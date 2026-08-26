@@ -15,6 +15,7 @@ services:
       PLATFORM_SETTINGS_PATH: /app/config/platform_settings.json
     volumes:
       - ./terraform:/app/terraform   # estado de Terraform (persistente)
+      - ./datasets:/app/datasets     # datasets de demo del host (para "Preparar bucket")
       - config:/app/config           # config de ⚙ (volumen, se autocrea)
     restart: unless-stopped
 

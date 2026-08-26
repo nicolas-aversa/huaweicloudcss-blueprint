@@ -159,16 +159,18 @@ Assistant). Ver el runbook universal en
 
 ## Datasets
 
-Los datasets **no se versionan** (pesan varios GB). Se regeneran con los build scripts:
+Los datasets **no se versionan** (pesan varios GB). Van en `datasets/*.log`; el contenedor los
+**monta desde el host** (`./datasets` → `/app/datasets` en el compose), así **⚙ Configuración →
+Preparar bucket de demos** los sube a OBS. Parte son sintéticos (regenerables), parte derivan de
+fuentes externas:
 
 ```bash
-python build_vertical_datasets.py   # verticales (wallet, alyc, streaming, e-commerce, salud, oil&gas)
-python build_siem_dataset.py        # SIEM (auth, cloudaudit, fortigate, waf)
-python build_fraud.py               # fraud detection (requiere el dataset IEEE-CIS, ver datasets/README.md)
+python build_siem_dataset.py        # SIEM (auth, cloudaudit, fortigate, waf) — sintéticos
+python build_vertical_datasets.py   # alyc, streaming (sintéticos) + fortianalyzer/oil/e-commerce/salud (necesitan fuentes externas)
 ```
 
 Ver [`datasets/README.md`](datasets/README.md) para el detalle de cada uno y de dónde sale la data
-base. Luego se suben al bucket OBS desde **⚙ Configuración → Preparar bucket de demos**.
+base. Si `datasets/` está vacío, "Preparar bucket" no tiene qué subir (el resto de la app funciona igual).
 
 ---
 
