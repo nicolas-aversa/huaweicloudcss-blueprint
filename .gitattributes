@@ -1,0 +1,10 @@
+# Normalizar line endings a LF en el repo (evita churn CRLF entre plataformas).
+* text=auto eol=lf
+
+# Binarios (no tocar EOL).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

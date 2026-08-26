@@ -1,0 +1,84 @@
+{
+  "index_patterns": ["transacciones-billetera-*"],
+  "priority": 100,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "refresh_interval": "30s",
+      "index.sort.field": "@timestamp",
+      "index.sort.order": "desc"
+    },
+    "mappings": {
+      "dynamic_templates": [
+        {
+          "strings_as_keyword": {
+            "match_mapping_type": "string",
+            "mapping": { "type": "keyword", "ignore_above": 1024 }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "transaction": {
+          "properties": {
+            "operation_code":  { "type": "keyword" },
+            "message_type":    { "type": "integer" },
+            "response_code":   { "type": "keyword" },
+            "sequence_number": { "type": "integer" },
+            "channel":         { "type": "keyword" },
+            "customer_id":     { "type": "keyword" },
+            "account_ref":     { "type": "keyword" },
+            "operation_key":   { "type": "keyword" },
+            "entry_time":      { "type": "keyword" },
+            "geo_location":    { "type": "geo_point" },
+            "device": {
+              "properties": {
+                "platform":        { "type": "keyword" },
+                "carrier":         { "type": "keyword" },
+                "os_version":      { "type": "keyword" },
+                "app_version":     { "type": "keyword" },
+                "device_model":    { "type": "keyword" },
+                "device_platform": { "type": "keyword" },
+                "geo_lat":         { "type": "keyword" },
+                "geo_long":        { "type": "keyword" },
+                "geo_date":        { "type": "keyword" }
+              }
+            },
+            "steps_parsed": {
+              "properties": {
+                "data": {
+                  "properties": {
+                    "steps": {
+                      "type": "nested",
+                      "properties": {
+                        "code":      { "type": "keyword" },
+                        "index":     { "type": "integer" },
+                        "counter":   { "type": "integer", "index": false },
+                        "stepType":  { "type": "keyword" },
+                        "status":    { "type": "keyword" },
+                        "timedout":  { "type": "keyword" },
+                        "lateResp":  { "type": "keyword" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "funnel": {
+              "properties": {
+                "steps_total":     { "type": "integer" },
+                "steps_completed": { "type": "integer" },
+                "steps_reached":   { "type": "keyword" },
+                "steps_ok":        { "type": "keyword" },
+                "last_step_code":  { "type": "keyword" },
+                "failed":          { "type": "boolean" },
+                "failed_at_code":  { "type": "keyword" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

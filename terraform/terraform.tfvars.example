@@ -1,0 +1,25 @@
+# TF-CSS terraform.tfvars
+# Copiar a terraform.tfvars y configurar
+
+# Credenciales Huawei Cloud
+hwc_access_key      = "YOUR_HWC_ACCESS_KEY"
+hwc_secret_key      = "YOUR_HWC_SECRET_KEY"
+
+# Credenciales OBS (pueden ser las mismas que HWC)
+obs_access_key      = "YOUR_OBS_ACCESS_KEY"
+obs_secret_key      = "YOUR_OBS_SECRET_KEY"
+
+# Password para OpenSearch admin
+opensearch_password = "YourSecurePassword123!"
+
+# Infraestructura (obtener de la consola de Huawei Cloud)
+vpc_id              = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+subnet_id           = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+security_group_id   = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+availability_zone   = "la-south-2a"
+
+# Proyecto
+project_name        = "financial-logs"
+
+# Pipeline generado por la plataforma (pasar via CLI)
+# pipeline_conf = ""

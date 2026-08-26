@@ -1,0 +1,37 @@
+# No hornear en la imagen: secretos, estado, data pesada, caches.
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Secretos / estado (se inyectan/mapean en runtime)
+.env
+.platform_settings.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Datasets (GB) — se regeneran con los build scripts / se suben a OBS
+datasets/*.log
+datasets/*.csv
+
+# Docs de vendor (bloat)
+docs/*.pdf
+docs/*_parte_*.txt
+docs/logstash_7.10_completo.txt
+
+# Terraform: estado y providers
+terraform/.terraform/
+terraform/terraform.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform.tfstate
+
+# Salidas de herramientas
+graphify-out/

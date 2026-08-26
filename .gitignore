@@ -1,0 +1,39 @@
+# --- Secretos: NUNCA versionar ---
+.env
+.platform_settings.json
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# --- Datasets: los generan los build scripts, NO se versionan (pesan GB) ---
+# Ver datasets/README.md para regenerarlos.
+datasets/*.log
+datasets/*.csv
+
+# --- Docs de vendor (bajarlas aparte; no redistribuir) ---
+docs/*.pdf
+docs/*_parte_*.txt
+docs/logstash_7.10_completo.txt
+
+# --- Temporales de validación de Logstash ---
+logstash_validate_*/
+
+# --- Terraform: estado, lockfiles y tfvars con secrets ---
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/deploy.auto.tfvars.json
+terraform/pipeline.conf
+
+# --- Salidas de herramientas / misc ---
+graphify-out/
+terraform.tfstate
+terraform/*.auto.tfvars.json
+terraform/.pipelines.json

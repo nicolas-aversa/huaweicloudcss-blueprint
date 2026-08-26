@@ -1,0 +1,13 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+
+# Secrets
+terraform.tfvars
+*.auto.tfvars
+
+# Pipeline (generated)
+pipeline.conf

@@ -1,0 +1,93 @@
+# Profile de referencia: FortiGate UTM (webfilter, IPS, antivirus).
+#
+# Documenta cómo declarar las 6 dimensiones para un vendor real. Sirve como
+# espejo de qué se puede sacar del .conf hardcodeado y poner en un archivo
+# editable por demo / cliente.
+#
+# Estado: no se consume por el generator todavía. Es documentación viva del
+# destino arquitectural. Cuando la fase 2 conecte tenant_profile.py al
+# generator de filter, este archivo se vuelve un test concreto del flujo.
+
+name: FortiGate-UTM
+description: |
+  FortiGate webfilter UTM log típico — line-based k=v separado por espacios,
+  con quotes alrededor de strings con espacios. Sin envelope cuando llega
+  directo del Logstash input file/beats. Si llega por syslog forwarder real
+  agregar envelope.type=syslog con el grok del header.
+
+# Sin envelope: la línea llega cruda y arranca en `date=...`. Si el forwarder
+# antepone <PRI> + header, descomentar:
+# envelope:
+#   type: syslog
+#   grok_pattern: '^<%{NONNEGINT}>%{GREEDYDATA:kv_payload}$'
+
+parser:
+  type: kv
+  field_split: " "
+  value_split: "="
+
+field_map:
+  # Network primitives — el prefix-alias del auto-detect (sin profile) ya
+  # los resuelve, pero los explicitamos para que sirvan de documentación.
+  srcip:    { ecs_path: source.ip,                       type: ip }
+  dstip:    { ecs_path: destination.ip,                  type: ip }
+  srcport:  { ecs_path: source.port,                     type: long }
+  dstport:  { ecs_path: destination.port,                type: long }
+  srcintf:  { ecs_path: observer.ingress.interface.name, type: keyword }
+  dstintf:  { ecs_path: observer.egress.interface.name,  type: keyword }
+  # FortiGate-específicos: el auto-detect los manda a labels.*. Con el
+  # profile los enrutamos a paths ECS canónicos donde aplica.
+  proto:     { ecs_path: network.iana_number,    type: long }
+  service:   { ecs_path: network.protocol,       type: keyword }
+  direction: { ecs_path: network.direction,      type: keyword }
+  action:    { ecs_path: event.action,           type: keyword }
+  logid:     { ecs_path: event.code,             type: keyword }
+  policyid:  { ecs_path: rule.id,                type: keyword }
+  category:
+    ecs_path: rule.category
+    type: keyword
+    lookup: fortiguard_category   # ← se resuelve via code_lookups abajo
+  desc:      { ecs_path: rule.description,       type: keyword }
+  msg:       { ecs_path: message,                type: text }
+  url:       { ecs_path: url.original,           type: keyword }
+  hostname:  { ecs_path: url.domain,             type: keyword }
+  # Genuinamente vendor-específicos (no hay path ECS canónico):
+  vd:         { ecs_path: labels.fortinet_vd,        type: keyword }
+  filtertype: { ecs_path: labels.fortinet_filtertype, type: keyword }
+  subtype:    { ecs_path: labels.fortinet_subtype,   type: keyword }
+  type:       { ecs_path: labels.fortinet_logtype,   type: keyword }
+  sessionid:  { ecs_path: labels.fortinet_sessionid, type: long }
+  eventtime:  { ecs_path: labels.fortinet_eventtime, type: long }
+
+timestamp:
+  # FortiGate emite `date=YYYY-MM-DD time=HH:MM:SS` separados.
+  source_fields: ["date", "time"]
+  format: "yyyy-MM-dd HH:mm:ss"
+  precision: iso
+  # En FortiGate el log timezone es config del device; CONFIRMAR con el
+  # cliente antes de un deploy de prod. UTC es lo más común.
+  timezone: UTC
+  # Alternativa: usar eventtime (epoch nanosegundos). Si se quiere mejor
+  # precisión sub-segundo para correlación, comentar source_fields y usar:
+  # source_field: eventtime
+  # precision: ns
+
+code_lookups:
+  fortiguard_category:
+    # Subset de los códigos FortiGuard URL Filter. Lista completa en
+    # https://www.fortiguard.com/webfilter
+    "1":  "Drug Abuse"
+    "20": "Hacking"
+    "26": "Malicious Websites"
+    "37": "Phishing"
+    "61": "Advertising"
+    "62": "Brokerage and Trading"
+    "76": "Online Storage and Backup"
+
+pii_fields:
+  # GDPR / regulación bancaria típica:
+  - source.ip
+  - destination.ip
+  - url.original
+  - url.domain
+  - user.name

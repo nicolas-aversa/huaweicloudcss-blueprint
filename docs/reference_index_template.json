@@ -1,0 +1,104 @@
+{
+  "index_patterns": ["logs-hoje-*"],
+  "priority": 100,
+  "template": {
+    "settings": {
+      "number_of_shards": 3,
+      "number_of_replicas": 1,
+      "refresh_interval": "30s",
+      "index.sort.field": "@timestamp",
+      "index.sort.order": "desc",
+      "index.mapping.total_fields.limit": 2000
+    },
+    "mappings": {
+      "dynamic_templates": [
+        {
+          "strings_as_keyword": {
+            "match_mapping_type": "string",
+            "mapping": { "type": "keyword", "ignore_above": 1024 }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": { "type": "date" },
+
+        "transaction": {
+          "properties": {
+
+            "trxl_write_timestamp": { "type": "keyword" },
+            "trxl_msg_typ":         { "type": "integer" },
+            "trxl_resp":            { "type": "keyword" },
+            "trxl_transaction_code":{ "type": "keyword" },
+            "trxl_seq_num":         { "type": "integer" },
+            "trxl_term_id":         { "type": "keyword" },
+            "trxl_client_id":       { "type": "keyword" },
+
+            "trxl_client_id_type":  { "type": "keyword" },
+            "trxl_client_plain_id": { "type": "keyword" },
+
+            "trxl_configuration_group": { "type": "integer" },
+            "trxl_banners_group":       { "type": "integer" },
+
+            "trxl_amount1": { "type": "double" },
+            "trxl_amount2": { "type": "double" },
+            "trxl_amount3": { "type": "double" },
+            "trxl_amount4": { "type": "double" },
+
+            "trxl_orig_pro_node": { "type": "keyword" },
+
+            "txn_key": { "type": "keyword" },
+
+            "trxl_geo": { "type": "geo_point" },
+
+            "funnel": {
+              "properties": {
+                "steps_total":      { "type": "integer" },
+                "steps_completed":  { "type": "integer" },
+                "steps_reached":    { "type": "keyword" },
+                "steps_ok":         { "type": "keyword" },
+                "last_step_code":   { "type": "keyword" },
+                "last_step_index":  { "type": "integer" },
+                "last_step_status": { "type": "keyword" },
+                "deepest_ok_code":  { "type": "keyword" },
+                "failed":           { "type": "boolean" },
+                "failed_at_code":   { "type": "keyword" },
+                "had_timeout":      { "type": "boolean" },
+                "had_late_resp":    { "type": "boolean" }
+              }
+            },
+
+            "trxl_tech_detail": {
+              "properties": {
+                "data": {
+                  "properties": {
+                    "steps": {
+                      "type": "nested",
+                      "properties": {
+                        "code":       { "type": "keyword" },
+                        "index":      { "type": "integer" },
+                        "stepType":   { "type": "keyword" },
+                        "status":     { "type": "keyword" },
+                        "timedout":   { "type": "keyword" },
+                        "lateResp":   { "type": "keyword" },
+                        "begin":      { "type": "date" },
+                        "end":        { "type": "date" },
+                        "counter":    { "type": "integer", "index": false },
+                        "optional":   { "type": "keyword", "index": false },
+                        "parallel":   { "type": "keyword", "index": false },
+                        "parents":    { "type": "keyword", "index": false },
+                        "children":   { "type": "keyword", "index": false },
+                        "return":     { "type": "keyword", "index": false },
+                        "serviceIn":  { "type": "date",    "index": false },
+                        "serviceOut": { "type": "date",    "index": false }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

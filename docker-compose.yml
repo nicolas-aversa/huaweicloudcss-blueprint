@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    image: css-accelerator
+    ports:
+      # host 8088 → contenedor 8000. Cambiá el 8088 si querés otro puerto.
+      - "8088:8000"
+    # Config opcional por entorno (modelos MaaS, project id…). Si no existe .env,
+    # no pasa nada: todo se puede configurar por la UI (⚙ Configuración).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # La config de ⚙ se persiste en el volumen `config` — sin crear archivos a mano.
+      PLATFORM_SETTINGS_PATH: /app/config/platform_settings.json
+    volumes:
+      - ./terraform:/app/terraform   # estado de Terraform (persistente)
+      - config:/app/config           # config de ⚙ (volumen, se autocrea)
+    restart: unless-stopped
+
+volumes:
+  config:
