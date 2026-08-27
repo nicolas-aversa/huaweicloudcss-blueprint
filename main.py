@@ -2628,6 +2628,22 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     """Generador que corre el deploy y emite eventos SSE con progreso real."""
     import concurrent.futures
 
+    # ── Pre-flight: la infra Huawei (vpc/subnet/sg/az) tiene que venir de ⚙
+    # Configuración o del terraform.tfvars estático. Si falta, cortamos con un
+    # mensaje claro en vez de dejar que `terraform apply` explote con
+    # "No value for required variable" (críptico). El tfvars estático NO está en
+    # la imagen Docker (tiene secretos) → en el contenedor hay que usar ⚙. ──
+    _hw = get_huawei_settings()
+    _tfvars_static = (terraform_dir / "terraform.tfvars").exists()
+    _missing_infra = [f for f in ("vpc_id", "subnet_id", "security_group_id", "availability_zone")
+                      if not _hw.get(f)]
+    if _missing_infra and not _tfvars_static:
+        yield _sse({"type": "error", "message":
+            "Falta configurar la cuenta Huawei en ⚙ Configuración: VPC, subnet, security group y "
+            "availability zone. Sin esos IDs el deploy no puede crear los clusters CSS. "
+            "Campos faltantes: " + ", ".join(_missing_infra) + "."})
+        return
+
     yield _sse({"type": "progress", "percent": 1, "phase": "Preparando",
                 "message": "Escribiendo configuración…"})
 
