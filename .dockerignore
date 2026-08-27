@@ -35,3 +35,6 @@ terraform.tfstate
 
 # Salidas de herramientas
 graphify-out/
+terraform/*.auto.tfvars.json
+terraform/.pipelines.json
+terraform/pipeline.conf
