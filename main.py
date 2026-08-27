@@ -2716,7 +2716,9 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
             cwd=terraform_dir, capture_output=True, text=True, timeout=180,
         )
         if init_result.returncode != 0:
-            yield _sse({"type": "error", "message": init_result.stderr or "terraform init falló"})
+            err = init_result.stderr or init_result.stdout or "terraform init falló"
+            print("[terraform init FALLÓ]\n" + err, flush=True)
+            yield _sse({"type": "error", "message": "terraform init falló:\n" + err[-1500:]})
             return
 
     # ── terraform apply (streaming línea por línea) ──────────────────────
@@ -2724,6 +2726,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                 "message": "Aplicando infraestructura…"})
 
     completed_resources: set[str] = set()
+    tf_lines: list[str] = []
     process = subprocess.Popen(
         ["terraform", "apply", "-auto-approve", "-input=false"],
         cwd=terraform_dir,
@@ -2734,6 +2737,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     )
     try:
         for line in process.stdout:
+            tf_lines.append(line)
             progress = _parse_tf_line(line, completed_resources)
             if progress:
                 yield _sse({"type": "progress", **progress})
@@ -2745,7 +2749,9 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         process.wait()
 
     if process.returncode != 0:
-        yield _sse({"type": "error", "message": "terraform apply falló (ver logs del servidor)"})
+        tail = "".join(tf_lines)[-3000:]
+        print("[terraform apply FALLÓ]\n" + tail, flush=True)   # visible en `docker compose logs`
+        yield _sse({"type": "error", "message": "terraform apply falló:\n" + tail[-1500:]})
         return
 
     # ── terraform output ─────────────────────────────────────────────────
