@@ -3010,8 +3010,8 @@
       if (!container) return;
       
       const isProductive = state.deployMode === 'custom';
-      const obsAk = state.obsCreds.ak || '';
-      const obsSk = state.obsCreds.sk || '';
+      const obsAk = (state.obsCreds || {}).ak || '';
+      const obsSk = (state.obsCreds || {}).sk || '';
       const credsNote = isProductive
         ? (obsAk
            ? '<span style="font-size:12px;color:var(--accent-green,#16a34a);font-weight:600;">Cargado desde configuración global</span>'
@@ -5805,6 +5805,7 @@
         businessRulesApplied: false, selectedExamples: [], logFileContent: '',
         logFileName: '', logFileLines: 0, pendingDeploy: null, lastStatus: null,
         provisioning: false, previewMode: false,
+        obsCreds: state.obsCreds || { ak: '', sk: '' },  // global: no se pierde al reiniciar el wizard
       };
       if (elements.rawLog) elements.rawLog.value = '';
       document.getElementById('step1-demo-error')?.classList.remove('show');
@@ -5894,8 +5895,8 @@
     function renderSettingsView() {
       const akIn = document.getElementById('settings-obs-ak');
       const skIn = document.getElementById('settings-obs-sk');
-      if (akIn) akIn.value = state.obsCreds.ak || '';
-      if (skIn) skIn.value = state.obsCreds.sk || '';
+      if (akIn) akIn.value = (state.obsCreds || {}).ak || '';
+      if (skIn) skIn.value = (state.obsCreds || {}).sk || '';
       const keyIn = document.getElementById('settings-maas-key');
       if (keyIn) keyIn.value = '';   // nunca se rellena con la key real
       refreshMaasKeyStatus();
