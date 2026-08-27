@@ -2764,23 +2764,43 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         process.stdout.close()
         process.wait()
 
-    if process.returncode != 0:
+    apply_failed = process.returncode != 0
+    if apply_failed:
         tail = "".join(tf_lines)[-3000:]
         print("[terraform apply FALLÓ]\n" + tail, flush=True)   # visible en `docker compose logs`
-        yield _sse({"type": "error", "message": "terraform apply falló:\n" + tail[-1500:]})
-        return
 
     # ── terraform output ─────────────────────────────────────────────────
+    # Se lee INCLUSO si el apply falló: un apply parcial igual guarda estado, así
+    # detectamos si el cluster se creó a pesar del error (típ. falló solo una regla
+    # de SG que ya existía) y no descartamos un entorno que quedó levantado.
     yield _sse({"type": "progress", "percent": 97, "phase": "Outputs",
                 "message": "Obteniendo endpoints…"})
     output_result = subprocess.run(
         ["terraform", "output", "-json"],
         cwd=terraform_dir, capture_output=True, text=True, timeout=30,
     )
-    if output_result.returncode != 0:
+    if not apply_failed and output_result.returncode != 0:
         yield _sse({"type": "error", "message": output_result.stderr or "terraform output falló"})
         return
-    tf_outputs = json.loads(output_result.stdout)
+    try:
+        tf_outputs = json.loads(output_result.stdout) if output_result.returncode == 0 else {}
+    except Exception:
+        tf_outputs = {}
+
+    cluster_created = bool((tf_outputs.get("opensearch_cluster_id") or {}).get("value")
+                           or (tf_outputs.get("opensearch_endpoint") or {}).get("value"))
+    if apply_failed and not cluster_created:
+        # Falla real (el cluster no llegó a crearse) → error.
+        yield _sse({"type": "error", "message": "terraform apply falló:\n" + tail[-1500:]})
+        return
+    if apply_failed:
+        # El cluster SÍ se creó: el apply falló en algo secundario (típicamente una
+        # regla de security group que YA existía). Registramos el entorno y avisamos,
+        # en vez de tirar todo abajo y dejar recursos huérfanos.
+        yield _sse({"type": "progress", "percent": 97, "phase": "Aviso",
+                    "message": "El entorno se creó, pero una regla de security group falló "
+                               "(probablemente ya existía). Si no accedés a 9200/Kibana desde "
+                               "afuera, revisá esa regla en tu SG."})
 
     # ── Verificar OBS upload (best-effort) ───────────────────────────────
     if obs_future is not None:
