@@ -14,10 +14,11 @@ services:
       # La config de ⚙ se persiste en el volumen `config` — sin crear archivos a mano.
       PLATFORM_SETTINGS_PATH: /app/config/platform_settings.json
     volumes:
-      - ./terraform:/app/terraform   # estado de Terraform (persistente)
       - ./datasets:/app/datasets     # datasets de demo del host (para "Preparar bucket")
+      - tfstate:/app/terraform       # config + estado de Terraform (volumen sembrado del image → providers Linux, NO los del host)
       - config:/app/config           # config de ⚙ (volumen, se autocrea)
     restart: unless-stopped
 
 volumes:
   config:
+  tfstate:
