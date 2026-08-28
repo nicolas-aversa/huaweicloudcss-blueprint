@@ -159,18 +159,17 @@ Assistant). Ver el runbook universal en
 
 ## Datasets
 
-Los datasets **no se versionan** (pesan varios GB). Van en `datasets/*.log`; el contenedor los
-**monta desde el host** (`./datasets` → `/app/datasets` en el compose), así **⚙ Configuración →
-Preparar bucket de demos** los sube a OBS. Parte son sintéticos (regenerables), parte derivan de
-fuentes externas:
+Los datasets **no se versionan** (pesan ~350 MB). El contenedor los **baja solos en el primer
+arranque** desde un GitHub Release (`docker-entrypoint.sh`) y los deja en `/app/datasets`. Después,
+**⚙ Configuración → Preparar bucket de demos** los sube al **bucket OBS del usuario**, y las demos
+leen de ahí. Cero pasos manuales de carga de datos.
 
-```bash
-python build_siem_dataset.py        # SIEM (auth, cloudaudit, fortigate, waf) — sintéticos
-python build_vertical_datasets.py   # alyc, streaming (sintéticos) + fortianalyzer/oil/e-commerce/salud (necesitan fuentes externas)
-```
+- La URL de descarga se puede sobreescribir con la env var `DATASETS_URL`.
+- Si corrés **nativo** (sin Docker), poné los `.log` en `datasets/` a mano (o corré los build
+  scripts: `build_siem_dataset.py`, `build_vertical_datasets.py`; algunos necesitan fuentes externas).
 
-Ver [`datasets/README.md`](datasets/README.md) para el detalle de cada uno y de dónde sale la data
-base. Si `datasets/` está vacío, "Preparar bucket" no tiene qué subir (el resto de la app funciona igual).
+Ver [`datasets/README.md`](datasets/README.md) para el detalle de cada dataset y de dónde sale la
+data base.
 
 ---
 
