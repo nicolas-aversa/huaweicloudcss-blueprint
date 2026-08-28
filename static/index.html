@@ -1672,6 +1672,42 @@
     }
     .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--text-secondary); border-color: var(--border-strong, #cbd5e1); }
 
+    /* Chat NL→PPL nativo en el panel de capabilities (Mi Infraestructura). */
+    .cap-chat__log {
+      margin-top: 10px; max-height: 280px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 8px; padding: 2px;
+    }
+    .cap-chat__log:empty { display: none; }
+    .cap-chat__msg {
+      max-width: 85%; padding: 8px 11px; border-radius: 12px;
+      font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .cap-chat__msg--user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+    .cap-chat__msg--bot { align-self: flex-start; background: var(--bg-tertiary); color: var(--text-primary); border-bottom-left-radius: 4px; }
+    .cap-chat__msg--err { background: var(--accent-red-tint, #fee2e2); color: var(--accent-red, #dc2626); }
+    .cap-chat__dots { letter-spacing: 2px; animation: capChatBlink 1s ease-in-out infinite; }
+    @keyframes capChatBlink { 0%,100%{opacity:.3} 50%{opacity:.85} }
+    .cap-chat__det { margin-top: 6px; font-size: 11.5px; }
+    .cap-chat__det summary { cursor: pointer; color: var(--text-muted); }
+    .cap-chat__ppl { margin: 4px 0; }
+    .cap-chat__ppl code { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+    .cap-chat__table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; }
+    .cap-chat__table th, .cap-chat__table td { border: 1px solid var(--border-subtle); padding: 3px 6px; text-align: left; }
+    .cap-chat__form { display: flex; gap: 8px; margin-top: 10px; }
+    .cap-chat__input {
+      flex: 1; padding: 9px 12px; font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+      background: var(--bg-primary); color: var(--text-primary);
+    }
+    .cap-chat__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint); }
+    .cap-chat__send {
+      flex: 0 0 auto; width: 40px; border: none; border-radius: var(--radius-md);
+      background: var(--accent); color: #fff; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .cap-chat__send .icon { width: 16px; height: 16px; }
+    .cap-chat__send:hover { filter: brightness(1.08); }
+
     /* ── Responsive ─────────────────────────────────────────────────────── */
     .nav-hamburger { display: none; }
 
@@ -4353,29 +4389,92 @@
           1. <strong>Dashboards</strong> del tipo (volumen, cuentas activas, funnel).<br>
           2. <strong>Forecasting</strong> (volumen proyectado) desde su plugin.
         </div>
-        ${agentReady && questionsHtml ? `
-        <div style="margin-top:14px;border-top:1px solid var(--border-subtle);padding-top:12px;">
+        ${agentReady && activeSlugs.length ? `
+        <div class="cap-chat" style="margin-top:14px;border-top:1px solid var(--border-subtle);padding-top:12px;">
           <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:8px;">
-            <strong>Preguntas sugeridas para el chat:</strong> copiá una pregunta y pegala en el <strong>chat de OpenSearch Dashboards</strong> — el agente conversacional la traduce a PPL y responde con el dato real.
+            <strong>Chat (NL → PPL):</strong> preguntá en lenguaje natural y te respondo con el dato real — sin tocar Dev Tools.${activeSlugs.length > 1 ? ' Elegí el tipo en las pestañas.' : ''}
           </div>
           ${questionsHtml}
+          <div class="cap-chat__log" id="cap-chat-log"></div>
+          <form class="cap-chat__form" id="cap-chat-form" autocomplete="off">
+            <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Escribí tu pregunta…">
+            <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
+          </form>
         </div>` : ''}
         ${agentReady && agentId ? `
-        <div style="margin-top:10px;font-size:11.5px;color:var(--text-muted);line-height:1.5;">
-          <strong>Dev Tools</strong> (OpenSearch Dashboards → Dev Tools):
-          <code style="display:block;margin-top:4px;padding:8px 10px;background:var(--bg-tertiary);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;font-size:11.5px;color:var(--text-muted);">Avanzado · Dev Tools (opcional)</summary>
+          <code style="display:block;margin-top:6px;padding:8px 10px;background:var(--bg-tertiary);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
 {"parameters":{"question":"¿Cuántos eventos hay en total?"}}</code>
-        </div>` : ''}`;
+        </details>` : ''}`;
       if (anchor) anchor.appendChild(host);
       else statusEl.insertAdjacentElement('afterend', host);
+
+      // \u2500\u2500 Chat NL\u2192PPL nativo: pega a POST /api/v1/capabilities/ppl-chat (orquestado
+      // server-side, sin el Assistant de Dashboards). El slug activo = la tab elegida. \u2500\u2500
+      const chatLog = host.querySelector('#cap-chat-log');
+      const chatInput = host.querySelector('#cap-chat-input');
+      const chatForm = host.querySelector('#cap-chat-form');
+      const _activeChatSlug = () =>
+        (host.querySelector('.lp-tab-btn.lp-tab-active')?.dataset.slug) || activeSlugs[0];
+      const _bubble = (who, html) => {
+        const b = document.createElement('div');
+        b.className = 'cap-chat__msg cap-chat__msg--' + who;
+        b.innerHTML = html;
+        chatLog.appendChild(b); chatLog.scrollTop = chatLog.scrollHeight;
+        return b;
+      };
+      async function sendCapChat(question) {
+        question = (question || '').trim();
+        if (!question || (chatForm && chatForm.dataset.busy)) return;
+        const slug = _activeChatSlug();
+        _bubble('user', escapeHtml(question));
+        const pending = _bubble('bot', '<span class="cap-chat__dots">\u00b7\u00b7\u00b7</span>');
+        if (chatForm) chatForm.dataset.busy = '1';
+        if (chatInput) chatInput.value = '';
+        try {
+          const res = await fetch('/api/v1/capabilities/ppl-chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question, slug,
+              opensearch_password: state.osPassword || '',
+              opensearch_user: state.osUser || 'admin',
+              https_enabled: state.httpsEnabled,   // undefined \u2192 el backend lo deriva del state
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            const d = data.detail || {};
+            const msg = (typeof d === 'object' ? d.message : d) || 'No se pudo responder.';
+            const ppl = (typeof d === 'object' && d.ppl)
+              ? `<div class="cap-chat__ppl">PPL: <code>${escapeHtml(d.ppl)}</code></div>` : '';
+            pending.classList.add('cap-chat__msg--err');
+            pending.innerHTML = `${escapeHtml(msg)}${ppl}`;
+            return;
+          }
+          const rows = (data.result && data.result.datarows) || [];
+          const cols = (data.result && data.result.schema) || [];
+          const table = rows.length
+            ? `<table class="cap-chat__table"><thead><tr>${cols.map(c => `<th>${escapeHtml(c.name || c.field || '')}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 20).map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v))}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+            : '';
+          const details = (data.ppl || table)
+            ? `<details class="cap-chat__det"><summary>ver PPL / datos</summary>${data.ppl ? `<div class="cap-chat__ppl"><code>${escapeHtml(data.ppl)}</code></div>` : ''}${table}</details>`
+            : '';
+          pending.innerHTML = `${escapeHtml(data.answer || '')}${details}`;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        } catch (_err) {
+          pending.classList.add('cap-chat__msg--err');
+          pending.textContent = 'Error de red al consultar el chat.';
+        } finally {
+          if (chatForm) delete chatForm.dataset.busy;
+        }
+      }
+      chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
+      // Preguntas sugeridas \u2192 enviar al chat (antes copiaban al clipboard).
       host.querySelectorAll('.lp-q-btn').forEach(qb => {
-        qb.addEventListener('click', () => {
-          const q = qb.dataset.q || '';
-          if (navigator.clipboard) navigator.clipboard.writeText(q);
-          const orig = qb.textContent; qb.textContent = '\u2713 Copiado';
-          setTimeout(() => { qb.textContent = orig; }, 1500);
-        });
+        qb.addEventListener('click', () => sendCapChat(qb.dataset.q || ''));
       });
+      // Tabs: seleccionan el vertical activo (slug) para el chat.
       host.querySelectorAll('.lp-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const slug = btn.dataset.slug;

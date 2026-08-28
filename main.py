@@ -5250,7 +5250,8 @@ class PplChatRequest(BaseModel):
     slug: str = Field(default="transacciones-billetera")
     opensearch_password: str = Field(default="")
     opensearch_user: str = Field(default="admin")
-    https_enabled: bool = Field(default=False)
+    # None → se deriva del state (robusto tras un reload que perdió el flag en el front).
+    https_enabled: bool | None = Field(default=None)
 
 
 class PplChatResponse(BaseModel):
@@ -5277,7 +5278,9 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
                             detail={"stage": "ppl_chat", "message": "No hay un cluster alcanzable."})
     password = request.opensearch_password or _cluster_admin_password(terraform_dir)
     user = request.opensearch_user or "admin"
-    base = _os_base(cluster, request.https_enabled)
+    https = (request.https_enabled if request.https_enabled is not None
+             else _read_https_enabled_from_state(terraform_dir))
+    base = _os_base(cluster, https)
 
     ids = _read_capabilities(terraform_dir).get(request.slug, {})
     ppl_model = ids.get("ppl_model_id")
