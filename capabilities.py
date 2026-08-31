@@ -43,8 +43,8 @@ def _sanitize_desc(s: str) -> str:
 # Endpoint que el CLUSTER usa para llamar a MaaS (distinto del que usa el backend
 # de la plataforma). El operador probó `api-ap-southeast-1`. Configurable por env.
 DEFAULT_MAAS_CONNECTOR_ENDPOINT = "api-ap-southeast-1.modelarts-maas.com"
-DEFAULT_MAAS_LLM_MODEL = "deepseek-v3.2"
-DEFAULT_MAAS_PPL_MODEL = "deepseek-v3.2"
+DEFAULT_MAAS_LLM_MODEL = "deepseek-v4-flash"
+DEFAULT_MAAS_PPL_MODEL = "deepseek-v4-flash"
 
 
 def maas_connector_endpoint() -> str:

@@ -46,7 +46,7 @@ POST _plugins/_ml/connectors/_create
   "protocol": "http",
   "parameters": {
     "endpoint": "api-ap-southeast-1.modelarts-maas.com",
-    "model": "deepseek-v3.2",
+    "model": "deepseek-v4-flash",
     "response_filter": "$.choices[0].message.content",
     "system_prompt": "You are a PPL query generator for OpenSearch. Output ONLY the raw PPL query. No explanation, no markdown, no backticks. CRITICAL: Always start with source=<INDEX>* with NO spaces around =.\\n\\nDATA SOURCE: <FUENTE>\\n\\nOPERATIONS:\\n(a definir)\\n\\nFIELDS:\\n(a definir)\\n\\nCRITICAL RULES:\\n1. NEVER use eval AFTER stats. NEVER calculate rates or percentages in the query.\\n2. NEVER use: JOIN, subqueries, append, row_number(), arithmetic after stats.\\n3. eval ONLY before stats for binary flags.\\n4. NEVER use head unless the user asks for top N.\\n5. Single quotes for strings.\\n6. Return raw numbers only - let the LLM calculate rates.\\n\\nCORRECT PATTERNS:\\n# Time histogram:\\nsource=<INDEX>* | stats count() as total by span(@timestamp, 1d)"
   },
@@ -87,7 +87,7 @@ POST _plugins/_ml/connectors/_create
   "protocol": "http",
   "parameters": {
     "endpoint": "api-ap-southeast-1.modelarts-maas.com",
-    "model": "deepseek-v3.2"
+    "model": "deepseek-v4-flash"
   },
   "credential": {
     "maas_key": "<MAAS_API_KEY>"
