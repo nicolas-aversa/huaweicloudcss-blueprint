@@ -1802,6 +1802,39 @@
       .cap-chat__send:hover { transform: none; }
     }
 
+    /* ── Gráficos inline en las respuestas (SVG, sin librería) ── */
+    .cap-chart { margin: 0 0 9px; animation: capFade .4s var(--ease) both; }
+    @keyframes capFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .cap-chart--bars { display: flex; flex-direction: column; gap: 6px; }
+    .cap-chart__bar { display: grid; grid-template-columns: minmax(56px, 34%) 1fr auto; align-items: center; gap: 9px; font-size: 11.5px; }
+    .cap-chart__bar-lbl { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cap-chart__bar-track { height: 15px; background: var(--bg-tertiary); border-radius: 8px; overflow: hidden; }
+    .cap-chart__bar-fill { display: block; height: 100%; width: 0; border-radius: 8px; background: linear-gradient(90deg, var(--accent), var(--accent-red, var(--accent))); transition: width .7s var(--ease); }
+    .cap-chart__bar-val { font-variant-numeric: tabular-nums; font-weight: 650; color: var(--text-primary); }
+    .cap-chart--kpi { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 4px; }
+    .cap-chart__kpi { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; line-height: 1; background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent))); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .cap-chart__kpi-lbl { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+    .cap-chart__svg { width: 100%; height: 84px; display: block; }
+    .cap-chart__area { fill: var(--accent-tint); }
+    .cap-chart__line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .cap-chat__typing::after { content: '▋'; margin-left: 1px; color: var(--accent); animation: capBlink .8s steps(1) infinite; }
+    @keyframes capBlink { 50% { opacity: 0; } }
+
+    /* ── Asistente hero / premium ── */
+    .cap-assistant { padding: 0; overflow: hidden; }
+    .cap-assistant > .section-card__head {
+      padding: 18px 22px; background: linear-gradient(135deg, var(--accent-tint), transparent 72%);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .cap-assistant .section-card__title { font-size: 16.5px; }
+    .cap-assistant__tile { background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent))); color: #fff; box-shadow: 0 6px 18px -6px var(--accent); }
+    .cap-assistant > .cap-chat { margin-top: 0; padding: 14px 22px 6px; }
+    .cap-assistant > .cap-assistant__adv { padding: 0 22px 16px; margin-top: 8px; }
+    @media (prefers-reduced-motion: reduce) {
+      .cap-chart, .cap-chat__typing::after { animation: none; }
+      .cap-chart__bar-fill { transition: none; }
+    }
+
     /* ── Responsive ─────────────────────────────────────────────────────── */
     .nav-hamburger { display: none; }
 
@@ -4527,6 +4560,54 @@
         chatLog.appendChild(row); chatLog.scrollTop = chatLog.scrollHeight;
         return row.querySelector('.cap-chat__msg');
       };
+      // ── Wow: gráfico inline (SVG, sin librería) + typewriter de la respuesta ──
+      const _reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      const _fmtNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : String(v); };
+      const _isNumT = (t) => /int|long|float|double|short|byte|scaled_float|half_float/i.test(t || '');
+      const _isDateT = (t) => /date|timestamp/i.test(t || '');
+      function _capChatChart(result) {
+        const schema = (result && result.schema) || [];
+        const rows = (result && result.datarows) || [];
+        if (!rows.length || !schema.length) return '';
+        const colName = (c, i) => (c && (c.name || c.field)) || `c${i}`;
+        let numIdx = schema.findIndex((c, i) => _isNumT(c.type) || rows.every(r => r[i] !== null && r[i] !== '' && Number.isFinite(Number(r[i]))));
+        if (numIdx < 0) return '';
+        const dateIdx = schema.findIndex(c => _isDateT(c.type));
+        let labelIdx = schema.findIndex((c, i) => i !== numIdx && !_isNumT(c.type));
+        if (labelIdx < 0) labelIdx = schema.findIndex((c, i) => i !== numIdx);
+        // KPI: un solo número.
+        if (rows.length === 1 && (schema.length === 1 || labelIdx < 0)) {
+          return `<div class="cap-chart cap-chart--kpi"><span class="cap-chart__kpi">${escapeHtml(_fmtNum(rows[0][numIdx]))}</span><span class="cap-chart__kpi-lbl">${escapeHtml(colName(schema[numIdx], numIdx))}</span></div>`;
+        }
+        if (labelIdx < 0) return '';
+        // Serie temporal → área/línea.
+        if (dateIdx >= 0 && dateIdx !== numIdx && rows.length >= 3) {
+          const pts = rows.map(r => Number(r[numIdx]) || 0);
+          const max = Math.max(...pts), min = Math.min(...pts, 0), W = 300, H = 84, n = pts.length;
+          const x = i => (n === 1 ? W / 2 : (i / (n - 1)) * W);
+          const y = v => H - ((v - min) / ((max - min) || 1)) * (H - 8) - 4;
+          const line = pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+          return `<div class="cap-chart"><svg class="cap-chart__svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path class="cap-chart__area" d="${line} L${W},${H} L0,${H} Z"/><path class="cap-chart__line" d="${line}"/></svg></div>`;
+        }
+        // Barras horizontales (categórico).
+        const data = rows.slice(0, 10).map(r => ({ label: String(r[labelIdx]), val: Number(r[numIdx]) || 0 }));
+        const max = Math.max(...data.map(d => d.val), 1);
+        const bars = data.map(d => `<div class="cap-chart__bar"><span class="cap-chart__bar-lbl" title="${escapeHtml(d.label)}">${escapeHtml(d.label)}</span><span class="cap-chart__bar-track"><span class="cap-chart__bar-fill" data-w="${(d.val / max * 100).toFixed(1)}%" style="width:0"></span></span><span class="cap-chart__bar-val">${escapeHtml(_fmtNum(d.val))}</span></div>`).join('');
+        return `<div class="cap-chart cap-chart--bars">${bars}</div>`;
+      }
+      function _typeInto(el, text, onDone) {
+        text = text || '';
+        if (_reduceMotion || text.length > 320) { el.textContent = text; onDone && onDone(); return; }
+        el.classList.add('cap-chat__typing');
+        let i = 0;
+        const step = () => {
+          el.textContent = text.slice(0, i++);
+          chatLog.scrollTop = chatLog.scrollHeight;
+          if (i <= text.length) setTimeout(step, 12);
+          else { el.classList.remove('cap-chat__typing'); onDone && onDone(); }
+        };
+        step();
+      }
       async function sendCapChat(question) {
         question = (question || '').trim();
         if (!question || (chatForm && chatForm.dataset.busy)) return;
@@ -4563,8 +4644,15 @@
           const details = (data.ppl || table)
             ? `<details class="cap-chat__det"><summary>ver PPL / datos</summary>${data.ppl ? `<div class="cap-chat__ppl"><code>${escapeHtml(data.ppl)}</code></div>` : ''}${table}</details>`
             : '';
-          pending.innerHTML = `${escapeHtml(data.answer || '')}${details}`;
-          chatLog.scrollTop = chatLog.scrollHeight;
+          // Gráfico inline (si los datos lo permiten) + respuesta con typewriter + details.
+          const chart = _capChatChart(data.result);
+          pending.innerHTML = `${chart}<span class="cap-chat__answer"></span>`;
+          pending.querySelectorAll('.cap-chart__bar-fill').forEach(f => requestAnimationFrame(() => { f.style.width = f.dataset.w || '0'; }));
+          const answerEl = pending.querySelector('.cap-chat__answer');
+          _typeInto(answerEl, data.answer || '', () => {
+            if (details) pending.insertAdjacentHTML('beforeend', details);
+            chatLog.scrollTop = chatLog.scrollHeight;
+          });
         } catch (_err) {
           pending.classList.add('cap-chat__msg--err');
           pending.textContent = 'Error de red al consultar el chat.';
@@ -5244,6 +5332,7 @@
           <div class="pipe-list">${pipeRows}</div>
         </div>
         ${donePanel}${setupPanel}
+        <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
         <p class="form-hint" style="margin:2px 0 14px;">Podés correr otro log <strong>en paralelo, en este mismo entorno</strong>: "Nuevo pipeline" agrega una pipeline con su propio índice y prefijo OBS (no toca las que ya corren, sin re-provisionar).</p>
         <div class="infra-actions" style="display:flex; gap:12px; flex-wrap:wrap;">
           <button class="btn btn-primary" id="infra-new-pipeline-btn">${icon('spark')} Nuevo pipeline</button>
@@ -5253,8 +5342,7 @@
           <div class="spacer" style="flex:1;"></div>
           <button class="btn btn-secondary" id="infra-destroy-btn"
                   style="border-color:rgba(229,0,0,0.4); color:var(--accent-red);">${icon('trash')} Destruir entorno</button>
-        </div>
-        <div id="infra-capabilities-result" style="margin-top:14px;"></div>`;
+        </div>`;
 
       // Acciones: reusan las funciones del flujo.
       body.querySelector('#infra-new-pipeline-btn')?.addEventListener('click', () => {
