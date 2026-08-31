@@ -4606,11 +4606,15 @@
       function _vegaTheme() {
         const cs = getComputedStyle(document.documentElement);
         const g = (n, f) => ((cs.getPropertyValue(n) || '').trim() || f);
+        const accent = g('--accent', '#0268BC');
+        const accent2 = g('--accent-red', accent);
         return {
-          accent: g('--accent', '#0268BC'),
-          accent2: g('--accent-red', g('--accent', '#0268BC')),
+          accent, accent2,
           text: g('--text-secondary', '#69707d'),
           grid: g('--border-subtle', 'rgba(120,120,120,.18)'),
+          bg: g('--bg-primary', '#ffffff'),
+          // Paleta categórica (marca + acentos tipo OUI) para multi-serie/dona/heatmap.
+          palette: [accent, accent2, '#54B399', '#D36086', '#9170B8', '#D6BF57', '#5BC0EB', '#B9A888'],
           font: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         };
       }
@@ -4623,66 +4627,137 @@
             gridColor: t.grid, gridOpacity: 0.7, domainColor: t.grid, tickColor: t.grid,
             labelFont: t.font, titleFont: t.font,
           },
+          legend: {
+            labelColor: t.text, titleColor: t.text, labelFont: t.font, titleFont: t.font,
+            labelFontSize: 11, titleFontSize: 11, symbolType: 'circle',
+          },
           bar: { color: t.accent, cornerRadiusEnd: 3 },
-          line: { color: t.accent, strokeWidth: 2.5, point: false },
-          area: { color: t.accent, opacity: 0.14, line: { color: t.accent, strokeWidth: 2.5 } },
+          line: { strokeWidth: 2.5, point: false },
+          area: { opacity: 0.16, line: { strokeWidth: 2.5 } },
+          point: { size: 66, filled: true, opacity: 0.72 },
+          arc: { stroke: t.bg, strokeWidth: 1.5 },
+          range: { category: t.palette, heatmap: { scheme: 'tealblues' } },
         };
       }
       const _normDate = (v) => (typeof v === 'string' ? v.replace(/^(\d{4}-\d\d-\d\d) (\d\d:)/, '$1T$2') : v);
-      // Devuelve null | {kind:'kpi', html} | {kind:'vega', spec, height}
+      // Clasifica cada columna por rol (temporal / quant / nominal), confiando en el
+      // type del schema y sólo infiriendo si viene sin type.
+      function _classifyCols(schema, rows) {
+        return schema.map((c, i) => {
+          const name = (c && (c.name || c.field)) || `c${i}`;
+          const ty = c && c.type;
+          let role;
+          if (_isDateT(ty)) role = 'temporal';
+          else if (_isNumT(ty)) role = 'quant';
+          else if (ty) role = 'nominal';
+          else role = (rows.length && rows.every(r => r[i] !== null && r[i] !== '' && Number.isFinite(Number(r[i])))) ? 'quant' : 'nominal';
+          const distinct = role === 'nominal' ? new Set(rows.map(r => String(r[i]))).size : 0;
+          return { i, name, role, distinct };
+        });
+      }
+      // Elige la visualización MÁS APTA para la forma de los datos (varios tipos
+      // Vega-Lite: KPI, serie temporal, multi-serie, dispersión, barras agrupadas,
+      // heatmap, dona, barras). Devuelve null | {kind:'kpi',html} | {kind:'vega',spec,height}.
       function _capChatVizPlan(result) {
         const schema = (result && result.schema) || [];
         const rows = (result && result.datarows) || [];
         if (!rows.length || !schema.length) return null;
-        const colName = (c, i) => (c && (c.name || c.field)) || `c${i}`;
-        const numIdx = schema.findIndex((c, i) => _isNumT(c.type) || rows.every(r => r[i] !== null && r[i] !== '' && Number.isFinite(Number(r[i]))));
-        if (numIdx < 0) return null;
-        const dateIdx = schema.findIndex(c => _isDateT(c.type));
-        let labelIdx = schema.findIndex((c, i) => i !== numIdx && !_isNumT(c.type));
-        if (labelIdx < 0) labelIdx = schema.findIndex((c, i) => i !== numIdx);
         const t = _vegaTheme();
         const config = _vegaConfig(t);
-        // KPI: un solo número (OpenSearch lo mostraría como "Metric"; acá número grande).
-        if (rows.length === 1 && (schema.length === 1 || labelIdx < 0)) {
-          return { kind: 'kpi', html: `<div class="cap-chart cap-chart--kpi"><span class="cap-chart__kpi">${escapeHtml(_fmtNum(rows[0][numIdx]))}</span><span class="cap-chart__kpi-lbl">${escapeHtml(colName(schema[numIdx], numIdx))}</span></div>` };
+        const cols = _classifyCols(schema, rows);
+        const Q = cols.filter(c => c.role === 'quant');
+        const N = cols.filter(c => c.role === 'nominal');
+        const T = cols.filter(c => c.role === 'temporal');
+        if (!Q.length) return null;   // sin medida numérica no hay gráfico (queda la tabla cruda)
+        const q = Q[0];
+        const base = { $schema: 'https://vega.github.io/schema/vega-lite/v5.json', width: 'container', autosize: { type: 'fit-x', contains: 'padding' }, config };
+        const mk = (spec, height) => ({ kind: 'vega', height, spec: Object.assign({ height }, base, spec) });
+        const num = (r, c) => Number(r[c.i]) || 0;
+        const str = (r, c) => String(r[c.i]);
+
+        // KPI: una sola fila con una medida → número grande (OpenSearch: "Metric").
+        if (rows.length === 1 && Q.length === 1) {
+          const lbl = N.length ? str(rows[0], N[0]) : q.name;
+          return { kind: 'kpi', html: `<div class="cap-chart cap-chart--kpi"><span class="cap-chart__kpi">${escapeHtml(_fmtNum(rows[0][q.i]))}</span><span class="cap-chart__kpi-lbl">${escapeHtml(lbl)}</span></div>` };
         }
-        if (labelIdx < 0) return null;
-        const valName = colName(schema[numIdx], numIdx);
-        // Serie temporal → área + línea.
-        if (dateIdx >= 0 && dateIdx !== numIdx && rows.length >= 3) {
-          const tName = colName(schema[dateIdx], dateIdx);
-          const values = rows.map(r => ({ t: _normDate(r[dateIdx]), v: Number(r[numIdx]) || 0 }));
-          return {
-            kind: 'vega', height: 150,
-            spec: {
-              $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-              width: 'container', height: 150, autosize: { type: 'fit-x', contains: 'padding' },
-              data: { values }, mark: { type: 'area', tooltip: true, line: true, point: false },
+        // Una sola fila con varias medidas → barras comparando las métricas.
+        if (rows.length === 1 && Q.length >= 2 && !T.length) {
+          const r0 = rows[0];
+          const values = Q.map(c => ({ label: c.name, v: Number(r0[c.i]) || 0 }));
+          return mk({ data: { values }, mark: { type: 'bar', tooltip: true },
+            encoding: {
+              y: { field: 'label', type: 'nominal', title: null, sort: '-x' },
+              x: { field: 'v', type: 'quantitative', title: null },
+              color: { value: t.accent },
+            } }, values.length * 26 + 40);
+        }
+
+        // Serie temporal.
+        if (T.length) {
+          const tc = T[0];
+          const xEnc = { field: 't', type: 'temporal', title: tc.name, axis: { format: '%d %b', labelAngle: 0 } };
+          if (N.length) {   // multi-serie: una línea por categoría
+            const s = N[0];
+            const values = rows.map(r => ({ t: _normDate(r[tc.i]), v: num(r, q), k: str(r, s) }));
+            return mk({ data: { values }, mark: { type: 'line', tooltip: true, point: false },
+              encoding: { x: xEnc, y: { field: 'v', type: 'quantitative', title: q.name }, color: { field: 'k', type: 'nominal', title: s.name } } }, 175);
+          }
+          const values = rows.map(r => ({ t: _normDate(r[tc.i]), v: num(r, q) }));
+          return mk({ data: { values }, mark: { type: 'area', tooltip: true, line: true, point: false, color: t.accent },
+            encoding: { x: xEnc, y: { field: 'v', type: 'quantitative', title: q.name } } }, 150);
+        }
+
+        // Dispersión: 2+ medidas (correlación), sin temporal.
+        if (Q.length >= 2 && rows.length >= 3) {
+          const q2 = Q[1], s = N[0];
+          const values = rows.slice(0, 300).map(r => { const o = { x: num(r, q), y: num(r, q2) }; if (s) o.k = str(r, s); return o; });
+          const enc = { x: { field: 'x', type: 'quantitative', title: q.name }, y: { field: 'y', type: 'quantitative', title: q2.name } };
+          if (s) enc.color = { field: 'k', type: 'nominal', title: s.name };
+          return mk({ data: { values }, mark: { type: 'point', tooltip: true, color: t.accent }, encoding: enc }, 220);
+        }
+
+        // Dos categóricas + medida → barras agrupadas (2ª con pocas categorías) o heatmap.
+        if (N.length >= 2) {
+          const n1 = N[0], n2 = N[1];
+          if (n2.distinct <= 4) {
+            const values = rows.slice(0, 60).map(r => ({ a: str(r, n1), b: str(r, n2), v: num(r, q) }));
+            return mk({ data: { values }, mark: { type: 'bar', tooltip: true },
               encoding: {
-                x: { field: 't', type: 'temporal', title: tName, axis: { format: '%d %b', labelAngle: 0 } },
-                y: { field: 'v', type: 'quantitative', title: valName },
-              },
-              config,
-            },
-          };
+                x: { field: 'a', type: 'nominal', title: n1.name, axis: { labelAngle: 0 } },
+                xOffset: { field: 'b', type: 'nominal' },
+                y: { field: 'v', type: 'quantitative', title: q.name },
+                color: { field: 'b', type: 'nominal', title: n2.name },
+              } }, 230);
+          }
+          const values = rows.slice(0, 250).map(r => ({ a: str(r, n1), b: str(r, n2), v: num(r, q) }));
+          return mk({ data: { values }, mark: { type: 'rect', tooltip: true },
+            encoding: {
+              x: { field: 'a', type: 'nominal', title: n1.name },
+              y: { field: 'b', type: 'nominal', title: n2.name },
+              color: { field: 'v', type: 'quantitative', title: q.name },
+            } }, Math.min(360, Math.max(160, n2.distinct * 22 + 50)));
         }
-        // Barras horizontales (categórico) — top 12.
-        const values = rows.slice(0, 12).map(r => ({ label: String(r[labelIdx]), v: Number(r[numIdx]) || 0 }));
-        const lblName = colName(schema[labelIdx], labelIdx);
-        return {
-          kind: 'vega', height: values.length * 26 + 40,
-          spec: {
-            $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-            width: 'container', autosize: { type: 'fit-x', contains: 'padding' },
-            data: { values }, mark: { type: 'bar', tooltip: true },
+
+        // Una categórica + medida.
+        if (N.length === 1) {
+          const n = N[0];
+          // Composición (pocas categorías) → dona.
+          if (n.distinct >= 2 && n.distinct <= 5 && rows.length <= 8) {
+            const values = rows.map(r => ({ k: str(r, n), v: num(r, q) }));
+            return mk({ data: { values }, mark: { type: 'arc', tooltip: true, innerRadius: 55 },
+              encoding: { theta: { field: 'v', type: 'quantitative' }, color: { field: 'k', type: 'nominal', title: n.name } } }, 230);
+          }
+          // Ranking/comparación → barras horizontales (top 12).
+          const values = rows.slice(0, 12).map(r => ({ label: str(r, n), v: num(r, q) }));
+          return mk({ data: { values }, mark: { type: 'bar', tooltip: true },
             encoding: {
               y: { field: 'label', type: 'nominal', title: null, sort: '-x', axis: { labelLimit: 130 } },
-              x: { field: 'v', type: 'quantitative', title: valName },
+              x: { field: 'v', type: 'quantitative', title: q.name },
               color: { value: t.accent },
-            },
-            config,
-          },
-        };
+            } }, values.length * 26 + 40);
+        }
+
+        return null;
       }
       // Renderiza el gráfico dentro de `container` (async para Vega).
       function _renderCapChartInto(container, result) {
