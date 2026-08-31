@@ -5275,6 +5275,35 @@ class PplChatResponse(BaseModel):
     result: dict = Field(default_factory=dict)
 
 
+def _index_time_window(base: str, user: str, password: str, index_pattern: str):
+    """(min, max) de @timestamp del índice como strings, o None. Best-effort: se usa
+    para que el generador de PPL sepa de qué AÑO consultar cuando el usuario menciona
+    un mes/período sin año (evita rangos vacíos fuera de la ventana del dataset)."""
+    try:
+        r = _os_req("POST", f"{base}/_plugins/_ppl", user, password,
+                    json_body={"query": f"source={index_pattern} | stats min(@timestamp) as mn, max(@timestamp) as mx"},
+                    timeout=15)
+        if r is None or r.status_code != 200:
+            return None
+        rows = (r.json() or {}).get("datarows") or []
+        if not rows or len(rows[0]) < 2 or rows[0][0] is None or rows[0][1] is None:
+            return None
+
+        def _fmt(v):
+            s = str(v)
+            if s.isdigit() and len(s) >= 12:   # epoch millis → fecha legible (UTC)
+                try:
+                    import datetime as _dt
+                    return _dt.datetime.utcfromtimestamp(int(s) / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    return s
+            return s
+
+        return (_fmt(rows[0][0]), _fmt(rows[0][1]))
+    except Exception:
+        return None
+
+
 @app.post("/api/v1/capabilities/ppl-chat", response_model=PplChatResponse, tags=["capabilities"])
 def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     """Chatbot PPL orquestado en el BACKEND (no un agente ml-commons: las tools nativas
@@ -5313,13 +5342,22 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     predict_params: dict = {"prompt": request.question}
     _spec = getattr(caps, "_CAPABILITY_SPECS", {}).get(request.slug)
     if _spec:
+        index_pattern = _spec.get("index_pattern", f"{request.slug}*")
         _sp = caps.build_ppl_system_prompt(
-            _spec.get("index_pattern", f"{request.slug}*"),
+            index_pattern,
             _spec.get("operations", []),
             _spec.get("fields", {}),
             _spec.get("success_code", ""),
             _spec.get("label", request.slug),
         )
+        # Ventana temporal real del índice → el modelo elige el AÑO correcto cuando el
+        # usuario menciona un mes/período sin año (evita rangos vacíos).
+        tw = _index_time_window(base, user, password, index_pattern)
+        if tw:
+            _sp += (
+                f"\n\nDATA TIME WINDOW: @timestamp ranges from {tw[0]} to {tw[1]}. "
+                "If the user names a month or period without a year, choose the year that falls within this window."
+            )
         predict_params["system_prompt"] = _sp.replace("\n", "\\n")
     ppl = _ml_predict(base, user, password, ppl_model, predict_params)
     if ppl:
