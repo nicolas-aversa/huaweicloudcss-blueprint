@@ -5305,8 +5305,23 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
                             detail={"stage": "ppl_chat",
                                     "message": "El chatbot no está provisionado para este tipo. Corré 'Provisionar capabilities'."})
 
-    # 1) NL → PPL. Limpiar backticks/markdown por si el modelo los agrega.
-    ppl = _ml_predict(base, user, password, ppl_model, {"prompt": request.question})
+    # 1) NL → PPL. Pasamos el system_prompt del SLUG elegido (índice + campos + reglas)
+    # para que el modelo apunte al vertical correcto. Sin esto, el _predict directo usa
+    # el default del connector (que quedó con OTRO vertical) y responde sobre el índice
+    # equivocado. El agente/DevTools no tiene el problema: cada PPLTool pasa su prompt.
+    import capabilities as caps
+    predict_params: dict = {"prompt": request.question}
+    _spec = getattr(caps, "_CAPABILITY_SPECS", {}).get(request.slug)
+    if _spec:
+        _sp = caps.build_ppl_system_prompt(
+            _spec.get("index_pattern", f"{request.slug}*"),
+            _spec.get("operations", []),
+            _spec.get("fields", {}),
+            _spec.get("success_code", ""),
+            _spec.get("label", request.slug),
+        )
+        predict_params["system_prompt"] = _sp.replace("\n", "\\n")
+    ppl = _ml_predict(base, user, password, ppl_model, predict_params)
     if ppl:
         ppl = ppl.replace("```ppl", "").replace("```", "").strip()
     if not ppl or not ppl.lower().startswith("source="):
