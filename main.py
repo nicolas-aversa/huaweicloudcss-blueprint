@@ -2281,7 +2281,7 @@ def _do_terraform_sequence(
     # ── Escribir deploy.auto.tfvars.json con todas las creds del form ─
     tfvars: dict[str, Any] = {
         "pipelines": pipelines_var,
-        "project_name": request.project_name or "log-analytics",
+        "project_name": _effective_project_name(request, terraform_dir),
         "https_enabled": request.https_enabled,
     }
     if logstash_flavor:
@@ -2500,7 +2500,7 @@ def terraform_deploy(request: TerraformDeployRequest) -> TerraformDeployResponse
         # Marcar este entorno como "desplegado por la plataforma" → habilita
         # que aparezca en "Mi Infraestructura". Sin esta marca, un tfstate
         # cualquiera (manual/leftover/stale) NO se reclama como propio.
-        _write_platform_marker(terraform_dir, request.project_name or "log-analytics")
+        _write_platform_marker(terraform_dir, _effective_project_name(request, terraform_dir))
         # Persistir el index template para que "Mi Infraestructura" lo muestre
         # (hidratado del disco, sin pasar por el wizard).
         _write_index_template_artifact(terraform_dir, request)
@@ -2679,7 +2679,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         }
         tfvars: dict[str, Any] = {
             "pipelines": pipelines_var,
-            "project_name": request.project_name or "log-analytics",
+            "project_name": _effective_project_name(request, terraform_dir),
             "https_enabled": request.https_enabled,
         }
         if logstash_flavor:
@@ -2813,7 +2813,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     # ── Post-deploy: marker + artifact ───────────────────────────────────
     yield _sse({"type": "progress", "percent": 99, "phase": "Finalizando",
                 "message": "Guardando estado del deploy…"})
-    _write_platform_marker(terraform_dir, request.project_name or "log-analytics")
+    _write_platform_marker(terraform_dir, _effective_project_name(request, terraform_dir))
     _write_index_template_artifact(terraform_dir, request)
 
     cluster = _read_opensearch_cluster_from_state(terraform_dir)
@@ -3155,6 +3155,19 @@ def _read_platform_marker(terraform_dir: Path) -> dict[str, Any] | None:
         return json.loads(marker.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def _effective_project_name(request, terraform_dir: Path) -> str:
+    """project_name a usar en el deploy. En reuse ("Nuevo pipeline", not fresh_deploy)
+    lo FIJAMOS al del entorno existente (marcador): el cluster Logstash se llama
+    "${project_name}-logstash", así que un nombre distinto haría que Terraform lo
+    RECREE (un Logstash nuevo) en vez de agregar la pipeline al que ya está."""
+    requested = request.project_name or "log-analytics"
+    if not getattr(request, "fresh_deploy", False):
+        existing = (_read_platform_marker(terraform_dir) or {}).get("project_name")
+        if existing:
+            return existing
+    return requested
 
 
 def _remove_platform_marker(terraform_dir: Path) -> None:
