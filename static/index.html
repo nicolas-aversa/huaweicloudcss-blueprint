@@ -1731,18 +1731,19 @@
     .cap-chat__tabs .lp-tab-btn { border: none; background: transparent; border-radius: var(--radius-pill); padding: 6px 14px; }
     .cap-chat__tabs .lp-tab-btn.lp-tab-active { background: var(--bg-primary); color: var(--accent); box-shadow: var(--shadow-xs); }
     .cap-chat__empty-title { font-size: 13px; font-weight: 650; color: var(--text-secondary); }
-    .cap-chat__suggest { width: 100%; max-width: 440px; margin-top: 4px; }
-    .cap-chat__suggest .lp-tab-panel { display: flex; flex-direction: column; gap: 7px; }
+    /* Sugerencias persistentes (arriba del input): card-chips compactas que wrappean. */
+    .cap-chat__suggest-row { margin-top: 10px; }
+    .cap-chat__suggest .lp-tab-panel { display: flex; flex-wrap: wrap; gap: 8px; }
     .cap-chat__suggest .lp-q-btn {
-      display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
-      padding: 10px 13px; font-size: 12.5px; line-height: 1.35; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px; text-align: left;
+      padding: 9px 13px; font-size: 12px; line-height: 1.3; cursor: pointer;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
       background: var(--bg-primary); color: var(--text-secondary); transition: all .15s var(--ease);
     }
-    .cap-chat__suggest .lp-q-btn .icon { width: 15px; height: 15px; flex: none; color: var(--accent); opacity: .85; }
+    .cap-chat__suggest .lp-q-btn .icon { width: 14px; height: 14px; flex: none; color: var(--accent); opacity: .85; }
     .cap-chat__suggest .lp-q-btn:hover {
       border-color: var(--accent); color: var(--text-primary);
-      background: var(--accent-tint); transform: translateX(2px);
+      background: var(--accent-tint); transform: translateY(-1px);
     }
 
     .cap-chat__log {
@@ -4491,9 +4492,9 @@
             <div class="cap-chat__empty" id="cap-chat-empty">
               <span class="cap-chat__empty-ic">${icon('spark')}</span>
               <span class="cap-chat__empty-title">Preguntame sobre tus datos${activeSlugs.length > 1 ? ' — elegí el tipo arriba' : ''}</span>
-              ${chipPanels}
             </div>
           </div>
+          <div class="cap-chat__suggest-row">${chipPanels}</div>
           <form class="cap-chat__form" id="cap-chat-form" autocomplete="off">
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Escribí tu pregunta…">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
