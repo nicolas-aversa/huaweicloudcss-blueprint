@@ -4218,9 +4218,24 @@ def _ml_predict(base: str, user: str, password: str, model_id: str,
         return None
     try:
         out = r.json()["inference_results"][0]["output"][0]
-        data = out.get("dataAsMap") or {}
+        data = out.get("dataAsMap")
+        # Con response_filter el connector deja el texto plano en dataAsMap.
+        if isinstance(data, str):
+            return data.strip() or None
+        data = data or {}
+        # Sin response_filter: estructura OpenAI completa.
         content = data.get("choices", [{}])[0].get("message", {}).get("content")
-        return content.strip() if isinstance(content, str) else None
+        # Con response_filter ($.choices[0].message.content): ya viene extraído.
+        if not isinstance(content, str):
+            for k in ("response", "content", "output", "result", "text"):
+                v = data.get(k)
+                if isinstance(v, str) and v.strip():
+                    content = v
+                    break
+        if not isinstance(content, str):
+            print(f"[ppl-chat] _predict {model_id} sin content; dataAsMap={str(data)[:400]}")
+            return None
+        return content.strip() or None
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         print(f"[ppl-chat] _predict {model_id} respuesta inesperada: {exc!r}")
         return None
