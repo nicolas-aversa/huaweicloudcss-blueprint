@@ -1724,12 +1724,26 @@
     .cap-assistant__code { display: block; margin-top: 6px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-all; }
 
     .cap-chat { margin-top: 14px; }
-    .cap-chat__tabs {
-      display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin-bottom: 10px;
-      background: var(--bg-tertiary); border-radius: var(--radius-pill); width: fit-content; max-width: 100%;
+    /* Selector de caso: banda propia, centrada y distintiva, bajo el header. */
+    .cap-assistant__cases {
+      display: flex; flex-direction: column; align-items: center; gap: 7px;
+      padding: 14px 22px 12px;
     }
-    .cap-chat__tabs .lp-tab-btn { border: none; background: transparent; border-radius: var(--radius-pill); padding: 6px 14px; }
-    .cap-chat__tabs .lp-tab-btn.lp-tab-active { background: var(--bg-primary); color: var(--accent); box-shadow: var(--shadow-xs); }
+    .cap-assistant__cases-lbl {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .cap-chat__tabs {
+      display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 4px; padding: 5px; margin: 0;
+      background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-pill); max-width: 100%; box-shadow: var(--shadow-xs);
+    }
+    .cap-chat__tabs .lp-tab-btn { border: none; background: transparent; border-radius: var(--radius-pill); padding: 7px 16px; font-weight: 600; }
+    .cap-chat__tabs .lp-tab-btn.lp-tab-active {
+      background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent)));
+      color: #fff; box-shadow: 0 4px 12px -5px var(--accent);
+    }
+    .cap-chat__tabs .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--accent); }
     .cap-chat__empty-title { font-size: 13px; font-weight: 650; color: var(--text-secondary); }
     /* Sugerencias persistentes (arriba del input): card-chips compactas que wrappean. */
     .cap-chat__suggest-row { margin-top: 10px; }
@@ -4479,6 +4493,7 @@
       let activeSlugs = [];
       let tabsBar = '';
       let chipPanels = '';
+      let logsHtml = '';
       if (agentReady) {
         for (const [s, c] of entries) {
           const ready = !!(c && c.conversational && c.conversational.ok);
@@ -4491,13 +4506,24 @@
           const showTabs = activeSlugs.length > 1;
           const tabsHtml = activeSlugs.map((s, i) => {
             const label = SLUG_LABELS[s] || s.replace(/-/g, ' ');
-            return `<button type="button" class="lp-tab-btn${i === 0 ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
+            return `<button type="button" role="tab" class="lp-tab-btn${i === 0 ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
           }).join('');
           const panelsHtml = activeSlugs.map((s, i) => {
             const qs = (SUGGESTED_BY_SLUG[s] || _genericQuestions(s)).slice(0, 4);
             return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
           }).join('');
-          tabsBar = showTabs ? `<div class="cap-chat__tabs">${tabsHtml}</div>` : '';
+          // Selector de caso: banda propia, centrada y distintiva (arriba del chat).
+          tabsBar = showTabs
+            ? `<div class="cap-assistant__cases"><span class="cap-assistant__cases-lbl">Elegí el caso</span><div class="cap-chat__tabs" role="tablist">${tabsHtml}</div></div>`
+            : '';
+          // Un log de chat por caso (conversación separada); se muestra el del slug activo.
+          logsHtml = activeSlugs.map((s, i) =>
+            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">
+              <div class="cap-chat__empty">
+                <span class="cap-chat__empty-ic">${icon('spark')}</span>
+                <span class="cap-chat__empty-title">Preguntame sobre ${escapeHtml(SLUG_LABELS[s] || 'tus datos')}</span>
+              </div>
+            </div>`).join('');
           chipPanels = `<div class="cap-chat__suggest">${panelsHtml}</div>`;
         }
       }
@@ -4513,14 +4539,9 @@
           </span>
         </div>
         ${agentReady && activeSlugs.length ? `
+        ${tabsBar}
         <div class="cap-chat">
-          ${tabsBar}
-          <div class="cap-chat__log" id="cap-chat-log">
-            <div class="cap-chat__empty" id="cap-chat-empty">
-              <span class="cap-chat__empty-ic">${icon('spark')}</span>
-              <span class="cap-chat__empty-title">Preguntame sobre tus datos${activeSlugs.length > 1 ? ' — elegí el tipo arriba' : ''}</span>
-            </div>
-          </div>
+          ${logsHtml}
           <div class="cap-chat__suggest-row">${chipPanels}</div>
           <form class="cap-chat__form" id="cap-chat-form" autocomplete="off">
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Escribí tu pregunta…">
@@ -4540,18 +4561,22 @@
 
       // \u2500\u2500 Chat NL\u2192PPL nativo: pega a POST /api/v1/capabilities/ppl-chat (orquestado
       // server-side, sin el Assistant de Dashboards). El slug activo = la tab elegida. \u2500\u2500
-      const chatLog = host.querySelector('#cap-chat-log');
       const chatInput = host.querySelector('#cap-chat-input');
       const chatForm = host.querySelector('#cap-chat-form');
       const _activeChatSlug = () =>
         (host.querySelector('.lp-tab-btn.lp-tab-active')?.dataset.slug) || activeSlugs[0];
+      // Chat separado por caso: cada slug tiene su propio log; escribimos en el activo.
+      const _activeLog = () =>
+        host.querySelector(`.cap-chat__log[data-slug="${_activeChatSlug()}"]`) || host.querySelector('.cap-chat__log');
+      const _scrollLog = (el) => { const l = el && el.closest('.cap-chat__log'); if (l) l.scrollTop = l.scrollHeight; };
       const _bubble = (who, html) => {
-        host.querySelector('#cap-chat-empty')?.remove();
+        const log = _activeLog();
+        log.querySelector('.cap-chat__empty')?.remove();
         const row = document.createElement('div');
         row.className = 'cap-chat__row cap-chat__row--' + who;
         const avatar = who === 'bot' ? `<span class="cap-chat__avatar">${icon('spark')}</span>` : '';
         row.innerHTML = `${avatar}<div class="cap-chat__msg cap-chat__msg--${who}">${html}</div>`;
-        chatLog.appendChild(row); chatLog.scrollTop = chatLog.scrollHeight;
+        log.appendChild(row); log.scrollTop = log.scrollHeight;
         return row.querySelector('.cap-chat__msg');
       };
       // ── Wow: visualización Vega-Lite (el motor del tipo "Vega" de OpenSearch
@@ -4682,7 +4707,7 @@
         let i = 0;
         const step = () => {
           el.textContent = text.slice(0, i++);
-          chatLog.scrollTop = chatLog.scrollHeight;
+          _scrollLog(el);
           if (i <= text.length) setTimeout(step, 12);
           else { el.classList.remove('cap-chat__typing'); onDone && onDone(); }
         };
@@ -4730,7 +4755,7 @@
           const answerEl = pending.querySelector('.cap-chat__answer');
           _typeInto(answerEl, data.answer || '', () => {
             if (details) pending.insertAdjacentHTML('beforeend', details);
-            chatLog.scrollTop = chatLog.scrollHeight;
+            _scrollLog(pending);
           });
         } catch (_err) {
           pending.classList.add('cap-chat__msg--err');
@@ -4744,15 +4769,23 @@
       host.querySelectorAll('.lp-q-btn').forEach(qb => {
         qb.addEventListener('click', () => sendCapChat(qb.dataset.q || ''));
       });
-      // Tabs: seleccionan el vertical activo (slug) para el chat.
+      // Tabs: seleccionan el caso activo (slug). Cambian el log (chat separado por
+      // caso), las sugerencias y el marcado de la tab.
       host.querySelectorAll('.lp-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const slug = btn.dataset.slug;
-          host.querySelectorAll('.lp-tab-btn').forEach(b => b.classList.remove('lp-tab-active'));
-          btn.classList.add('lp-tab-active');
+          host.querySelectorAll('.lp-tab-btn').forEach(b => {
+            const on = b === btn;
+            b.classList.toggle('lp-tab-active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+          });
+          host.querySelectorAll('.cap-chat__log').forEach(l => {
+            l.style.display = (l.dataset.slug === slug) ? 'flex' : 'none';
+          });
           host.querySelectorAll('.lp-tab-panel').forEach(p => {
             p.style.display = (p.dataset.slug === slug) ? 'flex' : 'none';
           });
+          if (chatInput) chatInput.focus();
         });
       });
     }
