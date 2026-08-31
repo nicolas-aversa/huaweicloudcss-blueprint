@@ -1730,13 +1730,20 @@
     }
     .cap-chat__tabs .lp-tab-btn { border: none; background: transparent; border-radius: var(--radius-pill); padding: 6px 14px; }
     .cap-chat__tabs .lp-tab-btn.lp-tab-active { background: var(--bg-primary); color: var(--accent); box-shadow: var(--shadow-xs); }
-    .cap-chat__chips .lp-tab-panel { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 4px; }
-    .cap-chat__chips .lp-q-btn {
-      font-size: 12px; padding: 6px 12px; border-radius: var(--radius-pill);
-      border: 1px solid var(--border-subtle); background: var(--bg-primary); color: var(--text-secondary);
-      cursor: pointer; transition: all .15s; line-height: 1.3;
+    .cap-chat__empty-title { font-size: 13px; font-weight: 650; color: var(--text-secondary); }
+    .cap-chat__suggest { width: 100%; max-width: 440px; margin-top: 4px; }
+    .cap-chat__suggest .lp-tab-panel { display: flex; flex-direction: column; gap: 7px; }
+    .cap-chat__suggest .lp-q-btn {
+      display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+      padding: 10px 13px; font-size: 12.5px; line-height: 1.35; cursor: pointer;
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+      background: var(--bg-primary); color: var(--text-secondary); transition: all .15s var(--ease);
     }
-    .cap-chat__chips .lp-q-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-tint); }
+    .cap-chat__suggest .lp-q-btn .icon { width: 15px; height: 15px; flex: none; color: var(--accent); opacity: .85; }
+    .cap-chat__suggest .lp-q-btn:hover {
+      border-color: var(--accent); color: var(--text-primary);
+      background: var(--accent-tint); transform: translateX(2px);
+    }
 
     .cap-chat__log {
       margin-top: 10px; max-height: 320px; overflow-y: auto;
@@ -4442,7 +4449,8 @@
         return qs;
       };
       let activeSlugs = [];
-      let questionsHtml = '';
+      let tabsBar = '';
+      let chipPanels = '';
       if (agentReady) {
         for (const [s, c] of entries) {
           const ready = !!(c && c.conversational && c.conversational.ok);
@@ -4458,10 +4466,11 @@
             return `<button type="button" class="lp-tab-btn${i === 0 ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
           }).join('');
           const panelsHtml = activeSlugs.map((s, i) => {
-            const qs = (SUGGESTED_BY_SLUG[s] || _genericQuestions(s)).slice(0, 6);
-            return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div>`;
+            const qs = (SUGGESTED_BY_SLUG[s] || _genericQuestions(s)).slice(0, 4);
+            return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
           }).join('');
-          questionsHtml = `${showTabs ? `<div class="cap-chat__tabs">${tabsHtml}</div>` : ''}<div class="cap-chat__chips">${panelsHtml}</div>`;
+          tabsBar = showTabs ? `<div class="cap-chat__tabs">${tabsHtml}</div>` : '';
+          chipPanels = `<div class="cap-chat__suggest">${panelsHtml}</div>`;
         }
       }
       host = document.createElement('div');
@@ -4475,15 +4484,14 @@
             <span class="section-card__hint">Preguntá en lenguaje natural — lo traduzco a PPL y respondo con el dato real.</span>
           </span>
         </div>
-        <div class="cap-assistant__chips-row">${chips}</div>
-        ${notes ? `<ul class="cap-assistant__notes">${notes}</ul>` : ''}
         ${agentReady && activeSlugs.length ? `
         <div class="cap-chat">
-          ${questionsHtml}
+          ${tabsBar}
           <div class="cap-chat__log" id="cap-chat-log">
             <div class="cap-chat__empty" id="cap-chat-empty">
               <span class="cap-chat__empty-ic">${icon('spark')}</span>
-              <span>Preguntame algo sobre tus datos${activeSlugs.length > 1 ? ' — elegí el tipo arriba' : ''}. Tocá una sugerencia o escribí abajo.</span>
+              <span class="cap-chat__empty-title">Preguntame sobre tus datos${activeSlugs.length > 1 ? ' — elegí el tipo arriba' : ''}</span>
+              ${chipPanels}
             </div>
           </div>
           <form class="cap-chat__form" id="cap-chat-form" autocomplete="off">
