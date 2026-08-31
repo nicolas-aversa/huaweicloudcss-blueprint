@@ -129,7 +129,7 @@ def build_llm_connector(api_key: str, endpoint: str | None = None, model: str | 
         '{ "model": "${parameters.model}", "messages": ['
         '{"role": "system", "content": "${parameters.system_instruction:-You are a helpful assistant}"}, '
         '{"role": "user", "content": "${parameters.prompt}"}], '
-        '"chat_template_kwargs": {"thinking": false} }'
+        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
     )
     return {
         "name": "MaaS LLM (platform)",
@@ -156,7 +156,7 @@ def build_ppl_connector(api_key: str, ppl_system_prompt: str,
         '{ "model": "${parameters.model}", "messages": ['
         '{"role": "system", "content": "${parameters.system_prompt}"}, '
         '{"role": "user", "content": "${parameters.prompt}"}], '
-        '"chat_template_kwargs": {"thinking": false} }'
+        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
     )
     return {
         "name": "MaaS DeepSeek PPLTool (platform)",
