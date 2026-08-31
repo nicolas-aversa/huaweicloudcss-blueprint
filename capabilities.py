@@ -233,9 +233,14 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         "3. eval ONLY before stats for binary flags.\n"
         "4. NEVER use head unless the user asks for top N.\n"
         "5. Single quotes for strings.\n"
-        "6. Return raw numbers only - let the LLM calculate rates.\n\n"
+        "6. Return raw numbers only - let the LLM calculate rates.\n"
+        "7. To filter by date/time, COMPARE @timestamp with literals 'YYYY-MM-DD HH:mm:ss'. "
+        "NEVER use match(), like() or wildcards ('2025-03-*') on @timestamp or any date field - it fails.\n"
+        "8. For a whole month use a half-open range: @timestamp >= 'YYYY-MM-01 00:00:00' and @timestamp < '(next month)-01 00:00:00'. "
+        "Alternatively use the extractors: year(@timestamp)=YYYY and month(@timestamp)=M (1-12).\n\n"
         "CORRECT PATTERNS:\n"
         f"{examples}"
+        f"# Filter a month (never match/wildcards on dates):\nsource={index_pattern} | where @timestamp >= '2025-03-01 00:00:00' and @timestamp < '2025-04-01 00:00:00' | stats count() as total\n\n"
         f"# Time histogram:\nsource={index_pattern} | stats count() as total by span(@timestamp, 1d)"
     )
 
