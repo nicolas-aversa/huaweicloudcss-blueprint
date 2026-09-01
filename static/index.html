@@ -587,6 +587,28 @@
     .app-nav__footer-text { display: flex; flex-direction: column; line-height: 1.3; }
     .app-nav__footer-region { font-size: 12px; font-weight: 600; color: var(--text-primary); }
     .app-nav__footer-label { font-size: 11px; color: var(--text-muted); }
+    /* Usuario logueado + logout (modo hosteado) */
+    .app-nav__user {
+      flex-shrink: 0; display: flex; align-items: center; gap: 9px;
+      margin: 8px 12px 0; padding: 8px 10px; border-radius: var(--radius-md);
+      border: 1px solid var(--border-subtle); background: var(--bg-subtle);
+    }
+    .app-nav__user-avatar {
+      width: 26px; height: 26px; flex: none; border-radius: 50%;
+      background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; text-transform: uppercase;
+    }
+    .app-nav__user-email {
+      flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .app-nav__logout {
+      flex: none; display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle); background: var(--bg-primary);
+      color: var(--text-muted); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+    }
+    .app-nav__logout:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
 
     /* ── App views (router de secciones, mismo patrón que step-pane) ─ */
     .app-view { display: none; }
@@ -2038,6 +2060,15 @@
             <span class="app-nav__env-project" id="nav-env-project">—</span>
             <span id="nav-env-meta">—</span>
           </div>
+        </button>
+      </div>
+
+      <!-- Usuario logueado + logout: solo visible en modo hosteado (auth on). -->
+      <div class="app-nav__user hidden" id="nav-user">
+        <span class="app-nav__user-avatar" id="nav-user-avatar">·</span>
+        <span class="app-nav__user-email" id="nav-user-email"></span>
+        <button class="app-nav__logout" id="nav-logout" type="button" aria-label="Cerrar sesión" title="Cerrar sesión">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
       </div>
 
@@ -6661,6 +6692,31 @@
         loadExample(id);
         console.log(`✓ Ejemplo "${id}" cargado automáticamente (modo dev)`);
       }
+    })();
+  </script>
+  <script>
+    // Sesión (modo hosteado): si hay un SA logueado, muestra su email + logout
+    // en el rail. En single-user (auth off) el bloque queda oculto.
+    (function () {
+      fetch('/auth/me', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.auth || !d.email) return;
+          var box = document.getElementById('nav-user');
+          if (!box) return;
+          var em = document.getElementById('nav-user-email');
+          var av = document.getElementById('nav-user-avatar');
+          if (em) { em.textContent = d.email; em.title = d.email; }
+          if (av) av.textContent = (d.email[0] || '·');
+          box.classList.remove('hidden');
+          var btn = document.getElementById('nav-logout');
+          if (btn) btn.addEventListener('click', function () {
+            btn.disabled = true;
+            fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' })
+              .finally(function () { window.location.href = '/login'; });
+          });
+        })
+        .catch(function () { /* single-user o sin red: no mostramos nada */ });
     })();
   </script>
 </body>

@@ -3,55 +3,86 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ingresar · CSS Accelerator</title>
+  <title>Ingresar · Blueprint</title>
   <style>
     :root {
-      --accent: #e50000; --accent-red: #b30000;
-      --bg: #f5f6f8; --card: #ffffff; --text: #1a1c21; --muted: #69707d;
-      --border: #e3e6ea; --radius: 14px;
+      --bg-primary: #ffffff; --bg-secondary: #f6f5f1; --bg-tertiary: #efeee8; --bg-subtle: #faf9f6;
+      --border-subtle: #e7e5dd; --border-default: #d9d7cd;
+      --text-primary: #15161a; --text-secondary: #515463; --text-muted: #8a8b94;
+      --accent: #7f0001; --accent-hover: #660001; --accent-tint: rgba(127,0,1,0.08);
+      --accent-ring: rgba(127,0,1,0.22); --accent-red: #e50000;
+      --radius-lg: 18px; --radius-md: 12px; --radius-sm: 8px;
+      --shadow-lg: 0 16px 40px rgba(20,22,30,0.10);
+      --font-sans: 'Huawei Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --ease: cubic-bezier(0.4,0,0.2,1);
     }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #14161a; --card: #1c1f24; --text: #f2f3f5; --muted: #9aa0a8; --border: #2a2e35; }
-    }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(1200px 500px at 50% -10%, rgba(229,0,0,0.10), transparent 60%), var(--bg);
-      color: var(--text); font: 14px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 24px;
+      font-family: var(--font-sans); color: var(--text-primary); line-height: 1.6;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+      background:
+        radial-gradient(900px 420px at 50% -8%, var(--accent-tint), transparent 62%),
+        var(--bg-secondary);
     }
     .card {
-      width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 30px 28px; box-shadow: 0 18px 50px -22px rgba(0,0,0,0.4);
+      width: 100%; max-width: 392px; background: var(--bg-primary);
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+      padding: 32px 30px; box-shadow: var(--shadow-lg);
     }
-    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-    .brand-dot {
-      width: 30px; height: 30px; border-radius: 9px; flex: none;
-      background: linear-gradient(135deg, var(--accent), var(--accent-red));
-      box-shadow: 0 6px 16px -6px var(--accent);
+    /* Marca — igual que el rail de la app */
+    .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
+    .brand__logo {
+      width: 40px; height: 40px; flex: none; border-radius: var(--radius-md);
+      background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center;
     }
-    h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
-    .sub { color: var(--muted); font-size: 12.5px; margin: 8px 0 22px; }
-    label { display: block; font-size: 11.5px; font-weight: 650; color: var(--muted); margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; }
+    .brand__text { display: flex; flex-direction: column; line-height: 1.2; }
+    .brand__name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+    .brand__sub { font-size: 11.5px; color: var(--text-muted); }
+    .eyebrow {
+      display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 8px;
+    }
+    h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px; }
+    .sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 22px; }
+    label {
+      display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary);
+      margin: 0 0 6px; letter-spacing: 0.02em;
+    }
     input {
-      width: 100%; padding: 11px 13px; margin-bottom: 16px; font-size: 14px;
-      border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+      width: 100%; padding: 11px 13px; margin-bottom: 16px; font-size: 14px; font-family: inherit;
+      color: var(--text-primary); background: var(--bg-tertiary);
+      border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+      transition: border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
     }
-    input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(229,0,0,0.12); }
+    input:focus {
+      outline: none; background: var(--bg-primary);
+      border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
+    }
     button {
-      width: 100%; padding: 12px; font-size: 14px; font-weight: 650; color: #fff; cursor: pointer;
-      border: none; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent-red));
-      box-shadow: 0 8px 20px -8px var(--accent);
+      width: 100%; padding: 12px; font-size: 14px; font-weight: 700; font-family: inherit; color: #fff;
+      cursor: pointer; border: none; border-radius: var(--radius-sm); background: var(--accent);
+      transition: background .15s var(--ease);
     }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
     button:disabled { opacity: .6; cursor: default; }
-    .err { color: var(--accent); font-size: 12.5px; margin: 0 0 14px; min-height: 16px; }
-    .foot { color: var(--muted); font-size: 11px; margin-top: 18px; text-align: center; }
+    .err { color: var(--accent-red); font-size: 12.5px; margin: 0 0 14px; min-height: 16px; font-weight: 500; }
+    .foot { color: var(--text-muted); font-size: 11.5px; margin-top: 18px; text-align: center; }
   </style>
 </head>
 <body>
   <form class="card" id="f" autocomplete="on">
-    <div class="brand"><span class="brand-dot"></span><h1>CSS Accelerator</h1></div>
-    <p class="sub">Ingresá con tu cuenta de SA para usar la plataforma.</p>
+    <div class="brand">
+      <span class="brand__logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      </span>
+      <span class="brand__text">
+        <span class="brand__name">Blueprint</span>
+        <span class="brand__sub">Huawei Cloud CSS</span>
+      </span>
+    </div>
+    <span class="eyebrow">Acceso de SAs</span>
+    <h1>Ingresá a la plataforma</h1>
+    <p class="sub">Entrá con tu cuenta para armar pipelines, desplegar y usar el asistente.</p>
     <p class="err" id="err"></p>
     <label for="email">Email</label>
     <input id="email" name="email" type="email" required placeholder="vos@huawei.com" autofocus>
@@ -66,7 +97,7 @@
       e.preventDefault(); err.textContent = ''; btn.disabled = true; btn.textContent = 'Ingresando…';
       try {
         const r = await fetch('/auth/login', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
           body: JSON.stringify({ email: f.email.value, password: f.password.value }),
         });
         const d = await r.json().catch(() => ({}));

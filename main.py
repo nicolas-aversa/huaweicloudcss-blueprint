@@ -1012,12 +1012,13 @@ def auth_logout() -> Response:
 
 
 @app.get("/auth/me", include_in_schema=False)
-def auth_me() -> dict:
-    """Quién está logueado (para la UI). En modo single-user devuelve auth:false."""
+def auth_me(request: Request) -> dict:
+    """Quién está logueado (para la UI). Lee la cookie directo (el endpoint es
+    público, no liga contexto). En modo single-user devuelve auth:false."""
     if not auth.AUTH_ENABLED:
         return {"auth": False}
-    ctx = auth.current_user_var.get()
-    return {"auth": True, "email": ctx.email if ctx else None}
+    email = auth.read_session_token(request.cookies.get(auth.COOKIE_NAME))
+    return {"auth": True, "logged_in": bool(email), "email": email}
 
 
 @app.get("/api/v1/verticals", tags=["verticals"], summary="Registro de verticales de demo")
