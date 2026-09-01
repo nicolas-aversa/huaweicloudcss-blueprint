@@ -371,16 +371,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántos eventos de seguridad hay en total por tipo de fuente (fortigate, auth, cloudaudit, waf)?',
-        '¿Cuáles son las 10 IPs de origen más frecuentes en eventos bloqueados?',
-        '¿Cuántos intentos de login SSH fallidos hubo y desde qué IPs?',
-        '¿Qué tipos de ataque detectó el WAF y cuántos de cada uno?',
-        '¿Cuáles son las técnicas MITRE ATT&CK más frecuentes en los eventos de seguridad?',
-        '¿Cuántos eventos coinciden con IPs conocidas como maliciosas (threat intel)?',
-        '¿Cuál es la distribución de eventos por fase del kill chain?',
-        '¿Cuántos eventos de severidad critical hay y cuáles son sus firmas?',
-        '¿Qué acciones de cloud audit (CTS) se ejecutaron y por qué usuarios?',
-        '¿Cuántos eventos pertenecen a campañas multi-stage y cuáles son sus IDs?'
+        '¿Cuántos eventos de seguridad hay en total?',
+        '¿Cuántos eventos hay por fuente (fortigate, auth, cloudaudit, waf)?',
+        '¿Cuáles son las 10 IPs de origen más frecuentes?',
+        '¿Cuántos eventos hay por país de origen?',
+        '¿Cuántos eventos hay por severidad?',
+        '¿Cuántos eventos hay por categoría de seguridad?',
+        '¿Cuáles son las 10 técnicas MITRE ATT&CK más frecuentes?',
+        '¿Cuántos eventos hay por fase del kill chain?',
+        '¿Cuántos logins SSH fallidos hubo y desde qué IPs?',
+        '¿Cuántos eventos hay por día?',
     ],
     'industry_fields': {
         'event.action',

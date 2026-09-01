@@ -257,16 +257,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántas transacciones financieras fallaron, o sea tienen un código de respuesta distinto de 000?',
-        '¿Cuántas transacciones financieras hay por cada tipo de operación bancaria?',
-        '¿Cuántos clientes únicos realizaron transacciones en el sistema financiero?',
-        '¿Qué tipos de operación bancaria tienen más transacciones fallidas?',
-        '¿Cuántas transacciones financieras hay por canal de acceso (web, mobile, etc.)?',
-        '¿Cuál es la distribución de los códigos de respuesta en las transacciones financieras?',
-        '¿Cuántas transferencias se completaron correctamente con código de respuesta 000?',
-        '¿Cuántas transacciones financieras hay por plataforma del dispositivo (iOS, Android, web)?',
-        '¿Cuál es el tipo de operación bancaria más común entre todas las transacciones?',
-        '¿Qué canales de acceso presentan más transacciones fallidas en la banca digital?'
+        '¿Cuántas transacciones hay en total?',
+        '¿Cuántas transacciones hay por tipo de operación?',
+        '¿Cuántas transacciones hay por canal (mobile/web)?',
+        '¿Cuántas transacciones hay por plataforma (Android/iOS)?',
+        '¿Cuántas transacciones hay por código de respuesta?',
+        '¿Cuántas transacciones fallaron vs exitosas?',
+        '¿Cuáles son los 10 clientes más activos?',
+        '¿En qué paso del funnel fallan las transacciones?',
+        '¿Cuántos clientes distintos operaron?',
+        '¿Cuántas transacciones hay por día?',
     ],
     'industry_fields': {
         'transaction.account_ref',

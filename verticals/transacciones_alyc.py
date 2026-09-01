@@ -123,16 +123,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuál es el volumen total operado (notional) en el mercado de capitales?',
-        '¿Qué especie concentró el mayor volumen operado?',
-        '¿Cuántas órdenes fueron rechazadas y por qué motivo?',
-        '¿Cuántos comitentes únicos operaron en el período?',
-        '¿Cuántos fallos de liquidación hubo y cuáles fueron sus motivos?',
-        '¿Cuál es la distribución de órdenes por canal (WEB, API, MOBILE, MESA)?',
-        '¿Cuánto se operó en plazo CI versus T+1?',
-        '¿Cuáles son los 5 comitentes con mayor volumen operado?',
-        '¿Cuántas operaciones hubo por mercado (BYMA vs MAE)?',
-        '¿Cuál es el total de aranceles (fees) cobrados por especie?'
+        '¿Cuántas operaciones hay en total?',
+        '¿Cuántas operaciones hay por mercado (BYMA, MAE)?',
+        '¿Cuáles son las 10 especies más operadas?',
+        '¿Cuál es el volumen operado por especie?',
+        '¿Cuántas operaciones hay por estado?',
+        '¿Cuál es el total de comisiones cobradas?',
+        '¿Cuántas operaciones hay por canal?',
+        '¿Cuántas operaciones hay por lado (compra/venta)?',
+        '¿Cuántos rechazos hay por motivo?',
+        '¿Cuántas operaciones hay por día?',
     ],
     'industry_fields': {
         'comitente',

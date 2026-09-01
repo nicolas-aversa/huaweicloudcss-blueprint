@@ -89,16 +89,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántas consultas médicas hay por cada clase de atención (emergencia, rutina, etc.)?',
-        '¿Cuántos pacientes únicos atendió el sistema de salud pública?',
-        '¿Cuál es el monto total de reclamos (claims) en las consultas médicas?',
-        '¿Cuántas consultas médicas de urgencias fueron clasificadas como triage RED?',
-        '¿Cuáles son las 5 ciudades con mayor cantidad de consultas médicas?',
-        '¿Cuántas consultas hay por cada nivel de triage (RED, YELLOW, GREEN) en el hospital?',
-        '¿Cuál es el costo promedio de atención por cada clase de consulta médica?',
-        '¿Cuáles son los 5 motivos de consulta clínica más frecuentes en el sistema de salud?',
-        '¿Cuál es el monto total cubierto por seguro versus el total reclamado en las consultas?',
-        '¿Cuántas consultas médicas corresponden a emergencias en el sistema de salud pública?'
+        '¿Cuántos encuentros clínicos hay en total?',
+        '¿Cuántos encuentros hay por clase (ambulatorio, internación, emergencia)?',
+        '¿Cuáles son los 10 diagnósticos más frecuentes?',
+        '¿Cuántos encuentros hay por ciudad?',
+        '¿Cuál es el costo total de los reclamos?',
+        '¿Cuál es la cobertura total de los pagadores?',
+        '¿Cuántos encuentros hay por nivel de triage?',
+        '¿Cuáles son los 10 motivos clínicos más frecuentes?',
+        '¿Cuál es el costo promedio por clase de encuentro?',
+        '¿Cuántos encuentros hay por día?',
     ],
     'industry_fields': {
         'claim',

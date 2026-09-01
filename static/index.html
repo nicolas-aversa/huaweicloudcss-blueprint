@@ -1769,14 +1769,14 @@
     .cap-chat__empty-title { font-size: 13px; font-weight: 650; color: var(--text-secondary); }
     /* Sugerencias persistentes (arriba del input): card-chips compactas que wrappean. */
     .cap-chat__suggest-row { margin-top: 10px; }
-    .cap-chat__suggest .lp-tab-panel { display: flex; flex-wrap: wrap; gap: 8px; }
+    .cap-chat__suggest .lp-tab-panel { display: flex; flex-wrap: wrap; gap: 6px; }
     .cap-chat__suggest .lp-q-btn {
-      display: inline-flex; align-items: center; gap: 8px; text-align: left;
-      padding: 9px 13px; font-size: 12px; line-height: 1.3; cursor: pointer;
-      border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+      display: inline-flex; align-items: center; gap: 5px; text-align: left;
+      padding: 5px 10px; font-size: 11px; line-height: 1.25; cursor: pointer;
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
       background: var(--bg-primary); color: var(--text-secondary); transition: all .15s var(--ease);
     }
-    .cap-chat__suggest .lp-q-btn .icon { width: 14px; height: 14px; flex: none; color: var(--accent); opacity: .85; }
+    .cap-chat__suggest .lp-q-btn .icon { width: 12px; height: 12px; flex: none; color: var(--accent); opacity: .85; }
     .cap-chat__suggest .lp-q-btn:hover {
       border-color: var(--accent); color: var(--text-primary);
       background: var(--accent-tint); transform: translateY(-1px);
@@ -1833,6 +1833,14 @@
       transition: transform .15s var(--ease), filter .15s var(--ease);
     }
     .cap-chat__send .icon { width: 17px; height: 17px; }
+    .cap-chat__clear {
+      flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%;
+      border: 1px solid var(--border-default); background: var(--bg-primary); color: var(--text-muted); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+    }
+    .cap-chat__clear .icon { width: 16px; height: 16px; }
+    .cap-chat__clear:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
     .cap-chat__send:hover { filter: brightness(1.06); transform: translateY(-1px); }
     @media (prefers-reduced-motion: reduce) {
       .cap-chat__row { animation: none; }
@@ -4540,7 +4548,7 @@
             return `<button type="button" role="tab" class="lp-tab-btn${i === 0 ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
           }).join('');
           const panelsHtml = activeSlugs.map((s, i) => {
-            const qs = (SUGGESTED_BY_SLUG[s] || _genericQuestions(s)).slice(0, 4);
+            const qs = (SUGGESTED_BY_SLUG[s] || _genericQuestions(s)).slice(0, 10);
             return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
           }).join('');
           // Selector de caso: banda propia, centrada y distintiva (arriba del chat).
@@ -4575,6 +4583,7 @@
           ${logsHtml}
           <div class="cap-chat__suggest-row">${chipPanels}</div>
           <form class="cap-chat__form" id="cap-chat-form" autocomplete="off">
+            <button class="cap-chat__clear" id="cap-chat-clear" type="button" aria-label="Limpiar este chat" title="Limpiar este chat">${icon('trash')}</button>
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Escribí tu pregunta…">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
@@ -4600,6 +4609,13 @@
       const _activeLog = () =>
         host.querySelector(`.cap-chat__log[data-slug="${_activeChatSlug()}"]`) || host.querySelector('.cap-chat__log');
       const _scrollLog = (el) => { const l = el && el.closest('.cap-chat__log'); if (l) l.scrollTop = l.scrollHeight; };
+      // Limpia el chat del caso activo → vuelve al estado vacío (por-caso).
+      const _clearActiveLog = () => {
+        const log = _activeLog();
+        if (!log) return;
+        const label = SLUG_LABELS[_activeChatSlug()] || 'tus datos';
+        log.innerHTML = `<div class="cap-chat__empty"><span class="cap-chat__empty-ic">${icon('spark')}</span><span class="cap-chat__empty-title">Preguntame sobre ${escapeHtml(label)}</span></div>`;
+      };
       const _bubble = (who, html) => {
         const log = _activeLog();
         log.querySelector('.cap-chat__empty')?.remove();
@@ -4871,6 +4887,7 @@
         }
       }
       chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
+      host.querySelector('#cap-chat-clear')?.addEventListener('click', () => { _clearActiveLog(); chatInput?.focus(); });
       // Preguntas sugeridas \u2192 enviar al chat (antes copiaban al clipboard).
       host.querySelectorAll('.lp-q-btn').forEach(qb => {
         qb.addEventListener('click', () => sendCapChat(qb.dataset.q || ''));

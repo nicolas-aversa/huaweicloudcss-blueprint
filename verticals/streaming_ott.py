@@ -101,16 +101,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántos espectadores únicos tuvo la plataforma de streaming?',
+        '¿Cuántos eventos de reproducción hay en total?',
         '¿Cuáles son los 10 títulos más reproducidos?',
-        '¿Cuántos segundos de reproducción hubo por tipo de contenido?',
-        '¿Cuántos errores de reproducción hubo y de qué tipo?',
-        '¿Qué CDN pop concentra más eventos de rebuffering?',
-        '¿Cuál es la distribución de reproducciones por dispositivo?',
-        '¿Cuántas reproducciones hubo por país?',
-        '¿Cuáles son los géneros más vistos por segundos reproducidos?',
-        '¿Qué títulos concentran más errores de reproducción?',
-        '¿Cuántas sesiones únicas de reproducción hubo por CDN pop?'
+        '¿Cuántos eventos hay por género?',
+        '¿Cuántos eventos hay por dispositivo?',
+        '¿Cuántos eventos hay por país?',
+        '¿Cuál es el tiempo total visto en segundos?',
+        '¿Cuántos eventos hay por tipo de contenido?',
+        '¿Cuántos errores de reproducción hay por código?',
+        '¿Cuántos eventos hay por CDN pop?',
+        '¿Cuántos eventos hay por día?',
     ],
     'industry_fields': {
         'bitrate_kbps',

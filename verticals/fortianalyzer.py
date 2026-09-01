@@ -151,16 +151,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántas sesiones de firewall hay por cada acción (accept, deny, close)?',
-        '¿Cuáles son las 10 aplicaciones con más tráfico en el firewall?',
-        '¿Cuántas amenazas IPS se detectaron y cuáles son las firmas más frecuentes?',
-        '¿Cuáles son las 10 IPs de origen con más sesiones bloqueadas?',
-        '¿Cuántos bytes se enviaron en total por categoría de aplicación?',
-        '¿Cuáles son los países de origen con más tráfico hacia el firewall?',
-        '¿Cuántos eventos hay por cada subtipo de log (forward, ips, virus, webfilter)?',
-        '¿Qué puertos de destino registran más intentos bloqueados?',
-        '¿Cuántas IPs de origen únicas atravesaron el firewall?',
-        '¿Cuál es la distribución de severidad de los eventos UTM?'
+        '¿Cuántos logs hay en total?',
+        '¿Cuántos logs hay por tipo (traffic, utm, event)?',
+        '¿Cuáles son las 10 IPs de origen más frecuentes?',
+        '¿Cuántas sesiones hay por acción (accept, deny, close)?',
+        '¿Cuántos logs hay por nivel de severidad?',
+        '¿Cuáles son las 10 aplicaciones más detectadas?',
+        '¿Cuáles son las 10 firmas de ataque IPS más frecuentes?',
+        '¿Cuántos bytes se enviaron por país de origen?',
+        '¿Cuántos logs hay por país de origen?',
+        '¿Cuántos logs hay por día?',
     ],
     'industry_fields': {
         'app',

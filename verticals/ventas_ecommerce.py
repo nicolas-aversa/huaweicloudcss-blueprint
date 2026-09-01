@@ -95,16 +95,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántos pedidos de e-commerce hay por cada estado (completado, cancelado, pendiente)?',
-        '¿Cuál es el total de ingresos por categoría de producto en la tienda online?',
-        '¿Cuántos clientes únicos hicieron pedidos en la plataforma de e-commerce?',
-        '¿Cuántos pedidos fueron cancelados en la tienda online?',
-        '¿Cuáles son las 5 categorías de productos con más pedidos vendidos?',
-        '¿Cuántos pedidos hay por ciudad de origen del cliente en el e-commerce?',
-        '¿Cuál es el total de ingresos por día de la semana en el retail?',
-        '¿Cuáles son los motivos de cancelación de pedidos más frecuentes en la tienda?',
-        '¿Cuáles son los 5 fabricantes con mayores ingresos por ventas en el e-commerce?',
-        '¿Cuántos pedidos hay por género del cliente (masculino, femenino) en la tienda online?'
+        '¿Cuántas órdenes hay en total?',
+        '¿Cuál es el ingreso total en EUR?',
+        '¿Cuántas órdenes hay por categoría?',
+        '¿Cuáles son las 10 marcas más vendidas?',
+        '¿Cuántas órdenes hay por estado (completada, devuelta, cancelada)?',
+        '¿Cuántas órdenes hay por género del cliente?',
+        '¿Cuál es el ingreso por categoría?',
+        '¿Cuántas órdenes hay por ciudad?',
+        '¿Cuántas órdenes hay por día de la semana?',
+        '¿Cuántas cancelaciones hay por motivo?',
     ],
     'industry_fields': {
         'category',

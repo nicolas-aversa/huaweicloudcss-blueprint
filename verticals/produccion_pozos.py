@@ -116,16 +116,16 @@ VERTICAL = {
         }
     ],
     'suggested_questions': [
-        '¿Cuántas lecturas de pozos petroleros están marcadas como DOWN o fuera de servicio?',
-        '¿Cuál es el volumen total de petróleo producido por cada pozo?',
-        '¿Cuál es el pozo con mayor producción de petróleo en todo el periodo?',
-        '¿Cuántas lecturas de pozos registraron tiempo de inactividad (downtime) y en qué pozos?',
-        '¿Cuál es la presión promedio de fondo de pozo en las lecturas de petróleo y gas?',
-        '¿Cuáles son los 5 pozos con mayor volumen de gas producido?',
-        '¿Cuántas horas en producción (on-stream) tiene cada pozo de petróleo y gas?',
-        '¿Cuál es el volumen total de agua inyectada por cada pozo inyector?',
-        '¿Cuántas lecturas de pozos hay por cada estado de operación (UP, DOWN, etc.)?',
-        '¿Cuántas lecturas hay por tipo de pozo (productor, inyector, observador) en los datos de petróleo y gas?'
+        '¿Cuántas lecturas de producción hay en total?',
+        '¿Cuál es el volumen de petróleo producido por pozo?',
+        '¿Cuántas horas en producción tuvo cada pozo?',
+        '¿Cuántas lecturas hay por estado (FLOWING, INJECTING, DOWN)?',
+        '¿Cuál es el volumen total de gas producido?',
+        '¿Cuánta agua se inyectó por pozo?',
+        '¿Cuánto downtime tuvo cada pozo?',
+        '¿Cuántas lecturas hay por tipo de pozo (productor/inyector)?',
+        '¿Cuál es la producción de petróleo por día?',
+        '¿Cuál es la presión de fondo promedio por pozo?',
     ],
     'industry_fields': {
         'avg_dhp',
