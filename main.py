@@ -33,8 +33,8 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi import Body, FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
@@ -86,6 +86,55 @@ app = FastAPI(
 # se sigue sirviendo aparte en "/" (ver index()). Mountar acá no colisiona con
 # las rutas /api/v1/* ni con "/".
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# ── Multi-usuario hosteado (opcional) ────────────────────────────────────────
+# Si hay APP_SECRET_KEY en el entorno, auth queda ACTIVO: cada SA entra con
+# email+password y trabaja en su propio workspace aislado (settings + terraform
+# + state). Sin esa var, el middleware es passthrough y la app corre single-user
+# como siempre (dev local, tests, nativo). Ver auth.py.
+import auth  # noqa: E402
+
+app.add_middleware(auth.AuthMiddleware)
+
+
+def _active_terraform_dir() -> Path:
+    """Directorio de trabajo de Terraform: el del usuario logueado (hosteado) o
+    el global `terraform/` (single-user). Aísla state/marker/registro por SA."""
+    return auth.current_terraform_dir() or (Path(__file__).parent / "terraform")
+
+
+# ── Lock de deploy/destroy por usuario ───────────────────────────────────────
+# Un mismo SA no debe correr dos deploys/destroys a la vez (corrompería SU state).
+# SAs distintos corren en paralelo (dirs y states separados). Lock in-process
+# (un worker de uvicorn); en single-user la clave es "_global".
+import contextlib as _contextlib  # noqa: E402
+import threading as _threading  # noqa: E402
+
+_deploy_locks: "dict[str, _threading.Lock]" = {}
+_deploy_locks_guard = _threading.Lock()
+
+
+def _deploy_lock_for_current() -> "_threading.Lock":
+    ctx = auth.current_user_var.get()
+    key = ctx.user_id if ctx is not None else "_global"
+    with _deploy_locks_guard:
+        return _deploy_locks.setdefault(key, _threading.Lock())
+
+
+@_contextlib.contextmanager
+def _deploy_guard():
+    """Adquiere el lock del usuario o corta con 409 si ya hay uno en curso."""
+    lock = _deploy_lock_for_current()
+    if not lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"stage": "deploy_lock",
+                    "message": "Ya hay un despliegue o destroy en curso para tu usuario. "
+                               "Esperá a que termine antes de lanzar otro."})
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 # ===========================================================================
@@ -926,6 +975,51 @@ def index() -> Response:
     )
 
 
+@app.get("/login", include_in_schema=False)
+def login_page() -> Response:
+    """Página de login (solo tiene efecto real si auth está activo)."""
+    html = (STATIC_DIR / "login.html").read_text(encoding="utf-8")
+    return Response(content=html, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/auth/login", include_in_schema=False)
+async def auth_login(request: Request) -> Response:
+    """Body JSON ``{email, password}``. Valida contra allowlist + store de
+    usuarios (alta en el primer login) y setea la cookie de sesión firmada."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+    if not auth.AUTH_ENABLED:
+        return JSONResponse({"ok": True, "auth": False})
+    if not auth.check_login(email, password):
+        return JSONResponse({"ok": False, "error": "Credenciales inválidas o email no autorizado."},
+                            status_code=401)
+    resp = JSONResponse({"ok": True, "email": email})
+    resp.set_cookie(auth.COOKIE_NAME, auth.make_session_token(email), max_age=auth.SESSION_TTL,
+                    httponly=True, samesite="lax", secure=auth.SECURE_COOKIES, path="/")
+    return resp
+
+
+@app.post("/auth/logout", include_in_schema=False)
+def auth_logout() -> Response:
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE_NAME, path="/")
+    return resp
+
+
+@app.get("/auth/me", include_in_schema=False)
+def auth_me() -> dict:
+    """Quién está logueado (para la UI). En modo single-user devuelve auth:false."""
+    if not auth.AUTH_ENABLED:
+        return {"auth": False}
+    ctx = auth.current_user_var.get()
+    return {"auth": True, "email": ctx.email if ctx else None}
+
+
 @app.get("/api/v1/verticals", tags=["verticals"], summary="Registro de verticales de demo")
 def get_verticals() -> dict:
     """Payload declarativo de los verticales (grupos + specs de front). El mismo
@@ -1727,7 +1821,7 @@ def export_starter_kit(request: ExportStarterKitRequest) -> Response:
     import zipfile
 
     project = request.project_name or "log-analytics"
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     main_tf_path = terraform_dir / "main.tf"
     tfvars_example_path = terraform_dir / "terraform.tfvars.example"
 
@@ -2391,6 +2485,12 @@ def _do_terraform_sequence(
     summary="Deploya el pipeline en Huawei Cloud con Terraform",
 )
 def terraform_deploy(request: TerraformDeployRequest) -> TerraformDeployResponse:
+    """Deploy con Terraform, protegido por el lock de deploy por-usuario."""
+    with _deploy_guard():
+        return _terraform_deploy_impl(request)
+
+
+def _terraform_deploy_impl(request: TerraformDeployRequest) -> TerraformDeployResponse:
     """Deploy automático con Terraform.
 
     Ejecuta DOS workloads en paralelo (no tienen dependencia entre sí):
@@ -2408,7 +2508,7 @@ def terraform_deploy(request: TerraformDeployRequest) -> TerraformDeployResponse
     """
     import concurrent.futures
 
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     if not terraform_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2881,7 +2981,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
 
     El frontend lee el stream con ``fetch`` + ``response.body.getReader()``.
     """
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     if not terraform_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2905,10 +3005,23 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
         )
     _check_unavailable_plugins(request)
     _check_demo_datasets_present(request)
-    return StreamingResponse(
-        _deploy_stream_gen(request, terraform_dir, logstash_flavor, opensearch_flavor),
-        media_type="text/event-stream",
-    )
+    # Lock por-usuario: se adquiere ya (puede cortar con 409) y se libera cuando
+    # el stream se agota/cierra.
+    lock = _deploy_lock_for_current()
+    if not lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"stage": "deploy_lock",
+                    "message": "Ya hay un despliegue o destroy en curso para tu usuario. "
+                               "Esperá a que termine antes de lanzar otro."})
+
+    def _guarded_stream():
+        try:
+            yield from _deploy_stream_gen(request, terraform_dir, logstash_flavor, opensearch_flavor)
+        finally:
+            lock.release()
+
+    return StreamingResponse(_guarded_stream(), media_type="text/event-stream")
 
 
 # La Logstash de CSS (7.10) NO trae todos los plugins bundled de la OSS: el
@@ -4341,7 +4454,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     if not base.rsplit("//", 1)[-1]:
         return {"error": "no endpoint"}
 
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
 
     spec = caps.get_capability_spec(slug)
     if not spec:
@@ -4654,7 +4767,7 @@ def _teardown_capabilities(cluster: dict[str, str], user: str, password: str,
                            https_enabled: bool) -> None:
     """Borra los artefactos de capabilities de TODOS los slugs (best-effort),
     antes del terraform destroy (el cluster aún vive). Orden inverso al create."""
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     registry = _read_capabilities(terraform_dir)
     if not registry:
         return
@@ -5071,7 +5184,7 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
     Lee el cluster + la EIP del NAT desde el tfstate. Best-effort: si el index
     template falla, `index_template_applied=False` y el operador puede reintentar.
     """
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
         raise HTTPException(
@@ -5222,7 +5335,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     """
     import capabilities as _caps
 
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
         raise HTTPException(
@@ -5328,7 +5441,7 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     """
     import json as _json
 
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -5493,7 +5606,7 @@ def terraform_status() -> TerraformStatusResponse:
     El frontend lo llama al cargar para renderizar "Mi Infraestructura".
     Si dice active=true, /destroy opera sobre un entorno real.
     """
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     state_file = terraform_dir / "terraform.tfstate"
 
     marker = _read_platform_marker(terraform_dir)
@@ -5618,6 +5731,12 @@ def terraform_status() -> TerraformStatusResponse:
     summary="Destruye los recursos del último deploy (FinOps: control de costos de demo)",
 )
 def terraform_destroy(request: TerraformDestroyRequest = Body(default_factory=TerraformDestroyRequest)) -> TerraformDestroyResponse:
+    """Destroy con Terraform, protegido por el lock de deploy por-usuario."""
+    with _deploy_guard():
+        return _terraform_destroy_impl(request)
+
+
+def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestroyResponse:
     """Corre `terraform destroy -auto-approve -input=false` en terraform/.
 
     El provider necesita credenciales (AK/SK/password). Orden de resolución:
@@ -5628,7 +5747,7 @@ def terraform_destroy(request: TerraformDestroyRequest = Body(default_factory=Te
 
     Si NO hay state significativo, devuelve status="noop" sin invocar terraform.
     """
-    terraform_dir = Path(__file__).parent / "terraform"
+    terraform_dir = _active_terraform_dir()
     if not terraform_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

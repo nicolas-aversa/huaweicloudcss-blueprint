@@ -1,39 +1,42 @@
-# --- Secretos: NUNCA versionar ---
+# Secretos: el .env real NUNCA debe versionarse.
 .env
+# Settings de la plataforma (⚙ Configuración): puede traer la API key de MaaS.
 .platform_settings.json
 
-# --- Python ---
+# Python
 __pycache__/
 *.pyc
 *.pyo
 .venv/
 venv/
-.pytest_cache/
 
-# --- Datasets: los generan los build scripts, NO se versionan (pesan GB) ---
-# Ver datasets/README.md para regenerarlos.
-datasets/*.log
-datasets/*.csv
-
-# --- Docs de vendor (bajarlas aparte; no redistribuir) ---
-docs/*.pdf
-docs/*_parte_*.txt
-docs/logstash_7.10_completo.txt
-
-# --- Temporales de validación de Logstash ---
+# Temporales de validación de Logstash
 logstash_validate_*/
 
-# --- Terraform: estado, lockfiles y tfvars con secrets ---
+# Datasets grandes generados por build scripts (no versionar).
+datasets/fraud.log
+datasets/train_identity.csv
+datasets/train_transaction.csv
+
+# Terraform: estado, lockfiles, y los .tfvars que pueden traer secrets.
+# Solo versionamos terraform.tfvars.example y main.tf (el HCL).
 terraform/.terraform/
 terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
-terraform/*.tfstate
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
 terraform/*.tfstate.*
+# El endpoint /terraform/deploy escribe este archivo con AK/SK y lo borra
+# al final, pero por si quedó colgado tras un crash, gitignorearlo evita
+# que se commitee por accidente.
 terraform/deploy.auto.tfvars.json
+# El pipeline.conf también puede tener creds inyectadas (user/password
+# del cluster). Se regenera por deploy, no hace falta versionarlo.
 terraform/pipeline.conf
-
-# --- Salidas de herramientas / misc ---
-graphify-out/
-terraform.tfstate
 terraform/*.auto.tfvars.json
 terraform/.pipelines.json
+
+# Hosting multi-SA: datos por-usuario (settings + terraform + state + user store,
+# con credenciales) y el env con el secreto de sesión. NUNCA versionar.
+data/
+.env.hosted

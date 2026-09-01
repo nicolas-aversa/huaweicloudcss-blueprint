@@ -23,4 +23,10 @@ except Exception as e:
 PY
 fi
 
+# Multi-usuario hosteado (opcional): asegura el dir de datos por-usuario y el
+# cache de providers de Terraform compartido, si están configurados por env.
+# En single-user estas vars no están y no pasa nada.
+[ -n "$APP_DATA_DIR" ] && mkdir -p "$APP_DATA_DIR"
+[ -n "$TF_PLUGIN_CACHE_DIR" ] && mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
 exec uvicorn main:app --host 0.0.0.0 --port 8000

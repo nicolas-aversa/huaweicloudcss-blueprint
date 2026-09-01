@@ -1,0 +1,50 @@
+# Despliegue HOSTEADO multi-SA: la app detrás de Caddy (HTTPS automático) con
+# auth por email+password y aislamiento por usuario. Usá:
+#   cp .env.hosted.example .env.hosted   # y completá APP_DOMAIN/APP_SECRET_KEY/SA_ALLOWLIST
+#   docker compose -f docker-compose.hosted.yml --env-file .env.hosted up --build -d
+#
+# El compose local (docker-compose.yml, single-user) queda intacto.
+services:
+  app:
+    build: .
+    image: css-accelerator
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Activa auth + aislamiento por usuario (ver auth.py). Sin APP_SECRET_KEY
+      # la app corre single-user.
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?definí APP_SECRET_KEY (openssl rand -hex 32)}
+      SA_ALLOWLIST: ${SA_ALLOWLIST:-}
+      APP_DATA_DIR: /app/data
+      TERRAFORM_TEMPLATE_DIR: /app/terraform
+      # Cache de providers compartido: cada SA corre su propio `terraform init`
+      # pero descarga los providers una sola vez (total), no por usuario.
+      TF_PLUGIN_CACHE_DIR: /app/data/.tf-plugin-cache
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+    volumes:
+      - ./datasets:/app/datasets      # datasets de demo (para "Preparar bucket")
+      - appdata:/app/data             # workspaces por-usuario (settings + terraform + state)
+    expose:
+      - "8000"                        # NO se publica al host: solo Caddy lo alcanza
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?definí APP_DOMAIN (el dominio público, ej. accel.tudominio.com)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  appdata:
+  caddy_data:
+  caddy_config:

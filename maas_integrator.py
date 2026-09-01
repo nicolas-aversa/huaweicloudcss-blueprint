@@ -334,17 +334,38 @@ _SETTINGS_PATH = Path(
     or (Path(__file__).parent / ".platform_settings.json")
 )
 
+# ── Aislamiento por usuario (app hosteada multi-SA) ──────────────────────────
+# En modo hosteado, cada SA tiene su propio archivo de settings. La app setea
+# este contextvar por-request (auth.AuthMiddleware) con el path del usuario; si
+# no está seteado (modo single-user / tests / arranque nativo), se usa el global
+# _SETTINGS_PATH → 100% backward compatible.
+import contextvars as _contextvars
+
+_settings_path_var: "_contextvars.ContextVar[str | None]" = _contextvars.ContextVar(
+    "platform_settings_path", default=None)
+
+
+def set_current_settings_path(path) -> None:
+    """Fija (o limpia con None) el path de settings del usuario actual (por-request)."""
+    _settings_path_var.set(str(path) if path else None)
+
+
+def _settings_path() -> Path:
+    """Path efectivo de settings: el del usuario (contextvar) o el global."""
+    p = _settings_path_var.get()
+    return Path(p) if p else _SETTINGS_PATH
+
 
 def get_maas_api_key() -> str:
     """Key configurada en la plataforma (settings file) > MAAS_API_KEY del env."""
     try:
-        if _SETTINGS_PATH.is_file():
-            data = json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8"))
             key = (data.get("maas_api_key") or "").strip()
             if key:
                 return key
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[settings] no pude leer {_SETTINGS_PATH.name}: {exc!r}")
+        print(f"[settings] no pude leer {_settings_path().name}: {exc!r}")
     return os.getenv("MAAS_API_KEY", "")
 
 
@@ -352,8 +373,8 @@ def set_maas_api_key(key: str) -> None:
     """Persiste (o borra, si viene vacía) la key configurada desde la UI."""
     data: dict = {}
     try:
-        if _SETTINGS_PATH.is_file():
-            data = json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         data = {}
     key = (key or "").strip()
@@ -361,14 +382,14 @@ def set_maas_api_key(key: str) -> None:
         data["maas_api_key"] = key
     else:
         data.pop("maas_api_key", None)
-    _SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def maas_key_source() -> str:
     """De dónde sale la key efectiva: 'settings' | 'env' | 'none' (para la UI)."""
     try:
-        if _SETTINGS_PATH.is_file():
-            data = json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8"))
             if (data.get("maas_api_key") or "").strip():
                 return "settings"
     except (OSError, json.JSONDecodeError):
@@ -396,10 +417,10 @@ def get_huawei_settings() -> dict:
     """Settings de cuenta Huawei guardados por UI (dict con _HUAWEI_FIELDS, '' si falta)."""
     data: dict = {}
     try:
-        if _SETTINGS_PATH.is_file():
-            data = json.loads(_SETTINGS_PATH.read_text(encoding="utf-8")).get("huawei") or {}
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8")).get("huawei") or {}
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[settings] no pude leer {_SETTINGS_PATH.name}: {exc!r}")
+        print(f"[settings] no pude leer {_settings_path().name}: {exc!r}")
         data = {}
     return {f: (data.get(f) or "").strip() for f in _HUAWEI_FIELDS}
 
@@ -408,8 +429,8 @@ def set_huawei_settings(values: dict) -> None:
     """Persiste los settings de cuenta Huawei (solo campos conocidos; vacíos se borran)."""
     data: dict = {}
     try:
-        if _SETTINGS_PATH.is_file():
-            data = json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         data = {}
     huawei = {f: v for f in _HUAWEI_FIELDS if (v := (values.get(f) or "").strip())}
@@ -417,7 +438,7 @@ def set_huawei_settings(values: dict) -> None:
         data["huawei"] = huawei
     else:
         data.pop("huawei", None)
-    _SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def get_region() -> str:

@@ -1,0 +1,8 @@
+# Reverse proxy con HTTPS automático (Let's Encrypt) para la app hosteada.
+# El dominio viene de la env var APP_DOMAIN (docker-compose.hosted.yml).
+# Requisito: el DNS de ese dominio debe apuntar a la IP pública de esta máquina,
+# y los puertos 80/443 abiertos (Caddy resuelve el cert solo).
+{$APP_DOMAIN} {
+	encode gzip
+	reverse_proxy app:8000
+}

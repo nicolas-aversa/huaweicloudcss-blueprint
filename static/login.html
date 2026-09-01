@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ingresar · CSS Accelerator</title>
+  <style>
+    :root {
+      --accent: #e50000; --accent-red: #b30000;
+      --bg: #f5f6f8; --card: #ffffff; --text: #1a1c21; --muted: #69707d;
+      --border: #e3e6ea; --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #14161a; --card: #1c1f24; --text: #f2f3f5; --muted: #9aa0a8; --border: #2a2e35; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(1200px 500px at 50% -10%, rgba(229,0,0,0.10), transparent 60%), var(--bg);
+      color: var(--text); font: 14px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 30px 28px; box-shadow: 0 18px 50px -22px rgba(0,0,0,0.4);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+    .brand-dot {
+      width: 30px; height: 30px; border-radius: 9px; flex: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent-red));
+      box-shadow: 0 6px 16px -6px var(--accent);
+    }
+    h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+    .sub { color: var(--muted); font-size: 12.5px; margin: 8px 0 22px; }
+    label { display: block; font-size: 11.5px; font-weight: 650; color: var(--muted); margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; }
+    input {
+      width: 100%; padding: 11px 13px; margin-bottom: 16px; font-size: 14px;
+      border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+    }
+    input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(229,0,0,0.12); }
+    button {
+      width: 100%; padding: 12px; font-size: 14px; font-weight: 650; color: #fff; cursor: pointer;
+      border: none; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent-red));
+      box-shadow: 0 8px 20px -8px var(--accent);
+    }
+    button:disabled { opacity: .6; cursor: default; }
+    .err { color: var(--accent); font-size: 12.5px; margin: 0 0 14px; min-height: 16px; }
+    .foot { color: var(--muted); font-size: 11px; margin-top: 18px; text-align: center; }
+  </style>
+</head>
+<body>
+  <form class="card" id="f" autocomplete="on">
+    <div class="brand"><span class="brand-dot"></span><h1>CSS Accelerator</h1></div>
+    <p class="sub">Ingresá con tu cuenta de SA para usar la plataforma.</p>
+    <p class="err" id="err"></p>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" required placeholder="vos@huawei.com" autofocus>
+    <label for="password">Contraseña</label>
+    <input id="password" name="password" type="password" required placeholder="••••••••">
+    <button type="submit" id="btn">Ingresar</button>
+    <p class="foot">Tu primer ingreso crea la cuenta con esa contraseña.</p>
+  </form>
+  <script>
+    const f = document.getElementById('f'), err = document.getElementById('err'), btn = document.getElementById('btn');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault(); err.textContent = ''; btn.disabled = true; btn.textContent = 'Ingresando…';
+      try {
+        const r = await fetch('/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: f.email.value, password: f.password.value }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) { window.location.href = '/'; return; }
+        err.textContent = d.error || 'No se pudo ingresar.';
+      } catch (_e) {
+        err.textContent = 'Error de red. Reintentá.';
+      }
+      btn.disabled = false; btn.textContent = 'Ingresar';
+    });
+  </script>
+</body>
+</html>
