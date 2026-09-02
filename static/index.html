@@ -2238,7 +2238,7 @@
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
                 <div>
                   <div class="settings-card__title">Credenciales OBS</div>
-                  <div class="settings-card__hint">AK/SK quedan en este navegador; el bucket, en el servidor.</div>
+                  <div class="settings-card__hint">AK/SK y bucket se guardan en tu cuenta (servidor).</div>
                 </div>
               </div>
               <div class="settings-fields">
@@ -6397,16 +6397,33 @@
 
     // ── Config global: OBS AK/SK en nav bar ───────────────────────────────────
     state.obsCreds = { ak: '', sk: '' };
-    (function loadObsCreds() {
+    // Cache local (arranque instantáneo); la fuente de verdad es la cuenta (servidor).
+    (function loadObsCredsLocal() {
       try {
         const saved = JSON.parse(localStorage.getItem('obsCreds') || '{}');
         if (saved.ak) state.obsCreds.ak = saved.ak;
         if (saved.sk) state.obsCreds.sk = saved.sk;
       } catch (_) {}
       const badge = document.getElementById('nav-settings-label');
-      if (badge && state.obsCreds.ak) {
-        badge.textContent = 'Configuración';
-      }
+      if (badge && state.obsCreds.ak) badge.textContent = 'Configuración';
+    })();
+    // Las AK/SK guardadas en la cuenta del usuario pisan las del navegador → persisten
+    // por-cuenta y funcionan al entrar desde otro navegador o con el login del owner.
+    (async function loadObsCredsServer() {
+      try {
+        const r = await fetch('/api/v1/settings/obs', { credentials: 'same-origin' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d && d.ak) state.obsCreds.ak = d.ak;
+        if (d && d.sk) state.obsCreds.sk = d.sk;
+        try { localStorage.setItem('obsCreds', JSON.stringify({ ak: state.obsCreds.ak, sk: state.obsCreds.sk })); } catch (_) {}
+        const akIn = document.getElementById('settings-obs-ak');
+        const skIn = document.getElementById('settings-obs-sk');
+        if (akIn && !akIn.value) akIn.value = state.obsCreds.ak || '';
+        if (skIn && !skIn.value) skIn.value = state.obsCreds.sk || '';
+        const badge = document.getElementById('nav-settings-label');
+        if (badge && state.obsCreds.ak) badge.textContent = 'Configuración';
+      } catch (_) {}
     })();
 
     // ── Vista Configuración ──────────────────────────────────────────────────
@@ -6592,6 +6609,15 @@
       state.obsCreds.ak = ak;
       state.obsCreds.sk = sk;
       try { localStorage.setItem('obsCreds', JSON.stringify({ ak, sk })); } catch (_) {}
+      // Guardar en la cuenta del usuario (servidor) → persiste y sirve al entrar como owner.
+      let okObs = true;
+      try {
+        const r = await fetch('/api/v1/settings/obs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ access_key: ak, secret_key: sk }),
+        });
+        okObs = r.ok;
+      } catch (_) { okObs = false; }
       // Refrescar los lugares que muestran las creds.
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);
       _updateProductiveCredsStatus();
@@ -6601,8 +6627,10 @@
       if (!st) return;
       if (!ak || !sk) {
         st.textContent = '⚠ Guardado incompleto (falta AK o SK).';
-      } else if (okBucket) {
-        st.textContent = '✓ Claves en este navegador · bucket en el servidor.';
+      } else if (okObs && okBucket) {
+        st.textContent = '✓ Guardado en tu cuenta (AK/SK + bucket).';
+      } else if (okObs) {
+        st.textContent = '✓ AK/SK guardadas en tu cuenta.';
       }
     });
 

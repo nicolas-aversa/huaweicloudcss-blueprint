@@ -1398,6 +1398,40 @@ def set_huawei_settings_endpoint(request: dict) -> dict:
     return get_huawei_settings_endpoint()
 
 
+@app.get(
+    "/api/v1/settings/obs",
+    tags=["settings"],
+    summary="OBS AK/SK guardadas en la cuenta del usuario (por-usuario en modo hosteado)",
+)
+def get_obs_settings() -> dict:
+    """Devuelve las AK/SK guardadas del usuario logueado (protegido por auth en modo
+    hosteado). Permite prefilar la card y que el deploy funcione al entrar desde otro
+    navegador / con el login del owner, sin re-tipear las claves."""
+    import maas_integrator as _mi
+
+    creds = _mi.get_obs_creds()
+    return {
+        "configured": bool(creds.get("ak") and creds.get("sk")),
+        "ak": creds.get("ak", ""),
+        "sk": creds.get("sk", ""),
+    }
+
+
+@app.post(
+    "/api/v1/settings/obs",
+    tags=["settings"],
+    summary="Guarda las OBS AK/SK en la cuenta del usuario",
+)
+def set_obs_settings(request: dict) -> dict:
+    """Body: ``{access_key, secret_key}`` (ambas vacías = borra). Se guardan por-usuario
+    en el settings file del servidor."""
+    import maas_integrator as _mi
+
+    _mi.set_obs_creds(str(request.get("access_key", "") or ""), str(request.get("secret_key", "") or ""))
+    creds = _mi.get_obs_creds()
+    return {"configured": bool(creds.get("ak") and creds.get("sk"))}
+
+
 # ── Pre-carga de datasets de demo al bucket del SA ──────────────────────────
 # Cada demo lee su dataset de `<slug>-logs/` en el bucket configurado. El mapa
 # (slug → archivos de datasets/) sale del registro declarativo verticals/ y

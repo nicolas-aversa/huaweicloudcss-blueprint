@@ -441,6 +441,36 @@ def set_huawei_settings(values: dict) -> None:
     _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def get_obs_creds() -> dict:
+    """OBS AK/SK guardadas por-usuario en el settings file → {'ak','sk'} ('' si falta).
+    Son secretos: hoy en texto plano en el archivo por-usuario (volumen del owner);
+    el cifrado en reposo es hardening pendiente (ver HOSTING.md)."""
+    data: dict = {}
+    try:
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8")).get("obs") or {}
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    return {"ak": (data.get("ak") or "").strip(), "sk": (data.get("sk") or "").strip()}
+
+
+def set_obs_creds(ak: str, sk: str) -> None:
+    """Persiste (o borra, si ambas vacías) las OBS AK/SK del usuario en su settings file."""
+    data: dict = {}
+    try:
+        if _settings_path().is_file():
+            data = json.loads(_settings_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    ak = (ak or "").strip()
+    sk = (sk or "").strip()
+    if ak or sk:
+        data["obs"] = {"ak": ak, "sk": sk}
+    else:
+        data.pop("obs", None)
+    _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def get_region() -> str:
     """Región efectiva: settings > HUAWEI_REGION del env > la-south-2 (default histórico)."""
     region = get_huawei_settings().get("region", "")
