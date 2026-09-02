@@ -681,6 +681,16 @@
     .admin-audit__user { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .admin-audit__act { color: var(--text-primary); }
     .admin-audit__act b { color: var(--accent); font-weight: 700; }
+    .admin-allow-form { display: flex; gap: 8px; margin-bottom: 10px; }
+    .admin-allow-form input { flex: 1; padding: 8px 11px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+    .admin-allow-form input:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
+    .admin-allow-form .btn { flex: none; }
+    .admin-allowlist { display: flex; flex-direction: column; gap: 6px; }
+    .admin-allow-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); }
+    .admin-allow-email { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .admin-allow-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 7px; border-radius: var(--radius-pill); }
+    .admin-allow-remove { flex: none; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary); }
+    .admin-allow-remove:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
 
     /* ── App views (router de secciones, mismo patrón que step-pane) ─ */
     .app-view { display: none; }
@@ -2415,7 +2425,15 @@
                 </div>
               </div>
               <div class="admin-section">
-                <div class="admin-section__title">Usuarios</div>
+                <div class="admin-section__title">Usuarios autorizados (allowlist)</div>
+                <form id="admin-allow-form" class="admin-allow-form">
+                  <input id="admin-allow-input" type="email" placeholder="nuevo.sa@huawei.com" autocomplete="off">
+                  <button type="submit" class="btn btn-primary">Agregar</button>
+                </form>
+                <div id="admin-allowlist" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
+              </div>
+              <div class="admin-section">
+                <div class="admin-section__title">Cuentas creadas</div>
                 <div id="admin-users" class="admin-users"><span class="admin-empty">Cargando…</span></div>
               </div>
               <div class="admin-section">
@@ -6927,9 +6945,40 @@
       }).catch(function () {});
 
       function _fmtTs(ts) { try { return new Date(ts * 1000).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) { return String(ts); } }
+      function _loadAllowlist() {
+        _fetch('/api/v1/admin/allowlist', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+          var box = document.getElementById('admin-allowlist'); if (!box) return;
+          var env = (d && d.env) || [], added = (d && d.added) || [];
+          var rows = '';
+          env.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><span class="admin-allow-tag">env</span></div>'; });
+          added.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><button class="admin-allow-remove" type="button" data-email="' + esc(e) + '">Quitar</button></div>'; });
+          box.innerHTML = rows || '<span class="admin-empty">Sin emails autorizados (registro abierto).</span>';
+          box.querySelectorAll('.admin-allow-remove').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+              await _fetch('/api/v1/admin/allowlist/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ email: btn.dataset.email }) });
+              if (window.toast) window.toast('Quitado: ' + btn.dataset.email, 'success');
+              _loadAllowlist();
+            });
+          });
+        }).catch(function () {});
+      }
       function initAdminPanel() {
         var card = document.getElementById('admin-card');
         if (card) card.classList.remove('hidden');
+        _loadAllowlist();
+        var af = document.getElementById('admin-allow-form');
+        if (af && !af.dataset.wired) {
+          af.dataset.wired = '1';
+          af.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            var inp = document.getElementById('admin-allow-input');
+            var email = (inp.value || '').trim();
+            if (!email) return;
+            var r = await _fetch('/api/v1/admin/allowlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ email: email }) });
+            if (r.ok) { inp.value = ''; if (window.toast) window.toast('Agregado a la allowlist: ' + email, 'success'); _loadAllowlist(); }
+            else if (window.toast) window.toast('Email inválido.', 'error');
+          });
+        }
         _fetch('/api/v1/admin/users', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
           var box = document.getElementById('admin-users'); if (!box) return;
           var users = (d && d.users) || [];

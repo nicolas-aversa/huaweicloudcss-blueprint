@@ -109,6 +109,28 @@ variable "opensearch_flavor" {
   default     = "ess.spec-4u8g"
 }
 
+# Workers de Logstash por pipeline. El backend reparte el vCPU del nodo entre las
+# pipelines activas (más pipelines → menos workers c/u) para no sobre-suscribir.
+variable "pipeline_workers" {
+  description = "Workers de Logstash por pipeline (repartidos según cantidad de pipelines y vCPU del nodo)."
+  type        = number
+  default     = 2
+}
+
+# Discos: escalan con el flavor (los flavors grandes exigen discos mínimos mayores).
+# Los computa el backend junto con el flavor para que sean consistentes.
+variable "opensearch_volume_size" {
+  description = "Disco de OpenSearch en GB."
+  type        = number
+  default     = 40
+}
+
+variable "logstash_volume_size" {
+  description = "Disco de Logstash en GB."
+  type        = number
+  default     = 40
+}
+
 variable "existing_opensearch_endpoint" {
   description = "Endpoint de un cluster OpenSearch existente (ip:port). Si no está vacío, se saltea la creación del cluster OpenSearch y se usa este endpoint. Solo Logstash se crea nuevo."
   type        = string
@@ -117,12 +139,6 @@ variable "existing_opensearch_endpoint" {
 
 # ── OpenSearch Cluster (1 nodo) ──────────────────────────────────────────────
 
-locals {
-  # Disco de OpenSearch: escala con el flavor. ess.spec-4u8g admite 40 GB, pero
-  # ess.spec-8u16g (2+ pipelines) exige >= 80 GB — con 40 da CSS.5078 "Invalid
-  # disk size". El Logstash sí acepta 40 GB en ambos flavors.
-  opensearch_volume_size = var.opensearch_flavor == "ess.spec-8u16g" ? 80 : 40
-}
 
 resource "huaweicloud_css_cluster" "opensearch_cluster" {
   count = var.existing_opensearch_endpoint == "" ? 1 : 0
@@ -141,7 +157,7 @@ resource "huaweicloud_css_cluster" "opensearch_cluster" {
     instance_number = 1
     volume {
       volume_type = "HIGH"
-      size        = local.opensearch_volume_size
+      size        = var.opensearch_volume_size
     }
   }
 
@@ -286,7 +302,7 @@ resource "huaweicloud_css_logstash_cluster" "logstash_cluster" {
     instance_number = 1
     volume {
       volume_type = "HIGH"
-      size        = 40
+      size        = var.logstash_volume_size
     }
   }
 
@@ -348,7 +364,7 @@ resource "huaweicloud_css_logstash_configuration" "pipeline" {
   setting {
     queue_type = "memory"
     batch_size = 1000
-    workers    = 2
+    workers    = var.pipeline_workers
   }
 
   sensitive_words = [

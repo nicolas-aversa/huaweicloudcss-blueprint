@@ -60,11 +60,61 @@ def _allowlist() -> set[str]:
     return {e.strip().lower() for e in re.split(r"[,;\s]+", raw) if e.strip()}
 
 
+_ALLOWLIST_FILE = DATA_ROOT / "allowlist.json"
+
+
+def _persisted_allowlist() -> set[str]:
+    """Emails agregados en runtime desde el panel admin (además de SA_ALLOWLIST)."""
+    try:
+        if _ALLOWLIST_FILE.is_file():
+            data = json.loads(_ALLOWLIST_FILE.read_text(encoding="utf-8"))
+            return {str(e).strip().lower() for e in data if str(e).strip()}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def _save_persisted_allowlist(emails: set[str]) -> None:
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    _ALLOWLIST_FILE.write_text(json.dumps(sorted(emails), indent=2), encoding="utf-8")
+
+
 def is_allowed(email: str) -> bool:
-    """True si el email puede usar la app. Allowlist vacía = registro abierto
-    (bootstrap de una instancia nueva; el owner debería setear SA_ALLOWLIST)."""
-    al = _allowlist()
-    return (not al) or (email.lower() in al)
+    """True si el email puede usar la app. Allowlist = SA_ALLOWLIST (env) ∪ los
+    agregados por admin. Vacía = registro abierto (bootstrap; el owner debería
+    setear al menos un email o SA_ALLOWLIST)."""
+    if not email:
+        return False
+    combined = _allowlist() | _persisted_allowlist()
+    return (not combined) or (email.lower() in combined)
+
+
+def add_allowed(email: str) -> bool:
+    """Agrega un email a la allowlist persistida (panel admin). True si es válido."""
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        return False
+    s = _persisted_allowlist()
+    s.add(email)
+    _save_persisted_allowlist(s)
+    return True
+
+
+def remove_allowed(email: str) -> bool:
+    """Quita un email de la allowlist persistida. Los de SA_ALLOWLIST (env) no se
+    tocan desde acá. True si existía en la persistida."""
+    email = (email or "").strip().lower()
+    s = _persisted_allowlist()
+    if email in s:
+        s.discard(email)
+        _save_persisted_allowlist(s)
+        return True
+    return False
+
+
+def allowlist_info() -> dict:
+    """Para el panel admin: emails de env (no removibles) y agregados (removibles)."""
+    return {"env": sorted(_allowlist()), "added": sorted(_persisted_allowlist())}
 
 
 def _admins() -> set[str]:

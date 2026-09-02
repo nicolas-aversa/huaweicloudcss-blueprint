@@ -48,13 +48,14 @@ en **su** cuenta (o en la del owner), sin pisarse.
 
 ## Operación
 
-- **Agregar/quitar SAs**: editá `SA_ALLOWLIST` en `.env.hosted` y recreá el
-  contenedor `app`. Quitar un email de la allowlist le corta el acceso.
-- **Admins**: los emails en `SA_ADMINS` (subset de la allowlist) ven en ⚙
-  Configuración una card **Administración**: lista de usuarios con **"Resetear
-  contraseña"** (borra la credencial → el usuario fija una nueva en su próximo
-  ingreso) y el **audit log** (quién hizo qué). Es el "olvidé mi contraseña":
-  el usuario avisa, un admin lo resetea.
+- **Agregar/quitar SAs (desde la app)**: los **admins** (env `SA_ADMINS`) manejan
+  la allowlist desde ⚙ Configuración → **Administración** → "Usuarios autorizados":
+  agregan/quitan emails **sin tocar `.env` ni recrear el contenedor**. `SA_ALLOWLIST`
+  (env) sigue siendo la base no-removible; lo agregado por UI se guarda en el volumen.
+- **Admins**: los emails en `SA_ADMINS` (subset de la allowlist) ven la card
+  **Administración**: allowlist, lista de usuarios con **"Resetear contraseña"**
+  (borra la credencial → el usuario fija una nueva en su próximo ingreso) y el
+  **audit log**. Es el "olvidé mi contraseña": el usuario avisa, un admin lo resetea.
 - **Login**: es un overlay sobre la app (la app se ve blureada detrás). El primer
   login de cada SA crea su cuenta con la contraseña que elija.
 - **Backups**: todo el estado por-usuario vive en el volumen `appdata`
@@ -63,7 +64,10 @@ en **su** cuenta (o en la del owner), sin pisarse.
   la del **owner**, cada deploy crea clusters CSS (caros) — coordiná y destruí los
   entornos de demo cuando no se usen.
 - **Guardrails de costo** (env, opcionales):
-  - `MAX_PIPELINES_PER_USER` (default 5): tope de pipelines por usuario/cluster.
+  - `MAX_PIPELINES_PER_USER` (default **0 = sin límite**): tope duro opcional. Sin
+    tope, la plataforma **escala el flavor** del cluster y **reparte los workers** de
+    Logstash entre las pipelines (más pipelines → menos workers c/u, mín 1) para no
+    sobre-suscribir el nodo — ver `_capacity_for`.
   - `ENV_TTL_HOURS` (default 0 = off): auto-destruye entornos demo más viejos que N
     horas (usa las creds guardadas del deploy). Útil para demos efímeras; **destruye
     infra sola**, así que activalo con criterio. Chequeo cada `ENV_TTL_CHECK_SECONDS`.

@@ -1063,6 +1063,33 @@ def admin_audit(limit: int = 200) -> dict:
     return {"entries": audit.tail(max(1, min(1000, limit)))}
 
 
+@app.get("/api/v1/admin/allowlist", tags=["admin"], summary="Allowlist de emails (admin)")
+def admin_allowlist() -> dict:
+    _require_admin()
+    return auth.allowlist_info()
+
+
+@app.post("/api/v1/admin/allowlist/add", tags=["admin"], summary="Agrega un email a la allowlist (admin)")
+def admin_allowlist_add(request: dict) -> dict:
+    admin_email = _require_admin()
+    email = str(request.get("email", "") or "").strip().lower()
+    ok = auth.add_allowed(email)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "admin", "message": "Email inválido."})
+    audit.record("allowlist_add", f"{admin_email} → {email}", user=admin_email)
+    return auth.allowlist_info()
+
+
+@app.post("/api/v1/admin/allowlist/remove", tags=["admin"], summary="Quita un email de la allowlist (admin)")
+def admin_allowlist_remove(request: dict) -> dict:
+    admin_email = _require_admin()
+    email = str(request.get("email", "") or "").strip().lower()
+    ok = auth.remove_allowed(email)
+    audit.record("allowlist_remove", f"{admin_email} → {email} ({'ok' if ok else 'no estaba'})", user=admin_email)
+    return auth.allowlist_info()
+
+
 @app.get("/api/v1/verticals", tags=["verticals"], summary="Registro de verticales de demo")
 def get_verticals() -> dict:
     """Payload declarativo de los verticales (grupos + specs de front). El mismo
@@ -2458,10 +2485,13 @@ def _do_terraform_sequence(
         "project_name": _effective_project_name(request, terraform_dir),
         "https_enabled": request.https_enabled,
     }
-    if logstash_flavor:
-        tfvars["logstash_flavor"] = logstash_flavor
-    if opensearch_flavor:
-        tfvars["opensearch_flavor"] = opensearch_flavor
+    # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
+    _cap = _capacity_for(len(pipelines_var))
+    tfvars["logstash_flavor"] = _cap["logstash_flavor"]
+    tfvars["opensearch_flavor"] = _cap["opensearch_flavor"]
+    tfvars["pipeline_workers"] = _cap["pipeline_workers"]
+    tfvars["opensearch_volume_size"] = _cap["opensearch_volume_size"]
+    tfvars["logstash_volume_size"] = _cap["logstash_volume_size"]
     if request.obs_access_key:
         tfvars["obs_access_key"] = request.obs_access_key
         tfvars["hwc_access_key"] = request.obs_access_key
@@ -2597,7 +2627,7 @@ def _terraform_deploy_impl(request: TerraformDeployRequest) -> TerraformDeployRe
     _check_unavailable_plugins(request)
 
     num_cases = len(request.cases) if request.cases else 1
-    if num_cases > _MAX_PIPELINES:
+    if _MAX_PIPELINES and num_cases > _MAX_PIPELINES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -2614,7 +2644,7 @@ def _terraform_deploy_impl(request: TerraformDeployRequest) -> TerraformDeployRe
 
     slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
     registry = _read_pipelines_registry(terraform_dir)
-    if slug not in registry and len(registry) >= _MAX_PIPELINES:
+    if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -2862,10 +2892,13 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
             "project_name": _effective_project_name(request, terraform_dir),
             "https_enabled": request.https_enabled,
         }
-        if logstash_flavor:
-            tfvars["logstash_flavor"] = logstash_flavor
-        if opensearch_flavor:
-            tfvars["opensearch_flavor"] = opensearch_flavor
+        # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
+        _cap = _capacity_for(len(pipelines_var))
+        tfvars["logstash_flavor"] = _cap["logstash_flavor"]
+        tfvars["opensearch_flavor"] = _cap["opensearch_flavor"]
+        tfvars["pipeline_workers"] = _cap["pipeline_workers"]
+        tfvars["opensearch_volume_size"] = _cap["opensearch_volume_size"]
+        tfvars["logstash_volume_size"] = _cap["logstash_volume_size"]
         if request.obs_access_key:
             tfvars["obs_access_key"] = request.obs_access_key
             tfvars["hwc_access_key"] = request.obs_access_key
@@ -3068,7 +3101,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
             detail="Directorio terraform/ no encontrado",
         )
     num_cases = len(request.cases) if request.cases else 1
-    if num_cases > _MAX_PIPELINES:
+    if _MAX_PIPELINES and num_cases > _MAX_PIPELINES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"stage": "pipeline_cap",
@@ -3077,7 +3110,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
     logstash_flavor, opensearch_flavor = _determine_flavor(num_cases)
     slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
     registry = _read_pipelines_registry(terraform_dir)
-    if slug not in registry and len(registry) >= _MAX_PIPELINES:
+    if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"stage": "pipeline_cap",
@@ -3450,27 +3483,43 @@ _start_ttl_reaper()
 # en cada deploy (sin esto, un apply con el mapa vacío destruiría las otras).
 # `deploy.auto.tfvars.json` se borra tras cada deploy; este registro persiste.
 _PIPELINES_REGISTRY_NAME = ".pipelines.json"
-# Tope de pipelines concurrentes: el Logstash es 1 nodo ess.spec-4u8g (4 vCPU);
-# con workers=2 por pipeline, ~4 conviven sin sobre-suscribir el nodo. Configurable
-# por env (guardrail de costo) — default 5.
+# Tope de pipelines por usuario. Default 0 = SIN límite: en vez de cortar, se
+# escala el flavor y se reparten los workers de Logstash entre las pipelines (ver
+# _capacity_for). Poné MAX_PIPELINES_PER_USER>0 solo si querés un tope duro.
 try:
-    _MAX_PIPELINES = max(1, int(os.environ.get("MAX_PIPELINES_PER_USER", "5")))
+    _MAX_PIPELINES = max(0, int(os.environ.get("MAX_PIPELINES_PER_USER", "0")))
 except ValueError:
-    _MAX_PIPELINES = 5
+    _MAX_PIPELINES = 0
+
+
+def _capacity_for(num_pipelines: int) -> dict:
+    """Capacidad del cluster según la cantidad TOTAL de pipelines activas: escala
+    el flavor y el disco con el volumen de trabajo, y reparte el vCPU del nodo
+    Logstash entre las pipelines (workers por pipeline) para no sobre-suscribir.
+    Sin tope duro: con muchas pipelines cada una baja a 1 worker.
+
+        1 pipeline   → 4u8g  (4 vCPU)  · 2 workers c/u
+        2-4          → 8u16g (8 vCPU)  · 2 workers c/u
+        5+           → 16u32g (16 vCPU) · workers = vCPU/pipelines (mín 1)
+    """
+    n = max(1, int(num_pipelines))
+    if n <= 1:
+        ls, os_, vcpu, osv, lsv = "ess.spec-4u8g", "ess.spec-4u8g", 4, 40, 40
+    elif n <= 4:
+        ls, os_, vcpu, osv, lsv = "ess.spec-8u16g", "ess.spec-8u16g", 8, 80, 40
+    else:
+        ls, os_, vcpu, osv, lsv = "ess.spec-16u32g", "ess.spec-16u32g", 16, 160, 80
+    workers = max(1, min(2, vcpu // n))
+    return {
+        "logstash_flavor": ls, "opensearch_flavor": os_, "pipeline_workers": workers,
+        "opensearch_volume_size": osv, "logstash_volume_size": lsv,
+    }
 
 
 def _determine_flavor(num_pipelines: int) -> tuple[str, str]:
-    """Determina los flavors de Logstash y OpenSearch según la cantidad de pipelines.
-    
-    1 pipeline → ess.spec-4u8g (4 vCPU, 8 GB) para ambos
-    2-5 pipelines → ess.spec-8u16g (8 vCPU, 16 GB) para ambos
-    
-    Returns:
-        (logstash_flavor, opensearch_flavor)
-    """
-    if num_pipelines <= 1:
-        return ("ess.spec-4u8g", "ess.spec-4u8g")
-    return ("ess.spec-8u16g", "ess.spec-8u16g")
+    """Compat: solo los flavors (para los callers viejos)."""
+    c = _capacity_for(num_pipelines)
+    return (c["logstash_flavor"], c["opensearch_flavor"])
 
 
 def _read_pipelines_registry(terraform_dir: Path) -> dict[str, dict]:

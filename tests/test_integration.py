@@ -1459,6 +1459,7 @@ def test_deploy_caps_concurrent_pipelines(monkeypatch, tmp_path):
     import json as _json
     import main as _main
 
+    monkeypatch.setattr(_main, "_MAX_PIPELINES", 5)
     fake_main = tmp_path / "main.py"
     fake_main.write_text("")
     td = tmp_path / "terraform"
@@ -2950,26 +2951,32 @@ def test_determine_flavor_single_pipeline():
 
 
 def test_determine_flavor_multiple_pipelines():
-    """2-5 pipelines → flavors 8u16g."""
+    """2-4 pipelines → 8u16g; 5+ → 16u32g. Los workers se reparten (ver _capacity_for)."""
     import main as _main
 
-    for n in [2, 3, 4, 5]:
+    for n in [2, 3, 4]:
         ls, os = _main._determine_flavor(n)
-        assert ls == "ess.spec-8u16g"
-        assert os == "ess.spec-8u16g"
+        assert ls == "ess.spec-8u16g" and os == "ess.spec-8u16g"
+    for n in [5, 8, 12]:
+        ls, os = _main._determine_flavor(n)
+        assert ls == "ess.spec-16u32g" and os == "ess.spec-16u32g"
+    # Con muchas pipelines los workers por pipeline bajan (mín 1).
+    assert _main._capacity_for(12)["pipeline_workers"] == 1
+    assert _main._capacity_for(2)["pipeline_workers"] == 2
 
 
-def test_max_pipelines_is_five():
-    """_MAX_PIPELINES subió a 5."""
+def test_max_pipelines_unlimited_by_default():
+    """Sin MAX_PIPELINES_PER_USER no hay tope duro (0 = ilimitado)."""
     import main as _main
 
-    assert _main._MAX_PIPELINES == 5
+    assert _main._MAX_PIPELINES == 0
 
 
 def test_deploy_rejects_more_than_max_cases(monkeypatch, tmp_path):
-    """Más de _MAX_PIPELINES cases → 400."""
+    """Con un cap configurado (>0), más de _MAX_PIPELINES cases → 400."""
     import main as _main
 
+    monkeypatch.setattr(_main, "_MAX_PIPELINES", 5)
     fake_main = tmp_path / "main.py"
     fake_main.write_text("")
     td = tmp_path / "terraform"
