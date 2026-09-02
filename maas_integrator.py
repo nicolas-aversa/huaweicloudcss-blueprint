@@ -356,44 +356,84 @@ def _settings_path() -> Path:
     return Path(p) if p else _SETTINGS_PATH
 
 
+# ── Cifrado en reposo del settings file ──────────────────────────────────────
+# Si hay APP_SECRET_KEY (mismo secreto que la sesión), el settings file se guarda
+# CIFRADO con Fernet (AES-CBC + HMAC), clave derivada del secreto. Sin esa var
+# (single-user / tests / nativo) se guarda en texto plano. La lectura acepta AMBOS
+# formatos, así los archivos planos existentes se migran a cifrado en el próximo
+# guardado.
+import base64 as _base64
+import hashlib as _hashlib
+
+try:
+    from cryptography.fernet import Fernet as _Fernet
+except Exception:  # cryptography no instalado → sin cifrado (fallback plano)
+    _Fernet = None
+
+_fernet_cache = None  # None = sin resolver; False = sin cifrado; Fernet = activo
+
+
+def _fernet():
+    global _fernet_cache
+    if _fernet_cache is not None:
+        return _fernet_cache or None
+    secret = os.environ.get("APP_SECRET_KEY", "")
+    if not secret or _Fernet is None:
+        _fernet_cache = False
+        return None
+    key = _base64.urlsafe_b64encode(_hashlib.sha256(secret.encode("utf-8")).digest())
+    _fernet_cache = _Fernet(key)
+    return _fernet_cache
+
+
+def _read_settings() -> dict:
+    """Lee el settings file (cifrado o plano). {} si no existe / ilegible."""
+    p = _settings_path()
+    try:
+        if not p.is_file():
+            return {}
+        raw = p.read_bytes()
+        if not raw.strip():
+            return {}
+        if raw.lstrip()[:1] == b"{":               # texto plano (legacy / single-user)
+            return json.loads(raw.decode("utf-8"))
+        f = _fernet()
+        if f is not None:                          # token cifrado (Fernet)
+            return json.loads(f.decrypt(raw).decode("utf-8"))
+    except Exception as exc:
+        print(f"[settings] no pude leer {p.name}: {exc!r}")
+    return {}
+
+
+def _write_settings(data: dict) -> None:
+    """Escribe el settings file: cifrado si hay APP_SECRET_KEY, plano si no."""
+    p = _settings_path()
+    payload = json.dumps(data, indent=2).encode("utf-8")
+    f = _fernet()
+    p.write_bytes(f.encrypt(payload) if f is not None else payload)
+
+
 def get_maas_api_key() -> str:
     """Key configurada en la plataforma (settings file) > MAAS_API_KEY del env."""
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8"))
-            key = (data.get("maas_api_key") or "").strip()
-            if key:
-                return key
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"[settings] no pude leer {_settings_path().name}: {exc!r}")
-    return os.getenv("MAAS_API_KEY", "")
+    key = (_read_settings().get("maas_api_key") or "").strip()
+    return key or os.getenv("MAAS_API_KEY", "")
 
 
 def set_maas_api_key(key: str) -> None:
     """Persiste (o borra, si viene vacía) la key configurada desde la UI."""
-    data: dict = {}
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        data = {}
+    data = _read_settings()
     key = (key or "").strip()
     if key:
         data["maas_api_key"] = key
     else:
         data.pop("maas_api_key", None)
-    _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _write_settings(data)
 
 
 def maas_key_source() -> str:
     """De dónde sale la key efectiva: 'settings' | 'env' | 'none' (para la UI)."""
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8"))
-            if (data.get("maas_api_key") or "").strip():
-                return "settings"
-    except (OSError, json.JSONDecodeError):
-        pass
+    if (_read_settings().get("maas_api_key") or "").strip():
+        return "settings"
     return "env" if os.getenv("MAAS_API_KEY", "") else "none"
 
 
@@ -415,60 +455,38 @@ _HUAWEI_FIELDS = (
 
 def get_huawei_settings() -> dict:
     """Settings de cuenta Huawei guardados por UI (dict con _HUAWEI_FIELDS, '' si falta)."""
-    data: dict = {}
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8")).get("huawei") or {}
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"[settings] no pude leer {_settings_path().name}: {exc!r}")
-        data = {}
+    data = _read_settings().get("huawei") or {}
     return {f: (data.get(f) or "").strip() for f in _HUAWEI_FIELDS}
 
 
 def set_huawei_settings(values: dict) -> None:
     """Persiste los settings de cuenta Huawei (solo campos conocidos; vacíos se borran)."""
-    data: dict = {}
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        data = {}
+    data = _read_settings()
     huawei = {f: v for f in _HUAWEI_FIELDS if (v := (values.get(f) or "").strip())}
     if huawei:
         data["huawei"] = huawei
     else:
         data.pop("huawei", None)
-    _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _write_settings(data)
 
 
 def get_obs_creds() -> dict:
     """OBS AK/SK guardadas por-usuario en el settings file → {'ak','sk'} ('' si falta).
-    Son secretos: hoy en texto plano en el archivo por-usuario (volumen del owner);
-    el cifrado en reposo es hardening pendiente (ver HOSTING.md)."""
-    data: dict = {}
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8")).get("obs") or {}
-    except (OSError, json.JSONDecodeError):
-        data = {}
+    Son secretos: se guardan CIFRADAS en reposo (Fernet) cuando hay APP_SECRET_KEY."""
+    data = _read_settings().get("obs") or {}
     return {"ak": (data.get("ak") or "").strip(), "sk": (data.get("sk") or "").strip()}
 
 
 def set_obs_creds(ak: str, sk: str) -> None:
     """Persiste (o borra, si ambas vacías) las OBS AK/SK del usuario en su settings file."""
-    data: dict = {}
-    try:
-        if _settings_path().is_file():
-            data = json.loads(_settings_path().read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        data = {}
+    data = _read_settings()
     ak = (ak or "").strip()
     sk = (sk or "").strip()
     if ak or sk:
         data["obs"] = {"ak": ak, "sk": sk}
     else:
         data.pop("obs", None)
-    _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _write_settings(data)
 
 
 def get_region() -> str:

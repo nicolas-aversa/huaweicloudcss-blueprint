@@ -56,9 +56,16 @@ en **su** cuenta (o en la del owner), sin pisarse.
   la del **owner**, cada deploy crea clusters CSS (caros) — coordiná y destruí los
   entornos de demo cuando no se usen.
 
+## Seguridad de las credenciales
+
+- El `platform_settings.json` por-usuario (MaaS key + OBS AK/SK) se guarda **cifrado
+  en reposo** con Fernet (AES-CBC + HMAC), clave derivada de `APP_SECRET_KEY`. Los
+  archivos planos previos se migran a cifrado en el próximo guardado. Si perdés
+  `APP_SECRET_KEY`, esos settings dejan de ser legibles (guardá el secreto).
+- Aun así, para el modo "cuenta del owner" conviene una **AK/SK dedicada y
+  revocable** en vez de tu key principal.
+
 ## Pendiente (hardening, fase 2)
 
-- **Cifrado en reposo** de `platform_settings.json` (hoy: aislado por-usuario en el
-  volumen del host que controla el owner, permisos del FS). 
 - Cola de jobs para los `terraform apply` largos, backend de state remoto (OBS),
   guardrails de costo y audit log. Ver el plan.

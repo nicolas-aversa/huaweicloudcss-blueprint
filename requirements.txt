@@ -11,3 +11,6 @@ huaweicloudsdkcore>=3.1
 huaweicloudsdkcss>=3.1
 # Cliente HTTP para hablarle al cluster CSS (OpenSearch). Liviano, async-friendly.
 httpx>=0.27
+# Cifrado en reposo del settings file por-usuario (Fernet). Ya venía transitiva;
+# la declaramos porque ahora es dependencia directa (ver maas_integrator._fernet).
+cryptography>=42
