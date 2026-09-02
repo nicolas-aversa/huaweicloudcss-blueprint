@@ -1003,7 +1003,7 @@ async def auth_login(request: Request) -> Response:
     audit.record("login", email, user=email, ip=ip)
     resp = JSONResponse({"ok": True, "email": email})
     resp.set_cookie(auth.COOKIE_NAME, auth.make_session_token(email), max_age=auth.SESSION_TTL,
-                    httponly=True, samesite="lax", secure=auth.SECURE_COOKIES, path="/")
+                    httponly=True, samesite="lax", secure=auth.secure_for_request(request), path="/")
     return resp
 
 

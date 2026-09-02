@@ -4548,3 +4548,52 @@ def test_index_inyecta_verticals_y_endpoint():
 
     api = client.get("/api/v1/verticals").json()
     assert api == injected
+
+
+# ── Cookie de sesión: flag Secure derivado del esquema real del request ──────
+# Regresión del bug "login OK, recarga, vuelve el overlay": la cookie se seteaba
+# Secure siempre → el navegador la descarta en HTTP y no queda sesión.
+import auth as _auth
+
+
+class _FakeURL:
+    def __init__(self, scheme):
+        self.scheme = scheme
+
+
+class _FakeReq:
+    def __init__(self, scheme="http", forwarded_proto=None):
+        self.url = _FakeURL(scheme)
+        self.headers = {}
+        if forwarded_proto is not None:
+            self.headers["x-forwarded-proto"] = forwarded_proto
+
+
+def test_secure_cookie_https_via_forwarded_proto(monkeypatch):
+    """Caddy termina TLS → X-Forwarded-Proto: https → cookie Secure."""
+    monkeypatch.setattr(_auth, "SECURE_COOKIES", True)
+    assert _auth.secure_for_request(_FakeReq(forwarded_proto="https")) is True
+
+
+def test_secure_cookie_http_via_forwarded_proto(monkeypatch):
+    """Detrás de un proxy por HTTP → no Secure (sino el browser la descarta)."""
+    monkeypatch.setattr(_auth, "SECURE_COOKIES", True)
+    assert _auth.secure_for_request(_FakeReq(forwarded_proto="http")) is False
+
+
+def test_secure_cookie_https_direct_no_proxy(monkeypatch):
+    """HTTPS sin proxy (scheme del request) → Secure."""
+    monkeypatch.setattr(_auth, "SECURE_COOKIES", True)
+    assert _auth.secure_for_request(_FakeReq(scheme="https")) is True
+
+
+def test_secure_cookie_http_direct_no_proxy(monkeypatch):
+    """HTTP directo, sin X-Forwarded-Proto → no Secure."""
+    monkeypatch.setattr(_auth, "SECURE_COOKIES", True)
+    assert _auth.secure_for_request(_FakeReq(scheme="http")) is False
+
+
+def test_secure_cookie_insecure_override_forces_false(monkeypatch):
+    """APP_INSECURE_COOKIES=1 (SECURE_COOKIES=False) → nunca Secure, aun en HTTPS."""
+    monkeypatch.setattr(_auth, "SECURE_COOKIES", False)
+    assert _auth.secure_for_request(_FakeReq(forwarded_proto="https")) is False

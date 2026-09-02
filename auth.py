@@ -47,6 +47,23 @@ SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", str(7 * 24 * 3600)))
 # poné APP_INSECURE_COOKIES=1.
 SECURE_COOKIES = os.environ.get("APP_INSECURE_COOKIES", "").lower() not in ("1", "true", "yes")
 
+
+def secure_for_request(request) -> bool:
+    """Flag ``Secure`` para la cookie según el esquema *real* del request.
+
+    Mira ``X-Forwarded-Proto`` (lo setea Caddy/proxy al terminar el TLS) y, si
+    no está, el scheme del request. Así la cookie queda ``Secure`` sólo cuando
+    el browser llegó por HTTPS → el navegador no la descarta silenciosamente en
+    HTTP (síntoma: login OK, recarga, vuelve el overlay de login).
+
+    ``APP_INSECURE_COOKIES=1`` fuerza ``False`` (escape hatch para debug por HTTP)."""
+    if not SECURE_COOKIES:
+        return False
+    proto = (request.headers.get("x-forwarded-proto") or "").lower()
+    if proto:
+        return proto == "https"
+    return getattr(request.url, "scheme", "http") == "https"
+
 _USERS_FILE = DATA_ROOT / "users.json"
 
 # Contexto del usuario actual (seteado por el middleware por-request).
