@@ -67,6 +67,16 @@ def is_allowed(email: str) -> bool:
     return (not al) or (email.lower() in al)
 
 
+def _admins() -> set[str]:
+    raw = os.environ.get("SA_ADMINS", "")
+    return {e.strip().lower() for e in re.split(r"[,;\s]+", raw) if e.strip()}
+
+
+def is_admin(email: str | None) -> bool:
+    """True si el email es admin (env SA_ADMINS). Sin SA_ADMINS no hay admins."""
+    return bool(email) and email.lower() in _admins()
+
+
 # ── Password hashing (pbkdf2-sha256, stdlib) ─────────────────────────────────
 _PBKDF2_ITERS = 200_000
 
@@ -109,6 +119,32 @@ def create_user(email: str, password: str) -> None:
     users = _load_users()
     users[email.lower()] = {"pw": hash_password(password), "created": int(time.time())}
     _save_users(users)
+
+
+def list_users() -> list[dict]:
+    """Para el panel admin: usuarios registrados con estado (sin exponer hashes)."""
+    users = _load_users()
+    out = []
+    for email, rec in sorted(users.items()):
+        out.append({
+            "email": email,
+            "created": rec.get("created"),
+            "has_password": bool(rec.get("pw")),
+            "is_admin": is_admin(email),
+        })
+    return out
+
+
+def admin_reset_user(email: str) -> bool:
+    """Resetea la contraseña de un usuario borrando su registro: al próximo login
+    (si sigue en la allowlist) crea una nueva. True si existía."""
+    email = (email or "").lower().strip()
+    users = _load_users()
+    if email in users:
+        users.pop(email, None)
+        _save_users(users)
+        return True
+    return False
 
 
 def check_login(email: str, password: str) -> bool:
@@ -203,7 +239,9 @@ def current_terraform_dir() -> Path | None:
 
 
 # ── Middleware ASGI: auth + binding del contexto por-request ──────────────────
-_PUBLIC_EXACT = {"/login", "/health", "/favicon.ico", "/api/v1/verticals"}
+# "/" es público: la SPA se sirve a todos y muestra el overlay de login cuando no
+# hay sesión (con la app blureada detrás). Los /api/* siguen protegidos (401).
+_PUBLIC_EXACT = {"/", "/login", "/health", "/favicon.ico", "/api/v1/verticals"}
 _PUBLIC_PREFIXES = ("/static/", "/auth/")
 
 

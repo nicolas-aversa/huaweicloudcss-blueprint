@@ -34,7 +34,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
@@ -93,6 +93,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # + state). Sin esa var, el middleware es passthrough y la app corre single-user
 # como siempre (dev local, tests, nativo). Ver auth.py.
 import auth  # noqa: E402
+import audit  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -977,10 +978,9 @@ def index() -> Response:
 
 @app.get("/login", include_in_schema=False)
 def login_page() -> Response:
-    """Página de login (solo tiene efecto real si auth está activo)."""
-    html = (STATIC_DIR / "login.html").read_text(encoding="utf-8")
-    return Response(content=html, media_type="text/html; charset=utf-8",
-                    headers={"Cache-Control": "no-cache"})
+    """Compat: el login ahora es un overlay dentro de la SPA (con la app blureada
+    detrás). Redirigimos a `/`, que muestra ese overlay si no hay sesión."""
+    return RedirectResponse(url="/", status_code=307)
 
 
 @app.post("/auth/login", include_in_schema=False)
@@ -993,11 +993,14 @@ async def auth_login(request: Request) -> Response:
         data = {}
     email = str(data.get("email", "")).strip().lower()
     password = str(data.get("password", ""))
+    ip = request.client.host if request.client else None
     if not auth.AUTH_ENABLED:
         return JSONResponse({"ok": True, "auth": False})
     if not auth.check_login(email, password):
+        audit.record("login_failed", email or "(vacío)", user=email or "-", ip=ip)
         return JSONResponse({"ok": False, "error": "Credenciales inválidas o email no autorizado."},
                             status_code=401)
+    audit.record("login", email, user=email, ip=ip)
     resp = JSONResponse({"ok": True, "email": email})
     resp.set_cookie(auth.COOKIE_NAME, auth.make_session_token(email), max_age=auth.SESSION_TTL,
                     httponly=True, samesite="lax", secure=auth.SECURE_COOKIES, path="/")
@@ -1005,7 +1008,10 @@ async def auth_login(request: Request) -> Response:
 
 
 @app.post("/auth/logout", include_in_schema=False)
-def auth_logout() -> Response:
+def auth_logout(request: Request) -> Response:
+    email = auth.read_session_token(request.cookies.get(auth.COOKIE_NAME)) if auth.AUTH_ENABLED else None
+    if email:
+        audit.record("logout", email, user=email)
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(auth.COOKIE_NAME, path="/")
     return resp
@@ -1018,7 +1024,43 @@ def auth_me(request: Request) -> dict:
     if not auth.AUTH_ENABLED:
         return {"auth": False}
     email = auth.read_session_token(request.cookies.get(auth.COOKIE_NAME))
-    return {"auth": True, "logged_in": bool(email), "email": email}
+    return {"auth": True, "logged_in": bool(email), "email": email, "is_admin": auth.is_admin(email)}
+
+
+# ── Panel de admin (solo hosteado, emails en SA_ADMINS) ──────────────────────
+def _require_admin() -> str:
+    """Devuelve el email del admin actual o corta con 403. Usa el contexto que
+    liga el middleware (los /api/* están protegidos)."""
+    ctx = auth.current_user_var.get()
+    email = ctx.email if ctx is not None else None
+    if not auth.is_admin(email):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"stage": "admin", "message": "Requiere permisos de administrador."})
+    return email
+
+
+@app.get("/api/v1/admin/users", tags=["admin"], summary="Usuarios registrados (admin)")
+def admin_list_users() -> dict:
+    _require_admin()
+    return {"users": auth.list_users(), "admins": sorted(auth._admins())}
+
+
+@app.post("/api/v1/admin/users/reset", tags=["admin"], summary="Resetea la contraseña de un usuario (admin)")
+def admin_reset_user(request: dict) -> dict:
+    admin_email = _require_admin()
+    target = str(request.get("email", "") or "").strip().lower()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "admin", "message": "Falta el email a resetear."})
+    ok = auth.admin_reset_user(target)
+    audit.record("admin_reset_user", f"{admin_email} → {target} ({'ok' if ok else 'no existía'})", user=admin_email)
+    return {"ok": ok, "email": target}
+
+
+@app.get("/api/v1/admin/audit", tags=["admin"], summary="Audit log (admin)")
+def admin_audit(limit: int = 200) -> dict:
+    _require_admin()
+    return {"entries": audit.tail(max(1, min(1000, limit)))}
 
 
 @app.get("/api/v1/verticals", tags=["verticals"], summary="Registro de verticales de demo")
@@ -1359,6 +1401,7 @@ def set_maas_settings(request: dict) -> dict:
 
     set_maas_api_key(str(request.get("api_key", "") or ""))
     key = get_maas_api_key()
+    audit.record("settings_maas", "MaaS API key actualizada" if key else "MaaS API key borrada")
     return {"configured": bool(key), "source": maas_key_source()}
 
 
@@ -1395,6 +1438,7 @@ def set_huawei_settings_endpoint(request: dict) -> dict:
     import maas_integrator as _mi
 
     _mi.set_huawei_settings({k: str(v or "") for k, v in dict(request).items()})
+    audit.record("settings_huawei", "cuenta Huawei actualizada")
     return get_huawei_settings_endpoint()
 
 
@@ -1429,6 +1473,7 @@ def set_obs_settings(request: dict) -> dict:
 
     _mi.set_obs_creds(str(request.get("access_key", "") or ""), str(request.get("secret_key", "") or ""))
     creds = _mi.get_obs_creds()
+    audit.record("settings_obs", "OBS AK/SK actualizadas" if creds.get("ak") else "OBS AK/SK borradas")
     return {"configured": bool(creds.get("ak") and creds.get("sk"))}
 
 
@@ -3049,6 +3094,8 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
             detail={"stage": "deploy_lock",
                     "message": "Ya hay un despliegue o destroy en curso para tu usuario. "
                                "Esperá a que termine antes de lanzar otro."})
+
+    audit.record("deploy", f"slug={slug} start_ingestion={request.start_ingestion} cases={num_cases}")
 
     def _guarded_stream():
         try:
@@ -5370,6 +5417,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     """
     import capabilities as _caps
 
+    audit.record("provision_capabilities", f"slugs={','.join(request.slugs or [])}")
     terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
@@ -5768,6 +5816,7 @@ def terraform_status() -> TerraformStatusResponse:
 def terraform_destroy(request: TerraformDestroyRequest = Body(default_factory=TerraformDestroyRequest)) -> TerraformDestroyResponse:
     """Destroy con Terraform, protegido por el lock de deploy por-usuario."""
     with _deploy_guard():
+        audit.record("destroy", "terraform destroy")
         return _terraform_destroy_impl(request)
 
 

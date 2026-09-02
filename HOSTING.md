@@ -50,6 +50,13 @@ en **su** cuenta (o en la del owner), sin pisarse.
 
 - **Agregar/quitar SAs**: editá `SA_ALLOWLIST` en `.env.hosted` y recreá el
   contenedor `app`. Quitar un email de la allowlist le corta el acceso.
+- **Admins**: los emails en `SA_ADMINS` (subset de la allowlist) ven en ⚙
+  Configuración una card **Administración**: lista de usuarios con **"Resetear
+  contraseña"** (borra la credencial → el usuario fija una nueva en su próximo
+  ingreso) y el **audit log** (quién hizo qué). Es el "olvidé mi contraseña":
+  el usuario avisa, un admin lo resetea.
+- **Login**: es un overlay sobre la app (la app se ve blureada detrás). El primer
+  login de cada SA crea su cuenta con la contraseña que elija.
 - **Backups**: todo el estado por-usuario vive en el volumen `appdata`
   (`/app/data`). Respaldalo (incluye states de Terraform y credenciales).
 - **Costos**: si los SAs despliegan en **su** cuenta, el costo es de ellos. Si usan
