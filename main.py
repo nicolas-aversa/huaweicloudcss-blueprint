@@ -3139,6 +3139,153 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
     return StreamingResponse(_guarded_stream(), media_type="text/event-stream")
 
 
+# ── Cola de jobs de deploy (reconectable) ────────────────────────────────────
+# El deploy/ingesta corre en un thread de background y sobrevive que el browser se
+# cierre o refresque: el cliente reengancha por `job_id` al stream, que reproduce
+# los eventos guardados y sigue. Un job por usuario (serializado por el lock).
+import uuid as _uuid
+
+_JOBS: "dict[str, dict]" = {}
+_JOBS_GUARD = _threading.Lock()
+
+
+def _user_jobs_dir() -> Path:
+    ctx = auth.current_user_var.get()
+    base = ctx.data_dir if ctx is not None else Path(__file__).parent
+    d = base / "jobs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _flush_job(job: dict, jobs_dir: Path) -> None:
+    try:
+        (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load_job_file(job_id: str) -> "dict | None":
+    try:
+        f = _user_jobs_dir() / f"{job_id}.json"
+        if f.is_file():
+            return json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+@app.post("/api/v1/terraform/deploy-job", tags=["terraform"],
+          summary="Lanza el deploy como job en background (reconectable)")
+def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
+    """Igual que deploy-stream pero el apply corre en background: devuelve un
+    `job_id` para engancharse al stream (sobrevive refresh/cierre del browser)."""
+    import maas_integrator as _mi
+
+    terraform_dir = _active_terraform_dir()
+    if not terraform_dir.exists():
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Directorio terraform/ no encontrado")
+    num_cases = len(request.cases) if request.cases else 1
+    if _MAX_PIPELINES and num_cases > _MAX_PIPELINES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
+    logstash_flavor, opensearch_flavor = _determine_flavor(num_cases)
+    slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+    registry = _read_pipelines_registry(terraform_dir)
+    if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
+    _check_unavailable_plugins(request)
+    _check_demo_datasets_present(request)
+
+    lock = _deploy_lock_for_current()
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail={"stage": "deploy_lock",
+                                    "message": "Ya hay un despliegue o destroy en curso para tu usuario."})
+    audit.record("deploy", f"slug={slug} start_ingestion={request.start_ingestion} cases={num_cases} (job)")
+
+    job_id = _uuid.uuid4().hex[:16]
+    ctx = auth.current_user_var.get()
+    settings_path = str(ctx.settings_path) if ctx is not None else None
+    jobs_dir = _user_jobs_dir()
+    job = {"id": job_id, "status": "running", "created": int(time.time()), "updated": int(time.time()),
+           "user": (ctx.user_id if ctx is not None else "-"), "events": []}
+    with _JOBS_GUARD:
+        _JOBS[job_id] = job
+    _flush_job(job, jobs_dir)
+
+    def _run():
+        try:
+            if ctx is not None:
+                auth.current_user_var.set(ctx)
+            _mi.set_current_settings_path(settings_path)
+            for raw in _deploy_stream_gen(request, terraform_dir, logstash_flavor, opensearch_flavor):
+                try:
+                    evt = json.loads(raw[6:].strip()) if isinstance(raw, str) and raw.startswith("data: ") else {"type": "raw", "message": str(raw)}
+                except Exception:
+                    evt = {"type": "raw"}
+                with _JOBS_GUARD:
+                    job["events"].append(evt)
+                    job["updated"] = int(time.time())
+                    if evt.get("type") in ("complete", "error"):
+                        job["status"] = evt["type"]
+                _flush_job(job, jobs_dir)
+        except Exception as exc:
+            with _JOBS_GUARD:
+                job["events"].append({"type": "error", "message": f"El job falló: {exc}"})
+                job["status"] = "error"
+        finally:
+            with _JOBS_GUARD:
+                if job["status"] == "running":
+                    job["status"] = "complete"
+            _flush_job(job, jobs_dir)
+            lock.release()
+
+    _threading.Thread(target=_run, name=f"deploy-job-{job_id}", daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/v1/terraform/jobs", tags=["terraform"], summary="Job de deploy en curso (para reconectar)")
+def terraform_jobs() -> dict:
+    ctx = auth.current_user_var.get()
+    uid = ctx.user_id if ctx is not None else "-"
+    running = None
+    with _JOBS_GUARD:
+        for jid, j in _JOBS.items():
+            if j.get("user") == uid and j.get("status") == "running":
+                running = jid
+                break
+    return {"running": running}
+
+
+@app.get("/api/v1/terraform/jobs/{job_id}/stream", tags=["terraform"],
+         summary="Stream SSE de un job (reproduce lo emitido y sigue)")
+def terraform_job_stream(job_id: str):
+    def gen():
+        cursor = 0
+        while True:
+            with _JOBS_GUARD:
+                job = _JOBS.get(job_id)
+                events = list(job["events"]) if job else None
+                stat = job["status"] if job else None
+            if job is None:
+                fj = _load_job_file(job_id)
+                if fj is None:
+                    yield _sse({"type": "error", "message": "Job no encontrado."})
+                    return
+                evs = fj.get("events", [])
+                while cursor < len(evs):
+                    yield _sse(evs[cursor]); cursor += 1
+                return
+            while cursor < len(events):
+                yield _sse(events[cursor]); cursor += 1
+            if stat in ("complete", "error"):
+                return
+            time.sleep(0.5)
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 # La Logstash de CSS (7.10) NO trae todos los plugins bundled de la OSS: el
 # cluster no tiene salida a internet para instalarlos y el deploy no los
 # agrega. Confirmados ausentes hasta ahora; extender la lista al descubrir

@@ -4525,6 +4525,67 @@
     // en `state.pendingDeploy`, lleva a Mi Infraestructura y arranca solo el PRIMER
     // paso de la puesta en marcha (index template + dashboards); ingesta y
     // capabilities quedan como botones en infra.
+    // Abre el stream de un deploy: lo lanza como JOB en background (sobrevive
+    // refresh/cierre del browser) y devuelve el Response del stream para leer con
+    // el mismo loop de SSE. Si deploy-job falla (p.ej. 409), propaga ese Response;
+    // si no existe (compat), cae a deploy-stream directo.
+    async function _openDeployStream(body) {
+      try {
+        const jr = await fetch('/api/v1/terraform/deploy-job', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (jr.ok) {
+          const jd = await jr.json().catch(() => ({}));
+          if (jd && jd.job_id) {
+            try { sessionStorage.setItem('deployJob', jd.job_id); } catch (_) {}
+            return await fetch('/api/v1/terraform/jobs/' + encodeURIComponent(jd.job_id) + '/stream');
+          }
+        } else if (jr.status !== 404) {
+          return jr;   // 409 (job en curso) u otro error → que lo maneje el caller
+        }
+      } catch (_) { /* red / endpoint viejo → fallback */ }
+      return await fetch('/api/v1/terraform/deploy-stream', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+    }
+
+    // Reconecta (una vez por carga) a un deploy/ingesta en curso y vuelca el
+    // progreso en el estado de puesta en marcha. Hace que el deploy sobreviva un
+    // refresh del browser.
+    async function _reconnectDeployJob() {
+      if (window.__jobReconnectTried) return;
+      window.__jobReconnectTried = true;
+      let running;
+      try {
+        const r = await fetch('/api/v1/terraform/jobs');
+        const d = await r.json();
+        running = d && d.running;
+      } catch (_) { return; }
+      if (!running) return;
+      const statusEl = document.getElementById('infra-setup-status');
+      if (statusEl) showStatus(statusEl, 'Reconectando a un despliegue en curso…', 'loading');
+      try {
+        const res = await fetch('/api/v1/terraform/jobs/' + encodeURIComponent(running) + '/stream');
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const evs = buf.split('\n\n');
+          buf = evs.pop();
+          for (const e of evs) {
+            if (!e.startsWith('data: ')) continue;
+            let d; try { d = JSON.parse(e.slice(6)); } catch (_) { continue; }
+            if (d.type === 'progress' && statusEl) showStatus(statusEl, `${d.message || d.phase} (${Math.round(d.percent)}%)`, 'loading');
+            else if (d.type === 'complete') { if (statusEl) showStatus(statusEl, '✓ Despliegue completado.', 'success'); await hydrateActiveEnv(); }
+            else if (d.type === 'error' && statusEl) showStatus(statusEl, 'Error: ' + d.message, 'error');
+          }
+        }
+      } catch (_) {}
+    }
+
     async function runDeploy({ btn }) {
       if (state.provisioning) return;   // ya hay un deploy en curso
       const preStatus = document.getElementById('deploy-status-1');
@@ -4554,11 +4615,7 @@
       showView('infra');
       renderInfraView(state.lastStatus);   // pinta el estado "provisionando"
       try {
-        const res = await fetch('/api/v1/terraform/deploy-stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const res = await _openDeployStream(body);
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(detailMsg(errData));
@@ -5186,11 +5243,7 @@
       btn.disabled = true;
       if (statusEl) showStatus(statusEl, 'Iniciando ingesta con Logstash…', 'loading');
       try {
-        const res = await fetch('/api/v1/terraform/deploy-stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, start_ingestion: true }),
-        });
+        const res = await _openDeployStream({ ...body, start_ingestion: true });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(detailMsg(errData));
@@ -5737,6 +5790,9 @@
 
       // Contador en vivo (el span #infra-age recién existe ahora).
       startActiveEnvTicker(data.deployed_seconds_ago || 0);
+
+      // Reconectar a un deploy/ingesta en curso (cola de jobs): sobrevive refresh.
+      _reconnectDeployJob();
 
       // Renderizar capabilities persistidas (.capabilities.json vía /terraform/status).
       // El formato persistido son IDs sueltos; los adaptamos al shape que espera
