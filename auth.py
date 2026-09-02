@@ -286,6 +286,14 @@ def _ensure_workspace(ctx: "UserCtx") -> None:
         # los trae → `terraform init` no re-descarga). Estado/secretos excluidos.
         shutil.copytree(TERRAFORM_TEMPLATE, ctx.terraform_dir,
                         ignore=_TF_SEED_IGNORE, dirs_exist_ok=True)
+    # Refrescar la fuente del template (main.tf + *.tf + tfvars.example) desde el
+    # image: un git pull + rebuild cambia el HCL y hay que propagarlo al workspace
+    # del usuario, que ya tiene una copia del primer deploy. State, secretos y
+    # registros viven en archivos ignorados/runtime → se preservan.
+    for src in TERRAFORM_TEMPLATE.glob("*.tf"):
+        shutil.copy2(src, ctx.terraform_dir / src.name)
+    for src in TERRAFORM_TEMPLATE.glob("*.tfvars.example"):
+        shutil.copy2(src, ctx.terraform_dir / src.name)
 
 
 def build_user_ctx(email: str) -> "UserCtx":

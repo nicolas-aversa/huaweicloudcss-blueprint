@@ -4595,3 +4595,22 @@ def test_secure_cookie_insecure_override_forces_false(monkeypatch):
     """APP_INSECURE_COOKIES=1 (SECURE_COOKIES=False) → nunca Secure, aun en HTTPS."""
     monkeypatch.setattr(_auth, "SECURE_COOKIES", False)
     assert _auth.secure_for_request(_FakeReq(forwarded_proto="https")) is False
+
+
+def test_workspace_refreshes_template_source(tmp_path, monkeypatch):
+    """Un git pull + rebuild cambia el main.tf del template → el workspace del
+    usuario lo refresca (no se queda con la copia stale del primer deploy)."""
+    tmpl = tmp_path / "template" / "terraform"
+    tmpl.mkdir(parents=True)
+    (tmpl / "main.tf").write_text("size = 5\n", encoding="utf-8")
+    (tmpl / "terraform.tfvars.example").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(_auth, "TERRAFORM_TEMPLATE", tmpl)
+    monkeypatch.setattr(_auth, "DATA_ROOT", tmp_path / "data")
+
+    ctx = _auth.build_user_ctx("sa@huawei.com")
+    assert (ctx.terraform_dir / "main.tf").read_text(encoding="utf-8") == "size = 5\n"
+
+    (tmpl / "main.tf").write_text("size = 300\n", encoding="utf-8")
+
+    _auth.build_user_ctx("sa@huawei.com")
+    assert (ctx.terraform_dir / "main.tf").read_text(encoding="utf-8") == "size = 300\n"
