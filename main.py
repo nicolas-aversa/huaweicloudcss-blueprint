@@ -3375,6 +3375,75 @@ def _remove_platform_marker(terraform_dir: Path) -> None:
         pass
 
 
+# ── Guardrail de costo: reaper de TTL (auto-destroy de entornos demo viejos) ──
+# Opt-in con ENV_TTL_HOURS>0. Cada ENV_TTL_CHECK_SECONDS recorre los workspaces
+# por-usuario y destruye los entornos cuyo marker supera el TTL, reusando el
+# destroy.auto.tfvars.json que persistió el deploy (con las creds). Off por
+# default: destruir infra es una acción fuerte.
+def _reap_expired_envs(ttl_hours: float) -> None:
+    import subprocess as _sp
+    from datetime import timedelta as _timedelta
+
+    cutoff = datetime.now(timezone.utc) - _timedelta(hours=ttl_hours)
+    users_root = auth.DATA_ROOT / "users"
+    if not users_root.is_dir():
+        return
+    for udir in users_root.iterdir():
+        try:
+            tdir = udir / "terraform"
+            marker = tdir / _PLATFORM_MARKER_NAME
+            state = tdir / "terraform.tfstate"
+            if not marker.is_file() or not state.is_file() or state.stat().st_size < 200:
+                continue
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            ts = data.get("deployed_at")
+            try:
+                when = datetime.fromisoformat(ts) if ts else datetime.fromtimestamp(marker.stat().st_mtime, tz=timezone.utc)
+            except ValueError:
+                when = datetime.fromtimestamp(marker.stat().st_mtime, tz=timezone.utc)
+            if when > cutoff:
+                continue
+            print(f"[ttl-reaper] destruyendo entorno vencido de {udir.name} (deployed {ts})", flush=True)
+            r = _sp.run(["terraform", "destroy", "-auto-approve", "-input=false"],
+                        cwd=tdir, capture_output=True, text=True, timeout=1800)
+            ok = r.returncode == 0
+            audit.record("ttl_autodestroy", f"user_dir={udir.name} ok={ok}", user="(ttl-reaper)")
+            if ok:
+                try:
+                    marker.unlink()
+                except OSError:
+                    pass
+            else:
+                print(f"[ttl-reaper] destroy falló para {udir.name}: {(r.stderr or r.stdout)[-400:]}", flush=True)
+        except Exception as exc:
+            print(f"[ttl-reaper] error con {udir.name}: {exc!r}", flush=True)
+
+
+def _start_ttl_reaper() -> None:
+    try:
+        ttl = float(os.environ.get("ENV_TTL_HOURS", "0") or "0")
+    except ValueError:
+        ttl = 0.0
+    if ttl <= 0:
+        return
+    interval = max(300, int(os.environ.get("ENV_TTL_CHECK_SECONDS", "1800") or "1800"))
+
+    def _loop():
+        import time as _t
+        while True:
+            try:
+                _reap_expired_envs(ttl)
+            except Exception:
+                pass
+            _t.sleep(interval)
+
+    _threading.Thread(target=_loop, name="ttl-reaper", daemon=True).start()
+    print(f"[ttl-reaper] activo: destruye entornos > {ttl}h (chequeo cada {interval}s)", flush=True)
+
+
+_start_ttl_reaper()
+
+
 # Registro de pipelines activas en el cluster. Cada "Nuevo pipeline" agrega una
 # entrada (slug → conf + flags + índice/prefijo) que corre EN PARALELO con las
 # demás. Es la fuente de verdad para reconstruir la var `pipelines` de Terraform
@@ -3382,8 +3451,12 @@ def _remove_platform_marker(terraform_dir: Path) -> None:
 # `deploy.auto.tfvars.json` se borra tras cada deploy; este registro persiste.
 _PIPELINES_REGISTRY_NAME = ".pipelines.json"
 # Tope de pipelines concurrentes: el Logstash es 1 nodo ess.spec-4u8g (4 vCPU);
-# con workers=2 por pipeline, ~4 conviven sin sobre-suscribir el nodo.
-_MAX_PIPELINES = 5
+# con workers=2 por pipeline, ~4 conviven sin sobre-suscribir el nodo. Configurable
+# por env (guardrail de costo) — default 5.
+try:
+    _MAX_PIPELINES = max(1, int(os.environ.get("MAX_PIPELINES_PER_USER", "5")))
+except ValueError:
+    _MAX_PIPELINES = 5
 
 
 def _determine_flavor(num_pipelines: int) -> tuple[str, str]:

@@ -62,6 +62,12 @@ en **su** cuenta (o en la del owner), sin pisarse.
 - **Costos**: si los SAs despliegan en **su** cuenta, el costo es de ellos. Si usan
   la del **owner**, cada deploy crea clusters CSS (caros) — coordiná y destruí los
   entornos de demo cuando no se usen.
+- **Guardrails de costo** (env, opcionales):
+  - `MAX_PIPELINES_PER_USER` (default 5): tope de pipelines por usuario/cluster.
+  - `ENV_TTL_HOURS` (default 0 = off): auto-destruye entornos demo más viejos que N
+    horas (usa las creds guardadas del deploy). Útil para demos efímeras; **destruye
+    infra sola**, así que activalo con criterio. Chequeo cada `ENV_TTL_CHECK_SECONDS`.
+  - Cada deploy/destroy queda en el **audit log** (panel Administración).
 
 ## Seguridad de las credenciales
 
