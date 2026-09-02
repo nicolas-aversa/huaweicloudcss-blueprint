@@ -2951,15 +2951,13 @@ def test_determine_flavor_single_pipeline():
 
 
 def test_determine_flavor_multiple_pipelines():
-    """2-4 pipelines → 8u16g; 5+ → 16u32g. Los workers se reparten (ver _capacity_for)."""
+    """Flavor fijo 4u8g sin importar la cantidad de pipelines (no escala). Los
+    workers se reparten sobre los 4 vCPU fijos (ver _capacity_for)."""
     import main as _main
 
-    for n in [2, 3, 4]:
+    for n in [2, 3, 4, 5, 8, 12]:
         ls, os = _main._determine_flavor(n)
-        assert ls == "ess.spec-8u16g" and os == "ess.spec-8u16g"
-    for n in [5, 8, 12]:
-        ls, os = _main._determine_flavor(n)
-        assert ls == "ess.spec-16u32g" and os == "ess.spec-16u32g"
+        assert ls == "ess.spec-4u8g" and os == "ess.spec-4u8g"
     # Con muchas pipelines los workers por pipeline bajan (mín 1).
     assert _main._capacity_for(12)["pipeline_workers"] == 1
     assert _main._capacity_for(2)["pipeline_workers"] == 2

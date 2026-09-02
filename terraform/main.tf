@@ -203,10 +203,10 @@ resource "huaweicloud_vpc_eip" "nat_eip" {
   }
   # Facturación POR TRÁFICO (charge_mode = "traffic"): se paga por GB transferidos,
   # no por ancho de banda reservado. El bloque `bandwidth` es obligatorio en el
-  # recurso; `size` acá es solo el TOPE (5 Mbit/s), no la facturación.
+  # recurso; `size` acá es solo el TOPE (300 Mbit/s), no la facturación.
   bandwidth {
     name        = "${var.project_name}-nat-eip"
-    size        = 5
+    size        = 300
     share_type  = "PER"
     charge_mode = "traffic"
   }

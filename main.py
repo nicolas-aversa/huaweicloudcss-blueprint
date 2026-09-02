@@ -3640,26 +3640,20 @@ except ValueError:
 
 
 def _capacity_for(num_pipelines: int) -> dict:
-    """Capacidad del cluster según la cantidad TOTAL de pipelines activas: escala
-    el flavor y el disco con el volumen de trabajo, y reparte el vCPU del nodo
-    Logstash entre las pipelines (workers por pipeline) para no sobre-suscribir.
-    Sin tope duro: con muchas pipelines cada una baja a 1 worker.
+    """Capacidad del cluster: flavor FIJO en 4u8g (4 vCPU, 8 GB) para OpenSearch
+    y Logstash y discos de 40 GB — no escala con la cantidad de pipelines. Los
+    4 vCPU del nodo Logstash se reparten entre las pipelines (workers por
+    pipeline) para no sobre-suscribir el nodo fijo.
 
-        1 pipeline   → 4u8g  (4 vCPU)  · 2 workers c/u
-        2-4          → 8u16g (8 vCPU)  · 2 workers c/u
-        5+           → 16u32g (16 vCPU) · workers = vCPU/pipelines (mín 1)
+        1-2 pipelines → 2 workers c/u
+        3+            → 1 worker c/u (4 vCPU // n, mín 1)
     """
     n = max(1, int(num_pipelines))
-    if n <= 1:
-        ls, os_, vcpu, osv, lsv = "ess.spec-4u8g", "ess.spec-4u8g", 4, 40, 40
-    elif n <= 4:
-        ls, os_, vcpu, osv, lsv = "ess.spec-8u16g", "ess.spec-8u16g", 8, 80, 40
-    else:
-        ls, os_, vcpu, osv, lsv = "ess.spec-16u32g", "ess.spec-16u32g", 16, 160, 80
-    workers = max(1, min(2, vcpu // n))
+    workers = max(1, min(2, 4 // n))
     return {
-        "logstash_flavor": ls, "opensearch_flavor": os_, "pipeline_workers": workers,
-        "opensearch_volume_size": osv, "logstash_volume_size": lsv,
+        "logstash_flavor": "ess.spec-4u8g", "opensearch_flavor": "ess.spec-4u8g",
+        "pipeline_workers": workers,
+        "opensearch_volume_size": 40, "logstash_volume_size": 40,
     }
 
 
