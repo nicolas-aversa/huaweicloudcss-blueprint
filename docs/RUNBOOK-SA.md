@@ -6,17 +6,18 @@ despliega en **tu** cuenta Huawei. Todo se configura desde la UI; no toques arch
 
 ---
 
-## 1. Arrancar (zero-config)
-En la VM:
+## 1. Arrancar (HTTPS automático, zero-config)
+En la VM (con puertos **80 y 443** abiertos en el security group):
 ```bash
 cd ~/huaweicloudcss-blueprint
-docker compose -f docker-compose.hosted.yml up --build -d
+./hosted-up.sh
 ```
-- Se sirve por **HTTP en el puerto 80** → abrí `http://<IP-pública-de-esta-VM>/`.
+- Detecta la **EIP** de la VM y sirve por **HTTPS** en `https://<EIP>.sslip.io/` (cert real de
+  Let's Encrypt, sin dominio propio). El script te imprime la URL.
 - La auth se activa sola (clave de sesión autogenerada). **El primer usuario que se registra
   queda como ADMIN.**
-- (Opcional, HTTPS con dominio) `cp .env.hosted.example .env` y poné `APP_DOMAIN=tudominio`, con el
-  DNS apuntando a la IP y los puertos 80/443 abiertos; después `... up --build -d`.
+- ¿Tenés dominio propio? `export APP_DOMAIN=tudominio` (DNS → la IP) y corré `./hosted-up.sh`.
+- Fallback: si no se detecta la EIP, arranca por HTTP en `:80` (`http://<EIP>/`).
 
 ## 2. Entrar y configurar (⚙ Configuración)
 Registrate con tu email + una contraseña (tu primer ingreso crea la cuenta). Andá a

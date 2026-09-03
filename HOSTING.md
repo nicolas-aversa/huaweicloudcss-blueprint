@@ -25,22 +25,20 @@ en **su** cuenta (o en la del owner), sin pisarse.
 1. **Una VM** (ECS de tu cuenta Huawei, u otra) con Docker + Docker Compose,
    **puertos 80 y 443 abiertos**, y un **dominio** cuyo DNS apunte a su IP pública.
 
-2. **Levantá — zero-config** (no hace falta cargar ningún `.env`):
+2. **Levantá — HTTPS automático, zero-config** (no hace falta cargar ningún `.env`):
    ```bash
-   docker compose -f docker-compose.hosted.yml up --build -d
+   ./hosted-up.sh
    ```
-   - **Auth queda activa**: el contenedor **autogenera** `APP_SECRET_KEY` y la
-     persiste en el volumen.
-   - **Sin dominio → sirve por HTTP en `:80`** (entrás por `http://<IP>/`).
+   - Detecta la **EIP** y sirve por **HTTPS** en `https://<EIP>.sslip.io/` (cert real de
+     Let's Encrypt, **sin dominio propio**). Requiere 80/443 abiertos.
+   - **Auth queda activa**: autogenera `APP_SECRET_KEY` y la persiste en el volumen.
    - **El primer usuario que se registra queda como admin** y gestiona el resto
      (allowlist, resets) desde ⚙ Configuración → **Administración**.
 
-   Opcional, para fijar cosas (HTTPS, allowlist inicial, admins): `cp
-   .env.hosted.example .env.hosted`, editá, y agregá `--env-file .env.hosted` al
-   comando. Con `APP_DOMAIN=tudominio` Caddy saca el **cert TLS** solo (necesita
-   DNS→IP y 80/443 abiertos).
+   Alternativas: dominio propio → `export APP_DOMAIN=tudominio && ./hosted-up.sh` (DNS→IP).
+   HTTP plano (sin TLS) → `docker compose -f docker-compose.hosted.yml up --build -d`.
 
-3. **Entrá** a `http://<IP>/` (o `https://tudominio` si pusiste `APP_DOMAIN`). Cada SA:
+3. **Entrá** a la URL que te imprimió el script (`https://<EIP>.sslip.io/`). Cada SA:
    - hace login con su email + una contraseña (el primer login crea su cuenta),
    - va a **⚙ Configuración** y carga **su** cuenta Huawei (VPC/subnet/SG/AZ,
      project id, región, bucket) y **su** MaaS API key — o los datos del owner si
