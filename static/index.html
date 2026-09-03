@@ -6660,7 +6660,7 @@
     // Defaults efectivos para el resto de la app (bucket de demos y región de
     // los forms). Se hidratan al inicio desde /settings/huawei; los fallbacks
     // son los del setup original.
-    function demoBucket() { return state.hwSettings?.demo_bucket || 'mi-tracker-cts'; }
+    function demoBucket() { return state.hwSettings?.demo_bucket || ''; }
     function hwRegion() { return state.hwSettings?.effective_region || 'la-south-2'; }
     (async function hydrateHuaweiSettings() {
       try {
@@ -6677,6 +6677,11 @@
       if (prodEp && prodEp.value.includes('la-south-2')) prodEp.value = `https://obs.${region}.myhuaweicloud.com`;
       const outEp = document.getElementById('output-obs-endpoint');
       if (outEp && outEp.value.includes('la-south-2')) outEp.value = `https://obs.${region}.myhuaweicloud.com`;
+      // Bucket de demos: el campo del wizard se pinta antes de este fetch, así que
+      // lo completamos acá con el bucket de ⚙ Configuración (si el usuario no lo
+      // editó / quedó con el default viejo).
+      const bkt = document.getElementById('input-bucket');
+      if (bkt && demoBucket() && (!bkt.value || bkt.value === 'mi-tracker-cts')) bkt.value = demoBucket();
     })();
 
     const HW_FIELD_IDS = {
@@ -6719,6 +6724,9 @@
       }
       try {
         await fetch('/api/v1/settings/huawei', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        // Reflejar en memoria para que el wizard (demoBucket/hwRegion) tome los
+        // valores nuevos sin recargar.
+        state.hwSettings = { ...(state.hwSettings || {}), ...body };
         refreshHuaweiSettings();
         return true;
       } catch (_e) {
