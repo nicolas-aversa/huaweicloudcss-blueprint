@@ -83,7 +83,10 @@ en **su** cuenta (o en la del owner), sin pisarse.
 - Aun así, para el modo "cuenta del owner" conviene una **AK/SK dedicada y
   revocable** en vez de tu key principal.
 
-## Pendiente (hardening, fase 2)
+## Fase 2 — estado
 
-- Cola de jobs para los `terraform apply` largos, backend de state remoto (OBS),
-  guardrails de costo y audit log. Ver el plan.
+- ✅ **Cola de jobs**: el deploy corre en background y sobrevive un refresh del browser.
+- ✅ **Guardrails de costo**: cap de pipelines configurable + reaper TTL opcional.
+- ✅ **Audit log**: quién hizo qué, en el panel de Administración.
+- ⏳ **Estado de Terraform remoto en OBS**: pendiente (hoy el state vive en el volumen
+  persistente `appdata`; para durabilidad extra, respaldá ese volumen).

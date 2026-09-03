@@ -1464,7 +1464,13 @@ def set_huawei_settings_endpoint(request: dict) -> dict:
     pisan el terraform.tfvars al armar el deploy."""
     import maas_integrator as _mi
 
-    _mi.set_huawei_settings({k: str(v or "") for k, v in dict(request).items()})
+    values = {k: str(v or "") for k, v in dict(request).items()}
+    # Validación de formato (defensa del backend, además del front): project_id 32 hex.
+    pid = (values.get("project_id") or "").strip()
+    if pid and not re.fullmatch(r"[0-9a-fA-F]{32}", pid):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "settings", "message": "Project ID inválido: deben ser 32 caracteres hex."})
+    _mi.set_huawei_settings(values)
     audit.record("settings_huawei", "cuenta Huawei actualizada")
     return get_huawei_settings_endpoint()
 

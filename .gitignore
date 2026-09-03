@@ -13,8 +13,9 @@ venv/
 # Temporales de validación de Logstash
 logstash_validate_*/
 
-# Datasets grandes generados por build scripts (no versionar).
-datasets/fraud.log
+# Datasets grandes (no versionar; se bajan del Release o build scripts). Los .log
+# pesan ~350 MB en total → nunca commitearlos.
+datasets/*.log
 datasets/train_identity.csv
 datasets/train_transaction.csv
 

@@ -1117,7 +1117,7 @@ def test_settings_huawei_roundtrip(monkeypatch, tmp_path):
 
     # Cuenta completa → settings manda: región efectiva, project id e infra.
     res = client.post("/api/v1/settings/huawei", json={
-        "project_id": "pid123", "region": "sa-brazil-1", "availability_zone": "sa-brazil-1a",
+        "project_id": "abcdef0123456789abcdef0123456789", "region": "sa-brazil-1", "availability_zone": "sa-brazil-1a",
         "vpc_id": "vpc-1", "subnet_id": "net-2", "security_group_id": "sg-3",
         "demo_bucket": "mis-demos",
     })
@@ -1126,7 +1126,7 @@ def test_settings_huawei_roundtrip(monkeypatch, tmp_path):
     assert body["effective_region"] == "sa-brazil-1"
     assert body["values"]["demo_bucket"] == "mis-demos"
     assert mi.get_region() == "sa-brazil-1"
-    assert mi.get_huawei_project_id() == "pid123"
+    assert mi.get_huawei_project_id() == "abcdef0123456789abcdef0123456789"
     assert main._huawei_infra_tfvars() == {
         "vpc_id": "vpc-1", "subnet_id": "net-2", "security_group_id": "sg-3",
         "availability_zone": "sa-brazil-1a", "region": "sa-brazil-1",
