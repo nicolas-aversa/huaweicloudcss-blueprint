@@ -140,8 +140,20 @@ def _admins() -> set[str]:
 
 
 def is_admin(email: str | None) -> bool:
-    """True si el email es admin (env SA_ADMINS). Sin SA_ADMINS no hay admins."""
-    return bool(email) and email.lower() in _admins()
+    """True si el email es admin. Con SA_ADMINS: los de esa lista. SIN SA_ADMINS
+    (zero-config): el PRIMER usuario registrado es admin — así el que arranca la
+    instancia gestiona allowlist/usuarios desde la UI sin tocar el env."""
+    if not email:
+        return False
+    email = email.lower()
+    admins = _admins()
+    if admins:
+        return email in admins
+    users = _load_users()
+    if not users:
+        return False
+    first = min(users.items(), key=lambda kv: (kv[1].get("created", 0), kv[0]))[0]
+    return email == first
 
 
 # ── Password hashing (pbkdf2-sha256, stdlib) ─────────────────────────────────

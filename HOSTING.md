@@ -25,25 +25,26 @@ en **su** cuenta (o en la del owner), sin pisarse.
 1. **Una VM** (ECS de tu cuenta Huawei, u otra) con Docker + Docker Compose,
    **puertos 80 y 443 abiertos**, y un **dominio** cuyo DNS apunte a su IP pública.
 
-2. **Configurá el entorno**:
+2. **Levantá — zero-config** (no hace falta cargar ningún `.env`):
    ```bash
-   cp .env.hosted.example .env.hosted
-   # editá .env.hosted:
-   #   APP_DOMAIN=accel.tudominio.com
-   #   APP_SECRET_KEY=$(openssl rand -hex 32)
-   #   SA_ALLOWLIST=vos@huawei.com, colega@huawei.com
+   docker compose -f docker-compose.hosted.yml up --build -d
    ```
+   - **Auth queda activa**: el contenedor **autogenera** `APP_SECRET_KEY` y la
+     persiste en el volumen.
+   - **Sin dominio → sirve por HTTP en `:80`** (entrás por `http://<IP>/`).
+   - **El primer usuario que se registra queda como admin** y gestiona el resto
+     (allowlist, resets) desde ⚙ Configuración → **Administración**.
 
-3. **Levantá** (Caddy resuelve el certificado TLS solo):
-   ```bash
-   docker compose -f docker-compose.hosted.yml --env-file .env.hosted up --build -d
-   ```
+   Opcional, para fijar cosas (HTTPS, allowlist inicial, admins): `cp
+   .env.hosted.example .env.hosted`, editá, y agregá `--env-file .env.hosted` al
+   comando. Con `APP_DOMAIN=tudominio` Caddy saca el **cert TLS** solo (necesita
+   DNS→IP y 80/443 abiertos).
 
-4. **Entrá** a `https://accel.tudominio.com`. Cada SA:
-   - hace login con su email (de la allowlist) y una contraseña,
+3. **Entrá** a `http://<IP>/` (o `https://tudominio` si pusiste `APP_DOMAIN`). Cada SA:
+   - hace login con su email + una contraseña (el primer login crea su cuenta),
    - va a **⚙ Configuración** y carga **su** cuenta Huawei (VPC/subnet/SG/AZ,
-     project id, región, bucket) y **su** MaaS API key — o, si van a usar la cuenta
-     del owner, cargan esos mismos datos del owner,
+     project id, región, bucket) y **su** MaaS API key — o los datos del owner si
+     van a desplegar en la cuenta del owner,
    - usa la plataforma normalmente; sus deploys van a **su** state aislado.
 
 ## Operación

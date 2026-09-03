@@ -12,10 +12,13 @@ services:
       - path: .env
         required: false
     environment:
-      # Activa auth + aislamiento por usuario (ver auth.py). Sin APP_SECRET_KEY
-      # la app corre single-user.
-      APP_SECRET_KEY: ${APP_SECRET_KEY:?definí APP_SECRET_KEY (openssl rand -hex 32)}
+      # Opcional: si no la pasás, el entrypoint AUTOGENERA una clave estable y la
+      # persiste en el volumen (auth queda activo igual). Pasala solo si querés
+      # fijar vos el secreto (p.ej. para clonar la config entre hosts).
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
       SA_ALLOWLIST: ${SA_ALLOWLIST:-}
+      # Admins (opcional): sin esto, el PRIMER usuario que se registra es admin.
+      SA_ADMINS: ${SA_ADMINS:-}
       APP_DATA_DIR: /app/data
       TERRAFORM_TEMPLATE_DIR: /app/terraform
       # Cache de providers compartido: cada SA corre su propio `terraform init`
@@ -37,7 +40,10 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      APP_DOMAIN: ${APP_DOMAIN:?definí APP_DOMAIN (el dominio público, ej. accel.tudominio.com)}
+      # Con dominio → HTTPS automático (Let's Encrypt). Sin dominio → default ":80"
+      # = sirve por HTTP en el puerto 80 (sin TLS, cero config). Poné un dominio
+      # cuando quieras HTTPS.
+      APP_DOMAIN: ${APP_DOMAIN:-:80}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

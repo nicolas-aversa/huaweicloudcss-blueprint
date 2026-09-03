@@ -29,4 +29,17 @@ fi
 [ -n "$APP_DATA_DIR" ] && mkdir -p "$APP_DATA_DIR"
 [ -n "$TF_PLUGIN_CACHE_DIR" ] && mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
+# Modo hosteado sin configurar nada: si hay APP_DATA_DIR (hosteado) y NO se pasó
+# APP_SECRET_KEY, lo autogeneramos y persistimos en el volumen. Así auth queda
+# activo con una clave estable sin que el operador cargue el .env. En single-user
+# (sin APP_DATA_DIR) no se genera → la app sigue sin auth como siempre.
+if [ -z "$APP_SECRET_KEY" ] && [ -n "$APP_DATA_DIR" ]; then
+  SECRET_FILE="$APP_DATA_DIR/.app_secret"
+  if [ ! -f "$SECRET_FILE" ]; then
+    python -c "import secrets; print(secrets.token_hex(32))" > "$SECRET_FILE" 2>/dev/null || openssl rand -hex 32 > "$SECRET_FILE"
+    echo "[entrypoint] APP_SECRET_KEY autogenerada y guardada en $SECRET_FILE"
+  fi
+  export APP_SECRET_KEY="$(cat "$SECRET_FILE")"
+fi
+
 exec uvicorn main:app --host 0.0.0.0 --port 8000
