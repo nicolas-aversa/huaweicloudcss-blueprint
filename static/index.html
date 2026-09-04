@@ -2277,15 +2277,15 @@
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span class="guide-num">2</span>
-                <div style="min-width:0;"><div class="guide-step-t">Levantar (con Docker)</div><div class="form-hint" style="margin-top:2px;"><code>docker compose up --build</code> y abrís <code>http://localhost:8088</code>. Sin crear nada a mano — la config y el estado quedan en volúmenes.</div></div>
+                <div style="min-width:0;"><div class="guide-step-t">Entrar a la plataforma</div><div class="form-hint" style="margin-top:2px;">Abrí la URL y registrate con tu email + una contraseña (tu primer ingreso crea la cuenta). Si la hosteás vos: <code>./hosted-up.sh</code> (HTTPS automático) o <code>docker compose -f docker-compose.hosted.yml up --build -d</code>.</div></div>
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span class="guide-num">3</span>
-                <div style="min-width:0;"><div class="guide-step-t">Configurar (⚙ Configuración)</div><div class="form-hint" style="margin-top:2px;">Cargá credenciales <strong>OBS</strong> (AK/SK), los datos de tu <strong>cuenta Huawei</strong> (project id, región, VPC/subnet/security group, AZ, bucket) y tu <strong>MaaS API key</strong>.</div></div>
+                <div style="min-width:0;"><div class="guide-step-t">Configurar (⚙ Configuración)</div><div class="form-hint" style="margin-top:2px;">Seguí el checklist: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS + MaaS API key + bucket de demos) e <strong>Infraestructura General</strong> (project id, región, AZ, VPC/subnet/security group).</div></div>
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span class="guide-num">4</span>
-                <div style="min-width:0;"><div class="guide-step-t">Preparar el bucket de demos</div><div class="form-hint" style="margin-top:2px;">⚙ Configuración → <strong>Preparar bucket de demos</strong>: sube los datasets al bucket con los prefijos que esperan las pipelines. Si no tenés la data, generala con los build scripts (<code>build_vertical_datasets.py</code>, <code>build_siem_dataset.py</code>).</div></div>
+                <div style="min-width:0;"><div class="guide-step-t">Preparar el bucket de demos</div><div class="form-hint" style="margin-top:2px;">En la card <strong>Credenciales de la cuenta</strong> tocá <strong>Preparar bucket</strong>: sube los datasets de demo a tu bucket OBS con los prefijos que esperan las pipelines. Necesario antes de desplegar una demo.</div></div>
               </div>
             </section>
 
@@ -2355,36 +2355,39 @@
             <div class="settings-checklist__items" id="settings-checklist-items"></div>
           </div>
           <div class="settings-grid">
-            <!-- Card 1: Credenciales de la cuenta (secretos): OBS AK/SK + MaaS API
-                 key. Un solo "Guardar", cifradas en la cuenta. -->
+            <!-- Card 1: Credenciales de la cuenta — AK/SK arriba; MaaS key + bucket
+                 de demos abajo. "Preparar bucket" sube los datasets. -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
                   <div class="settings-card__title">Credenciales de la cuenta</div>
-                  <div class="settings-card__hint">Se guardan cifradas: AK/SK de OBS y la API key de MaaS (modelos + chatbot).</div>
+                  <div class="settings-card__hint">AK/SK de OBS + API key de MaaS (se guardan cifradas) y el bucket de demos. <strong>Preparar bucket</strong> sube ahí los datasets de demo.</div>
                 </div>
               </div>
-              <div class="settings-fields" style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px;">
+              <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
               </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
+                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket">Preparar bucket</button>
                 <span id="settings-obs-status" class="settings-status"></span>
                 <span id="settings-maas-status" class="settings-status"></span>
               </div>
+              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
             <!-- Card 2: Infraestructura General — infra de la cuenta (pisa el
-                 terraform.tfvars) + bucket de demos. "Preparar" sube los datasets. -->
+                 terraform.tfvars del repo al armar cada deploy). -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-infra"/></svg></span>
                 <div>
                   <div class="settings-card__title">Infraestructura General</div>
-                  <div class="settings-card__hint">Infra de tu cuenta para los deploys y el bucket de demos (<strong>Preparar</strong> sube los datasets ahí). <span id="settings-hw-source"></span></div>
+                  <div class="settings-card__hint">VPC, subnet, security group, project id, región y AZ de tu cuenta — los usan los deploys. <span id="settings-hw-source"></span></div>
                 </div>
               </div>
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px;">
@@ -2394,14 +2397,11 @@
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-vpc">VPC ID</label><input class="form-input" id="settings-hw-vpc" autocomplete="off" placeholder="uuid"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-subnet">Subnet ID</label><input class="form-input" id="settings-hw-subnet" autocomplete="off" placeholder="uuid"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-sg">Security Group ID</label><input class="form-input" id="settings-hw-sg" autocomplete="off" placeholder="uuid"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
               </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-hw-save">Guardar</button>
-                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket">Preparar bucket</button>
                 <span id="settings-hw-status" class="settings-status"></span>
               </div>
-              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
             <!-- Card 4: Administración (solo admins, SA_ADMINS). Gestión de
@@ -6656,8 +6656,8 @@
       const c = state.obsCreds || {};
       const items = [
         { ok: !!(c.ak && c.sk && state._maasConfigured), label: '1. Credenciales (AK/SK + MaaS)' },
-        { ok: !!(hw.project_id && hw.vpc_id && hw.subnet_id && hw.security_group_id), label: '2. Infraestructura General' },
-        { ok: !!hw.demo_bucket, label: '3. Bucket + "Preparar"' },
+        { ok: !!hw.demo_bucket, label: '2. Bucket + "Preparar"' },
+        { ok: !!(hw.project_id && hw.vpc_id && hw.subnet_id && hw.security_group_id), label: '3. Infraestructura General' },
       ];
       box.innerHTML = items.map(i => `<span class="settings-checklist__item ${i.ok ? 'is-ok' : 'is-todo'}">${i.ok ? '✓' : '○'} ${escapeHtml(i.label)}</span>`).join('');
       wrap.hidden = false;
@@ -6708,8 +6708,8 @@
         });
         if (srcEl) srcEl.innerHTML = d.source === 'settings'
           ? '<span style="color:#16a34a;">✓ Los deploys usan esta cuenta.</span>'
-          : '<span style="color:var(--text-muted);">Hoy: fallback al terraform.tfvars.</span>';
-      } catch (_e) { if (srcEl) srcEl.textContent = '(no se pudo consultar el backend)'; }
+          : '';
+      } catch (_e) { if (srcEl) srcEl.textContent = ''; }
     }
 
     // El backend REEMPLAZA el bloque `huawei` entero (set_huawei_settings arma
@@ -6850,6 +6850,9 @@
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);
       _updateProductiveCredsStatus();
       refreshMaasKeyStatus();
+      // El bucket de demos vive en esta card: persistirlo (saveHuaweiSettings manda
+      // todos los campos huawei por id, así no pisa la infra de la otra card).
+      await saveHuaweiSettings(null);
       renderConfigChecklist();
       const st = document.getElementById('settings-obs-status');
       if (st) st.textContent = (!ak || !sk) ? '⚠ Falta AK o SK.' : '✓ Credenciales guardadas.';
