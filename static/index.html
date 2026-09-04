@@ -2355,31 +2355,26 @@
             <div class="settings-checklist__items" id="settings-checklist-items"></div>
           </div>
           <div class="settings-grid">
+            <!-- Card 1: TODAS las credenciales juntas (secretos): OBS AK/SK + MaaS
+                 API key. Se guardan cifradas en la cuenta con un solo "Guardar". -->
             <div class="settings-card">
               <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Credenciales OBS</div>
-                  <div class="settings-card__hint">AK/SK y bucket se guardan en tu cuenta. <strong>Preparar</strong> sube los datasets de demo a ese bucket (necesario antes de desplegar una demo).</div>
+                  <div class="settings-card__title">Credenciales</div>
+                  <div class="settings-card__hint">Se guardan cifradas en tu cuenta: AK/SK de OBS y la API key de MaaS (modelos + chatbot).</div>
                 </div>
               </div>
               <div class="settings-fields">
                 <div class="form-group settings-field" style="flex:1 1 190px;"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field" style="flex:1 1 190px;"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
-                <!-- El bucket va separado por una línea: AK/SK son secretos que
-                     quedan en el navegador, el bucket es un setting del
-                     servidor. "Preparar" es la acción de ESTE campo. -->
-                <div class="form-group settings-field settings-field--divided" style="flex:1 1 220px;">
-                  <label class="form-label" for="settings-hw-bucket">Bucket de demos</label>
-                  <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css">
-                  <button class="btn btn-secondary settings-field__action" id="settings-hw-preload" title="Sube los datasets de demo a este bucket OBS">Preparar</button>
-                </div>
+                <div class="form-group settings-field" style="flex:1 1 220px;"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
               </div>
               <div class="settings-actions settings-actions--raised">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
                 <span id="settings-obs-status" class="settings-status"></span>
+                <span id="settings-maas-status" class="settings-status"></span>
               </div>
-              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
             <!-- Card 2: cuenta Huawei Cloud del SA. Pisa el terraform.tfvars
@@ -2409,23 +2404,25 @@
               </div>
             </div>
 
-            <!-- Card 3: API key de MaaS. Mismo patrón que las otras dos:
-                 fila de campos + fila de acción al pie. -->
+            <!-- Card 3: Bucket de demos. El bucket OBS donde se cargan los datasets
+                 de demo; "Preparar" los sube. Se persiste con la cuenta Huawei. -->
             <div class="settings-card">
               <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-box"/></svg></span>
                 <div>
-                  <div class="settings-card__title">MaaS API Key</div>
-                  <div class="settings-card__hint">Una key para todos los modelos. Se guarda en el servidor y pisa la del <code>.env</code>.</div>
+                  <div class="settings-card__title">Bucket de demos</div>
+                  <div class="settings-card__hint">Bucket OBS donde viven los datasets de demo. <strong>Preparar</strong> los sube ahí (necesario antes de desplegar una demo). Es el bucket que usan los pipelines de las demos.</div>
                 </div>
               </div>
               <div class="settings-fields">
-                <div class="form-group settings-field" style="flex:1 1 240px;"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
+                <div class="form-group settings-field" style="flex:1 1 260px;"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
               </div>
               <div class="settings-actions">
-                <button class="btn btn-primary" id="settings-maas-save">Guardar key</button>
-                <span id="settings-maas-status" class="settings-status"></span>
+                <button class="btn btn-primary" id="settings-hw-bucket-save">Guardar</button>
+                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo a este bucket OBS">Preparar</button>
+                <span id="settings-hw-bucket-status" class="settings-status"></span>
               </div>
+              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
             <!-- Card 4: Administración (solo admins, SA_ADMINS). Gestión de
@@ -4360,7 +4357,7 @@
         log_file_content: state.logFileContent || '',
         obs_access_key: inputCfg.access_key_id || '',
         obs_secret_key: inputCfg.secret_access_key || '',
-        obs_bucket: inputCfg.bucket || '',
+        obs_bucket: inputCfg.bucket || demoBucket(),
         obs_endpoint: inputCfg.endpoint || '',
         obs_region: inputCfg.region || '',
         obs_prefix: inputCfg.prefix || '',
@@ -5212,6 +5209,13 @@
         read_existing_bucket: primary.slug !== 'custom',
         document_id: (LOG_EXAMPLES.find(e => e.id === primary.slug)?.dedupId) || '',
         obs_prefix: primary.obs_prefix || '',
+        // Bucket + creds de la config: garantizan que la ingesta (re)armada tras un
+        // reload use el mismo bucket que se preparó en ⚙ Configuración.
+        obs_bucket: demoBucket(),
+        obs_access_key: (state.obsCreds || {}).ak || '',
+        obs_secret_key: (state.obsCreds || {}).sk || '',
+        obs_endpoint: `https://obs.${hwRegion()}.myhuaweicloud.com`,
+        obs_region: hwRegion(),
         start_ingestion: false,
       };
       if (pipelines.length > 1) body.cases = pipelines.map(casesFrom);
@@ -6642,19 +6646,10 @@
         const d = await res.json();
         state._maasConfigured = !!(d.source && d.source !== 'none');
         renderConfigChecklist();
-        if (d.source === 'settings') {
-          statusEl.innerHTML = `<span style="color:#16a34a;">✓ Configurada en la plataforma (${escapeHtml(d.masked)})</span>
-            <button type="button" id="settings-maas-clear" class="btn-ghost">Borrar (volver a la del .env)</button>`;
-          statusEl.querySelector('#settings-maas-clear')?.addEventListener('click', async () => {
-            await fetch('/api/v1/settings/maas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: '' }) });
-            const keyIn = document.getElementById('settings-maas-key');
-            if (keyIn) keyIn.value = '';
-            renderSettingsView();   // re-pinta estado + mapa (la key efectiva cambió)
-          });
-        } else if (d.source === 'env') {
-          statusEl.innerHTML = `<span style="color:var(--text-muted);">Usando la del servidor (.env) (${escapeHtml(d.masked)}) — cargá una acá para usar los recursos del cliente.</span>`;
+        if (state._maasConfigured) {
+          statusEl.innerHTML = `<span style="color:#16a34a;">✓ MaaS API key configurada${d.masked ? ` (${escapeHtml(d.masked)})` : ''}</span>`;
         } else {
-          statusEl.innerHTML = '<span style="color:#dc2626;">⚠ Sin API key: los análisis con LLM y el chatbot van a fallar hasta configurarla.</span>';
+          statusEl.innerHTML = '<span style="color:#dc2626;">⚠ Falta la MaaS API key: sin ella el análisis con LLM y el chatbot fallan.</span>';
         }
       } catch (_e) { statusEl.textContent = '(no se pudo consultar el backend)'; }
     }
@@ -6848,17 +6843,15 @@
       }
     });
 
-    // Guarda en dos destinos distintos, porque en esta card conviven dos cosas:
-    // AK/SK son secretos y quedan en el navegador; el bucket de demos es un
-    // setting más de la cuenta y va al servidor con el resto (ver
-    // saveHuaweiSettings: manda el body completo para no pisar la infra).
+    // "Guardar" de la card Credenciales: guarda AK/SK + (si la escribieron) la
+    // MaaS API key, todo cifrado en la cuenta. El bucket ya NO se toca acá.
     document.getElementById('settings-obs-save')?.addEventListener('click', async () => {
       const ak = document.getElementById('settings-obs-ak').value.trim();
       const sk = document.getElementById('settings-obs-sk').value.trim();
+      const maasKey = document.getElementById('settings-maas-key')?.value.trim() || '';
       state.obsCreds.ak = ak;
       state.obsCreds.sk = sk;
       try { localStorage.setItem('obsCreds', JSON.stringify({ ak, sk })); } catch (_) {}
-      // Guardar en la cuenta del usuario (servidor) → persiste y sirve al entrar como owner.
       let okObs = true;
       try {
         const r = await fetch('/api/v1/settings/obs', {
@@ -6867,36 +6860,28 @@
         });
         okObs = r.ok;
       } catch (_) { okObs = false; }
-      // Refrescar los lugares que muestran las creds.
+      if (maasKey) {
+        try {
+          await fetch('/api/v1/settings/maas', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ api_key: maasKey }),
+          });
+          const keyIn = document.getElementById('settings-maas-key'); if (keyIn) keyIn.value = '';
+        } catch (_) {}
+      }
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);
       _updateProductiveCredsStatus();
+      refreshMaasKeyStatus();
       renderConfigChecklist();
-
       const st = document.getElementById('settings-obs-status');
-      const okBucket = await saveHuaweiSettings(st);
-      if (!st) return;
-      if (!ak || !sk) {
-        st.textContent = '⚠ Guardado incompleto (falta AK o SK).';
-      } else if (okObs && okBucket) {
-        st.textContent = '✓ Guardado en tu cuenta (AK/SK + bucket).';
-      } else if (okObs) {
-        st.textContent = '✓ AK/SK guardadas en tu cuenta.';
-      }
+      if (st) st.textContent = (!ak || !sk) ? '⚠ Falta AK o SK.' : '✓ Credenciales guardadas.';
     });
 
-    document.getElementById('settings-maas-save')?.addEventListener('click', async () => {
-      const keyIn = document.getElementById('settings-maas-key');
-      const maasKey = keyIn?.value.trim();
-      if (!maasKey) { setFieldError(keyIn, 'Ingresá la API key (o usá "Borrar" en el estado para volver a la del .env).'); return; }
-      clearFieldError(keyIn);
-      try {
-        await fetch('/api/v1/settings/maas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: maasKey }) });
-        keyIn.value = '';
-        toast('✓ MaaS API key configurada — los modelos usan esta key desde ahora.', 'success');
-        renderSettingsView();
-      } catch (_e) {
-        toast('No se pudo guardar la MaaS API key (¿backend caído?).', 'error');
-      }
+    // "Guardar" de la card Bucket de demos → persiste el bucket (con el resto de
+    // la cuenta Huawei; saveHuaweiSettings lee todos los campos por id).
+    document.getElementById('settings-hw-bucket-save')?.addEventListener('click', async () => {
+      const st = document.getElementById('settings-hw-bucket-status');
+      if (await saveHuaweiSettings(st) && st) st.textContent = '✓ Bucket guardado.';
     });
 
     // ── Modo productivo: leer la muestra del bucket + industry matching ────────
