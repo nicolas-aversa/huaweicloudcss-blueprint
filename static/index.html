@@ -2355,72 +2355,51 @@
             <div class="settings-checklist__items" id="settings-checklist-items"></div>
           </div>
           <div class="settings-grid">
-            <!-- Card 1: TODAS las credenciales juntas (secretos): OBS AK/SK + MaaS
-                 API key. Se guardan cifradas en la cuenta con un solo "Guardar". -->
+            <!-- Card 1: Credenciales de la cuenta (secretos): OBS AK/SK + MaaS API
+                 key. Un solo "Guardar", cifradas en la cuenta. -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Credenciales</div>
-                  <div class="settings-card__hint">Se guardan cifradas en tu cuenta: AK/SK de OBS y la API key de MaaS (modelos + chatbot).</div>
+                  <div class="settings-card__title">Credenciales de la cuenta</div>
+                  <div class="settings-card__hint">Se guardan cifradas: AK/SK de OBS y la API key de MaaS (modelos + chatbot).</div>
                 </div>
               </div>
-              <div class="settings-fields">
-                <div class="form-group settings-field" style="flex:1 1 190px;"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
-                <div class="form-group settings-field" style="flex:1 1 190px;"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field" style="flex:1 1 220px;"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
+              <div class="settings-fields" style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px;">
+                <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
               </div>
-              <div class="settings-actions settings-actions--raised">
+              <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
                 <span id="settings-obs-status" class="settings-status"></span>
                 <span id="settings-maas-status" class="settings-status"></span>
               </div>
             </div>
 
-            <!-- Card 2: cuenta Huawei Cloud del SA. Pisa el terraform.tfvars
-                 estático al armar cada deploy. El bucket de demos también se
-                 persiste acá, pero su campo vive en la card de OBS. -->
+            <!-- Card 2: Infraestructura General — infra de la cuenta (pisa el
+                 terraform.tfvars) + bucket de demos. "Preparar" sube los datasets. -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-infra"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Cuenta Huawei Cloud</div>
-                  <div class="settings-card__hint">Infra de tu cuenta para los deploys. Vacío usa el <code>terraform.tfvars</code> del repo. <span id="settings-hw-source"></span></div>
+                  <div class="settings-card__title">Infraestructura General</div>
+                  <div class="settings-card__hint">Infra de tu cuenta para los deploys y el bucket de demos (<strong>Preparar</strong> sube los datasets ahí). <span id="settings-hw-source"></span></div>
                 </div>
               </div>
-              <!-- Grilla 3×2 pareja: fila 1 identidad (project/región/AZ), fila 2
-                   red (VPC/subnet/SG). El bucket vive en la card de OBS. -->
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px;">
-                <div class="form-group"><label class="form-label" for="settings-hw-project">Project ID</label><input class="form-input" id="settings-hw-project" autocomplete="off" placeholder="32 caracteres hex"></div>
-                <div class="form-group"><label class="form-label" for="settings-hw-region">Región</label><input class="form-input" id="settings-hw-region" autocomplete="off" placeholder="la-south-2"></div>
-                <div class="form-group"><label class="form-label" for="settings-hw-az">Availability zone</label><input class="form-input" id="settings-hw-az" autocomplete="off" placeholder="la-south-2a"></div>
-                <div class="form-group"><label class="form-label" for="settings-hw-vpc">VPC ID</label><input class="form-input" id="settings-hw-vpc" autocomplete="off" placeholder="uuid"></div>
-                <div class="form-group"><label class="form-label" for="settings-hw-subnet">Subnet ID</label><input class="form-input" id="settings-hw-subnet" autocomplete="off" placeholder="uuid"></div>
-                <div class="form-group"><label class="form-label" for="settings-hw-sg">Security Group ID</label><input class="form-input" id="settings-hw-sg" autocomplete="off" placeholder="uuid"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-project">Project ID</label><input class="form-input" id="settings-hw-project" autocomplete="off" placeholder="32 caracteres hex"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-region">Región</label><input class="form-input" id="settings-hw-region" autocomplete="off" placeholder="la-south-2"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-az">Availability zone</label><input class="form-input" id="settings-hw-az" autocomplete="off" placeholder="la-south-2a"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-vpc">VPC ID</label><input class="form-input" id="settings-hw-vpc" autocomplete="off" placeholder="uuid"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-subnet">Subnet ID</label><input class="form-input" id="settings-hw-subnet" autocomplete="off" placeholder="uuid"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-sg">Security Group ID</label><input class="form-input" id="settings-hw-sg" autocomplete="off" placeholder="uuid"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
               </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-hw-save">Guardar</button>
+                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket">Preparar bucket</button>
                 <span id="settings-hw-status" class="settings-status"></span>
-              </div>
-            </div>
-
-            <!-- Card 3: Bucket de demos. El bucket OBS donde se cargan los datasets
-                 de demo; "Preparar" los sube. Se persiste con la cuenta Huawei. -->
-            <div class="settings-card">
-              <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-box"/></svg></span>
-                <div>
-                  <div class="settings-card__title">Bucket de demos</div>
-                  <div class="settings-card__hint">Bucket OBS donde viven los datasets de demo. <strong>Preparar</strong> los sube ahí (necesario antes de desplegar una demo). Es el bucket que usan los pipelines de las demos.</div>
-                </div>
-              </div>
-              <div class="settings-fields">
-                <div class="form-group settings-field" style="flex:1 1 260px;"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
-              </div>
-              <div class="settings-actions">
-                <button class="btn btn-primary" id="settings-hw-bucket-save">Guardar</button>
-                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo a este bucket OBS">Preparar</button>
-                <span id="settings-hw-bucket-status" class="settings-status"></span>
               </div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
@@ -6676,10 +6655,9 @@
       const hw = state.hwSettings || {};
       const c = state.obsCreds || {};
       const items = [
-        { ok: !!(c.ak && c.sk), label: '1. Credenciales OBS (AK/SK)' },
-        { ok: !!(hw.project_id && hw.vpc_id && hw.subnet_id && hw.security_group_id), label: '2. Cuenta Huawei (project + VPC/subnet/SG)' },
-        { ok: !!state._maasConfigured, label: '3. MaaS API key' },
-        { ok: !!hw.demo_bucket, label: '4. Bucket + "Preparar"' },
+        { ok: !!(c.ak && c.sk && state._maasConfigured), label: '1. Credenciales (AK/SK + MaaS)' },
+        { ok: !!(hw.project_id && hw.vpc_id && hw.subnet_id && hw.security_group_id), label: '2. Infraestructura General' },
+        { ok: !!hw.demo_bucket, label: '3. Bucket + "Preparar"' },
       ];
       box.innerHTML = items.map(i => `<span class="settings-checklist__item ${i.ok ? 'is-ok' : 'is-todo'}">${i.ok ? '✓' : '○'} ${escapeHtml(i.label)}</span>`).join('');
       wrap.hidden = false;
@@ -6877,12 +6855,6 @@
       if (st) st.textContent = (!ak || !sk) ? '⚠ Falta AK o SK.' : '✓ Credenciales guardadas.';
     });
 
-    // "Guardar" de la card Bucket de demos → persiste el bucket (con el resto de
-    // la cuenta Huawei; saveHuaweiSettings lee todos los campos por id).
-    document.getElementById('settings-hw-bucket-save')?.addEventListener('click', async () => {
-      const st = document.getElementById('settings-hw-bucket-status');
-      if (await saveHuaweiSettings(st) && st) st.textContent = '✓ Bucket guardado.';
-    });
 
     // ── Modo productivo: leer la muestra del bucket + industry matching ────────
     // Lo dispara "Siguiente" del paso 1 (no hay botón aparte: dos CTAs para la
