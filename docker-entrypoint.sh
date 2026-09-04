@@ -42,4 +42,5 @@ if [ -z "$APP_SECRET_KEY" ] && [ -n "$APP_DATA_DIR" ]; then
   export APP_SECRET_KEY="$(cat "$SECRET_FILE")"
 fi
 
-exec uvicorn main:app --host 0.0.0.0 --port 8000
+# Puerto: 8000 por default (Docker/compose); en PaaS como Render se respeta $PORT.
+exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"

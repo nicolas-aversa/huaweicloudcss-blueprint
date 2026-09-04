@@ -1,8 +1,8 @@
-# Runbook de entrega — CSS Accelerator (para el SA que la recibe)
+# Runbook de entrega — CSS Accelerator
 
 Esta app te deja mostrar, sobre **Huawei Cloud CSS (OpenSearch + Logstash)**, el camino de un
 log crudo → pipeline → dashboards → chatbot NL→PPL → forecasts. Corre en esta VM (Docker) y
-despliega en **tu** cuenta Huawei. Todo se configura desde la UI; no toques archivos.
+despliega en **tu** cuenta Huawei. Todo se configura desde la UI.
 
 ---
 
@@ -16,8 +16,6 @@ cd ~/huaweicloudcss-blueprint
   Let's Encrypt, sin dominio propio). El script te imprime la URL.
 - La auth se activa sola (clave de sesión autogenerada). **El primer usuario que se registra
   queda como ADMIN.**
-- ¿Tenés dominio propio? `export APP_DOMAIN=tudominio` (DNS → la IP) y corré `./hosted-up.sh`.
-- Fallback: si no se detecta la EIP, arranca por HTTP en `:80` (`http://<EIP>/`).
 
 ## 2. Entrar y configurar (⚙ Configuración)
 Registrate con tu email + una contraseña (tu primer ingreso crea la cuenta). Andá a
