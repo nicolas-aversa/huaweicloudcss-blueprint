@@ -692,13 +692,6 @@
     .admin-allow-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 7px; border-radius: var(--radius-pill); }
     .admin-allow-remove { flex: none; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary); }
     .admin-allow-remove:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
-    /* Checklist de primer uso (Configuración) */
-    .settings-checklist { margin-bottom: 18px; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); }
-    .settings-checklist__title { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
-    .settings-checklist__items { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
-    .settings-checklist__item { font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-    .settings-checklist__item.is-ok { color: var(--accent-green); }
-    .settings-checklist__item.is-todo { color: var(--text-muted); }
 
     /* ── App views (router de secciones, mismo patrón que step-pane) ─ */
     .app-view { display: none; }
@@ -2348,12 +2341,6 @@
              campos que termina en su acción. `is-settings` la centra vertical
              (entra en una pantalla), igual que el Home. -->
         <div class="app-view is-settings" id="view-settings">
-          <!-- Checklist de primer uso: qué falta para poder desplegar una demo.
-               Se completa en renderConfigChecklist(). -->
-          <div class="settings-checklist" id="settings-checklist" hidden>
-            <span class="settings-checklist__title">Para desplegar una demo (en orden):</span>
-            <div class="settings-checklist__items" id="settings-checklist-items"></div>
-          </div>
           <div class="settings-grid">
             <!-- Card 1: Credenciales de la cuenta — AK/SK arriba; MaaS key + bucket
                  de demos abajo. "Preparar bucket" sube los datasets. -->
@@ -6624,13 +6611,12 @@
         const res = await fetch('/api/v1/settings/maas');
         const d = await res.json();
         state._maasConfigured = !!(d.source && d.source !== 'none');
-        renderConfigChecklist();
-        if (state._maasConfigured) {
-          statusEl.innerHTML = `<span style="color:#16a34a;">✓ MaaS API key configurada${d.masked ? ` (${escapeHtml(d.masked)})` : ''}</span>`;
-        } else {
-          statusEl.innerHTML = '<span style="color:#dc2626;">⚠ Falta la MaaS API key: sin ella el análisis con LLM y el chatbot fallan.</span>';
-        }
-      } catch (_e) { statusEl.textContent = '(no se pudo consultar el backend)'; }
+        // Solo mostramos el ✓ cuando está configurada; sin ella no alertamos
+        // proactivamente (el botón Guardar valida que la cargues).
+        statusEl.innerHTML = state._maasConfigured
+          ? `<span style="color:#16a34a;">✓ MaaS API key configurada${d.masked ? ` (${escapeHtml(d.masked)})` : ''}</span>`
+          : '';
+      } catch (_e) { statusEl.textContent = ''; }
     }
 
     // Al entrar a la vista: precargar OBS del navegador + estado de la key + mapa.
@@ -6646,22 +6632,9 @@
       renderConfigChecklist();
     }
 
-    // Checklist de "qué falta para desplegar" (arriba de Configuración). Lee del
-    // estado en memoria (state.hwSettings / obsCreds / _maasConfigured).
-    function renderConfigChecklist() {
-      const box = document.getElementById('settings-checklist-items');
-      const wrap = document.getElementById('settings-checklist');
-      if (!box || !wrap) return;
-      const hw = state.hwSettings || {};
-      const c = state.obsCreds || {};
-      const items = [
-        { ok: !!(c.ak && c.sk && state._maasConfigured), label: '1. Credenciales (AK/SK + MaaS)' },
-        { ok: !!hw.demo_bucket, label: '2. Bucket + "Preparar"' },
-        { ok: !!(hw.project_id && hw.vpc_id && hw.subnet_id && hw.security_group_id), label: '3. Infraestructura General' },
-      ];
-      box.innerHTML = items.map(i => `<span class="settings-checklist__item ${i.ok ? 'is-ok' : 'is-todo'}">${i.ok ? '✓' : '○'} ${escapeHtml(i.label)}</span>`).join('');
-      wrap.hidden = false;
-    }
+    // (El checklist de primer uso se removió: los botones Guardar validan que estén
+    // todos los campos.) No-op para las llamadas existentes.
+    function renderConfigChecklist() {}
 
     // ── Cuenta Huawei Cloud (settings del servidor: pisan terraform.tfvars) ──
     // Defaults efectivos para el resto de la app (bucket de demos y región de
@@ -6756,6 +6729,16 @@
 
     document.getElementById('settings-hw-save')?.addEventListener('click', async () => {
       const st = document.getElementById('settings-hw-status');
+      // Todos los campos de infra son obligatorios para desplegar.
+      const ok = validateRequired([
+        { id: 'settings-hw-project', label: 'el Project ID', test: v => /^[0-9a-f]{32}$/i.test(v), msg: 'El Project ID son 32 caracteres hex.' },
+        { id: 'settings-hw-region', label: 'la región' },
+        { id: 'settings-hw-az', label: 'la Availability zone', test: v => { const r = (document.getElementById('settings-hw-region')?.value || '').trim().toLowerCase(); return !!v && !!r && v.toLowerCase().startsWith(r); }, msg: 'La AZ debe empezar con la región (ej. la-south-2a).' },
+        { id: 'settings-hw-vpc', label: 'la VPC ID' },
+        { id: 'settings-hw-subnet', label: 'la Subnet ID' },
+        { id: 'settings-hw-sg', label: 'el Security Group ID' },
+      ]);
+      if (!ok) { if (st) st.textContent = ''; return; }
       if (await saveHuaweiSettings(st) && st) st.textContent = '✓ Guardado en el servidor.';
     });
 
@@ -6824,6 +6807,15 @@
     // "Guardar" de la card Credenciales: guarda AK/SK + (si la escribieron) la
     // MaaS API key, todo cifrado en la cuenta. El bucket ya NO se toca acá.
     document.getElementById('settings-obs-save')?.addEventListener('click', async () => {
+      // Todos los campos de credenciales son obligatorios. La MaaS key se tolera
+      // vacía SOLO si ya estaba configurada (no la re-mostramos por ser secreto).
+      const okReq = validateRequired([
+        { id: 'settings-obs-ak', label: 'el Access Key (AK)' },
+        { id: 'settings-obs-sk', label: 'el Secret Access Key (SK)' },
+        { id: 'settings-maas-key', label: 'la MaaS API key', test: v => !!v || !!state._maasConfigured, msg: 'Ingresá la MaaS API key.' },
+        { id: 'settings-hw-bucket', label: 'el Bucket de demos' },
+      ]);
+      if (!okReq) return;
       const ak = document.getElementById('settings-obs-ak').value.trim();
       const sk = document.getElementById('settings-obs-sk').value.trim();
       const maasKey = document.getElementById('settings-maas-key')?.value.trim() || '';

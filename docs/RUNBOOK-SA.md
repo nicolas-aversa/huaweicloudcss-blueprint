@@ -1,8 +1,8 @@
-# Runbook de entrega — CSS Accelerator
+# Runbook de entrega — CSS Accelerator (para el SA que la recibe)
 
 Esta app te deja mostrar, sobre **Huawei Cloud CSS (OpenSearch + Logstash)**, el camino de un
 log crudo → pipeline → dashboards → chatbot NL→PPL → forecasts. Corre en esta VM (Docker) y
-despliega en **tu** cuenta Huawei. Todo se configura desde la UI.
+despliega en **tu** cuenta Huawei. Todo se configura desde la UI; no toques archivos.
 
 ---
 
@@ -16,18 +16,22 @@ cd ~/huaweicloudcss-blueprint
   Let's Encrypt, sin dominio propio). El script te imprime la URL.
 - La auth se activa sola (clave de sesión autogenerada). **El primer usuario que se registra
   queda como ADMIN.**
+- ¿Tenés dominio propio? `export APP_DOMAIN=tudominio` (DNS → la IP) y corré `./hosted-up.sh`.
+- Fallback: si no se detecta la EIP, arranca por HTTP en `:80` (`http://<EIP>/`).
 
 ## 2. Entrar y configurar (⚙ Configuración)
 Registrate con tu email + una contraseña (tu primer ingreso crea la cuenta). Andá a
-**⚙ Configuración** — arriba tenés un **checklist** de lo que falta. Completá **en orden**:
-1. **Credenciales OBS** — tu Access Key ID / Secret Access Key de Huawei (My Credentials).
-2. **Cuenta Huawei Cloud** — Project ID (32 hex), Región, Availability Zone, y VPC / Subnet /
-   Security Group (los tres juntos; tienen que existir en esa región). Guardar.
-3. **MaaS API Key** — tu key de ModelArts MaaS (sin ella no andan el análisis con LLM ni el chatbot).
-4. **Bucket de demos** + botón **Preparar** — escribí el nombre del bucket y tocá *Preparar*: sube
-   los datasets de demo a tu bucket OBS (necesario antes de la primera demo).
+**⚙ Configuración** y completá las dos cards (el botón **Guardar** de cada una valida que
+estén todos los campos):
 
-Cuando el checklist esté en ✓, estás listo para desplegar.
+1. **Credenciales de la cuenta** — Access Key ID / Secret Access Key de OBS (My Credentials),
+   tu **MaaS API key** (ModelArts MaaS; sin ella no andan el análisis con LLM ni el chatbot), y el
+   **Bucket de demos**. Tocá **Preparar bucket** para subir los datasets de demo a ese bucket
+   (necesario antes de la primera demo). Guardar.
+2. **Infraestructura General** — Project ID (32 hex), Región, Availability Zone, y VPC / Subnet /
+   Security Group (existentes en esa región). Guardar.
+
+Con eso estás listo para desplegar.
 
 ## 3. Presentar una demo
 1. **Crear pipeline** → elegí uno o varios casos (SIEM, e-commerce, streaming, salud, ALyC,
