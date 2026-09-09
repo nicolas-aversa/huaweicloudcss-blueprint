@@ -1611,6 +1611,21 @@
       border-color: var(--accent); background: var(--accent-tint);
     }
     #log-file-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    /* Sub-toggle del paso 1 (origen del dataset): más chico que el toggle
+       principal, para que se lea como una elección dentro del paso. */
+    .src-toggle { margin-bottom: 12px; }
+    .src-toggle .mode-toggle__btn { padding: 6px 16px; font-size: 12.5px; }
+    .live-source__hints { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+    .live-source__hints > div { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+    .live-source__hints span {
+      flex: 0 0 46px; font-weight: 700; color: var(--text-primary);
+    }
+    .live-source__hints code {
+      flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px;
+      background: var(--bg-tertiary); padding: 3px 6px; border-radius: 4px;
+      color: var(--text-secondary); overflow-x: auto; white-space: pre;
+    }
+
     /* Vía secundaria del paso 1 (fuente en vivo): colapsada, discreta, para que
        la decisión por default siga siendo "subo mi archivo". */
     .live-source { margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px; }
@@ -2637,90 +2652,74 @@
 
 
             <div class="form-group hidden" id="rawlog-group">
-              <!-- Entrada PRINCIPAL del Builder: subir el archivo de log. Se guarda
-                   con el dataset y se sube a OBS, así el dataset es repetible
-                   (se despliega las veces que quieras, igual que un caso built-in).
-                   `_handleLogFile()` toma la primera línea de datos como muestra para
-                   que GLM-5.2 detecte la estructura. -->
-              <label class="form-label">Subí el archivo de log</label>
-              <div id="log-file-drop" tabindex="0" role="button"
-                   style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
-                <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
-                <div style="font-size:13.5px; font-weight:600; color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
-                <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
+              <!-- Entrada PRINCIPAL: traer el dataset. Dos formas equivalentes —
+                   subirlo desde la máquina, o apuntar a uno que ya está en OBS.
+                   En ambas se saca una línea de muestra para que GLM-5.2 detecte
+                   la estructura (`_handleLogFile` / `analyzeProductiveBucket`). -->
+              <label class="form-label">¿De dónde traemos los datos?</label>
+              <div class="mode-toggle src-toggle" id="source-toggle" role="group" aria-label="Origen del dataset">
+                <button type="button" class="mode-toggle__btn is-active" data-src="file" aria-pressed="true">Subir un archivo</button>
+                <button type="button" class="mode-toggle__btn" data-src="obs" aria-pressed="false">Ya está en OBS</button>
               </div>
-              <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
-              <div id="log-file-meta" class="form-hint hidden" style="margin-top:8px; color:var(--accent);"></div>
+
+              <div id="source-pane-file">
+                <div id="log-file-drop" tabindex="0" role="button"
+                     style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
+                  <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
+                  <div style="font-size:13.5px; font-weight:600; color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
+                  <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
+                </div>
+                <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
+                <div id="log-file-meta" class="form-hint hidden" style="margin-top:8px; color:var(--accent);"></div>
+              </div>
+
+              <div id="source-pane-obs" class="hidden">
+                <p class="form-hint" style="margin:0 0 12px;">Si el log ya está en un bucket, Logstash lo lee de ahí: no hace falta volver a subirlo. Indicá dónde está y leemos una muestra para detectar la estructura.</p>
+                <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                  <div class="form-group" style="flex:1; min-width:180px;">
+                    <label class="form-label" style="font-size:11px;">Bucket</label>
+                    <input type="text" class="form-input" id="productive-bucket" placeholder="mi-bucket-logs" style="font-size:12px;">
+                  </div>
+                  <div class="form-group" style="flex:1; min-width:180px;">
+                    <label class="form-label" style="font-size:11px;">Prefijo</label>
+                    <input type="text" class="form-input" id="productive-prefix" placeholder="logs/" style="font-size:12px;">
+                  </div>
+                  <div class="form-group" style="flex:1; min-width:150px;">
+                    <label class="form-label" style="font-size:11px;">Región</label>
+                    <input type="text" class="form-input" id="productive-region" value="la-south-2" style="font-size:12px;">
+                  </div>
+                  <div class="form-group" style="flex:2; min-width:220px;">
+                    <label class="form-label" style="font-size:11px;">Endpoint</label>
+                    <input type="text" class="form-input" id="productive-endpoint" value="https://obs.la-south-2.myhuaweicloud.com" style="font-size:12px;">
+                  </div>
+                </div>
+                <div id="productive-creds-status" style="font-size:11px; margin-bottom:8px;"></div>
+                <button class="btn btn-secondary btn-sm" type="button" id="obs-read-sample"><svg class="icon"><use href="#ic-search"/></svg> Leer una muestra</button>
+              </div>
 
               <div class="form-group hidden" id="rawlog-sample-group" style="margin:12px 0 0;">
                 <label class="form-label">Registro de muestra</label>
                 <pre id="rawlog-sample-preview" style="margin:0; padding:10px 12px; background:var(--bg-tertiary); border-radius:var(--radius-md); font-family:var(--font-mono); font-size:11.5px; line-height:1.5; white-space:pre-wrap; word-break:break-all; color:var(--text-secondary); max-height:120px; overflow:auto;"></pre>
               </div>
 
-              <!-- Alternativa: sin archivo, pegás unas líneas. Sirve cuando los datos
-                   no los traés vos sino que llegan en vivo desde la fuente del cliente
-                   (Kafka/Beats/JDBC/OBS ya levantados) → el caso se guarda sin dataset. -->
-              <!-- Vía secundaria, colapsada: cuando los datos no los traés vos
-                   sino que llegan en vivo de una fuente del cliente. Arranca
-                   cerrada porque el camino normal es subir el archivo. -->
+              <!-- Vía secundaria, colapsada: los datos NO los traés vos, llegan en
+                   vivo de una fuente del cliente (Kafka/Beats/JDBC). El dataset se
+                   guarda sin datos y esa fuente tiene que estar levantada. -->
               <details class="live-source">
                 <summary class="live-source__summary">
                   <svg class="icon"><use href="#ic-chevron"/></svg>
-                  No tengo el archivo: los datos llegan de una fuente en vivo
+                  Los datos llegan en vivo (Kafka, Beats, base de datos)
                 </summary>
                 <div class="live-source__body">
-                  <p class="form-hint" style="margin:0 0 12px;">Pegá 2-3 líneas de muestra para que el LLM detecte la estructura. El dataset se guarda sin datos: al desplegar, Logstash los lee de la fuente que configures en el paso 3 — que tiene que estar levantada.</p>
-              <label class="form-label">Pegá unas líneas del log</label>
-              <textarea id="builder-paste" class="form-input" rows="6"
-                placeholder="Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV… cualquier formato). GLM-5.2 detecta la estructura y arma el pipeline."
-                style="font-family:var(--font-mono); font-size:12px; resize:vertical; line-height:1.5;"></textarea>
-
-              <!-- Panel unificado: ¿de dónde sacar las líneas? + atajo OBS -->
-              <div style="margin-top:10px; border:1px solid var(--border-subtle); border-radius:var(--radius-md); overflow:hidden;">
-                <div style="padding:8px 14px; background:var(--bg-tertiary); font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted);">¿De dónde sacar las líneas?</div>
-                <div style="padding:10px 14px; display:flex; flex-direction:column; gap:8px;">
-                  <div style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--text-secondary);">
-                    <span style="flex:0 0 70px; display:flex; align-items:center; gap:5px; font-weight:700; color:var(--text-primary);"><svg class="icon" style="width:14px;height:14px;color:var(--accent);"><use href="#ic-cloud"/></svg>OBS</span>
-                    <span style="flex:1;">Descargá un objeto del bucket, o usá el atajo de abajo para leerlo directo.</span>
+                  <p class="form-hint" style="margin:0 0 12px;">Pegá 2-3 líneas de muestra para que el LLM detecte la estructura. El dataset se guarda sin datos: al desplegar, Logstash los lee de la fuente que configures en el paso 3 — que tiene que estar levantada y ser alcanzable.</p>
+                  <textarea id="builder-paste" class="form-input" rows="5"
+                    placeholder="Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV… cualquier formato)."
+                    style="font-family:var(--font-mono); font-size:12px; resize:vertical; line-height:1.5;"></textarea>
+                  <div class="live-source__hints">
+                    <div><span>Kafka</span><code>kafka-console-consumer --topic &lt;topic&gt; --bootstrap-server &lt;host:9092&gt; --max-messages 3</code></div>
+                    <div><span>Beats</span><code>tail -n 3 /var/log/tu-app.log</code></div>
+                    <div><span>JDBC</span><code>SELECT * FROM &lt;tabla&gt; LIMIT 3</code></div>
                   </div>
-                  <div style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--text-secondary);">
-                    <span style="flex:0 0 70px; display:flex; align-items:center; gap:5px; font-weight:700; color:var(--text-primary);"><svg class="icon" style="width:14px;height:14px;color:var(--accent);"><use href="#ic-queue"/></svg>Kafka</span>
-                    <span style="flex:1; font-family:var(--font-mono); font-size:11px; background:var(--bg-tertiary); padding:3px 6px; border-radius:4px; white-space:pre-wrap;">kafka-console-consumer --topic <span style="color:#dc2626;font-weight:700;">&lt;topic&gt;</span> --bootstrap-server <span style="color:#dc2626;font-weight:700;">&lt;host:9092&gt;</span> --max-messages 3</span>
-                  </div>
-                  <div style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--text-secondary);">
-                    <span style="flex:0 0 70px; display:flex; align-items:center; gap:5px; font-weight:700; color:var(--text-primary);"><svg class="icon" style="width:14px;height:14px;color:var(--accent);"><use href="#ic-activity"/></svg>Beats</span>
-                    <span style="flex:1; font-family:var(--font-mono); font-size:11px; background:var(--bg-tertiary); padding:3px 6px; border-radius:4px; white-space:pre-wrap;">tail -n 3 <span style="color:#dc2626;font-weight:700;">&lt;/var/log/tu-app.log&gt;</span>  <span style="color:var(--text-muted);"># el path de filebeat.inputs, no el registry</span></span>
-                  </div>
-                  <div style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--text-secondary);">
-                    <span style="flex:0 0 70px; display:flex; align-items:center; gap:5px; font-weight:700; color:var(--text-primary);"><svg class="icon" style="width:14px;height:14px;color:var(--accent);"><use href="#ic-database"/></svg>JDBC</span>
-                    <span style="flex:1; font-family:var(--font-mono); font-size:11px; background:var(--bg-tertiary); padding:3px 6px; border-radius:4px; white-space:pre-wrap;">SELECT <span style="color:#dc2626;font-weight:700;">*</span> FROM <span style="color:#dc2626;font-weight:700;">&lt;tabla&gt;</span> LIMIT 3. Cualquier query vale (joins, filtros, etc.)</span>
-                  </div>
-                </div>
-                <!-- Atajo OBS inline -->
-                <details style="border-top:1px solid var(--border-subtle);">
-                  <summary style="cursor:pointer; font-size:12px; padding:8px 14px; color:var(--accent); font-weight:600;">Leer una muestra desde OBS</summary>
-                  <div style="padding:4px 14px 12px; display:flex; gap:12px; flex-wrap:wrap;">
-                    <div class="form-group" style="flex:1; min-width:180px;">
-                      <label class="form-label" style="font-size:11px;">Bucket</label>
-                      <input type="text" class="form-input" id="productive-bucket" placeholder="mi-bucket-logs" style="font-size:12px;">
-                    </div>
-                    <div class="form-group" style="flex:1; min-width:120px;">
-                      <label class="form-label" style="font-size:11px;">Prefijo</label>
-                      <input type="text" class="form-input" id="productive-prefix" placeholder="logs/" style="font-size:12px;">
-                    </div>
-                    <div class="form-group" style="flex:1; min-width:120px;">
-                      <label class="form-label" style="font-size:11px;">Región</label>
-                      <input type="text" class="form-input" id="productive-region" value="la-south-2" style="font-size:12px;">
-                    </div>
-                    <div class="form-group" style="flex:2; min-width:200px;">
-                      <label class="form-label" style="font-size:11px;">Endpoint</label>
-                      <input type="text" class="form-input" id="productive-endpoint" value="https://obs.la-south-2.myhuaweicloud.com" style="font-size:12px;">
-                    </div>
-                  </div>
-                  <div id="productive-creds-status" style="font-size:11px; padding:0 14px 10px;"></div>
-                </details>
-              </div>
-
                 </div>
               </details>
 
@@ -3059,6 +3058,8 @@
       // markup arranca con el toggle en "demo" y varios chequeos comparan contra
       // 'demo' antes de que el usuario toque el toggle.
       deployMode: 'demo',
+      // 'file' (subir .log) | 'obs' (ya está en un bucket) — panel del paso 1.
+      sourceMode: 'file',
       logFileContent: '',
       logFileName: '',
       logFileLines: 0,
@@ -6548,6 +6549,8 @@
         if (sampleGroup) sampleGroup.classList.add('hidden');
         const samplePre = document.getElementById('rawlog-sample-preview');
         if (samplePre) samplePre.textContent = '';
+        // El paso arranca siempre en "Subir un archivo", que es el camino normal.
+        if (typeof switchSourceMode === 'function') switchSourceMode('file');
         _setExampleIndex('logs');
         return;
       }
@@ -7021,7 +7024,13 @@
           btn.disabled = true;
           const prev = btn.innerHTML;
           let ok;
-          if (pasted) {
+          // Con el panel OBS activo se lee la muestra del bucket; si no, se
+          // analiza lo pegado (fuente en vivo). El archivo subido ya dejó su
+          // muestra en #raw-log, así que no entra por acá.
+          if (state.sourceMode === 'obs' && !pasted) {
+            btn.innerHTML = 'Leyendo muestra de OBS…';
+            ok = await analyzeProductiveBucket();
+          } else if (pasted) {
             btn.innerHTML = 'Analizando con GLM-5.2…';
             const rawLogEl = document.getElementById('raw-log');
             if (rawLogEl) rawLogEl.value = pasted;
@@ -7030,8 +7039,8 @@
             if (ok) { updateProductiveStep2(); }
             else if (errEl) errEl.textContent = 'No se pudo analizar el log: ' + (r.error || 'error');
           } else {
-            btn.innerHTML = 'Analizando muestra…';
-            ok = await analyzeProductiveBucket();
+            if (errEl) errEl.textContent = 'Subí un archivo, leé una muestra de OBS, o pegá unas líneas.';
+            ok = false;
           }
           btn.disabled = false;
           btn.innerHTML = prev;
@@ -7408,6 +7417,35 @@
     // ── Modo productivo: leer la muestra del bucket + industry matching ────────
     // Lo dispara "Siguiente" del paso 1 (no hay botón aparte: dos CTAs para la
     // misma acción confundían). Devuelve true si se puede avanzar al paso 2.
+    // ── Origen del dataset (paso 1) ────────────────────────────────────────
+    // Subir el archivo y leerlo de OBS traen el MISMO dataset: son dos paneles
+    // del mismo paso, no dos flujos. `state.sourceMode` decide cuál se usa al
+    // apretar Siguiente.
+    function switchSourceMode(src) {
+      state.sourceMode = src;
+      document.querySelectorAll('#source-toggle .mode-toggle__btn').forEach(b => {
+        const on = b.dataset.src === src;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', String(on));
+      });
+      document.getElementById('source-pane-file')?.classList.toggle('hidden', src !== 'file');
+      document.getElementById('source-pane-obs')?.classList.toggle('hidden', src !== 'obs');
+      if (src === 'obs') _updateProductiveCredsStatus();
+    }
+    document.getElementById('source-toggle')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mode-toggle__btn');
+      if (btn) switchSourceMode(btn.dataset.src);
+    });
+    document.getElementById('obs-read-sample')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      const prev = btn.innerHTML;
+      btn.innerHTML = 'Leyendo…';
+      try { await analyzeProductiveBucket(); } finally {
+        btn.disabled = false; btn.innerHTML = prev;
+      }
+    });
+
     async function analyzeProductiveBucket() {
       const statusEl = document.getElementById('productive-analyze-status');
       const matchPanel = document.getElementById('industry-match-panel');
