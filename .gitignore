@@ -41,3 +41,6 @@ terraform/.pipelines.json
 # con credenciales) y el env con el secreto de sesión. NUNCA versionar.
 data/
 .env.hosted
+# Historial de ejecuciones en single-user (en hosted vive bajo data/).
+runs/
+jobs/

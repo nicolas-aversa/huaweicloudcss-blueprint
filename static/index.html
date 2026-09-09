@@ -733,6 +733,43 @@
       background: rgba(22, 163, 74, 0.1);
       color: var(--accent-green);
     }
+
+    /* ── Vista Actividad: historial de ejecuciones ───────────────────────── */
+    .activity-row {
+      display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+      padding: 12px 14px; margin-bottom: 8px; font-family: inherit; cursor: pointer;
+      background: var(--bg-primary); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md); box-shadow: var(--shadow-xs);
+      transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
+    }
+    .activity-row:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); }
+    .activity-row__tile {
+      flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px;
+      background: var(--accent-tint); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .activity-row__tile .icon { width: 15px; height: 15px; }
+    .activity-row__title {
+      display: block; font-size: 13px; font-weight: 600; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .activity-row__meta { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+    .activity-step {
+      display: flex; align-items: flex-start; gap: 9px; padding: 7px 0;
+      font-size: 13px; color: var(--text-secondary);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .activity-step:last-child { border-bottom: none; }
+    .activity-step__why {
+      display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px;
+      font-family: var(--font-mono); word-break: break-word;
+    }
+    .activity-log {
+      margin: 10px 0 0; padding: 12px 14px; max-height: 380px; overflow: auto;
+      background: var(--bg-tertiary); border-radius: var(--radius-md);
+      font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+      color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
+    }
     .status-pill__dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--accent-green);
@@ -1487,6 +1524,22 @@
       max-width: 100%; opacity: 0.85;
     }
     .example-card.is-disabled { opacity: 0.6; cursor: not-allowed; }
+    /* ✕ para borrar un caso creado desde el Builder. La card es position:static,
+       así que se ancla al grupo con un margin-left:auto en vez de absolute. */
+    .example-card { position: relative; }
+    .example-card__del {
+      position: absolute; top: 3px; right: 3px; width: 17px; height: 17px;
+      border-radius: 5px; display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); background: transparent; opacity: 0;
+      transition: opacity .14s var(--ease), color .14s var(--ease), background .14s var(--ease);
+    }
+    .example-card__del .icon { width: 11px; height: 11px; }
+    .example-card:hover .example-card__del, .example-card__del:focus-visible { opacity: 1; }
+    .example-card__del:hover { color: var(--accent-red); background: var(--accent-red-tint); }
+    /* Drop-zone del Builder: feedback al arrastrar un archivo encima. */
+    #log-file-drop:hover, #log-file-drop.is-dragover {
+      border-color: var(--accent); background: var(--accent-tint);
+    }
     .example-card.is-custom { background: var(--accent-red-tint); }
     .example-card.is-custom .example-card__tile { background: var(--accent-red); color: #fff; }
     .example-card.is-custom .example-card__label { color: var(--accent-red); }
@@ -2161,6 +2214,11 @@
           <span class="nav-dot hidden" id="nav-infra-dot"></span>
         </button>
 
+        <button class="nav-item" data-view="activity" type="button">
+          <span class="nav-item__icon"><svg class="icon"><use href="#ic-clock"/></svg></span>
+          <span class="nav-item__label">Actividad</span>
+        </button>
+
         <button class="nav-item" data-view="settings" type="button">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-settings"/></svg></span>
           <span class="nav-item__label" id="nav-settings-label">Configuración</span>
@@ -2213,7 +2271,7 @@
           <section class="hero">
             <span class="eyebrow eyebrow--muted">Kit de preventa · Huawei Cloud CSS</span>
             <h1 class="hero__title">Del log crudo a OpenSearch,<br><span class="accent">con dashboards y chatbot</span>.</h1>
-            <p class="hero__sub" id="home-hero-sub">El pipeline lo escribe el LLM. Vos elegís si termina en un cluster desplegado o en un kit para el cliente.</p>
+            <p class="hero__sub" id="home-hero-sub">El pipeline lo escribe el LLM. Elegí un caso listo o traé el log del cliente y guardalo como un caso nuevo.</p>
             <!-- La entrada al wizard son los dos caminos de abajo; acá solo
                  aparece el atajo a infraestructura cuando hay entorno activo. -->
             <div class="hero__actions">
@@ -2240,7 +2298,7 @@
                 <h2 class="path__name">Custom builder</h2>
                 <span class="path__badge">Sin tocar sus datos</span>
               </div>
-              <p class="path__lead">El log del cliente convertido en un kit para desplegar juntos por consola.</p>
+              <p class="path__lead">El log del cliente convertido en un caso de demo propio, listo para desplegar.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Empezar con mi log <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
           </section>
@@ -2288,14 +2346,18 @@
                 <span style="flex:none; width:30px; height:30px; border-radius:8px; background:var(--accent-tint); color:var(--accent); display:inline-flex; align-items:center; justify-content:center;"><svg class="icon" style="width:17px;height:17px;"><use href="#ic-rocket"/></svg></span>
                 <h2 style="font-size:16px; font-weight:700; color:var(--text-primary); margin:0;">2 · Usarlo</h2>
               </div>
-              <p class="form-hint" style="margin:0 0 10px;">Dos caminos, según si querés desplegar o llevarte un kit.</p>
+              <p class="form-hint" style="margin:0 0 10px;">Dos caminos: usar un caso ya armado, o crear el tuyo con el log del cliente.</p>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-rocket"/></svg>Demo</span>
                 <div style="min-width:0;"><div class="guide-step-t">Despliega de verdad en tu cuenta</div><div class="form-hint" style="margin-top:2px;"><strong>Crear pipeline</strong> → elegí uno o varios verticales → <strong>Desplegar</strong>. El primer deploy tarda ~20 min (clusters CSS); los siguientes reusan el entorno. Después, en <strong>Mi Infraestructura</strong>, completá la puesta en marcha: (1) index template + dashboards, (2) iniciar ingesta, (3) capabilities (chatbot + forecasts).</div></div>
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-code"/></svg>Builder</span>
-                <div style="min-width:0;"><div class="guide-step-t">Traé el log del cliente → kit</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Builder (tu log → kit)”</strong> → pegás unas líneas → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Exportás el Starter Kit</strong> (todo en un documento) o desplegás. Ver las guías en <code>docs/guides/</code>.</div></div>
+                <div style="min-width:0;"><div class="guide-step-t">Traé el log del cliente → caso nuevo</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Tu log específico”</strong> → subís el <code>.log</code> del cliente → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Guardar como caso</strong>. Queda como una card más del grid, para desplegar cuando quieras. Ver las guías en <code>docs/guides/</code>.</div></div>
+              </div>
+              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
+                <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-clock"/></svg>Actividad</span>
+                <div style="min-width:0;"><div class="guide-step-t">¿Qué se ejecutó? ¿Por qué falló?</div><div class="form-hint" style="margin-top:2px;">Cada deploy, puesta en marcha y teardown queda registrado en <strong>Actividad</strong>: los sub-pasos con ✓/✗ y su motivo (apply, index template, dashboards por caso, subida a OBS, cada capability) y la <strong>salida cruda de Terraform</strong>. Es el primer lugar donde mirar si el deploy “salió bien” pero no ves datos.</div></div>
               </div>
             </section>
 
@@ -2334,6 +2396,20 @@
           <p class="view-subtitle">El entorno CSS que desplegaste con esta plataforma.</p>
           <!-- renderInfraView() inyecta acá la tarjeta activa o el empty state -->
           <div id="infra-body"></div>
+        </div>
+
+        <!-- ═══ Vista: Actividad ════════════════════════════════════════════ -->
+        <!-- Historial de ejecuciones (runs.py): qué se corrió, si terminó bien y
+             la salida cruda de Terraform. Responde "¿corrió el apply?, ¿se
+             importaron los dashboards?" después del hecho. -->
+        <div class="app-view" id="view-activity">
+          <p class="view-subtitle">Qué ejecutó la plataforma: deploys, puesta en marcha y teardowns, con su salida.</p>
+          <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
+            <button class="btn btn-secondary btn-sm" id="activity-refresh"><svg class="icon"><use href="#ic-arrow-right"/></svg> Actualizar</button>
+            <span class="form-hint" id="activity-count" style="margin:0;"></span>
+          </div>
+          <div id="activity-list"></div>
+          <div id="activity-detail" class="hidden" style="margin-top:16px;"></div>
         </div>
 
         <!-- ═══ Vista: Configuración (credenciales + modelos, en una pantalla) ═══ -->
@@ -2471,8 +2547,34 @@
 
 
             <div class="form-group hidden" id="rawlog-group">
-              <!-- Entrada principal del Builder: pegar unas líneas de log. GLM-5.2
-                   detecta la estructura y arma el pipeline. -->
+              <!-- Entrada PRINCIPAL del Builder: subir el .log del cliente. El archivo
+                   se guarda con el caso y se sube a OBS, así el caso es repetible
+                   (se despliega las veces que quieras, igual que un caso built-in).
+                   `_handleLogFile()` toma la primera línea de datos como muestra para
+                   que GLM-5.2 detecte la estructura. -->
+              <label class="form-label">Subí el archivo de log del caso</label>
+              <div id="log-file-drop" tabindex="0" role="button"
+                   style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
+                <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
+                <div style="font-size:13.5px; font-weight:600; color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
+              </div>
+              <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
+              <div id="log-file-meta" class="form-hint hidden" style="margin-top:8px; color:var(--accent);"></div>
+
+              <div class="form-group hidden" id="rawlog-sample-group" style="margin:12px 0 0;">
+                <label class="form-label">Registro de muestra</label>
+                <pre id="rawlog-sample-preview" style="margin:0; padding:10px 12px; background:var(--bg-tertiary); border-radius:var(--radius-md); font-family:var(--font-mono); font-size:11.5px; line-height:1.5; white-space:pre-wrap; word-break:break-all; color:var(--text-secondary); max-height:120px; overflow:auto;"></pre>
+              </div>
+
+              <!-- Alternativa: sin archivo, pegás unas líneas. Sirve cuando los datos
+                   no los traés vos sino que llegan en vivo desde la fuente del cliente
+                   (Kafka/Beats/JDBC/OBS ya levantados) → el caso se guarda sin dataset. -->
+              <div style="display:flex; align-items:center; gap:10px; margin:18px 0 12px;">
+                <div style="flex:1; height:1px; background:var(--border-subtle);"></div>
+                <span style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted);">o conectá una fuente en vivo</span>
+                <div style="flex:1; height:1px; background:var(--border-subtle);"></div>
+              </div>
               <label class="form-label">Pegá unas líneas de tu log</label>
               <textarea id="builder-paste" class="form-input" rows="6"
                 placeholder="Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV… cualquier formato). GLM-5.2 detecta la estructura y arma el pipeline."
@@ -2668,7 +2770,7 @@
             <h2 class="card-title"><span class="step-badge">4</span>Revisar y desplegar</h2>
             <p class="card-description">
               Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.
-              El index template y terraform se empaquetan en el Starter Kit descargable.
+              El index template y los dashboards se aplican solos en la puesta en marcha.
             </p>
 
             <div id="deploy-case-tabs"></div>
@@ -2707,8 +2809,8 @@
             <div class="step-nav">
               <button class="btn btn-secondary" data-go-prev><svg class="icon"><use href="#ic-arrow-left"/></svg> Atrás</button>
               <div class="spacer"></div>
-              <!-- Builder: genera el kit en un documento (no despliega). -->
-              <button class="btn btn-primary hidden" id="builder-doc-btn"><svg class="icon"><use href="#ic-box"/></svg> Generar documento del kit</button>
+              <!-- Builder: guarda lo analizado como un caso de demo (no despliega acá). -->
+              <button class="btn btn-primary hidden" id="builder-save-case-btn"><svg class="icon"><use href="#ic-plus"/></svg> Guardar como caso</button>
               <button class="btn btn-primary" id="deploy-provision-btn">Desplegar <svg class="icon"><use href="#ic-rocket"/></svg></button>
             </div>
             <div id="deploy-status-1" class="hidden" style="margin-top:12px;" aria-live="polite" aria-atomic="true"></div>
@@ -2733,10 +2835,6 @@
               </div>
             </div>
 
-            <div class="deploy-footer" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--border-subtle); display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-              <button class="btn btn-secondary" id="deploy-kit-btn"><svg class="icon"><use href="#ic-box"/></svg>Exportar Starter Kit</button>
-              <div class="spacer"></div>
-            </div>
           </div>
         </div>
 
@@ -2760,6 +2858,43 @@
       <div style="padding:16px 20px; border-top:1px solid var(--border-subtle); display:flex; gap:8px;">
         <button id="conf-modal-copy" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-copy"/></svg> Copiar</button>
         <button id="conf-modal-download" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-download"/></svg> Descargar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal "Guardar como caso": cierre del Builder. Lo que se analizó (filter,
+       campos, muestra, dataset) se persiste como un caso de demo y aparece como
+       una card más del grid del paso 1. Ver custom_cases.py. -->
+  <div id="save-case-modal" class="hidden" style="position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
+    <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:560px; width:92%; max-height:88vh; display:flex; flex-direction:column; box-shadow:var(--shadow-lg);">
+      <div style="padding:20px 24px; border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="font-size:16px; font-weight:600; margin:0;">Guardar como caso de demo</h3>
+        <button id="save-case-close" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-x"/></svg> Cerrar</button>
+      </div>
+      <div style="padding:20px 24px; overflow-y:auto; flex:1;">
+        <p class="form-hint" style="margin:0 0 16px;">Queda como una card en el grid del paso 1, para vos y para el resto de los usuarios de esta instancia.</p>
+        <div class="form-group">
+          <label class="form-label" for="save-case-label">Nombre del caso</label>
+          <input type="text" class="form-input settings-field" id="save-case-label" maxlength="60" placeholder="Ej: Firewall de ACME">
+          <div class="field-error" id="save-case-label-error"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="save-case-desc">Descripción</label>
+          <input type="text" class="form-input settings-field" id="save-case-desc" maxlength="200" placeholder="Una línea que explique qué muestra el caso">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="save-case-group">Grupo del grid</label>
+          <select class="form-select settings-field" id="save-case-group"></select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Icono</label>
+          <div id="save-case-icons" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+        </div>
+        <div id="save-case-summary" class="form-hint" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border-subtle);"></div>
+      </div>
+      <div style="padding:16px 24px; border-top:1px solid var(--border-subtle); display:flex; gap:8px; align-items:center;">
+        <div id="save-case-status" style="flex:1; font-size:12.5px;"></div>
+        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-check"/></svg> Guardar caso</button>
       </div>
     </div>
   </div>
@@ -2822,6 +2957,10 @@
       pipelineCodeDirty: false,
       businessRulesApplied: false,
       selectedExamples: [],
+      // 'demo' (grid de casos) | 'custom' (Builder). Inicializado acá porque el
+      // markup arranca con el toggle en "demo" y varios chequeos comparan contra
+      // 'demo' antes de que el usuario toque el toggle.
+      deployMode: 'demo',
       logFileContent: '',
       logFileName: '',
       logFileLines: 0,
@@ -3309,19 +3448,25 @@
       _applyCaseSourceDest(state.selectedExamples[0]);
     }
 
-    // En modo demo (logs de ejemplo) la fuente siempre es OBS y el destino
-    // OpenSearch, así que ocultamos las otras opciones de input/output para no
-    // confundir. En modo custom se muestran todas.
+    // Los casos con dataset (los de fábrica y los creados subiendo un .log) leen
+    // siempre de OBS y escriben en OpenSearch → se ocultan las otras opciones
+    // para no confundir. Un caso `live` guardado con otra fuente muestra la suya
+    // (fija: cambiarla ahí no tendría efecto, la conexión vive en el caso).
     function applyStep3PluginVisibility() {
-      const isDemo = state.selectedExamples.some(id => id !== 'custom');
+      const picked = state.selectedExamples.filter(id => id !== 'custom');
+      const liveCase = picked.length === 1
+        ? LOG_EXAMPLES.find(e => e.id === picked[0] && e.caseType === 'live')
+        : null;
+      const forced = liveCase ? (liveCase.inputPlugin === 's3' ? 'obs' : liveCase.inputPlugin) : 'obs';
+      const isDemo = picked.length > 0;
       document.querySelectorAll('#input-plugins .plugin-option').forEach(o => {
-        o.classList.toggle('hidden', isDemo && o.dataset.plugin !== 'obs');
+        o.classList.toggle('hidden', isDemo && o.dataset.plugin !== forced);
       });
       document.querySelectorAll('#output-plugins .plugin-option').forEach(o => {
         o.classList.toggle('hidden', isDemo && o.dataset.plugin !== 'opensearch');
       });
       if (isDemo) {
-        if (state.inputPlugin !== 'obs') _selectInputPlugin('obs');
+        if (state.inputPlugin !== forced) _selectInputPlugin(forced);
         if (!(state.outputPlugins.length === 1 && state.outputPlugins[0] === 'opensearch')) {
           _selectOutputPlugin('opensearch');
         }
@@ -3420,20 +3565,52 @@
             <div class="form-hint" style="margin:2px 0 0;">Dejá el CA de tu Kafka como <code>client.truststore.jks</code> en esa ruta del Logstash (en DMS lo bajás del panel del instance).</div>
           </div>`,
         'beats': `
-          <div class="form-group">
-            <label class="form-label">Puerto</label>
-            <input type="number" class="form-input" id="input-beats-port" value="5044">
-          </div>`,
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <div class="form-group" style="flex:1; min-width:140px;">
+              <label class="form-label">Puerto</label>
+              <input type="number" class="form-input" id="input-beats-port" value="5044">
+            </div>
+            <div class="form-group" style="flex:1; min-width:140px;">
+              <label class="form-label">Interfaz de escucha</label>
+              <input type="text" class="form-input" id="input-beats-host" value="0.0.0.0">
+            </div>
+          </div>
+          <p class="form-hint" style="margin-top:-4px;">El Logstash <strong>escucha</strong> y tu Filebeat le envía. Requiere que el security group del cluster permita ese puerto desde la máquina que manda (ver <code>docs/guides/custom-builder-kafka-beats.md</code>).</p>`,
         'jdbc': `
           <div class="form-group">
             <label class="form-label">JDBC URL</label>
             <input type="text" class="form-input" id="input-jdbc-url" placeholder="jdbc:postgresql://host:5432/db">
           </div>
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <div class="form-group" style="flex:1; min-width:150px;">
+              <label class="form-label">Usuario</label>
+              <input type="text" class="form-input" id="input-jdbc-user" autocomplete="off">
+            </div>
+            <div class="form-group" style="flex:1; min-width:150px;">
+              <label class="form-label">Contraseña</label>
+              <input type="password" class="form-input" id="input-jdbc-pass" autocomplete="new-password">
+            </div>
+          </div>
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <div class="form-group" style="flex:2; min-width:200px;">
+              <label class="form-label">Driver (.jar en el Logstash)</label>
+              <input type="text" class="form-input" id="input-jdbc-driver-lib" placeholder="/opt/logstash/lib/postgresql.jar">
+            </div>
+            <div class="form-group" style="flex:2; min-width:180px;">
+              <label class="form-label">Clase del driver</label>
+              <input type="text" class="form-input" id="input-jdbc-driver-class" placeholder="org.postgresql.Driver">
+            </div>
+            <div class="form-group" style="flex:1; min-width:120px;">
+              <label class="form-label">Frecuencia (cron)</label>
+              <input type="text" class="form-input" id="input-jdbc-schedule" value="* * * * *">
+            </div>
+          </div>
           <div class="form-group">
             <label class="form-label">Consulta SQL</label>
             <textarea class="form-input" id="input-jdbc-query" rows="2" placeholder="SELECT * FROM logs" style="font-family:var(--font-mono);font-size:12px;resize:vertical;line-height:1.5;"></textarea>
             <p class="form-hint">La consulta determina qué columnas llegan a Logstash. Pegá una fila de resultado como sample en el paso 1.</p>
-          </div>`
+          </div>
+          <div class="form-hint" style="color:var(--accent-red);">⚠ El input JDBC necesita el <strong>.jar del driver</strong> en el nodo de Logstash. La Logstash de CSS no da acceso al filesystem ni tiene salida a internet para instalarlo, así que este deploy va a fallar salvo que el driver ya esté en esa ruta.</div>`
       };
       
       container.innerHTML = configs[plugin] || '';
@@ -3486,42 +3663,225 @@
     // CAPABILITY_SLUGS / SUGGESTED_BY_SLUG se DERIVAN del registro que el
     // backend inyecta en `window.__VERTICALS__` (ver verticals/ y main.index()).
     // Los consumidores no cambiaron: mismos nombres y shapes que los literales.
-    const _VDATA = (window.__VERTICALS__ || { groups: [], verticals: [] });
-    const _VVIS = _VDATA.verticals.filter(v => !v.hidden);
-
-    // LOG_EXAMPLES = verticales visibles (mismo shape de card) + 'custom' (UI-only).
-    const LOG_EXAMPLES = [
-      ..._VVIS.map(v => {
-        const e = { id: v.slug, label: v.label, icon: v.icon, indexBase: v.indexBase, description: v.description };
-        if (v.dedupId) e.dedupId = v.dedupId;
-        return e;
-      }),
-      { id: 'custom', label: 'Tu log específico', icon: 'code', indexBase: 'logs', description: 'Traé tu propio log y configura tu pipeline usando un LLM' },
-    ];
-
-    // DEMO_VERTICALS = grupos del grid (id/label/icon/members) del registro.
-    const DEMO_VERTICALS = _VDATA.groups.map(g => ({ id: g.id, label: g.label, icon: g.icon, members: g.members.slice() }));
+    // Todas se RE-DERIVAN en applyVerticalsPayload(): los casos creados desde el
+    // Builder ("Guardar como caso") se dan de alta en runtime, así que el
+    // catálogo se refresca sin recargar la página. Por eso son `let` y no `const`.
+    let _VDATA = { groups: [], verticals: [] };
+    let _VVIS = [];
+    let LOG_EXAMPLES = [];
+    let DEMO_VERTICALS = [];
+    let EXAMPLE_DATA = {};
+    let CAPABILITY_SLUGS = new Set();
+    let SLUG_LABELS = {};
 
     // Poblar el select de industria (paso 1 productivo) desde los verticales.
-    (function populateIndustrySelect() {
+    function populateIndustrySelect() {
       const sel = document.getElementById('industry-match-select');
       if (!sel) return;
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">-- Seleccionar --</option>';
       _VVIS.forEach(v => {
         const opt = document.createElement('option');
         opt.value = v.slug; opt.textContent = v.fullLabel;
         sel.appendChild(opt);
       });
-    })();
+      if (prev) sel.value = prev;
+    }
 
-    // EXAMPLE_DATA = {slug: {sample, filterCode, fields}} de TODOS los verticales
-    // (incluye los hidden, ej. cts, que no tienen card) + 'custom' vacío.
-    const EXAMPLE_DATA = Object.assign(
-      {},
-      ..._VDATA.verticals.map(v => ({ [v.slug]: { sample: v.sample, filterCode: v.filterCode, fields: v.fields } })),
-      { custom: { sample: '', filterCode: '', fields: [] } },
-    );
+    function applyVerticalsPayload(data) {
+      _VDATA = data || { groups: [], verticals: [] };
+      _VVIS = _VDATA.verticals.filter(v => !v.hidden);
 
-    // (EXAMPLE_DATA se deriva de window.__VERTICALS__, arriba.)
+      // LOG_EXAMPLES = verticales visibles (mismo shape de card) + 'custom' (UI-only).
+      LOG_EXAMPLES = [
+        ..._VVIS.map(v => {
+          const e = { id: v.slug, label: v.label, icon: v.icon, indexBase: v.indexBase, description: v.description };
+          if (v.dedupId) e.dedupId = v.dedupId;
+          if (v.custom) { e.custom = true; e.createdBy = v.createdBy || ''; }
+          return e;
+        }),
+        { id: 'custom', label: 'Tu log específico', icon: 'code', indexBase: 'logs', description: 'Traé tu propio log y configura tu pipeline usando un LLM' },
+      ];
+
+      // DEMO_VERTICALS = grupos del grid (id/label/icon/members) del registro.
+      DEMO_VERTICALS = _VDATA.groups.map(g => ({ id: g.id, label: g.label, icon: g.icon, members: g.members.slice() }));
+
+      // EXAMPLE_DATA = {slug: {sample, filterCode, fields}} de TODOS los verticales
+      // (incluye los hidden, ej. cts, que no tienen card) + 'custom' vacío.
+      EXAMPLE_DATA = Object.assign(
+        {},
+        ..._VDATA.verticals.map(v => ({ [v.slug]: { sample: v.sample, filterCode: v.filterCode, fields: v.fields } })),
+        { custom: { sample: '', filterCode: '', fields: [] } },
+      );
+
+      // Slugs con bundle de capabilities en el backend + labels. SLUG_LABELS es
+      // global: lo usan el panel del chatbot, el industry match y el deploy.
+      CAPABILITY_SLUGS = new Set(_VVIS.filter(v => v.hasCapability).map(v => v.slug));
+      SLUG_LABELS = Object.fromEntries(_VVIS.map(v => [v.slug, v.fullLabel]));
+
+      populateIndustrySelect();
+    }
+    applyVerticalsPayload(window.__VERTICALS__);
+
+    // Re-lee el catálogo del backend y repinta el grid. Se llama después de
+    // crear o borrar un caso de demo, para que la card aparezca/desaparezca sin F5.
+    async function refreshVerticals() {
+      const res = await fetch('/api/v1/verticals');
+      if (!res.ok) throw new Error('No pude refrescar el catálogo de casos.');
+      applyVerticalsPayload(await res.json());
+      if (typeof renderExampleCards === 'function') renderExampleCards();
+    }
+
+    // ── Guardar como caso de demo (cierre del Builder) ─────────────────────
+    // Persiste lo analizado (filter + campos + muestra + dataset) como un caso
+    // nuevo. El backend lo mergea al catálogo (main._front_payload) y lo sube al
+    // bucket de demos del creador, así queda desplegable en el acto.
+    const SAVE_CASE_ICONS = ['shield', 'activity', 'shopping-cart', 'play', 'droplet',
+                             'heart', 'database', 'cloud', 'code', 'box'];
+    let _saveCaseIcon = 'box';
+
+    function openSaveCaseModal() {
+      if (!state.fields || !state.fields.length) {
+        toast('Todavía no hay campos detectados. Analizá el log en el paso 1.', 'error');
+        return;
+      }
+      const modal = document.getElementById('save-case-modal');
+      if (!modal) return;
+
+      // Grupos: los del registro + "Mis casos" (el default para lo que se crea acá).
+      const sel = document.getElementById('save-case-group');
+      if (sel) {
+        const opts = DEMO_VERTICALS.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.label)}</option>`);
+        if (!DEMO_VERTICALS.some(g => g.id === 'mis-casos')) opts.push('<option value="mis-casos">Mis casos</option>');
+        sel.innerHTML = opts.join('');
+        sel.value = 'mis-casos';
+      }
+
+      _saveCaseIcon = 'box';
+      const iconWrap = document.getElementById('save-case-icons');
+      if (iconWrap) {
+        iconWrap.innerHTML = SAVE_CASE_ICONS.map(n => `
+          <button type="button" class="btn btn-secondary btn-sm" data-icon="${n}"
+                  style="padding:8px; line-height:0;">${icon(n)}</button>`).join('');
+        _paintSaveCaseIcons();
+      }
+
+      // Resumen de lo que se va a guardar: es la única señal de si el caso lleva
+      // dataset (repetible) o se conecta a una fuente en vivo.
+      const summary = document.getElementById('save-case-summary');
+      if (summary) {
+        const lines = state.logFileLines || 0;
+        const plugin = state.inputPlugin || 'obs';
+        const PLUGIN_LABEL = { obs: 'OBS', kafka: 'Kafka', beats: 'Beats/Filebeat', jdbc: 'una base (JDBC)' };
+        summary.innerHTML = state.logFileContent
+          ? `<strong>Caso repetible.</strong> Se guarda el dataset <strong>${escapeHtml(state.logFileName || 'log')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket de demos, así lo desplegás las veces que quieras.`
+          : `<strong>Caso en vivo.</strong> Sin archivo: Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión que cargaste en el paso 3. Esa fuente tiene que estar levantada y alcanzable al desplegar.`;
+        summary.innerHTML += ` · ${state.fields.length} campo${state.fields.length === 1 ? '' : 's'} detectado${state.fields.length === 1 ? '' : 's'}.`;
+      }
+
+      document.getElementById('save-case-status').textContent = '';
+      modal.classList.remove('hidden');
+      document.getElementById('save-case-label')?.focus();
+    }
+
+    function _paintSaveCaseIcons() {
+      document.querySelectorAll('#save-case-icons [data-icon]').forEach(b => {
+        const on = b.dataset.icon === _saveCaseIcon;
+        b.style.borderColor = on ? 'var(--accent)' : '';
+        b.style.color = on ? 'var(--accent)' : '';
+      });
+    }
+
+    document.getElementById('save-case-icons')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-icon]');
+      if (!btn) return;
+      _saveCaseIcon = btn.dataset.icon;
+      _paintSaveCaseIcons();
+    });
+
+    const _closeSaveCase = () => document.getElementById('save-case-modal')?.classList.add('hidden');
+    document.getElementById('save-case-close')?.addEventListener('click', _closeSaveCase);
+    document.getElementById('save-case-modal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'save-case-modal') _closeSaveCase();
+    });
+
+    document.getElementById('save-case-submit')?.addEventListener('click', async (e) => {
+      if (!validateRequired([{ id: 'save-case-label', label: 'el nombre del caso' }])) return;
+      const btn = e.currentTarget;
+      const statusEl = document.getElementById('save-case-status');
+      btn.disabled = true;
+      statusEl.style.color = 'var(--text-secondary)';
+      statusEl.textContent = 'Guardando…';
+      try {
+        const res = await fetch('/api/v1/cases', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: document.getElementById('save-case-label').value.trim(),
+            description: document.getElementById('save-case-desc').value.trim(),
+            group: document.getElementById('save-case-group').value,
+            icon: _saveCaseIcon,
+            sample: state.rawLog || '',
+            filter_code: state.filterCode || '',
+            fields: state.fields || [],
+            log_content: state.logFileContent || '',
+            // Fuente elegida en el paso 3. Con archivo el caso es `dataset` y
+            // esto queda de referencia; sin archivo es `live` y ES la fuente de
+            // la que Logstash va a leer. Los secretos se cifran en el server.
+            input_config: {
+              plugin_type: state.inputPlugin || 'obs',
+              [state.inputPlugin || 'obs']: collectInputConfig(),
+            },
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.detail?.message || data?.detail || `HTTP ${res.status}`);
+
+        _closeSaveCase();
+        await refreshVerticals();
+        // El caso ya es una card: volvemos al grid con la nueva seleccionada,
+        // lista para desplegar como cualquier otra demo.
+        const slug = data.case?.slug;
+        switchExampleMode('demo');
+        if (slug) {
+          state.selectedExamples = [slug];
+          _applySelectionState();
+        }
+        goToStep(1);
+        toast(data.uploaded
+          ? `Caso "${data.case.label}" guardado y cargado en tu bucket. Ya lo podés desplegar.`
+          : `Caso "${data.case.label}" guardado. Para desplegarlo, subí los datos con ⚙ Configuración → Preparar bucket${data.upload_error ? ` (${data.upload_error})` : ''}.`,
+          data.uploaded ? 'success' : 'info', data.uploaded ? 5000 : 8000);
+      } catch (err) {
+        statusEl.style.color = 'var(--accent-red)';
+        statusEl.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Borrar un caso creado (✕ en la card). Solo aparece para casos custom que
+    // el usuario puede borrar; el backend revalida creador/admin.
+    async function deleteCustomCase(slug, label) {
+      const ok = await confirmModal({
+        title: 'Borrar el caso',
+        message: `Se elimina "${label}" y su dataset guardado. Los entornos ya desplegados no se tocan.`,
+        confirmLabel: 'Borrar',
+      });
+      if (!ok) return;
+      try {
+        const res = await fetch(`/api/v1/cases/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d?.detail?.message || `HTTP ${res.status}`);
+        }
+        state.selectedExamples = state.selectedExamples.filter(s => s !== slug);
+        await refreshVerticals();
+        _applySelectionState();
+        toast(`Caso "${label}" borrado.`, 'success');
+      } catch (err) {
+        toast('No pude borrar el caso: ' + err.message, 'error');
+      }
+    }
 
     // Autosugiere índice + prefijo OBS según el tipo de caso.
     function _setExampleIndex(indexBase) {
@@ -3919,15 +4279,14 @@
       // Modo reuse: si ya hay clusters activos, esta fase AGREGA una pipeline
       // nueva en paralelo (su propio índice + prefijo OBS), sin tocar las que
       // ya corren ni re-provisionar los clusters.
-      // Builder (modo custom): no despliega — genera el kit en un documento.
-      // Mostrar el CTA del doc y ocultar todo lo de Terraform/deploy.
+      // Builder (modo custom): no despliega acá — guarda lo analizado como un
+      // caso de demo, que después se despliega desde el grid como cualquier otro.
       const isBuilder = state.deployMode === 'custom';
-      document.getElementById('builder-doc-btn')?.classList.toggle('hidden', !isBuilder);
+      document.getElementById('builder-save-case-btn')?.classList.toggle('hidden', !isBuilder);
       document.getElementById('deploy-provision-btn')?.classList.toggle('hidden', isBuilder);
-      document.getElementById('deploy-kit-btn')?.classList.toggle('hidden', isBuilder);
       const rt = document.getElementById('deploy-review-title')?.closest('.card')?.querySelector('.card-description');
       if (rt) rt.textContent = isBuilder
-        ? 'Revisá el pipeline (fuente, filter y destino). El botón arma un documento con TODO el kit — sin desplegar nada.'
+        ? 'Revisá el pipeline (fuente, filter y destino) y guardalo como un caso de demo reutilizable.'
         : 'Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.';
 
       const reuse = !!state.envActive;
@@ -3952,7 +4311,7 @@
       const cfgPanel = document.getElementById('deploy-config-panel');
       if (cfgPanel) cfgPanel.style.display = 'none';
 
-      // ── Cierre: qué se va a crear / qué trae el kit (closure antes del CTA) ──
+      // ── Cierre: qué se va a crear / qué guarda el caso (closure antes del CTA) ──
       const closureEl = document.getElementById('deploy-closure');
       if (closureEl) {
         const labels = types.map(id => (LOG_EXAMPLES.find(e => e.id === id)?.label) || id);
@@ -3963,8 +4322,8 @@
         const items = isBuilder ? [
           li('code', 'Configuration file de Logstash (con tu fuente elegida)'),
           li('dashboard', 'Index template + dashboards de tus campos'),
-          li('box', 'Runbook de consola (paso a paso, sin Terraform)'),
-          li('spark', 'Comandos del chatbot (NL→PPL) + forecasts para tus datos'),
+          li('spark', 'Chatbot (NL→PPL) + forecasts sobre tus datos'),
+          li('plus', 'Queda como una card más, lista para desplegar cuando quieras'),
         ].join('') : [
           ...(reuse ? [] : [
             ...(useExistingCluster ? [] : [li('search', 'Cluster <strong>OpenSearch</strong> (CSS)')]),
@@ -3976,7 +4335,7 @@
         ].join('');
         closureEl.innerHTML = `
           <div class="deploy-panel">
-            <div class="deploy-panel__title">${isBuilder ? 'Qué trae el kit' : 'Qué se va a crear'}</div>
+            <div class="deploy-panel__title">${isBuilder ? 'Qué guarda el caso' : 'Qué se va a crear'}</div>
             <ul style="list-style:none; margin:0; padding:0;">${items}</ul>
           </div>`;
       }
@@ -4010,44 +4369,8 @@
     document.getElementById('deploy-provision-btn')?.addEventListener('click', (e) =>
       runDeploy({ btn: e.currentTarget }));
 
-    document.getElementById('deploy-kit-btn')?.addEventListener('click', (e) => {
-      const conf = state.pipelineCodeDirty ? state.pipelineCodeEdited : state.pipelineCode;
-      const projectName = document.getElementById('deploy-project-name')?.value?.trim() || 'log-analytics';
-      downloadStarterKit(conf, projectName, e.currentTarget);
-    });
-
-    // Builder: genera el kit COMPLETO en un documento Markdown (no despliega).
-    document.getElementById('builder-doc-btn')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      const conf = state.pipelineCodeDirty ? state.pipelineCodeEdited : state.pipelineCode;
-      if (!conf) { toast('El configuration file todavía no está listo. Volvé al paso 3.', 'error'); return; }
-      const name = (document.getElementById('deploy-project-name')?.value?.trim() || 'log-analytics');
-      btn.disabled = true;
-      const prev = btn.innerHTML;
-      btn.innerHTML = 'Generando documento…';
-      try {
-        const res = await fetch('/api/v1/onboarding/export-kit', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pipeline_conf: conf, project_name: name, fields: state.fields,
-            namespace: pipelineNamespace(),
-            opensearch_index: document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}',
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `${name}-kit.md`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        toast('Kit generado: ' + name + '-kit.md', 'success');
-      } catch (err) {
-        toast('Error al generar el documento: ' + err.message, 'error');
-      } finally {
-        btn.disabled = false; btn.innerHTML = prev;
-      }
-    });
+    // Builder: guarda lo analizado como un caso de demo reutilizable.
+    document.getElementById('builder-save-case-btn')?.addEventListener('click', () => openSaveCaseModal());
 
     // ── Modal para ver .conf ─────────────────────────────────────────────
     // Toast in-app no bloqueante (reemplaza alert()). type: success | error | info.
@@ -4232,9 +4555,17 @@
         }
       } else if (state.inputPlugin === 'beats') {
         config.port = parseInt(document.getElementById('input-beats-port')?.value) || 5044;
+        config.host = document.getElementById('input-beats-host')?.value || '0.0.0.0';
       } else if (state.inputPlugin === 'jdbc') {
+        // El plugin necesita las 6: antes solo se mandaban URL y query, y el
+        // .conf salía con `jdbc_driver_library => ""` (inválido, no arranca).
         config.jdbc_connection_string = document.getElementById('input-jdbc-url')?.value || '';
         config.statement = document.getElementById('input-jdbc-query')?.value || 'SELECT * FROM logs';
+        config.jdbc_user = document.getElementById('input-jdbc-user')?.value || '';
+        config.jdbc_password = document.getElementById('input-jdbc-pass')?.value || '';
+        config.jdbc_driver_library = document.getElementById('input-jdbc-driver-lib')?.value || '';
+        config.jdbc_driver_class = document.getElementById('input-jdbc-driver-class')?.value || '';
+        config.schedule = document.getElementById('input-jdbc-schedule')?.value || '* * * * *';
       }
       
       return config;
@@ -4377,6 +4708,10 @@
             // Solo el caso custom trae archivo importado; los predefinidos leen su
             // dataset pre-cargado en OBS.
             log_file_content: id === 'custom' ? (state.logFileContent || '') : '',
+            // Los casos `live` traen su propia fuente (Kafka/Beats/JDBC del
+            // cliente). No se manda desde acá: el backend la lee del store, que
+            // es donde están las credenciales (cifradas). Solo se marca cuál es.
+            input_config: {},
           };
         });
       }
@@ -4460,14 +4795,23 @@
       }
     }
 
-    // Marca todos los items de la lista como completados (al terminar el deploy).
-    function finishDeployProgress() {
+    // Cierra la barra al terminar el deploy. Antes marcaba ✓ TODOS los items sin
+    // mirar el resultado, así que un paso que nunca terminó igual se veía como
+    // completado. Ahora solo se marcan los que el stream reportó `done`, y los
+    // que quedaron a medias se marcan como incompletos.
+    function finishDeployProgress(ok = true) {
       const fill = document.getElementById('deploy-progress-fill');
       const pctEl = document.getElementById('deploy-progress-pct');
       if (fill) fill.style.width = '100%';
       if (pctEl) pctEl.textContent = '100%';
       document.querySelectorAll('#deploy-progress-list .deploy-progress__item')
-        .forEach(el => el.classList.add('is-done'));
+        .forEach(el => {
+          if (el.classList.contains('is-done')) return;
+          el.classList.add(ok ? 'is-done' : 'is-stalled');
+          if (!ok) el.style.opacity = '0.55';
+        });
+      const phase = document.getElementById('deploy-progress-phase');
+      if (phase && !ok) phase.textContent = 'Interrumpido — mirá Actividad para ver dónde';
     }
 
     // ── Animacion de aprovisionamiento ──
@@ -4618,11 +4962,15 @@
               deployResult = d.result;
               finishDeployProgress();
             } else if (d.type === 'error') {
+              finishDeployProgress(false);
               throw new Error(d.message);
             }
           }
         }
-        if (!deployResult) throw new Error('El deploy no completó correctamente.');
+        if (!deployResult) {
+          finishDeployProgress(false);
+          throw new Error('El deploy no completó correctamente.');
+        }
 
         state.lastDeploySucceeded = true;
         state.businessRulesApplied = false;
@@ -4647,11 +4995,8 @@
       conversational: 'Copiloto (NL→PPL)',
       forecast: 'Forecast de volumen',
     };
-    // Slugs con bundle de capabilities en el backend + labels — derivados del
-    // registro (window.__VERTICALS__). SLUG_LABELS es global (lo usan el chatbot
-    // panel, el industry match del productivo y el deploy).
-    const CAPABILITY_SLUGS = new Set(_VVIS.filter(v => v.hasCapability).map(v => v.slug));
-    const SLUG_LABELS = Object.fromEntries(_VVIS.map(v => [v.slug, v.fullLabel]));
+    // CAPABILITY_SLUGS y SLUG_LABELS se derivan del registro en
+    // applyVerticalsPayload() (se re-derivan al crear/borrar un caso).
     function renderCapabilitiesResult(capsBySlug, anchor) {
       const statusEl = anchor || document.getElementById('infra-capabilities-result');
       if (!statusEl) return;
@@ -5265,59 +5610,6 @@
       }
     }
 
-    // ── Export Starter Kit (.zip) ─────────────────────────────────────────
-    async function downloadStarterKit(pipelineConf, projectName, triggerBtn) {
-      if (!pipelineConf) {
-        toast('No hay pipeline disponible para exportar.', 'error');
-        return;
-      }
-      const name = (projectName || 'log-analytics').trim() || 'log-analytics';
-      if (triggerBtn) triggerBtn.disabled = true;
-      try {
-        const res = await fetch('/api/v1/onboarding/export-starter-kit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pipeline_conf: pipelineConf,
-            project_name: name,
-            fields: state.fields,
-            namespace: pipelineNamespace(),
-            opensearch_index: document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}',
-          }),
-        });
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`HTTP ${res.status}: ${errText}`);
-        }
-        const blob = await res.blob();
-        // Trigger del download disparando un click programático sobre un
-        // <a> temporal — patrón estándar para descargar blobs desde fetch.
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${name}-starter-kit.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        toast('Error al exportar starter kit: ' + err.message, 'error');
-      } finally {
-        if (triggerBtn) triggerBtn.disabled = false;
-      }
-    }
-
-    document.getElementById('export-kit-btn')?.addEventListener('click', () => {
-      const exportBtn = document.getElementById('export-kit-btn');
-      const projectName = document.getElementById('tf-project-name')?.value || 'log-analytics';
-      const pipelineConf = state.pipelineCodeEdited || state.pipelineCode;
-      if (!pipelineConf) {
-        toast('Primero generá el pipeline (step 4 → step 5) antes de exportar.', 'error');
-        return;
-      }
-      downloadStarterKit(pipelineConf, projectName, exportBtn);
-    });
-
     // ── Destroy del entorno — FinOps manual, evita acumular costos.
     // Dispara desde dos lugares: botón en step 5 (wizard) y botón de la
     // tarjeta en "Mi Infraestructura". Función compartida con feedback
@@ -5509,6 +5801,7 @@
       document.getElementById('pipeline-substeps')?.classList.toggle('hidden', name !== 'pipeline');
       // Configuración: precargar creds + estado de la key + mapa de modelos.
       if (name === 'settings' && typeof renderSettingsView === 'function') renderSettingsView();
+      if (name === 'activity' && typeof renderActivityView === 'function') renderActivityView();
       document.querySelector('.main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -5522,7 +5815,7 @@
     // infraestructura y el subtítulo refleja el estado real. Lo llama
     // renderInfraView (única fuente de verdad del estado del entorno).
     // Debe coincidir con el texto del markup de #home-hero-sub.
-    const HOME_SUB_DEFAULT = 'El pipeline lo escribe el LLM. Vos elegís si termina en un cluster desplegado o en un kit para el cliente.';
+    const HOME_SUB_DEFAULT = 'El pipeline lo escribe el LLM. Elegí un caso listo o traé el log del cliente y guardalo como un caso nuevo.';
     function syncHomeHero(active, nPipelines) {
       document.getElementById('home-infra-btn')?.classList.toggle('hidden', !active);
       const sub = document.getElementById('home-hero-sub');
@@ -5545,10 +5838,140 @@
       btn.addEventListener('click', () => goToWizard(btn.dataset.homeMode));
     });
 
+    // ── Vista Actividad ────────────────────────────────────────────────
+    // Historial de ejecuciones (GET /api/v1/runs). Cada fila abre su detalle:
+    // la línea de tiempo de sub-pasos con ✓/✗ y motivo, más la salida cruda de
+    // Terraform. Es lo que permite auditar un deploy después del hecho.
+    const RUN_KINDS = {
+      deploy: { label: 'Despliegue', icon: 'rocket' },
+      ingestion: { label: 'Ingesta', icon: 'play' },
+      schema: { label: 'Template + dashboards', icon: 'dashboard' },
+      capabilities: { label: 'Capabilities', icon: 'spark' },
+      destroy: { label: 'Teardown', icon: 'trash' },
+    };
+    const RUN_STATUS = {
+      running: { label: 'En curso', color: 'var(--accent)' },
+      complete: { label: 'OK', color: 'var(--accent-green)' },
+      error: { label: 'Falló', color: 'var(--accent-red)' },
+    };
+
+    function _fmtRunTs(ts) {
+      try {
+        return new Date(ts * 1000).toLocaleString('es-AR',
+          { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      } catch (_) { return String(ts); }
+    }
+    function _fmtDur(s) {
+      if (!s || s < 0) return '—';
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+    }
+
+    async function renderActivityView() {
+      const list = document.getElementById('activity-list');
+      const count = document.getElementById('activity-count');
+      if (!list) return;
+      document.getElementById('activity-detail')?.classList.add('hidden');
+      list.innerHTML = '<p class="form-hint">Cargando…</p>';
+      let rows = [];
+      try {
+        rows = (await (await fetch('/api/v1/runs?limit=50')).json()).runs || [];
+      } catch (err) {
+        list.innerHTML = `<p class="form-hint" style="color:var(--accent-red);">No pude leer el historial: ${escapeHtml(err.message)}</p>`;
+        return;
+      }
+      if (count) count.textContent = rows.length ? `${rows.length} ejecución${rows.length === 1 ? '' : 'es'}` : '';
+      if (!rows.length) {
+        list.innerHTML = `<div class="deploy-panel"><p class="form-hint" style="margin:0;">Todavía no se ejecutó nada. Cuando despliegues un entorno o corras la puesta en marcha, va a quedar registrado acá.</p></div>`;
+        return;
+      }
+      list.innerHTML = rows.map(r => {
+        const k = RUN_KINDS[r.kind] || { label: r.kind, icon: 'box' };
+        const st = RUN_STATUS[r.status] || { label: r.status, color: 'var(--text-muted)' };
+        const fails = r.steps_failed
+          ? `<span style="color:var(--accent-red);">${r.steps_failed} con error</span>`
+          : (r.steps_ok ? `${r.steps_ok} pasos OK` : '');
+        return `
+          <button type="button" class="activity-row" data-run="${escapeHtml(r.id)}">
+            <span class="activity-row__tile">${icon(k.icon)}</span>
+            <span style="min-width:0; flex:1;">
+              <span class="activity-row__title">${escapeHtml(k.label)}${r.detail ? ` · ${escapeHtml(r.detail)}` : ''}</span>
+              <span class="activity-row__meta">${_fmtRunTs(r.created)} · ${_fmtDur(r.duration)}${fails ? ' · ' + fails : ''}</span>
+            </span>
+            <span class="status-pill" style="color:${st.color}; background:var(--bg-tertiary); flex:none;">${st.label}</span>
+          </button>`;
+      }).join('');
+    }
+
+    document.getElementById('activity-refresh')?.addEventListener('click', renderActivityView);
+    document.getElementById('activity-list')?.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-run]');
+      if (row) showRunDetail(row.dataset.run);
+    });
+
+    async function showRunDetail(runId) {
+      const box = document.getElementById('activity-detail');
+      if (!box) return;
+      box.classList.remove('hidden');
+      box.innerHTML = '<p class="form-hint">Cargando detalle…</p>';
+      let run;
+      try {
+        const res = await fetch(`/api/v1/runs/${encodeURIComponent(runId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        run = await res.json();
+      } catch (err) {
+        box.innerHTML = `<p class="form-hint" style="color:var(--accent-red);">No pude leer la ejecución: ${escapeHtml(err.message)}</p>`;
+        return;
+      }
+      const events = run.events || [];
+      const steps = events.filter(e => e.type === 'step');
+      const logs = events.filter(e => e.type === 'log');
+      const errors = events.filter(e => e.type === 'error');
+      const k = RUN_KINDS[run.kind] || { label: run.kind };
+
+      const stepsHtml = steps.length ? steps.map(s => `
+        <div class="activity-step">
+          <span style="color:${s.ok ? 'var(--accent-green)' : 'var(--accent-red)'}; flex:none; font-weight:700;">${s.ok ? '✓' : '✗'}</span>
+          <span style="flex:1; min-width:0;">${escapeHtml(s.name)}${s.reason ? `<span class="activity-step__why">${escapeHtml(s.reason)}</span>` : ''}</span>
+          <span style="color:var(--text-muted); font-size:11px; flex:none;">${_fmtRunTs(s.ts)}</span>
+        </div>`).join('')
+        : '<p class="form-hint" style="margin:0;">Esta ejecución no registró sub-pasos.</p>';
+
+      const errHtml = errors.map(e => `
+        <div class="activity-step" style="color:var(--accent-red);">
+          <span style="flex:none; font-weight:700;">✗</span>
+          <span style="flex:1; white-space:pre-wrap;">${escapeHtml(String(e.message || '').slice(0, 2000))}</span>
+        </div>`).join('');
+
+      box.innerHTML = `
+        <div class="deploy-panel">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <div class="deploy-panel__title" style="margin:0; flex:1;">${escapeHtml(k.label)}${run.detail ? ` · ${escapeHtml(run.detail)}` : ''}</div>
+            <button class="btn btn-secondary btn-sm" id="activity-close">${icon('x')} Cerrar</button>
+          </div>
+          <p class="form-hint" style="margin:0 0 14px;">${_fmtRunTs(run.created)} · ${_fmtDur((run.finished || run.updated) - run.created)} · ${steps.filter(s => s.ok).length} de ${steps.length || 0} pasos OK</p>
+          ${errHtml}
+          ${stepsHtml}
+          ${logs.length ? `
+            <details style="margin-top:14px;">
+              <summary style="cursor:pointer; font-size:12.5px; color:var(--accent); font-weight:600;">
+                Salida cruda (${logs.length} línea${logs.length === 1 ? '' : 's'}${run.log_truncated ? ', truncada' : ''})
+              </summary>
+              <pre class="activity-log">${escapeHtml(logs.map(l => l.message).join('\n'))}</pre>
+              <button class="btn btn-secondary btn-sm" id="activity-copy-log" style="margin-top:8px;">${icon('copy')} Copiar</button>
+            </details>` : ''}
+        </div>`;
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      document.getElementById('activity-close')?.addEventListener('click', () => box.classList.add('hidden'));
+      document.getElementById('activity-copy-log')?.addEventListener('click', (e) =>
+        copyToClipboard(logs.map(l => l.message).join('\n'), e.currentTarget));
+    }
+
     // ── Vista Mi Infraestructura ───────────────────────────────────────
     // Renderiza la tarjeta del entorno activo o el empty state, a partir
     // del payload de /terraform/status. Reusa formatAge/ticker para el
-    // contador en vivo y downloadStarterKit/destroyEnvironment para las
+    // contador en vivo y destroyEnvironment para las
     // acciones (mismas funciones que usaba el wizard del step 5).
     function renderInfraView(data) {
       const body = document.getElementById('infra-body');
@@ -5617,7 +6040,6 @@
       const osEp = data.opensearch_endpoint || '—';
       const lsEp = data.logstash_endpoint || '—';
       const dashUrl = data.dashboards_url || '';
-      const kitReady = !!(data.pipeline_conf && data.project_name);
       const pipelines = Array.isArray(data.pipelines) ? data.pipelines : [];
       const hasCapabilitySlug = pipelines.some(p => p.has_capabilities);
 
@@ -5746,7 +6168,6 @@
           <button class="btn btn-primary" id="infra-new-pipeline-btn">${icon('spark')} Nuevo pipeline</button>
           <a class="btn btn-secondary ${dashUrl ? '' : 'hidden'}" id="infra-dashboards-btn"
              href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>
-          <button class="btn btn-secondary ${kitReady ? '' : 'hidden'}" id="infra-kit-btn">${icon('box')} Exportar Starter Kit</button>
           <div class="spacer" style="flex:1;"></div>
           <button class="btn btn-secondary" id="infra-destroy-btn"
                   style="border-color:rgba(229,0,0,0.4); color:var(--accent-red);">${icon('trash')} Destruir entorno</button>
@@ -5758,10 +6179,6 @@
         showView('pipeline');
         goToStep(1);
       });
-      if (kitReady) {
-        body.querySelector('#infra-kit-btn')?.addEventListener('click', (e) =>
-          downloadStarterKit(data.pipeline_conf, data.project_name, e.currentTarget));
-      }
       body.querySelector('#infra-destroy-btn')?.addEventListener('click', () =>
         destroyEnvironment({ source: 'infra' }));
       // Secuencia de puesta en marcha.
@@ -6104,8 +6521,12 @@
     function renderExampleCards() {
       const demoGrid = document.getElementById('example-grid-demo');
       if (!demoGrid) return;
+      // Los casos creados desde el Builder (e.custom) llevan un ✕ para borrarlos.
+      // Va dentro del <button> de la card, así que el handler del grid distingue
+      // primero el ✕ y solo después trata el click como selección.
       const cardHtml = (e) => `
         <button type="button" class="example-card${e.disabled ? ' is-disabled' : ''}" data-example-id="${e.id}"${e.disabled ? ' disabled' : ''} title="${escapeHtml(e.description || '')}">
+          ${e.custom ? `<span class="example-card__del" data-delete-case="${escapeHtml(e.id)}" role="button" tabindex="0" title="Borrar este caso">${icon('x')}</span>` : ''}
           <span class="example-card__tile"><svg class="icon"><use href="#ic-${e.icon || 'box'}"/></svg></span>
           <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}</span>
         </button>`;
@@ -6133,6 +6554,14 @@
     renderExampleCards();
 
     document.getElementById('example-grid-demo')?.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-delete-case]');
+      if (del) {
+        e.preventDefault();
+        e.stopPropagation();
+        const slug = del.dataset.deleteCase;
+        deleteCustomCase(slug, LOG_EXAMPLES.find(x => x.id === slug)?.label || slug);
+        return;
+      }
       const card = e.target.closest('.example-card');
       if (!card || card.hasAttribute('disabled')) return;
       loadExample(card.dataset.exampleId);
@@ -6265,12 +6694,15 @@
     if (_logDrop) {
       ['dragenter', 'dragover'].forEach(ev => _logDrop.addEventListener(ev, (e) => {
         e.preventDefault();
-        _logDrop.style.borderColor = 'var(--accent)';
+        _logDrop.classList.add('is-dragover');
       }));
       ['dragleave', 'drop'].forEach(ev => _logDrop.addEventListener(ev, (e) => {
         e.preventDefault();
-        _logDrop.style.borderColor = '';
+        _logDrop.classList.remove('is-dragover');
       }));
+      _logDrop.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _logDrop.click(); }
+      });
       _logDrop.addEventListener('drop', (e) =>
         _handleLogFile(e.dataTransfer?.files && e.dataTransfer.files[0]));
     }
@@ -6521,7 +6953,8 @@
         inputPlugin: 'obs', inputConfig: {}, ctsMode: false, readExistingMode: false,
         dedupId: '', outputPlugins: ['opensearch'], outputConfig: {},
         pipelineCode: '', pipelineCodeEdited: '', pipelineCodeDirty: false,
-        businessRulesApplied: false, selectedExamples: [], logFileContent: '',
+        businessRulesApplied: false, selectedExamples: [], deployMode: 'demo',
+        logFileContent: '',
         logFileName: '', logFileLines: 0, pendingDeploy: null, lastStatus: null,
         provisioning: false, previewMode: false,
         obsCreds: state.obsCreds || { ak: '', sk: '' },  // global: no se pierde al reiniciar el wizard

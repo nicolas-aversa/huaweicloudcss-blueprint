@@ -45,6 +45,23 @@ en **su** cuenta (o en la del owner), sin pisarse.
      van a desplegar en la cuenta del owner,
    - usa la plataforma normalmente; sus deploys van a **su** state aislado.
 
+## Qué es por-usuario y qué es de la instancia
+
+| | Alcance | Dónde vive |
+|---|---|---|
+| Cuenta Huawei / MaaS key / OBS AK-SK | **por usuario** (cifrado) | `data/users/<id>/platform_settings.json` |
+| Estado de Terraform + pipelines | **por usuario** | `data/users/<id>/terraform/` |
+| Historial de **Actividad** | **por usuario** | `data/users/<id>/runs/` |
+| **Casos de demo creados** | **compartidos por instancia** | `data/cases/` |
+| Allowlist, usuarios, audit log | instancia | `data/` |
+
+Los **casos creados** desde el Builder los ve y despliega cualquier usuario logueado de esa VM;
+borrarlos queda limitado al creador o a un admin. Como el dataset se sube al bucket de **cada
+uno**, un usuario que quiera desplegar un caso que creó otro tiene que tocar **Preparar bucket**
+una vez. Un caso con dataset **nunca** guarda el bucket ni las credenciales de quien lo creó — el
+input se arma con las del que despliega. Los casos `live` (Kafka/JDBC) sí guardan la conexión de la
+fuente, con las credenciales **cifradas** (Fernet, misma clave que el settings file).
+
 ## Operación
 
 - **Agregar/quitar SAs (desde la app)**: los **admins** (env `SA_ADMINS`) manejan
@@ -58,7 +75,12 @@ en **su** cuenta (o en la del owner), sin pisarse.
 - **Login**: es un overlay sobre la app (la app se ve blureada detrás). El primer
   login de cada SA crea su cuenta con la contraseña que elija.
 - **Backups**: todo el estado por-usuario vive en el volumen `appdata`
-  (`/app/data`). Respaldalo (incluye states de Terraform y credenciales).
+  (`/app/data`). Respaldalo (incluye states de Terraform, credenciales, los casos
+  creados con sus datasets y el historial de Actividad).
+- **Diagnóstico**: la vista **Actividad** (por usuario) guarda las últimas 50 ejecuciones
+  (30 días) con sus sub-pasos y la salida cruda de Terraform. Es el primer lugar donde
+  mirar cuando un deploy "salió bien" pero el cluster quedó sin datos. El audit log
+  (admin) sigue siendo el "quién hizo qué".
 - **Costos**: si los SAs despliegan en **su** cuenta, el costo es de ellos. Si usan
   la del **owner**, cada deploy crea clusters CSS (caros) — coordiná y destruí los
   entornos de demo cuando no se usen.
@@ -81,10 +103,17 @@ en **su** cuenta (o en la del owner), sin pisarse.
 - Aun así, para el modo "cuenta del owner" conviene una **AK/SK dedicada y
   revocable** en vez de tu key principal.
 
-## Fase 2 — estado
+## Estado
 
 - ✅ **Cola de jobs**: el deploy corre en background y sobrevive un refresh del browser.
 - ✅ **Guardrails de costo**: cap de pipelines configurable + reaper TTL opcional.
 - ✅ **Audit log**: quién hizo qué, en el panel de Administración.
+- ✅ **Casos creados desde la app** (`custom_cases.py`): el Builder guarda el log de un
+  cliente como un caso más del grid, sin tocar código ni rebuildear la imagen.
+- ✅ **Actividad** (`runs.py`): historial persistido de cada ejecución, con la salida
+  cruda de Terraform y un sub-paso por acción.
 - ⏳ **Estado de Terraform remoto en OBS**: pendiente (hoy el state vive en el volumen
   persistente `appdata`; para durabilidad extra, respaldá ese volumen).
+- ⚠️ **Input JDBC**: la config se genera bien pero el deploy falla — el plugin necesita el
+  `.jar` del driver en el nodo y CSS no da acceso al filesystem. Ídem el truststore
+  `.jks` de Kafka SASL_SSL. Ver `docs/guides/custom-builder-kafka-beats.md`.

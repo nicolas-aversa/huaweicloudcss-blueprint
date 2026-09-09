@@ -4,8 +4,12 @@ Cómo probar el **Builder** (traé tu propio log) con dos fuentes típicas de Hu
 **DMS for Kafka** y **Filebeat en una ECS/VM**. La idea: conseguir 3 líneas de muestra de cada
 fuente, pegarlas en el paso 1 del Builder, y ver el pipeline que arma.
 
-> El Builder solo necesita **3 líneas de log**. Todo lo demás (instalar Filebeat, consumers) es
-> para el envío real / end-to-end.
+> Para **detectar el schema** el Builder solo necesita **3 líneas de log**. Todo lo demás
+> (instalar Filebeat, consumers) es para el envío real / end-to-end.
+>
+> Si en vez de conectar la fuente en vivo querés un caso de demo **repetible**, subí el archivo
+> `.log` completo en el paso 1: se guarda con el caso y se sube a tu bucket OBS, así lo desplegás
+> las veces que quieras sin depender de que el Kafka/Filebeat del cliente esté levantado.
 
 ---
 
@@ -100,17 +104,48 @@ filebeat.inputs:
 output.logstash:
   hosts: ["<IP-DEL-LOGSTASH>:5044"]
 ```
-Arrancá con `filebeat -e -c filebeat.yml`. **Red**: el security group del Logstash tiene que
-permitir inbound **5044** desde la VM (idealmente misma VPC).
+Arrancá con `filebeat -e -c filebeat.yml`.
+
+**Red — lo hace el deploy.** Cuando un caso usa el input `beats`, Terraform abre el camino solo:
+crea la regla de security group para ese puerto y un **DNAT** sobre el NAT/EIP apuntando al NIC del
+Logstash. Antes había que hacerlo a mano y no estaba documentado que faltaba.
+
+- El `<IP-DEL-LOGSTASH>` del `filebeat.yml` es la **EIP del NAT** (la misma por la que entrás a
+  Dashboards), no la IP privada del cluster.
+- Por defecto se acepta desde `0.0.0.0/0`. Si sabés la IP pública del cliente, acotala con la
+  variable `beats_source_cidr` de Terraform.
+- Si ningún caso usa `beats`, **no se abre ningún puerto**.
 
 ---
 
 ## Correr el Builder
 
-En <http://localhost:8000> → **Crear pipeline** → toggle **"Builder (tu log → kit)"**. Una corrida
-por fuente:
+**Crear pipeline** → toggle **"Tu log específico"**. Una corrida por fuente:
 
-1. **Paso 1** — pegá las 3 líneas → **Siguiente** (el LLM arma el `filter{}` y detecta campos).
+1. **Paso 1** — subí el `.log`, o pegá las 3 líneas si los datos van a llegar en vivo desde la
+   fuente → **Siguiente** (el LLM arma el `filter{}` y detecta campos).
 2. **Paso 2** — revisá el mapping.
 3. **Paso 3** — elegí la fuente (Kafka / Beats) y sus datos de conexión; output OpenSearch.
-4. **Paso 4** — **Exportar Starter Kit** (documento con todo) o Desplegar.
+4. **Paso 4** — **Guardar como caso**: nombre, icono y grupo. Queda como una card del grid del
+   paso 1 y se despliega desde ahí, igual que un caso de fábrica.
+
+### Dos tipos de caso
+Lo que decide el tipo es **si subiste un archivo**:
+
+| | **Con `.log`** (repetible) | **Sin `.log`** (en vivo) |
+|---|---|---|
+| De dónde salen los datos | del dataset guardado, que se sube a tu bucket OBS | de la fuente del cliente (Kafka/Beats/JDBC/OBS), que **tiene que estar levantada** |
+| Se puede redesplegar | sí, las veces que quieras | solo mientras la fuente exista y sea alcanzable |
+| Para qué sirve | demo repetible del log de un cliente | PoC sobre datos productivos |
+
+Las credenciales de la fuente (SASL de Kafka, password de JDBC) se guardan **cifradas** con el
+caso y se enmascaran en la consola de CSS.
+
+### Qué resuelve el deploy y qué no
+
+| Fuente | Estado |
+|---|---|
+| **OBS** | Anda. Es el camino de todos los casos con dataset. |
+| **Kafka** | El Logstash sale por el SNAT y el deploy le agrega las *Cluster Routes* hacia las IPs del broker. Requiere que el broker sea **alcanzable** desde la VPC; uno privado en la red del cliente necesita peering/VPN, que este stack no crea. |
+| **Beats** | El deploy abre el puerto (SG + DNAT). El Filebeat del cliente apunta a la EIP del NAT. |
+| **JDBC** | ⚠️ **No funciona todavía.** El input necesita el `.jar` del driver en el nodo, y la Logstash de CSS no da acceso al filesystem ni tiene salida a internet para instalarlo. La UI y el `.conf` se generan bien, pero el pipeline va a fallar al arrancar salvo que el driver ya esté en la ruta indicada. Mismo problema con el truststore `.jks` de Kafka SASL_SSL. |

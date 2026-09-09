@@ -94,6 +94,10 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # como siempre (dev local, tests, nativo). Ver auth.py.
 import auth  # noqa: E402
 import audit  # noqa: E402
+# Casos de demo creados desde la UI (se mergean con los de `verticals/`).
+import custom_cases  # noqa: E402
+# Historial persistido de ejecuciones (vista Actividad + cola de jobs del deploy).
+import runs  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -510,12 +514,17 @@ def gen_input_http(c: HttpInputConfig) -> str:
 
 
 def gen_input_jdbc(c: JdbcInputConfig) -> str:
-    lines = [
-        _kv("jdbc_driver_library", c.jdbc_driver_library),
-        _kv("jdbc_driver_class", c.jdbc_driver_class),
-        _kv("jdbc_connection_string", c.jdbc_connection_string),
-        _kv("jdbc_user", c.jdbc_user),
-        _kv("jdbc_password", c.jdbc_password),
+    # Los opcionales solo se emiten si tienen valor: `jdbc_driver_library => ""`
+    # o `jdbc_user => ""` hacen que el plugin falle al arrancar, y antes se
+    # emitían siempre (el form no los pedía y viajaban vacíos).
+    lines = [_kv("jdbc_connection_string", c.jdbc_connection_string)]
+    for key, val in (("jdbc_driver_library", c.jdbc_driver_library),
+                     ("jdbc_driver_class", c.jdbc_driver_class),
+                     ("jdbc_user", c.jdbc_user),
+                     ("jdbc_password", c.jdbc_password)):
+        if val:
+            lines.append(_kv(key, val))
+    lines += [
         _kv("statement", c.statement),
         _kv("schedule", c.schedule),
     ]
@@ -957,6 +966,32 @@ class PipelineResponse(BaseModel):
 _VERTICALS_MARKER = "/*__VERTICALS_JSON__*/null"
 
 
+def _front_payload() -> dict:
+    """Catálogo que ve el front: los verticales built-in (`verticals/`) MÁS los
+    casos creados desde la plataforma (`custom_cases`).
+
+    El merge se hace acá y no dentro de `verticals/` a propósito: ese paquete es
+    el registro declarativo del repo (con su inventario fijo y sus tests), y los
+    casos de runtime viven en el volumen de datos. Cada caso custom aporta su
+    card; el grupo "Mis casos" se agrega solo si hay al menos uno.
+    """
+    payload = verticals.front_payload()
+    entries = custom_cases.front_entries()
+    if not entries:
+        return payload
+    payload["verticals"] = payload["verticals"] + entries
+    by_group: dict[str, list[str]] = {}
+    for e in entries:
+        by_group.setdefault(e["group"], []).append(e["slug"])
+    for g in payload["groups"]:
+        if g["id"] in by_group:
+            g["members"] = g["members"] + by_group.pop(g["id"])
+    if by_group:
+        payload["groups"] = payload["groups"] + [
+            {**custom_cases.GROUP, "members": sum(by_group.values(), [])}]
+    return payload
+
+
 @app.get("/", include_in_schema=False)
 def index() -> Response:
     """Sirve la página de onboarding con los verticales inyectados.
@@ -967,7 +1002,7 @@ def index() -> Response:
     el boot a un fetch async. `no-cache` fuerza revalidar siempre el index.html.
     """
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    payload = json.dumps(verticals.front_payload(), ensure_ascii=False)
+    payload = json.dumps(_front_payload(), ensure_ascii=False)
     html = html.replace(_VERTICALS_MARKER, payload, 1)
     return Response(
         content=html,
@@ -1093,8 +1128,115 @@ def admin_allowlist_remove(request: dict) -> dict:
 @app.get("/api/v1/verticals", tags=["verticals"], summary="Registro de verticales de demo")
 def get_verticals() -> dict:
     """Payload declarativo de los verticales (grupos + specs de front). El mismo
-    que se inyecta en `GET /`; expuesto para tests/tooling."""
-    return verticals.front_payload()
+    que se inyecta en `GET /`. El front lo re-consulta después de crear o borrar
+    un caso para refrescar el grid sin recargar la página."""
+    return _front_payload()
+
+
+# ── Casos de demo creados desde la plataforma ───────────────────────────────
+# Alta desde el Builder: el SA sube su .log, GLM-5.2 arma el filter y detecta los
+# campos, y acá el caso queda persistido como uno más del flujo de demo. Ver
+# custom_cases.py. Son compartidos por instancia; borra el creador o un admin.
+@app.get("/api/v1/cases", tags=["verticals"], summary="Casos de demo creados desde la plataforma")
+def list_custom_cases() -> dict:
+    """Metadata de los casos guardados (sin el dataset)."""
+    ctx = auth.current_user_var.get()
+    email = ctx.email if ctx is not None else None
+    cases = []
+    for c in custom_cases.list_cases():
+        cases.append({
+            "slug": c["slug"], "label": c.get("label", ""),
+            "description": c.get("description", ""), "icon": c.get("icon", "box"),
+            "group": c.get("group", ""), "created_by": c.get("created_by", ""),
+            "created_at": c.get("created_at", 0), "lines": c.get("lines", 0),
+            "can_delete": custom_cases.can_delete(c["slug"], email),
+        })
+    return {"cases": cases, "icons": custom_cases.ICONS,
+            "groups": [{"id": g["id"], "label": g["label"]} for g in verticals.GROUPS]
+                      + [{"id": custom_cases.GROUP["id"], "label": custom_cases.GROUP["label"]}]}
+
+
+@app.post("/api/v1/cases", tags=["verticals"], summary="Crea un caso de demo nuevo")
+def create_custom_case(request: dict) -> dict:
+    """Body: ``{label, description?, icon?, group?, slug?, sample?, filter_code,
+    fields, questions?, log_content}``.
+
+    Persiste el caso + su dataset y, best-effort, sube el `.log` al bucket de
+    demos del creador para que quede desplegable en el acto (los demás usuarios
+    lo suben al suyo con "Preparar bucket", igual que un caso built-in)."""
+    ctx = auth.current_user_var.get()
+    email = ctx.email if ctx is not None else ""
+    try:
+        case = custom_cases.save_case(
+            {
+                "label": request.get("label", ""),
+                "slug": request.get("slug", ""),
+                "description": request.get("description", ""),
+                "icon": request.get("icon", ""),
+                "group": request.get("group", ""),
+                "sample": request.get("sample", ""),
+                "filter_code": request.get("filter_code", ""),
+                "fields": request.get("fields") or [],
+                "suggested_questions": request.get("questions") or [],
+                "input_config": request.get("input_config") or {},
+            },
+            str(request.get("log_content", "") or ""),
+            created_by=email,
+        )
+    except custom_cases.CaseError as exc:
+        raise HTTPException(status_code=400,
+                            detail={"stage": "case", "message": str(exc)}) from exc
+
+    audit.record("case_create", f"{case['slug']} ({case.get('lines', 0)} líneas)", user=email or None)
+    uploaded, upload_error = _upload_case_dataset(case["slug"])
+    return {"case": case, "uploaded": uploaded, "upload_error": upload_error}
+
+
+@app.delete("/api/v1/cases/{slug}", tags=["verticals"], summary="Borra un caso de demo creado")
+def delete_custom_case(slug: str) -> dict:
+    ctx = auth.current_user_var.get()
+    email = ctx.email if ctx is not None else None
+    if custom_cases.get_case(slug) is None:
+        raise HTTPException(status_code=404,
+                            detail={"stage": "case", "message": f"No existe el caso '{slug}'."})
+    if not custom_cases.can_delete(slug, email):
+        raise HTTPException(
+            status_code=403,
+            detail={"stage": "case",
+                    "message": "Solo quien creó el caso (o un admin) puede borrarlo."})
+    custom_cases.delete_case(slug)
+    audit.record("case_delete", slug, user=email or None)
+    return {"status": "deleted", "slug": slug}
+
+
+def _upload_case_dataset(slug: str) -> tuple[bool, str]:
+    """Sube el dataset del caso a `<slug>-logs/` en el bucket de demos del
+    usuario actual. Best-effort: si faltan creds o falla OBS devuelve el motivo y
+    el caso queda igual (el guard del deploy pide "Preparar bucket")."""
+    from obs_client import OBSClient, OBSConfigError, OBSUploadError
+    import maas_integrator as _mi
+
+    src = custom_cases.dataset_path(slug)
+    if src is None:
+        return False, "el caso no tiene dataset"
+    creds = _mi.get_obs_creds() or {}
+    ak, sk = creds.get("ak", ""), creds.get("sk", "")
+    bucket = get_huawei_settings().get("demo_bucket", "")
+    if not (ak and sk and bucket):
+        return False, "faltan AK/SK o el bucket de demos en ⚙ Configuración"
+    region = get_region()
+    client = None
+    try:
+        client = OBSClient(access_key_id=ak, secret_access_key=sk,
+                           endpoint=_default_obs_endpoint(), bucket=bucket)
+        client.ensure_bucket(region=region)
+        client.put_file(f"{slug}-logs/{slug}.log", str(src))
+        return True, ""
+    except (OBSConfigError, OBSUploadError) as exc:
+        return False, str(exc)
+    finally:
+        if client is not None:
+            client.close()
 
 
 @app.get("/health", tags=["infra"])
@@ -1518,6 +1660,22 @@ def set_obs_settings(request: dict) -> dict:
 _DEMO_DATASET_FILES: dict[str, list[str]] = verticals.demo_dataset_files()
 
 
+def _demo_dataset_files() -> dict[str, list[str]]:
+    """`slug -> [archivos]` a pre-cargar en OBS: los datasets bundleados del repo
+    MÁS los `.log` de los casos creados desde la plataforma. Es función (y no
+    constante) porque los casos custom se dan de alta en runtime."""
+    return {**_DEMO_DATASET_FILES, **custom_cases.dataset_files()}
+
+
+def _dataset_source(slug: str, fname: str) -> Path | None:
+    """Ruta en disco del dataset `fname` del caso `slug`: `datasets/` para los
+    built-in, el store de casos para los creados desde la UI."""
+    src = _DATASETS_DIR / fname
+    if src.is_file():
+        return src
+    return custom_cases.dataset_path(slug)
+
+
 @app.post(
     "/api/v1/datasets/preload",
     tags=["settings"],
@@ -1560,11 +1718,11 @@ def preload_datasets(request: dict):
                 yield _sse({"type": "error", "message": str(exc)})
                 return
             uploaded = skipped = errors = 0
-            for slug, files in _DEMO_DATASET_FILES.items():
+            for slug, files in _demo_dataset_files().items():
                 for fname in files:
                     key = f"{slug}-logs/{fname}"
-                    src = _DATASETS_DIR / fname
-                    if not src.is_file():
+                    src = _dataset_source(slug, fname)
+                    if src is None:
                         errors += 1
                         yield _sse({"type": "file", "slug": slug, "key": key,
                                     "state": "error", "detail": f"falta datasets/{fname} en el repo"})
@@ -1612,6 +1770,7 @@ class PipelineCase(BaseModel):
     read_existing_bucket: bool = Field(default=False, description="El caso lee datos reales ya presentes en su prefijo (ej. CTS → CloudTraces/); no subir sintéticos/dataset encima.")
     log_file_content: str = Field(default="", description="Contenido completo del archivo importado por el usuario (custom). Se sube tal cual a OBS, sin sintéticos.")
     document_id: str = Field(default="", description="document_id de dedup para read_existing (ej. CTS → %{trace_id}, fintech → %{[@metadata][generated_id]}). Vacío = ids auto de Logstash.")
+    input_config: dict = Field(default_factory=dict, description="Fuente propia del caso (`{plugin_type, <plugin>: {...}}`) para casos que NO leen de OBS (Kafka/Beats/JDBC del cliente). Vacío = input s3 sobre el bucket de demos.")
 
 
 class TerraformDeployRequest(BaseModel):
@@ -1663,16 +1822,6 @@ class ApplySchemaResponse(BaseModel):
     message: str = ""
 
 
-class ExportStarterKitRequest(BaseModel):
-    """Payload del endpoint que arma el .zip del starter kit para el cliente."""
-    pipeline_conf: str = Field(..., min_length=1, description="filter+input+output del wizard, lo que el cliente vio en la demo")
-    project_name: str = Field(default="log-analytics", description="Nombre del proyecto, usado para el filename del .zip y el README")
-    # Para incluir el index template en el kit (los tipos viven en OpenSearch).
-    fields: list[dict] = Field(default_factory=list, description="Campos del step 2 (raw_name + type) para el index template.")
-    namespace: str = Field(default="data", description="Namespace de los campos.")
-    opensearch_index: str = Field(default="logs-%{+YYYY.MM}", description="Índice del output (para el pattern del template).")
-
-
 class TerraformDestroyRequest(BaseModel):
     """Creds opcionales para el teardown. Si el deploy persistió las creds
     (`destroy.auto.tfvars.json`), no hace falta mandarlas. Para entornos
@@ -1692,9 +1841,9 @@ class TerraformStatusResponse(BaseModel):
     """Status del entorno (lectura idempotente del tfstate).
 
     El frontend lo consume al cargar la página para decidir si mostrar
-    el banner global "Entorno activo" — así los botones Dashboards,
-    Starter Kit y Destruir sobreviven a F5/refresh, en vez de depender
-    solo de flags in-memory del browser.
+    el banner global "Entorno activo" — así los botones Dashboards y
+    Destruir sobreviven a F5/refresh, en vez de depender solo de flags
+    in-memory del browser.
 
     Los campos derivados de outputs (dashboards_url, pipeline_conf,
     project_name) quedan None si `terraform output -json` falla o si el
@@ -1723,493 +1872,6 @@ class TerraformStatusResponse(BaseModel):
     https_enabled: bool = False
 
 
-def _generate_starter_kit_readme(project_name: str) -> str:
-    """README del .zip con instrucciones paso-a-paso para que el cliente
-    replique en su propia cuenta Huawei Cloud lo que vio en la demo."""
-    return f"""# Starter Kit — pipeline Logstash + OpenSearch en Huawei Cloud
-
-Proyecto: **{project_name}**
-
-Este paquete contiene todo lo necesario para replicar, en tu propia cuenta de
-Huawei Cloud, el pipeline que viste en la demo en vivo.
-
-## Requisitos
-
-- Terraform >= 1.5 (descarga en https://www.terraform.io/downloads).
-- Credenciales de Huawei Cloud (AK/SK) con permisos sobre Cloud Search Service
-  (CSS), Object Storage Service (OBS), y VPC.
-
-## Pasos
-
-1. Copiá `terraform/terraform.tfvars.example` a `terraform/terraform.tfvars` y
-   completá tus credenciales:
-   ```
-   cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-   # editar el archivo y poner AK/SK, password de OpenSearch, etc.
-   ```
-
-2. Inicializá Terraform (descarga el provider Huawei, ~50 MB la primera vez):
-   ```
-   cd terraform
-   terraform init
-   ```
-
-3. Aplicá la infraestructura. Tarda 5-15 min (creación de clusters CSS):
-   ```
-   terraform apply -auto-approve
-   ```
-
-4. Cuando termine, los endpoints del cluster están en `terraform output`:
-   ```
-   terraform output opensearch_endpoint
-   terraform output dashboards_url
-   ```
-
-5. **IMPORTANTE — aplicá el index template ANTES de ingerir datos.** Los tipos
-   de los campos se definen en `index-template.json` (no en Logstash). Si dejás
-   que Logstash cree el índice primero, OpenSearch infiere los tipos del primer
-   documento (dynamic mapping) y el template ya no aplica retroactivamente.
-   Aplicalo sobre el cluster vacío:
-   ```
-   curl -X PUT "https://<opensearch_endpoint>:9200/_index_template/<proyecto>" \\
-        -H "Content-Type: application/json" \\
-        -u "admin:<password>" \\
-        --data-binary @index-template.json -k
-   ```
-   (o pegá el contenido en Kibana → Dev Tools con `PUT _index_template/<proyecto>`).
-
-6. **Opcional — importá los dashboards baseline.** El archivo `dashboards.ndjson`
-   contiene visualizaciones pre-configuradas para el caso de uso (eventos en el
-   tiempo, top fields, métricas). Importalo en OpenSearch Dashboards:
-   - Abrí Dashboards → Management → Saved Objects → Import
-   - Seleccioná `dashboards.ndjson` y confirmá
-   - O vía API:
-   ```
-   curl -X POST "https://<opensearch_endpoint>:9200/_dashboards/api/saved_objects/_import?overwrite=true" \\
-        -H "osd-xsrf: true" \\
-        -u "admin:<password>" \\
-        -F file=@dashboards.ndjson -k
-   ```
-
-7. Recién ahora conectá tu fuente de logs al bucket OBS creado (o apuntá al
-   endpoint Logstash). Logstash crea el índice usando el template y los eventos
-   se indexan con los tipos correctos.
-
-## Estructura del paquete
-
-```
-starter-kit/
-├── logstash.conf                     # Filter + input + output (solo PARSEA: envelope, kv, json, @timestamp)
-├── index-template.json               # Mapping/tipos de OpenSearch (aplicar ANTES de ingerir)
-├── dashboards.ndjson                 # Dashboards baseline (opcional, importar en Dashboards)
-├── terraform/
-│   ├── main.tf                       # Definición de OpenSearch + Logstash + OBS
-│   └── terraform.tfvars.example      # Template de credenciales (completalo)
-├── RUNBOOK-consola.md                # Los mismos pasos, pero por CONSOLA Huawei (PoC guiada con el SA)
-└── README.md                         # Este archivo
-```
-
-> ¿Terraform o consola? Los dos caminos crean lo mismo. Si están haciendo la
-> PoC junto al arquitecto de soluciones, lo habitual es seguir
-> `RUNBOOK-consola.md` (consola, paso a paso). Este README documenta el
-> camino Terraform (automatizado, reproducible).
-
-## Notas técnicas
-
-- **El tipado vive en `index-template.json`, no en Logstash.** El `logstash.conf`
-  solo parsea/estructura (envelope, kv/json, `@timestamp`); el template de
-  OpenSearch decide los tipos (keyword por default + numéricos/date/ip
-  explícitos). Esto evita pérdida de datos (ej. códigos "000") y conflictos de
-  mapping. Por eso `manage_template => false` en el output.
-- El cluster CSS que crea el Terraform es de tamaño chico (apto para
-  pruebas). Para producción, escalá los nodos via el campo `node_config`
-  en `main.tf` — los valores típicos para volumen alto están comentados
-  en el archivo.
-- Si tu equipo prefiere otra región (la-south-2 es Santiago de Chile por
-  default), cambialo en `terraform.tfvars` antes del apply.
-
-## Soporte
-
-Este paquete fue generado por una herramienta interna de preventa. Si
-necesitás ayuda para integrarlo a tu pipeline existente, contactá al
-equipo que hizo la demo.
-"""
-
-
-def _generate_console_runbook(project_name: str, index_name: str, region: str) -> str:
-    """Runbook para el deploy CONJUNTO por consola Huawei (SA + cliente).
-
-    En la práctica el cliente nunca aplica el Terraform solo: durante la PoC
-    (cupón de 1 mes) el SA y el cliente crean los recursos juntos desde la
-    consola. Este runbook deja por escrito exactamente qué crear y en qué
-    orden, con los mismos artefactos del kit (conf, template, dashboards)."""
-    return f"""# Runbook — deploy por consola Huawei Cloud (PoC guiada)
-
-Proyecto: **{project_name}** · Región: **{region}** · Índice: **{index_name}**
-
-Pasos para crear por **consola** lo mismo que despliega el Terraform del kit.
-Pensado para hacerlo junto al arquitecto de soluciones durante la PoC.
-
-## 1. Cluster OpenSearch (CSS)
-
-Consola → Cloud Search Service → **Create Cluster**:
-
-- Engine: **OpenSearch 3.4** · Región: {region}
-- Nodos: 1 × `ess.spec-4u8g` (PoC) · Disco: HIGH 40 GB
-- VPC / subnet / security group: los de tu red (anotá cuáles)
-- **Security mode: ON** con password de admin (guardala)
-- HTTPS según tu política (la demo usa HTTP + NAT privado)
-
-## 2. Cluster Logstash (CSS)
-
-Consola → CSS → **Create Cluster** → tipo **Logstash 7.10**:
-
-- 1 × `ess.spec-4u8g`, misma VPC/subnet/SG que OpenSearch
-
-## 3. Index template (ANTES de ingerir)
-
-Los tipos de campos viven en `index-template.json`, NO en Logstash. Aplicalo
-con el índice todavía inexistente — OpenSearch Dashboards → Dev Tools:
-
-```
-PUT _index_template/{project_name}
-<contenido de index-template.json>
-```
-
-Si ya ingeriste sin template: borrá el índice y volvé a ingerir.
-
-## 4. Pipeline de Logstash
-
-Consola → cluster Logstash → **Configuration Center** → Create:
-
-- Pegá el contenido de `logstash.conf`
-- Revisá el input OBS: bucket, prefijo, AK/SK de la cuenta del cliente y
-  `delete => false` (lectura read-only: NO borra los objetos)
-- Guardar → **Start**. El índice `{index_name}` se crea con los tipos del template.
-
-## 5. Dashboards
-
-OpenSearch Dashboards → Management → Saved Objects → **Import** →
-`dashboards.ndjson`. Quedan el dashboard del caso + sus visualizaciones.
-
-## 6. Verificación
-
-- Dev Tools: `GET _cat/indices?v` → el índice crece.
-- `GET {index_name.replace("%{+YYYY.MM}", "*") if "%" in index_name else index_name}/_search?size=1` → los campos salen tipados (no todo `text`).
-- Dashboard del caso con datos en el rango de tiempo correcto.
-
-## Troubleshooting rápido
-
-- **No ingesta**: revisá en el Configuration Center el estado de la pipeline y
-  sus logs; el 90% es AK/SK o prefijo OBS mal escritos.
-- **Campos como `text`/mal tipados**: el template se aplicó DESPUÉS de crear
-  el índice. Borrá el índice, confirmá el template, re-ingerí.
-- **_grokparsefailure**: el formato real difiere de la muestra usada en la
-  PoC — pedile al SA regenerar el filter con una muestra más representativa.
-"""
-
-
-@app.post(
-    "/api/v1/onboarding/export-starter-kit",
-    tags=["onboarding"],
-    summary="Empaqueta el pipeline + terraform + README en un .zip para entregar al cliente",
-)
-def export_starter_kit(request: ExportStarterKitRequest) -> Response:
-    """Devuelve un .zip con todo lo necesario para que el cliente continúe el
-    desarrollo en su propia cuenta Huawei Cloud después de la demo.
-
-    Contenido:
-      - `logstash.conf` (el filter + input + output que vio el cliente, con
-        comentarios stripped via `strip_logstash_comments` para consistencia
-        con el .conf que va al cluster real).
-      - `terraform/main.tf` (copia del HCL actual).
-      - `terraform/terraform.tfvars.example` (template de creds con placeholders).
-      - `index-template.json` (tipos de campos para OpenSearch).
-      - `dashboards.ndjson` (dashboards baseline importables en OpenSearch Dashboards).
-      - `README.md` (instrucciones paso-a-paso interpoladas con project_name).
-
-    Devuelve `application/zip` con filename `<project_name>-starter-kit.zip`.
-    """
-    import io
-    import zipfile
-
-    project = request.project_name or "log-analytics"
-    terraform_dir = _active_terraform_dir()
-    main_tf_path = terraform_dir / "main.tf"
-    tfvars_example_path = terraform_dir / "terraform.tfvars.example"
-
-    if not main_tf_path.exists() or not tfvars_example_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="terraform/main.tf o terraform.tfvars.example no encontrados — "
-                   "el starter kit no puede armarse sin esos archivos base.",
-        )
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(
-            "starter-kit/logstash.conf",
-            strip_logstash_comments(request.pipeline_conf),
-        )
-        z.writestr(
-            "starter-kit/terraform/main.tf",
-            main_tf_path.read_text(encoding="utf-8"),
-        )
-        z.writestr(
-            "starter-kit/terraform/terraform.tfvars.example",
-            tfvars_example_path.read_text(encoding="utf-8"),
-        )
-        template = build_index_template(
-            request.fields, request.namespace, request.opensearch_index
-        )
-        z.writestr(
-            "starter-kit/index-template.json",
-            json.dumps(template, indent=2, ensure_ascii=False),
-        )
-
-        slug = _slug_from_index(request.opensearch_index)
-        ndjson_content: str | None = None
-        ndjson_file = Path(__file__).parent / "docs" / "dashboards" / f"{slug}.ndjson"
-        if ndjson_file.exists():
-            try:
-                ndjson_content = ndjson_file.read_text(encoding="utf-8")
-            except OSError:
-                pass
-        if ndjson_content is None:
-            try:
-                from dashboards import build_ndjson, get_available_slugs
-                if slug in get_available_slugs():
-                    ndjson_content = build_ndjson(slug)
-            except Exception:
-                pass
-        if ndjson_content:
-            z.writestr(
-                "starter-kit/dashboards.ndjson",
-                ndjson_content,
-            )
-
-        z.writestr(
-            "starter-kit/README.md",
-            _generate_starter_kit_readme(project),
-        )
-        z.writestr(
-            "starter-kit/RUNBOOK-consola.md",
-            _generate_console_runbook(project, request.opensearch_index, get_region()),
-        )
-
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in project)[:64]
-    if not safe_name:
-        safe_name = "log-analytics"
-
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}-starter-kit.zip"',
-        },
-    )
-
-
-def _kit_capabilities_section(slug: str, index_pattern: str, fields: list[dict],
-                              label: str) -> str:
-    """Markdown con la secuencia Dev Tools del chatbot (OpenSearch Assistant) +
-    forecasts, generada del schema del log del cliente. Con placeholders para la
-    MaaS key y los ids que se encadenan entre pasos."""
-    import capabilities as caps
-
-    spec = caps.build_spec_from_fields(slug, index_pattern, fields, label=label)
-    ops = spec.get("operations", [])
-    prompt_fields = spec.get("fields", {})
-    volume_field = spec.get("volume_field", "")
-    ppl_prompt = caps.build_ppl_system_prompt(
-        index_pattern, ops, prompt_fields, spec.get("success_code", ""), label)
-    av = [{
-        "tool_name": f"PPLTool-{slug}", "label": label, "index_pattern": index_pattern,
-        "operations": ops, "fields": prompt_fields, "success_code": spec.get("success_code", ""),
-        "ppl_system_prompt": ppl_prompt,
-    }]
-    instr = caps.build_agent_system_instruction(av)
-
-    def j(x: Any) -> str:
-        return json.dumps(x, ensure_ascii=False, indent=2)
-
-    ep = caps.maas_connector_endpoint()
-    parts = [
-        "## 6. Chatbot — OpenSearch Assistant (NL → PPL → resultado)",
-        "",
-        "Habilita el asistente conversacional sobre tus datos. Corré cada bloque en "
-        "**Dev Tools** de OpenSearch Dashboards, en orden. Reemplazá `<MAAS_API_KEY>` por tu "
-        f"API key de MaaS y encadená los ids que devuelve cada paso. Endpoint MaaS: `{ep}`.",
-        "",
-        "### 6.1 Habilitar connectors remotos",
-        "```", "PUT _cluster/settings", j(caps.build_cluster_settings()), "```",
-        "### 6.2 Model group → guardá `model_group_id`",
-        "```", "POST _plugins/_ml/model_groups/_register", j(caps.build_model_group()), "```",
-        "### 6.3 Connector PPL (NL→PPL) → guardá `connector_id`",
-        "```", "POST _plugins/_ml/connectors/_create",
-        j(caps.build_ppl_connector("<MAAS_API_KEY>", ppl_prompt)), "```",
-        "### 6.4 Connector LLM (razonador) → guardá `connector_id`",
-        "```", "POST _plugins/_ml/connectors/_create",
-        j(caps.build_llm_connector("<MAAS_API_KEY>")), "```",
-        "### 6.5 Registrar los 2 modelos remotos → cada uno devuelve `task_id`",
-        "```", "POST _plugins/_ml/models/_register",
-        j(caps.build_remote_model("platform-ppl", "<PPL_CONNECTOR_ID>", "<MODEL_GROUP_ID>", "NL to PPL")),
-        "", "POST _plugins/_ml/models/_register",
-        j(caps.build_remote_model("platform-llm", "<LLM_CONNECTOR_ID>", "<MODEL_GROUP_ID>", "LLM frasea resultados")),
-        "```",
-        "### 6.6 Resolver `model_id` de cada task y desplegar",
-        "```",
-        "GET _plugins/_ml/tasks/<TASK_ID>            # tomá el model_id",
-        "POST _plugins/_ml/models/<MODEL_ID>/_deploy   # uno por cada modelo (ppl y llm)",
-        "GET _plugins/_ml/models/<MODEL_ID>          # confirmá model_state: DEPLOYED",
-        "```",
-        "### 6.7 Registrar el agente root → guardá `agent_id`",
-        "```", "POST _plugins/_ml/agents/_register",
-        j(caps.build_conversational_agent("<LLM_MODEL_ID>", "<PPL_MODEL_ID>", instr, av)), "```",
-        "### 6.8 Apuntar el Assistant al agente root (+ reiniciar Dashboards)",
-        "```", "PUT .plugins-ml-config/_doc/os_chat",
-        j({"type": "os_chat_root_agent", "configuration": {"agent_id": "<AGENT_ID>"}}), "```",
-        "### 6.9 Probar",
-        "```", "POST _plugins/_ml/agents/<AGENT_ID>/_execute",
-        j({"parameters": {"question": "¿Cuántos eventos hay en total?"}}), "```",
-        "",
-        "> `OPERATIONS` en el prompt PPL puede venir vacío: se completa solo cuando ya tenés datos "
-        "ingeridos (se descubren los valores de las dimensiones). Editá el system prompt si querés "
-        "fijarlos a mano.",
-        "",
-    ]
-
-    forecasts = spec.get("forecasts", [])
-    if forecasts and volume_field:
-        parts += [
-            "## 7. Forecasts",
-            "",
-            "Pronóstico de volumen sobre tu serie. **Importante**: el `window_delay` y el `history` "
-            "hay que ajustarlos a las fechas reales de tus datos (la ventana de análisis del RCF "
-            "tiene que caer sobre la serie, con ≥40 puntos poblados). Creá el forecaster y dispará "
-            "un backtest con `_run_once`.", "",
-        ]
-        for fc in forecasts:
-            body = caps.build_forecaster(
-                index_pattern, volume_field, name=fc["name"], feature_name=fc["feature_name"],
-                aggregation_query=fc.get("aggregation_query"),
-                description=fc.get("description", "Forecast autogenerado"),
-                history=fc.get("history", 4380))
-            parts += ["```", "POST _plugins/_forecast/forecasters", j(body), "",
-                      "POST _plugins/_forecast/forecasters/<FORECASTER_ID>/_run_once", "```"]
-        parts.append("")
-    return "\n".join(parts)
-
-
-def _generate_kit_document(request: "ExportStarterKitRequest") -> str:
-    """Arma el KIT completo en UN documento Markdown: config de Logstash, index
-    template, dashboards, runbook de consola y los comandos del chatbot/forecasts,
-    todo parametrizado con el índice y los campos detectados del log del cliente."""
-    project = request.project_name or "log-analytics"
-    index = request.opensearch_index or "logs-%{+YYYY.MM}"
-    ip = index_pattern_from_name(index) if index else "logs-*"
-    slug = _slug_from_index(index)
-    fields = request.fields or []
-    ns = request.namespace or "data"
-    region = get_region()
-
-    conf = strip_logstash_comments(request.pipeline_conf or "").strip()
-    template_json = json.dumps(
-        build_index_template(fields, ns, index), indent=2, ensure_ascii=False)
-
-    ndjson = ""
-    try:
-        from dashboards import build_ndjson, build_ndjson_from_fields, get_available_slugs
-        if slug in get_available_slugs():
-            ndjson = build_ndjson(slug)
-        elif fields:
-            ndjson = build_ndjson_from_fields(slug, index, fields)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[kit] dashboards no disponibles: {exc!r}")
-
-    runbook = _generate_console_runbook(project, index, region)
-    caps_section = _kit_capabilities_section(slug, ip, fields, project)
-
-    field_rows = "\n".join(
-        f"| `{f.get('field_path') or f.get('raw_name','')}` | {f.get('type','')} | "
-        f"{f.get('business_label','')} |" for f in fields) or "| (sin campos) | | |"
-
-    dashboards_block = (
-        "```\n" + ndjson + "\n```\n\nImportá con **Saved Objects → Import** en OpenSearch "
-        "Dashboards (o `POST _dashboards/api/saved_objects/_import?overwrite=true`)."
-        if ndjson else
-        "_(No se generaron dashboards automáticos para este log — se pueden armar a mano "
-        "sobre el índice `" + ip + "`.)_")
-
-    return f"""# Kit de pipeline — {project}
-
-Generado por el **Builder**: pegaste unas líneas de log, GLM-5.2 armó el pipeline y este documento
-reúne **todo** lo necesario para ponerlo en marcha en OpenSearch (por consola Huawei Cloud), sin
-Terraform.
-
-- **Índice destino:** `{index}`  (index-pattern `{ip}`)
-- **Campos detectados:** {len(fields)}
-- **Región:** {region}
-
-## Campos detectados
-
-| Campo | Tipo | Etiqueta |
-|-------|------|----------|
-{field_rows}
-
-## 1. Configuration file (Logstash / CSS)
-
-El pipeline completo (input elegido + filter generado + output). Pegalo en el **Configuration
-Center** del cluster Logstash de CSS.
-
-```
-{conf}
-```
-
-## 2. Index template (aplicar ANTES de ingerir)
-
-Los tipos de los campos viven en el index template, NO en Logstash. Aplicalo con el índice todavía
-inexistente — Dev Tools:
-
-```
-PUT _index_template/{project}
-{template_json}
-```
-
-## 3. Dashboards
-
-{dashboards_block}
-
-## 4. Runbook de consola (paso a paso)
-
-{runbook}
-
-{caps_section}
-## Apéndice — deploy automatizado (opcional)
-
-Si en vez de la consola preferís infra automatizada, el repositorio de la plataforma trae un
-Terraform (`terraform/`) que crea los clusters CSS + NAT/DNAT. El camino recomendado para una PoC
-guiada es el de la consola (este documento).
-"""
-
-
-@app.post(
-    "/api/v1/onboarding/export-kit",
-    tags=["onboarding"],
-    summary="Genera el KIT completo (config + template + dashboards + runbook + chatbot) en UN documento Markdown",
-)
-def export_kit(request: ExportStarterKitRequest) -> Response:
-    """Salida principal del **Builder**: un solo `.md` con todo lo necesario para
-    armar el pipeline del cliente en OpenSearch, sin desplegar con Terraform."""
-    project = request.project_name or "log-analytics"
-    doc = _generate_kit_document(request)
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in project)[:64] or "log-analytics"
-    return Response(
-        content=doc,
-        media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}-kit.md"'},
-    )
-
 
 _DATASETS_DIR = Path(__file__).parent / "datasets"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -2225,11 +1887,17 @@ def _bundled_dataset(slug: str) -> str | None:
     ignoran. Si el archivo no existe o queda sin líneas de datos, devuelve
     None y el caller cae al comportamiento anterior (synthetic / raw único).
     El tipo ``custom`` (slug ``logs``) no tiene archivo → siempre None.
+
+    Los casos creados desde la plataforma guardan su `.log` en el store de
+    `custom_cases` (volumen de datos) en vez de en `datasets/`: se busca ahí como
+    fallback, así se comportan igual que un caso built-in.
     """
     if not slug:
         return None
     path = _DATASETS_DIR / f"{slug}.log"
     if not path.is_file():
+        path = custom_cases.dataset_path(slug)
+    if path is None or not path.is_file():
         return None
     lines = [
         l for l in path.read_text(encoding="utf-8").splitlines()
@@ -2293,6 +1961,9 @@ def _do_obs_upload(request: TerraformDeployRequest) -> None:
 
         if request.cases:
             for case in request.cases:
+                if case.input_config or custom_cases.case_type_for(case.slug) == "live":
+                    print(f"[obs_upload] [{case.slug}] skip — la fuente no es OBS (caso live)")
+                    continue
                 if case.read_existing_bucket:
                     print(f"[obs_upload] [{case.slug}] skip — read_existing_bucket (datos reales en su prefijo)")
                     continue
@@ -2370,26 +2041,115 @@ def _do_obs_upload(request: TerraformDeployRequest) -> None:
             obs_client.close()
 
 
+def _case_source_ips(request: "TerraformDeployRequest") -> list[str]:
+    """IPs de las fuentes externas de los casos (broker Kafka, host de la DB).
+
+    El cluster de CSS sale a internet por el SNAT, pero además necesita *Cluster
+    Routes* — config interna del cluster que el provider de Terraform no expone y
+    que agrega el backend por la API (igual que ya se hace con las IPs de MaaS).
+    Los hostnames se resuelven a IP porque la API de routes solo toma IPs.
+    """
+    import socket
+
+    hosts: list[str] = []
+    for case in (request.cases or []):
+        cfg = case.input_config or custom_cases.input_config_for(case.slug)
+        plugin = cfg.get("plugin_type", "")
+        if plugin == "kafka":
+            for hp in str((cfg.get("kafka") or {}).get("bootstrap_servers", "")).split(","):
+                host = hp.strip().rsplit(":", 1)[0].strip()
+                if host:
+                    hosts.append(host)
+        elif plugin == "jdbc":
+            # jdbc:postgresql://HOST:5432/db  → HOST
+            m = re.search(r"//([^:/?]+)", str((cfg.get("jdbc") or {}).get("jdbc_connection_string", "")))
+            if m:
+                hosts.append(m.group(1))
+
+    ips: list[str] = []
+    for h in hosts:
+        if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", h):
+            ips.append(h)
+            continue
+        try:
+            ips.append(socket.gethostbyname(h))
+        except OSError:
+            print(f"[css-routes] no pude resolver '{h}' — agregá la ruta a mano si el cluster no llega")
+    return sorted(set(ips))
+
+
+def _beats_port(request: "TerraformDeployRequest") -> int:
+    """Puerto de Beats a exponer, o 0 si ningún caso usa ese input.
+
+    Un caso con input `beats` no sale a buscar los datos: el Logstash ESCUCHA y
+    el Filebeat del cliente le envía. Terraform solo abre el puerto (regla de SG
+    + DNAT) cuando hace falta — abrirlo en todos los deploys sería exponer
+    superficie sin motivo.
+    """
+    for case in (request.cases or []):
+        cfg = case.input_config or custom_cases.input_config_for(case.slug)
+        if cfg.get("plugin_type") == "beats":
+            try:
+                return int((cfg.get("beats") or {}).get("port") or 5044)
+            except (TypeError, ValueError):
+                return 5044
+    return 0
+
+
+def _pipeline_secrets(request: "TerraformDeployRequest") -> list[str]:
+    """Credenciales de las FUENTES de los casos (Kafka SASL, JDBC…) que quedan
+    horneadas en los `.conf`. Van a `sensitive_words` de Terraform para que la
+    consola de CSS no las muestre en claro."""
+    out: list[str] = []
+    for case in (request.cases or []):
+        cfg = case.input_config or custom_cases.input_config_for(case.slug)
+        for sub in cfg.values():
+            if isinstance(sub, dict):
+                for k in ("sasl_password", "ssl_truststore_password", "jdbc_password",
+                          "secret_access_key"):
+                    v = sub.get(k)
+                    if isinstance(v, str) and v.strip():
+                        out.append(v)
+    return sorted(set(out))
+
+
 def _build_pipeline_conf_for_case(case: "PipelineCase", request: "TerraformDeployRequest") -> str:
     """Genera el pipeline .conf para un caso específico.
-    
+
     Combina:
-    - Input: OBS con el prefix del caso
+    - Input: la fuente propia del caso si la tiene (Kafka/Beats/JDBC del cliente),
+      si no OBS con el prefix del caso
     - Filter: el filter_code del caso
     - Output: OpenSearch con el index del caso
+
+    El input NO está hardcodeado a s3: un caso creado desde el Builder puede
+    apuntar a una fuente que el cliente ya tiene levantada. Sin `input_config`
+    (todos los casos de demo) se arma el s3 de siempre sobre el bucket de demos.
     """
-    input_config = {
-        "plugin_type": "s3",
-        "s3": {
-            "access_key_id": request.obs_access_key,
-            "secret_access_key": request.obs_secret_key,
-            "bucket": request.obs_bucket,
-            "region": request.obs_region,
-            "endpoint": request.obs_endpoint,
-            "prefix": case.obs_prefix,
-            "codec": "plain",
+    # Solo los casos `live` traen fuente propia. Para todo lo demás el input se
+    # arma con las credenciales y el bucket DEL REQUEST — es decir, los del
+    # usuario que despliega, no los de quien creó el caso.
+    stored = (custom_cases.input_config_for(case.slug)
+              if custom_cases.case_type_for(case.slug) == "live" else {})
+    if case.input_config:
+        input_config = dict(case.input_config)
+    elif stored:
+        # El caso guardó su fuente pero el front no la reenvió (ej. deploy
+        # reconstruido tras un refresh): se toma del store.
+        input_config = stored
+    else:
+        input_config = {
+            "plugin_type": "s3",
+            "s3": {
+                "access_key_id": request.obs_access_key,
+                "secret_access_key": request.obs_secret_key,
+                "bucket": request.obs_bucket,
+                "region": request.obs_region,
+                "endpoint": request.obs_endpoint,
+                "prefix": case.obs_prefix,
+                "codec": "plain",
+            }
         }
-    }
     
     output_config = {
         "plugin_type": "elasticsearch",
@@ -2410,9 +2170,12 @@ def _build_pipeline_conf_for_case(case: "PipelineCase", request: "TerraformDeplo
     # filtro; el resto no dedup (ids auto), y el clear de índice por corrida evita
     # duplicados. NO hardcodear trace_id acá: los tipos sin ese campo colapsarían
     # todos los docs a uno.
+    # Los flags read-only son propios del input s3: un caso con fuente Kafka/Beats/
+    # JDBC no tiene esa sub-config y accederla a ciegas tiraba KeyError.
     if case.read_existing_bucket:
-        input_config["s3"]["delete"] = False
-        input_config["s3"]["watch_for_new_files"] = False
+        if "s3" in input_config:
+            input_config["s3"]["delete"] = False
+            input_config["s3"]["watch_for_new_files"] = False
         output_config["elasticsearch"]["manage_template"] = False
         output_config["elasticsearch"]["ilm_enabled"] = False
         if case.document_id:
@@ -2465,7 +2228,11 @@ def _do_terraform_sequence(
                 "index": case.index_name,
                 "obs_prefix": case.obs_prefix,
                 "fields": case.fields or [],
-                "label": request.industry_label or "",
+                # `industry_label` es único para todo el request (camino
+                # productivo). En multi-caso, cada caso creado desde la
+                # plataforma aporta su propio label → el chatbot nombra bien la
+                # fuente en vez de rotular todo igual.
+                "label": request.industry_label or custom_cases.label_for(case.slug) or "",
             }
     else:
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
@@ -2493,6 +2260,8 @@ def _do_terraform_sequence(
     }
     # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
     _cap = _capacity_for(len(pipelines_var))
+    tfvars["pipeline_secrets"] = _pipeline_secrets(request)
+    tfvars["beats_port"] = _beats_port(request)
     tfvars["logstash_flavor"] = _cap["logstash_flavor"]
     tfvars["opensearch_flavor"] = _cap["opensearch_flavor"]
     tfvars["pipeline_workers"] = _cap["pipeline_workers"]
@@ -2900,6 +2669,8 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         }
         # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
         _cap = _capacity_for(len(pipelines_var))
+        tfvars["pipeline_secrets"] = _pipeline_secrets(request)
+        tfvars["beats_port"] = _beats_port(request)
         tfvars["logstash_flavor"] = _cap["logstash_flavor"]
         tfvars["opensearch_flavor"] = _cap["opensearch_flavor"]
         tfvars["pipeline_workers"] = _cap["pipeline_workers"]
@@ -2950,11 +2721,17 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
             ["terraform", "init", "-input=false"],
             cwd=terraform_dir, capture_output=True, text=True, timeout=180,
         )
+        for ln in (init_result.stdout or "").splitlines():
+            yield _sse({"type": "log", "source": "terraform init", "message": ln})
         if init_result.returncode != 0:
             err = init_result.stderr or init_result.stdout or "terraform init falló"
             print("[terraform init FALLÓ]\n" + err, flush=True)
+            for ln in err.splitlines():
+                yield _sse({"type": "log", "level": "error", "source": "terraform init", "message": ln})
+            yield _sse({"type": "step", "name": "terraform init", "ok": False, "reason": err[-300:]})
             yield _sse({"type": "error", "message": "terraform init falló:\n" + err[-1500:]})
             return
+        yield _sse({"type": "step", "name": "terraform init", "ok": True})
 
     # ── terraform apply (streaming línea por línea) ──────────────────────
     yield _sse({"type": "progress", "percent": 5, "phase": "Terraform apply",
@@ -2973,6 +2750,12 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     try:
         for line in process.stdout:
             tf_lines.append(line)
+            # La línea cruda va al historial (evento `log`): antes se descartaba
+            # salvo que el apply fallara, así que después no había forma de saber
+            # qué hizo el apply. El stream del wizard filtra estos eventos.
+            stripped = line.rstrip()
+            if stripped:
+                yield _sse({"type": "log", "source": "terraform apply", "message": stripped})
             progress = _parse_tf_line(line, completed_resources)
             if progress:
                 yield _sse({"type": "progress", **progress})
@@ -2984,6 +2767,8 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         process.wait()
 
     apply_failed = process.returncode != 0
+    yield _sse({"type": "step", "name": "terraform apply", "ok": not apply_failed,
+                "reason": ("".join(tf_lines)[-300:] if apply_failed else "")})
     if apply_failed:
         tail = "".join(tf_lines)[-3000:]
         print("[terraform apply FALLÓ]\n" + tail, flush=True)   # visible en `docker compose logs`
@@ -3025,8 +2810,13 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     if obs_future is not None:
         try:
             obs_future.result()
+            yield _sse({"type": "step", "name": "Subida de logs a OBS", "ok": True})
         except Exception as exc:
+            # Antes esto moría en un print: el deploy salía "ok" pero el cluster
+            # quedaba sin datos y no había rastro del motivo.
             print(f"[deploy-stream] OBS upload falló (best-effort): {exc!r}")
+            yield _sse({"type": "step", "name": "Subida de logs a OBS", "ok": False,
+                        "reason": str(exc)[:300]})
         obs_executor.shutdown()
 
     # ── Post-deploy: marker + artifact ───────────────────────────────────
@@ -3049,8 +2839,31 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                 get_huawei_project_id(),
             )
             print(f"[css-routes] resultado: {r}")
+            yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
+                        "ok": not r.get("error"), "reason": str(r.get("error") or "")})
         except Exception as exc:  # noqa: BLE001
             print(f"[css-routes] fallo agregando cluster routes (best-effort): {exc!r}")
+            yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
+                        "ok": False, "reason": repr(exc)[:300]})
+
+        # Rutas del cluster de LOGSTASH hacia las fuentes del cliente (broker
+        # Kafka, base de datos). Sin esto el Logstash no alcanza el origen aunque
+        # el SNAT esté puesto. Solo si hay algún caso con fuente externa.
+        source_ips = _case_source_ips(request)
+        if source_ips:
+            try:
+                ls_id = (tf_outputs.get("logstash_cluster_id") or {}).get("value", "")
+                r2 = _add_css_cluster_routes(
+                    ls_id, request.obs_access_key, request.obs_secret_key,
+                    get_huawei_project_id(), ips=source_ips,
+                )
+                print(f"[css-routes] logstash → fuentes {source_ips}: {r2}")
+                yield _sse({"type": "step", "name": f"Rutas del Logstash → {', '.join(source_ips)}",
+                            "ok": not r2.get("error"), "reason": str(r2.get("error") or "")})
+            except Exception as exc:  # noqa: BLE001
+                print(f"[css-routes] rutas del logstash fallaron (best-effort): {exc!r}")
+                yield _sse({"type": "step", "name": "Rutas del Logstash → fuentes del cliente",
+                            "ok": False, "reason": repr(exc)[:300]})
 
     # Security Analytics (Sigma rules + detector) para SIEM.
     # Best-effort: si el plugin no está o falla, no rompe el deploy.
@@ -3149,35 +2962,8 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
 # El deploy/ingesta corre en un thread de background y sobrevive que el browser se
 # cierre o refresque: el cliente reengancha por `job_id` al stream, que reproduce
 # los eventos guardados y sigue. Un job por usuario (serializado por el lock).
-import uuid as _uuid
-
-_JOBS: "dict[str, dict]" = {}
-_JOBS_GUARD = _threading.Lock()
-
-
-def _user_jobs_dir() -> Path:
-    ctx = auth.current_user_var.get()
-    base = ctx.data_dir if ctx is not None else Path(__file__).parent
-    d = base / "jobs"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _flush_job(job: dict, jobs_dir: Path) -> None:
-    try:
-        (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job), encoding="utf-8")
-    except OSError:
-        pass
-
-
-def _load_job_file(job_id: str) -> "dict | None":
-    try:
-        f = _user_jobs_dir() / f"{job_id}.json"
-        if f.is_file():
-            return json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        pass
-    return None
+# La persistencia y el historial los maneja `runs.py` (vista Actividad); acá solo
+# queda el ciclo de vida del thread y el stream.
 
 
 @app.post("/api/v1/terraform/deploy-job", tags=["terraform"],
@@ -3211,17 +2997,15 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
                                     "message": "Ya hay un despliegue o destroy en curso para tu usuario."})
     audit.record("deploy", f"slug={slug} start_ingestion={request.start_ingestion} cases={num_cases} (job)")
 
-    job_id = _uuid.uuid4().hex[:16]
     ctx = auth.current_user_var.get()
     settings_path = str(ctx.settings_path) if ctx is not None else None
-    jobs_dir = _user_jobs_dir()
-    job = {"id": job_id, "status": "running", "created": int(time.time()), "updated": int(time.time()),
-           "user": (ctx.user_id if ctx is not None else "-"), "events": []}
-    with _JOBS_GUARD:
-        _JOBS[job_id] = job
-    _flush_job(job, jobs_dir)
+    kind = "ingestion" if request.start_ingestion else "deploy"
+    run = runs.start(kind, detail=f"{slug} · {num_cases} pipeline{'s' if num_cases > 1 else ''}")
+    job_id = run["id"]
+    run_dir = runs.runs_dir()   # resuelto acá: en el thread no hay contexto de request
 
     def _run():
+        started = time.time()
         try:
             if ctx is not None:
                 auth.current_user_var.set(ctx)
@@ -3231,21 +3015,17 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
                     evt = json.loads(raw[6:].strip()) if isinstance(raw, str) and raw.startswith("data: ") else {"type": "raw", "message": str(raw)}
                 except Exception:
                     evt = {"type": "raw"}
-                with _JOBS_GUARD:
-                    job["events"].append(evt)
-                    job["updated"] = int(time.time())
-                    if evt.get("type") in ("complete", "error"):
-                        job["status"] = evt["type"]
-                _flush_job(job, jobs_dir)
+                runs.append(run, evt, d=run_dir)
         except Exception as exc:
-            with _JOBS_GUARD:
-                job["events"].append({"type": "error", "message": f"El job falló: {exc}"})
-                job["status"] = "error"
+            runs.append(run, {"type": "error", "message": f"El job falló: {exc}"}, d=run_dir)
         finally:
-            with _JOBS_GUARD:
-                if job["status"] == "running":
-                    job["status"] = "complete"
-            _flush_job(job, jobs_dir)
+            if run["status"] == "running":
+                runs.append(run, {"type": "complete"}, d=run_dir)
+            runs.finish(run, run["status"])
+            # El audit hoy registraba solo la INTENCIÓN (al arrancar). Esta fila
+            # es la que dice si terminó bien y cuánto tardó.
+            audit.record(f"deploy_{run['status']}",
+                         f"slug={slug} en {int(time.time() - started)}s", user=None)
             lock.release()
 
     _threading.Thread(target=_run, name=f"deploy-job-{job_id}", daemon=True).start()
@@ -3254,15 +3034,7 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
 
 @app.get("/api/v1/terraform/jobs", tags=["terraform"], summary="Job de deploy en curso (para reconectar)")
 def terraform_jobs() -> dict:
-    ctx = auth.current_user_var.get()
-    uid = ctx.user_id if ctx is not None else "-"
-    running = None
-    with _JOBS_GUARD:
-        for jid, j in _JOBS.items():
-            if j.get("user") == uid and j.get("status") == "running":
-                running = jid
-                break
-    return {"running": running}
+    return {"running": runs.running_id()}
 
 
 @app.get("/api/v1/terraform/jobs/{job_id}/stream", tags=["terraform"],
@@ -3271,25 +3043,39 @@ def terraform_job_stream(job_id: str):
     def gen():
         cursor = 0
         while True:
-            with _JOBS_GUARD:
-                job = _JOBS.get(job_id)
-                events = list(job["events"]) if job else None
-                stat = job["status"] if job else None
-            if job is None:
-                fj = _load_job_file(job_id)
-                if fj is None:
-                    yield _sse({"type": "error", "message": "Job no encontrado."})
-                    return
-                evs = fj.get("events", [])
-                while cursor < len(evs):
-                    yield _sse(evs[cursor]); cursor += 1
+            run = runs.get(job_id)
+            if run is None:
+                yield _sse({"type": "error", "message": "Job no encontrado."})
                 return
+            events = run.get("events", [])
             while cursor < len(events):
-                yield _sse(events[cursor]); cursor += 1
-            if stat in ("complete", "error"):
+                evt = events[cursor]
+                cursor += 1
+                # Las líneas crudas del apply van al historial, no al stream del
+                # wizard (que solo pinta fases): mandarlas sería ruido y miles de
+                # frames. Se ven en la vista Actividad.
+                if evt.get("type") != "log":
+                    yield _sse(evt)
+            if run.get("status") in ("complete", "error"):
                 return
             time.sleep(0.5)
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# ── Actividad: historial de ejecuciones ──────────────────────────────────────
+@app.get("/api/v1/runs", tags=["infra"], summary="Historial de ejecuciones del usuario")
+def list_runs_endpoint(limit: int = 50) -> dict:
+    """Filas resumidas (sin eventos) para la vista Actividad."""
+    return {"runs": runs.list_runs(max(1, min(200, limit)))}
+
+
+@app.get("/api/v1/runs/{run_id}", tags=["infra"], summary="Detalle de una ejecución")
+def get_run_endpoint(run_id: str) -> dict:
+    run = runs.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404,
+                            detail={"stage": "run", "message": "No existe esa ejecución."})
+    return run
 
 
 # La Logstash de CSS (7.10) NO trae todos los plugins bundled de la OSS: el
@@ -3330,14 +3116,19 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
     ``<slug>-logs/`` del bucket. Si falta alguno, cortar ANTES de gastar 20 min
     de deploy, con mensaje accionable (⚙ Configuración → Preparar bucket).
 
-    Solo aplica a slugs de demo conocidos (`_DEMO_DATASET_FILES`); el flujo
-    productivo (prefijo del cliente) no se toca. Best-effort: si el chequeo en
-    sí falla (red, permisos), no bloquea el deploy."""
+    Solo aplica a slugs de demo conocidos (built-in + casos creados desde la
+    plataforma); el flujo productivo (prefijo del cliente) no se toca.
+    Best-effort: si el chequeo en sí falla (red, permisos), no bloquea el deploy."""
     from obs_client import OBSClient, OBSConfigError, OBSUploadError
 
+    known = _demo_dataset_files()
     cases = request.cases or []
+    # Un caso `live` (Kafka/Beats/JDBC del cliente) no tiene dataset en OBS: no
+    # se lo puede exigir, si no el guard bloquearía un deploy perfectamente válido.
     demo_cases = [c for c in cases
-                  if c.read_existing_bucket and c.slug in _DEMO_DATASET_FILES]
+                  if c.read_existing_bucket and c.slug in known
+                  and not c.input_config
+                  and custom_cases.case_type_for(c.slug) != "live"]
     if not demo_cases or not request.obs_access_key or not request.obs_bucket:
         return
     missing: list[str] = []
@@ -5546,11 +5337,21 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
             },
         )
 
+    # Run de Actividad: cada sub-paso queda registrado con su resultado. Antes
+    # todo esto era best-effort con un print() y no había forma de saber después
+    # si el template se aplicó o si los dashboards se importaron.
+    run = runs.start("schema", detail=", ".join(
+        sorted({c.slug for c in request.cases} if request.cases
+               else {request.pipeline_slug or _slug_from_index(request.opensearch_index)})))
+
     index_template_applied = False
     try:
         index_template_applied = _apply_index_templates(request, cluster)
+        runs.step(run, "Index template", index_template_applied,
+                  "" if index_template_applied else "el cluster rechazó el template")
     except Exception as exc:  # noqa: BLE001
         print(f"[apply-schema] index template falló (best-effort): {exc!r}")
+        runs.step(run, "Index template", False, repr(exc)[:300])
 
     # (slug, fields, index_name) por caso. Predefinidos usan su spec; custom (sin
     # spec) auto-genera el dashboard de sus campos detectados.
@@ -5584,12 +5385,16 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
                 fields=flds, index_name=idx, time_bounds=bounds,
             ):
                 dashboards_imported = True
+                runs.step(run, f"Dashboards · {s}", True)
                 registry = _read_pipelines_registry(terraform_dir)
                 if s in registry:
                     registry[s]["dashboards_imported"] = True
                     _write_pipelines_registry(terraform_dir, registry)
+            else:
+                runs.step(run, f"Dashboards · {s}", False, "el import no devolvió objetos")
         except Exception as exc:  # noqa: BLE001
             print(f"[apply-schema] import de dashboards '{s}' falló (best-effort): {exc!r}")
+            runs.step(run, f"Dashboards · {s}", False, repr(exc)[:300])
 
     # Time picker global de Dashboards = UNIÓN de los rangos reales (min de mins, max
     # de maxes), para que Discover y dashboards nuevos arranquen sobre la serie aunque
@@ -5632,8 +5437,11 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
                 cluster, request.opensearch_user or "admin",
                 request.opensearch_password, request.https_enabled,
             )
+            runs.step(run, "Security Analytics", bool(sa_result.get("available")),
+                      "" if sa_result.get("available") else "el plugin no está disponible")
         except Exception as exc:  # noqa: BLE001
             print(f"[apply-schema] security-analytics falló (best-effort): {exc!r}")
+            runs.step(run, "Security Analytics", False, repr(exc)[:300])
 
     msg = "Index template aplicado" if index_template_applied else "El index template no se pudo aplicar"
     if dashboards_imported:
@@ -5641,6 +5449,8 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
     if sa_result.get("available"):
         n_rules = len(sa_result.get("rules", []))
         msg += f" · security analytics ({n_rules} rules)"
+    runs.finish(run, "complete" if index_template_applied else "error", detail=msg)
+    audit.record("apply_schema", msg[:200])
     return ApplySchemaResponse(
         status="success" if index_template_applied else "partial",
         index_template_applied=index_template_applied,
@@ -5713,6 +5523,10 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         _base = _os_base(cluster, request.https_enabled)
         if _base.rsplit("//", 1)[-1]:
             _teardown_orphans_by_name(_base, user, password)
+    # Run de Actividad: una fila por capability (chatbot, forecast, …) con su
+    # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
+    # cuanto el browser cerraba la pestaña.
+    run = runs.start("capabilities", detail=", ".join(slugs))
     for slug in slugs:
         has_spec = _caps.get_capability_spec(slug) is not None
         has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
@@ -5725,11 +5539,17 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             )
             if caps_result[slug]:
                 any_ok = True
+            for cap_name, cap in (caps_result[slug] or {}).items():
+                if isinstance(cap, dict) and "ok" in cap:
+                    runs.step(run, f"{cap_name} · {slug}", cap.get("ok"),
+                              str(cap.get("reason", ""))[:300])
         except Exception as exc:  # noqa: BLE001
             print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
             caps_result[slug] = {"error": repr(exc)}
+            runs.step(run, slug, False, repr(exc)[:300])
 
     msg = "Capabilities provisionadas" if any_ok else "No se provisionó ninguna capability"
+    runs.finish(run, "complete" if any_ok else "error", detail=msg)
     return ProvisionCapabilitiesResponse(
         status="success" if any_ok else "partial",
         capabilities=caps_result,
@@ -5981,7 +5801,7 @@ def terraform_status() -> TerraformStatusResponse:
     seconds_ago = max(0, int(time.time() - deployed_at.timestamp()))
 
     # `terraform output -json` para reconstruir los botones del banner
-    # (Dashboards/Starter Kit) sin depender del state in-memory del browser.
+    # (Dashboards/Destruir) sin depender del state in-memory del browser.
     # Si falla (terraform CLI ausente, state corrupto, etc.) degradamos:
     # active=True con outputs None → banner muestra solo Destruir.
     outputs: dict[str, Any] = {}
@@ -6049,7 +5869,8 @@ def terraform_status() -> TerraformStatusResponse:
         }
         for slug, entry in registry.items()
     ]
-    # `pipeline_conf` (para el Starter Kit) = la última pipeline registrada.
+    # `pipeline_conf` (lo reusa el redeploy tras un refresh) = la última
+    # pipeline registrada.
     last_conf = None
     if registry:
         last_conf = list(registry.values())[-1].get("pipeline_conf") or None
@@ -6086,7 +5907,17 @@ def terraform_destroy(request: TerraformDestroyRequest = Body(default_factory=Te
     """Destroy con Terraform, protegido por el lock de deploy por-usuario."""
     with _deploy_guard():
         audit.record("destroy", "terraform destroy")
-        return _terraform_destroy_impl(request)
+        run = runs.start("destroy", detail="terraform destroy")
+        try:
+            res = _terraform_destroy_impl(request)
+        except Exception as exc:
+            runs.step(run, "terraform destroy", False, str(exc)[:300])
+            runs.finish(run, "error", detail=str(exc)[:200])
+            raise
+        runs.step(run, "terraform destroy", res.status != "error", res.message[:300])
+        runs.finish(run, "complete" if res.status != "error" else "error",
+                    detail=res.message[:200] or res.status)
+        return res
 
 
 def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestroyResponse:

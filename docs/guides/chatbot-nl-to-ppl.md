@@ -8,8 +8,9 @@ placeholders: `<MAAS_API_KEY>`, `<INDEX>`, `<FUENTE>`, y los ids que devuelve ca
 Lo único específico del log es el `system_prompt` del connector PPL (6.3): `DATA SOURCE` /
 `FIELDS` / `OPERATIONS`. El resto es igual para cualquier fuente.
 
-> El **Builder** (`Exportar Starter Kit`) genera esta misma secuencia ya parametrizada con el
-> schema del log que pegaste. Este documento es la versión genérica de referencia.
+> La plataforma corre esta misma secuencia sola en la puesta en marcha ("Provisionar
+> capabilities"), parametrizada con el schema detectado del log. Este documento es la versión
+> genérica de referencia, para hacerlo a mano o para entender qué quedó provisionado.
 
 ---
 

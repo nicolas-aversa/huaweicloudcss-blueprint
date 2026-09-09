@@ -25,9 +25,9 @@ Dos maneras de usarlo:
 - **Demo** — 8 escenarios verticales pre-armados (SIEM, FortiAnalyzer, wallet/pagos, ALyC,
   oil & gas, e-commerce, streaming, salud): dataset sintético, pipeline, index template, dashboards
   curados, forecasts y chatbot, desplegados con Terraform en un par de clicks.
-- **Builder** — traés tu propio log: pegás unas líneas, un LLM (GLM) infiere la estructura y arma
-  el pipeline; elegís la fuente (OBS, Kafka, Beats, JDBC…) y te llevás **todo en un documento**
-  listo para ejecutar, o lo desplegás.
+- **Builder** — traés el log de un cliente: subís el `.log`, un LLM (GLM) infiere la estructura y
+  arma el pipeline; elegís la fuente (OBS, Kafka, Beats, JDBC…) y lo **guardás como un caso de demo
+  propio**, que queda en el grid junto a los de fábrica y se despliega igual.
 
 ---
 
@@ -39,10 +39,12 @@ Dos maneras de usarlo:
 | **Multi-fuente** | Inputs: **OBS/S3**, **Kafka** (incl. Huawei **DMS for Kafka**, plaintext y **SASL_SSL**), **Beats/Filebeat**, **JDBC**, HTTP, File. |
 | **Index templates** | Genera el `_index_template` con los tipos inferidos y namespacing por campo. |
 | **Dashboards curados** | Un dashboard por vertical (métricas, series, tablas top-N) + panel de **Controls** para filtrar. |
-| **Chatbot NL→PPL** | Agente conversacional de OpenSearch (ml-commons): traduce preguntas en lenguaje natural a **PPL** y responde con el dato real. Secuencia Dev Tools generada por el kit. |
+| **Chatbot NL→PPL** | Agente conversacional de OpenSearch (ml-commons): traduce preguntas en lenguaje natural a **PPL** y responde con el dato real. Se provisiona solo al desplegar. |
 | **Forecasting** | Forecasters (RCF) sobre las series de volumen del vertical. |
 | **Deploy con Terraform** | Levanta los clusters CSS (OpenSearch + Logstash) + NAT/DNAT en tu cuenta. |
 | **Registro declarativo** | Cada vertical se define en **un solo módulo** `verticals/<slug>.py`; backend y frontend lo consumen. |
+| **Casos creados desde la app** | El Builder guarda el log de un cliente como un caso nuevo (card + dataset + dashboards + chatbot), sin tocar código ni rebuildear la imagen. |
+| **Actividad** | Historial persistido de cada ejecución: sub-pasos con ✓/✗ y motivo, más la salida cruda de Terraform. |
 
 ---
 
@@ -66,10 +68,10 @@ flowchart LR
     end
     API -->|Terraform| LS
     API -->|Terraform| OS
-    API -->|genera config/kit| LS
+    API -->|genera config| LS
 ```
 
-- **Backend**: FastAPI (`main.py`) — onboarding, generación de pipeline/kit, capabilities
+- **Backend**: FastAPI (`main.py`) — onboarding, generación de pipeline, casos de demo, capabilities
   (chatbot/forecasts), deploy Terraform, settings.
 - **Frontend**: SPA en un solo archivo (`static/index.html`) — wizard, infraestructura, config.
 - **Registro de verticales**: `verticals/` (un módulo por vertical) → inyectado en `GET /` como
@@ -123,15 +125,19 @@ Logstash — eso lo provee CSS en la nube.
 (clusters CSS); los siguientes reusan el entorno. Cada vertical trae dataset, pipeline, template,
 dashboards, forecasts y chatbot.
 
-### Builder (traé tu propio log)
-Toggle **"Builder (tu log → kit)"** en el paso 1:
+### Builder (traé tu propio log → caso de demo nuevo)
+Toggle **"Tu log específico"** en el paso 1. Sirve para convertir el log de un cliente en un caso
+propio, que después se despliega igual que los que vienen de fábrica:
 
-1. Pegás unas líneas del log → **Siguiente** dispara el análisis con el LLM (arma el `filter{}` y
-   detecta campos).
+1. Subís el `.log` del cliente (o pegás unas líneas si los datos van a llegar de una fuente en
+   vivo) → **Siguiente** dispara el análisis con el LLM (arma el `filter{}` y detecta campos).
 2. Revisás/ajustás el mapping.
 3. Elegís la **fuente** (OBS / Kafka / Beats / JDBC) y sus datos de conexión; output OpenSearch.
-4. **Exportás el Starter Kit** (un documento Markdown con config + index template + dashboards +
-   runbook de consola + comandos del chatbot y forecasts), o desplegás.
+4. **Guardar como caso**: le ponés nombre, icono y grupo. Queda como una card más del grid del
+   paso 1 — con su dataset, dashboards auto-generados y chatbot — lista para desplegar.
+
+Los casos creados se guardan en el volumen de datos (`$APP_DATA_DIR/cases/`), son **compartidos por
+instancia** y los borra quien los creó o un admin. Ver `custom_cases.py`.
 
 De dónde sacar la muestra según la fuente:
 
@@ -150,9 +156,8 @@ paso a paso completo con **Kafka DMS** y **Filebeat en una VM**.
 ## Chatbot NL → PPL
 
 El asistente conversacional de OpenSearch (ml-commons) traduce preguntas en lenguaje natural a
-consultas **PPL** y responde con el dato. El kit genera la **secuencia completa de comandos Dev
-Tools** para provisionarlo (cluster settings → connectors → modelos → agente root → bind del
-Assistant). Ver el runbook universal en
+consultas **PPL** y responde con el dato. La plataforma lo provisiona sola en la puesta en marcha
+(cluster settings → connectors → modelos → agente root → bind del Assistant). Ver el runbook universal en
 [`docs/guides/chatbot-nl-to-ppl.md`](docs/guides/chatbot-nl-to-ppl.md).
 
 ---
@@ -185,7 +190,8 @@ valores y `terraform init && terraform apply`. Ver [`terraform/README.md`](terra
 ## Estructura del repo
 
 ```
-main.py                 Backend FastAPI (onboarding, kit, capabilities, deploy, settings)
+main.py                 Backend FastAPI (onboarding, casos, capabilities, deploy, settings)
+runs.py                 Historial persistido de ejecuciones (vista Actividad)
 maas_integrator.py      Integración con MaaS/LLM (análisis de log, generación de filter)
 capabilities.py         Builders del chatbot (connectors, modelos, agente) y forecasts
 dashboards.py           Motor de dashboards (ndjson) desde el registro de verticales
@@ -193,6 +199,7 @@ index_template.py       Generación del _index_template
 plugin_rag.py           Catálogo/RAG de plugins de Logstash para el LLM
 verticals/              Registro declarativo: un módulo por vertical (card, filter, campos,
                         capability spec, dashboard, preguntas, datasets)
+custom_cases.py         Casos de demo creados desde la UI (store en el volumen de datos)
 static/index.html       Frontend completo (SPA)
 terraform/              HCL de los clusters CSS + NAT/DNAT
 docs/                   Contexto para el LLM, dashboards de referencia, guías (docs/guides/)

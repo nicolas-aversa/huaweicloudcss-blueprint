@@ -85,6 +85,25 @@ variable "pipelines" {
   default = {}
 }
 
+variable "beats_port" {
+  description = "Puerto en el que el Logstash escucha a Beats/Filebeat. 0 = no exponer nada (default: ningún caso usa el input beats)."
+  type        = number
+  default     = 0
+}
+
+variable "beats_source_cidr" {
+  description = "Desde dónde se acepta el tráfico de Beats. Acotalo a la IP pública del cliente cuando se la sepa."
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
+variable "pipeline_secrets" {
+  description = "Credenciales de las FUENTES de los casos (Kafka SASL, JDBC…) que quedan horneadas en los .conf, para enmascararlas en la consola de CSS."
+  type        = list(string)
+  default     = []
+  sensitive   = true
+}
+
 variable "project_name" {
   description = "Nombre del proyecto (para tags)"
   type        = string
@@ -313,6 +332,51 @@ resource "huaweicloud_css_logstash_cluster" "logstash_cluster" {
   }
 }
 
+# ── Exponer el Logstash para fuentes push (Beats/Filebeat) ──────────────────
+# Un caso `live` con input `beats` NO sale a buscar los datos: el Logstash ESCUCHA
+# y el Filebeat del cliente le envía. Para que eso funcione desde afuera de la VPC
+# hacen falta las mismas dos piezas que ya tiene OpenSearch — regla de SG + DNAT
+# sobre el NAT/EIP — pero apuntando al NIC del Logstash.
+#
+# Se crean SOLO si `beats_port > 0` (lo setea el backend cuando alguno de los
+# casos del deploy usa el input beats): abrir un puerto público en cada deploy
+# "por las dudas" sería exponer superficie sin motivo.
+locals {
+  logstash_private_ip = split(":", split(",", huaweicloud_css_logstash_cluster.logstash_cluster.endpoint)[0])[0]
+  expose_beats        = var.beats_port > 0
+}
+
+data "huaweicloud_networking_port" "logstash_node" {
+  count      = local.expose_beats ? 1 : 0
+  fixed_ip   = local.logstash_private_ip
+  depends_on = [huaweicloud_css_logstash_cluster.logstash_cluster]
+}
+
+resource "huaweicloud_nat_dnat_rule" "logstash_beats" {
+  count                 = local.expose_beats ? 1 : 0
+  nat_gateway_id        = huaweicloud_nat_gateway.nat.id
+  floating_ip_id        = huaweicloud_vpc_eip.nat_eip.id
+  protocol              = "tcp"
+  port_id               = data.huaweicloud_networking_port.logstash_node[0].id
+  internal_service_port = var.beats_port
+  external_service_port = var.beats_port
+}
+
+# El DNAT preserva el source, así que el SG del nodo tiene que permitir el puerto.
+# `beats_source_cidr` acota quién puede publicar: por defecto 0.0.0.0/0 (el
+# Filebeat del cliente suele estar en una IP dinámica), pero conviene restringirlo
+# a la IP pública del cliente cuando se la sabe.
+resource "huaweicloud_networking_secgroup_rule" "logstash_beats" {
+  count             = local.expose_beats ? 1 : 0
+  security_group_id = var.security_group_id
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = var.beats_port
+  port_range_max    = var.beats_port
+  remote_ip_prefix  = var.beats_source_cidr
+}
+
 # ── Preparar hosts de OpenSearch ────────────────────────────────────────────
 
 locals {
@@ -367,11 +431,15 @@ resource "huaweicloud_css_logstash_configuration" "pipeline" {
     workers    = var.pipeline_workers
   }
 
-  sensitive_words = [
+  # Palabras a enmascarar en la config que muestra la consola de CSS. Además de
+  # las credenciales de la plataforma van las de la FUENTE del caso (Kafka SASL,
+  # JDBC): un caso que lee del Kafka del cliente hornea esa password en el .conf,
+  # y sin esto quedaba legible.
+  sensitive_words = compact(concat([
     var.obs_access_key,
     var.obs_secret_key,
     var.opensearch_password
-  ]
+  ], var.pipeline_secrets))
 }
 
 # ── Logstash Pipeline (activar configuraciones) ──────────────────────────────
@@ -392,6 +460,11 @@ resource "huaweicloud_css_logstash_pipeline" "pipeline" {
 output "opensearch_endpoint" {
   description = "OpenSearch cluster endpoint"
   value       = local.opensearch_endpoint
+}
+
+output "logstash_cluster_id" {
+  description = "ID del cluster Logstash (para agregarle Cluster Routes hacia fuentes del cliente)"
+  value       = huaweicloud_css_logstash_cluster.logstash_cluster.id
 }
 
 output "opensearch_cluster_id" {
