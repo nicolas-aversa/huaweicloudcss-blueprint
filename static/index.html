@@ -658,7 +658,7 @@
     .login-foot a:hover { text-decoration: underline; }
     .login-forgot-note { display: block; margin-top: 8px; color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
 
-    /* ── Card de administración (settings) ── */
+    /* ── Panel de control (vista de admin) ── */
     .admin-section { margin-top: 14px; }
     .admin-section__title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 8px; }
     .admin-empty { color: var(--text-muted); font-size: 12.5px; }
@@ -2224,6 +2224,13 @@
           <span class="nav-item__label" id="nav-settings-label">Configuración</span>
         </button>
 
+        <!-- Solo admins: nace oculto y lo revela initAdminPanel() tras /auth/me,
+             igual que #nav-user. -->
+        <button class="nav-item hidden" data-view="control" id="nav-control" type="button">
+          <span class="nav-item__icon"><svg class="icon"><use href="#ic-shield"/></svg></span>
+          <span class="nav-item__label">Panel de control</span>
+        </button>
+
         <!-- Mini-card del entorno activo: solo se muestra cuando hay un entorno
              desplegado (renderInfraView la togglea). Oculta por defecto. -->
         <button class="app-nav__env hidden" id="nav-env-card" type="button">
@@ -2359,6 +2366,10 @@
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-clock"/></svg>Actividad</span>
                 <div style="min-width:0;"><div class="guide-step-t">¿Qué se ejecutó? ¿Por qué falló?</div><div class="form-hint" style="margin-top:2px;">Cada deploy, puesta en marcha y teardown queda registrado en <strong>Actividad</strong>: los sub-pasos con ✓/✗ y su motivo (apply, index template, dashboards por caso, subida a OBS, cada capability) y la <strong>salida cruda de Terraform</strong>. Es el primer lugar donde mirar si el deploy “salió bien” pero no ves datos.</div></div>
               </div>
+              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
+                <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-shield"/></svg>Admin</span>
+                <div style="min-width:0;"><div class="guide-step-t">Sumar gente al equipo</div><div class="form-hint" style="margin-top:2px;">El <strong>Panel de control</strong> (solo visible si sos administrador) maneja quién puede entrar (<strong>allowlist</strong>), quién administra, las cuentas creadas con <strong>“Resetear contraseña”</strong> — el “olvidé mi contraseña” — y el audit log. Admin = los de <code>SA_ADMINS</code> + los que promuevas ahí; si no hay ninguno, el <strong>primer usuario registrado</strong>.</div></div>
+              </div>
             </section>
 
             <!-- 3 · Explicarlo -->
@@ -2410,6 +2421,61 @@
           </div>
           <div id="activity-list"></div>
           <div id="activity-detail" class="hidden" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- ═══ Vista: Panel de control (solo admins) ═══════════════════════ -->
+        <!-- Quién puede entrar, quién administra, las cuentas creadas y el audit
+             log. El ítem del nav nace oculto y lo revela initAdminPanel(), que es
+             el único punto del front que conoce `is_admin`. El gate real es el
+             403 de _require_admin() en el backend. -->
+        <div class="app-view" id="view-control">
+          <p class="view-subtitle">Quién puede usar esta instancia, quién la administra y qué hizo cada uno.</p>
+          <div class="settings-grid">
+            <div class="settings-card">
+              <div class="settings-card__head">
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
+                <div>
+                  <div class="settings-card__title">Acceso</div>
+                  <div class="settings-card__hint">Solo estos emails pueden registrarse y entrar. Vacío = registro abierto.</div>
+                </div>
+              </div>
+              <div class="admin-section">
+                <div class="admin-section__title">Usuarios autorizados (allowlist)</div>
+                <form id="admin-allow-form" class="admin-allow-form">
+                  <input id="admin-allow-input" type="email" placeholder="nuevo.sa@huawei.com" autocomplete="off">
+                  <button type="submit" class="btn btn-primary">Agregar</button>
+                </form>
+                <div id="admin-allowlist" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
+              </div>
+              <div class="admin-section">
+                <div class="admin-section__title">Administradores</div>
+                <form id="admin-admins-form" class="admin-allow-form">
+                  <input id="admin-admins-input" type="email" placeholder="otro.sa@huawei.com" autocomplete="off">
+                  <button type="submit" class="btn btn-primary">Promover</button>
+                </form>
+                <div id="admin-admins" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
+                <p class="form-hint" style="margin:8px 0 0;">Promover a alguien también lo agrega a la allowlist. Siempre tiene que quedar al menos un administrador.</p>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="settings-card__head">
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-shield"/></svg></span>
+                <div>
+                  <div class="settings-card__title">Cuentas y actividad</div>
+                  <div class="settings-card__hint">Cuentas creadas en esta instancia y quién hizo qué.</div>
+                </div>
+              </div>
+              <div class="admin-section">
+                <div class="admin-section__title">Cuentas creadas</div>
+                <div id="admin-users" class="admin-users"><span class="admin-empty">Cargando…</span></div>
+              </div>
+              <div class="admin-section">
+                <div class="admin-section__title">Actividad reciente</div>
+                <div id="admin-audit" class="admin-audit"><span class="admin-empty">Cargando…</span></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ═══ Vista: Configuración (credenciales + modelos, en una pantalla) ═══ -->
@@ -2467,33 +2533,6 @@
               </div>
             </div>
 
-            <!-- Card 4: Administración (solo admins, SA_ADMINS). Gestión de
-                 usuarios (reset de contraseña) + audit log. -->
-            <div class="settings-card admin-card hidden" id="admin-card">
-              <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-settings"/></svg></span>
-                <div>
-                  <div class="settings-card__title">Administración</div>
-                  <div class="settings-card__hint">Usuarios y actividad de la plataforma (solo administradores).</div>
-                </div>
-              </div>
-              <div class="admin-section">
-                <div class="admin-section__title">Usuarios autorizados (allowlist)</div>
-                <form id="admin-allow-form" class="admin-allow-form">
-                  <input id="admin-allow-input" type="email" placeholder="nuevo.sa@huawei.com" autocomplete="off">
-                  <button type="submit" class="btn btn-primary">Agregar</button>
-                </form>
-                <div id="admin-allowlist" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
-              </div>
-              <div class="admin-section">
-                <div class="admin-section__title">Cuentas creadas</div>
-                <div id="admin-users" class="admin-users"><span class="admin-empty">Cargando…</span></div>
-              </div>
-              <div class="admin-section">
-                <div class="admin-section__title">Actividad reciente</div>
-                <div id="admin-audit" class="admin-audit"><span class="admin-empty">Cargando…</span></div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -5802,6 +5841,8 @@
       // Configuración: precargar creds + estado de la key + mapa de modelos.
       if (name === 'settings' && typeof renderSettingsView === 'function') renderSettingsView();
       if (name === 'activity' && typeof renderActivityView === 'function') renderActivityView();
+      // El panel de admin vive en el otro <script> (IIFE), que lo expone en window.
+      if (name === 'control' && typeof window.initAdminPanel === 'function') window.initAdminPanel();
       document.querySelector('.main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -7461,10 +7502,85 @@
           });
         }).catch(function () {});
       }
+      // Administradores: mismo shape que la allowlist. `env` viene de SA_ADMINS y
+      // no se puede quitar desde acá; `bootstrap` es el primer usuario registrado,
+      // que manda solo mientras no haya ninguno declarado.
+      function _loadAdmins() {
+        _fetch('/api/v1/admin/admins', { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); }).then(function (d) {
+            var box = document.getElementById('admin-admins'); if (!box) return;
+            var env = (d && d.env) || [], added = (d && d.added) || [], boot = (d && d.bootstrap) || '';
+            if (boot) {
+              box.innerHTML = '<div class="admin-allow-row"><span class="admin-allow-email"></span>'
+                + '<span class="admin-allow-tag">primer usuario</span></div>';
+              box.querySelector('.admin-allow-email').textContent = boot;
+              return;
+            }
+            if (!env.length && !added.length) {
+              box.innerHTML = '<span class="admin-empty">Sin administradores declarados.</span>';
+              return;
+            }
+            box.innerHTML = '';
+            env.forEach(function (e) {
+              var row = document.createElement('div'); row.className = 'admin-allow-row';
+              row.innerHTML = '<span class="admin-allow-email"></span><span class="admin-allow-tag">del entorno</span>';
+              row.querySelector('.admin-allow-email').textContent = e;
+              box.appendChild(row);
+            });
+            added.forEach(function (e) {
+              var row = document.createElement('div'); row.className = 'admin-allow-row';
+              row.innerHTML = '<span class="admin-allow-email"></span><button class="admin-allow-remove" type="button">Quitar</button>';
+              row.querySelector('.admin-allow-email').textContent = e;
+              row.querySelector('.admin-allow-remove').addEventListener('click', async function () {
+                var msg = '¿Quitarle el rol de administrador a ' + e + '?';
+                var ok = window.confirmModal
+                  ? await window.confirmModal({ title: 'Quitar administrador', message: msg, confirmLabel: 'Quitar' })
+                  : window.confirm(msg);
+                if (!ok) return;
+                var r = await _fetch('/api/v1/admin/admins/remove', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  credentials: 'same-origin', body: JSON.stringify({ email: e }),
+                });
+                if (!r.ok) {
+                  var err = await r.json().catch(function () { return {}; });
+                  if (window.toast) window.toast((err.detail && err.detail.message) || 'No se pudo quitar.', 'error');
+                  return;
+                }
+                if (window.toast) window.toast('Ya no es administrador: ' + e, 'success');
+                initAdminPanel();
+              });
+              box.appendChild(row);
+            });
+          }).catch(function () {});
+      }
+
       function initAdminPanel() {
-        var card = document.getElementById('admin-card');
-        if (card) card.classList.remove('hidden');
+        // Revela el ítem del nav: es el único punto del front que sabe si sos admin.
+        var navItem = document.getElementById('nav-control');
+        if (navItem) navItem.classList.remove('hidden');
         _loadAllowlist();
+        _loadAdmins();
+        var adf = document.getElementById('admin-admins-form');
+        if (adf && !adf.dataset.wired) {
+          adf.dataset.wired = '1';
+          adf.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            var inp = document.getElementById('admin-admins-input');
+            var email = (inp.value || '').trim();
+            if (!email) return;
+            var r = await _fetch('/api/v1/admin/admins/add', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin', body: JSON.stringify({ email: email }),
+            });
+            if (r.ok) {
+              inp.value = '';
+              if (window.toast) window.toast('Ahora es administrador: ' + email, 'success');
+              initAdminPanel();
+            } else if (window.toast) {
+              window.toast('Email inválido.', 'error');
+            }
+          });
+        }
         var af = document.getElementById('admin-allow-form');
         if (af && !af.dataset.wired) {
           af.dataset.wired = '1';
@@ -7507,6 +7623,10 @@
           }).join('');
         }).catch(function () {});
       }
+
+      // El router de vistas vive en el otro <script>: se expone para que
+      // showView('control') pueda refrescar el panel al entrar.
+      window.initAdminPanel = initAdminPanel;
     })();
   </script>
 </body>

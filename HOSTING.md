@@ -33,7 +33,7 @@ en **su** cuenta (o en la del owner), sin pisarse.
      Let's Encrypt, **sin dominio propio**). Requiere 80/443 abiertos.
    - **Auth queda activa**: autogenera `APP_SECRET_KEY` y la persiste en el volumen.
    - **El primer usuario que se registra queda como admin** y gestiona el resto
-     (allowlist, resets) desde ⚙ Configuración → **Administración**.
+     (allowlist, otros admins, resets) desde 🛡 **Panel de control**.
 
    Alternativas: dominio propio → `export APP_DOMAIN=tudominio && ./hosted-up.sh` (DNS→IP).
    HTTP plano (sin TLS) → `docker compose -f docker-compose.hosted.yml up --build -d`.
@@ -64,14 +64,27 @@ fuente, con las credenciales **cifradas** (Fernet, misma clave que el settings f
 
 ## Operación
 
-- **Agregar/quitar SAs (desde la app)**: los **admins** (env `SA_ADMINS`) manejan
-  la allowlist desde ⚙ Configuración → **Administración** → "Usuarios autorizados":
-  agregan/quitan emails **sin tocar `.env` ni recrear el contenedor**. `SA_ALLOWLIST`
-  (env) sigue siendo la base no-removible; lo agregado por UI se guarda en el volumen.
-- **Admins**: los emails en `SA_ADMINS` (subset de la allowlist) ven la card
-  **Administración**: allowlist, lista de usuarios con **"Resetear contraseña"**
-  (borra la credencial → el usuario fija una nueva en su próximo ingreso) y el
-  **audit log**. Es el "olvidé mi contraseña": el usuario avisa, un admin lo resetea.
+- **Agregar/quitar SAs (desde la app)**: los admins manejan la allowlist desde
+  🛡 **Panel de control** → "Usuarios autorizados": agregan/quitan emails **sin tocar
+  `.env` ni recrear el contenedor**. `SA_ALLOWLIST` (env) sigue siendo la base
+  no-removible; lo agregado por UI se guarda en el volumen.
+- **Quién es admin**, en este orden:
+  1. los emails de `SA_ADMINS` (env), si está seteada;
+  2. **más** los promovidos desde el Panel de control (`data/admins.json`);
+  3. si no hay ninguno de los dos: **el primer usuario registrado** — así una instancia
+     recién creada funciona sin configurar nada.
+
+  Promover a alguien lo agrega también a la allowlist, y **nunca** se puede quitar al
+  último admin (sería un lockout irreversible desde la UI). Los de `SA_ADMINS` solo se
+  sacan desde el entorno.
+- **Panel de control** (solo admins): allowlist, administradores, cuentas creadas con
+  **"Resetear contraseña"** (vacía la credencial → el usuario fija una nueva en su
+  próximo ingreso, **sin perder su rol**) y el **audit log**. Es el "olvidé mi
+  contraseña": el usuario avisa, un admin lo resetea.
+- **¿Nadie ve el Panel de control?** Pasa si el bootstrap le tocó a una cuenta que ya no
+  usás. Miralo con `docker compose -f docker-compose.hosted.yml exec app cat
+  /app/data/users.json` (el `created` más chico manda) y desbloqueate poniendo
+  `SA_ADMINS=tu.email@huawei.com` en `.env.hosted` + `./hosted-up.sh`.
 - **Login**: es un overlay sobre la app (la app se ve blureada detrás). El primer
   login de cada SA crea su cuenta con la contraseña que elija.
 - **Backups**: todo el estado por-usuario vive en el volumen `appdata`
@@ -92,7 +105,7 @@ fuente, con las credenciales **cifradas** (Fernet, misma clave que el settings f
   - `ENV_TTL_HOURS` (default 0 = off): auto-destruye entornos demo más viejos que N
     horas (usa las creds guardadas del deploy). Útil para demos efímeras; **destruye
     infra sola**, así que activalo con criterio. Chequeo cada `ENV_TTL_CHECK_SECONDS`.
-  - Cada deploy/destroy queda en el **audit log** (panel Administración).
+  - Cada deploy/destroy queda en el **audit log** (🛡 Panel de control).
 
 ## Seguridad de las credenciales
 
@@ -107,7 +120,7 @@ fuente, con las credenciales **cifradas** (Fernet, misma clave que el settings f
 
 - ✅ **Cola de jobs**: el deploy corre en background y sobrevive un refresh del browser.
 - ✅ **Guardrails de costo**: cap de pipelines configurable + reaper TTL opcional.
-- ✅ **Audit log**: quién hizo qué, en el panel de Administración.
+- ✅ **Audit log**: quién hizo qué, en el 🛡 Panel de control.
 - ✅ **Casos creados desde la app** (`custom_cases.py`): el Builder guarda el log de un
   cliente como un caso más del grid, sin tocar código ni rebuildear la imagen.
 - ✅ **Actividad** (`runs.py`): historial persistido de cada ejecución, con la salida

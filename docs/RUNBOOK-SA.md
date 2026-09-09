@@ -74,12 +74,30 @@ Cada deploy, puesta en marcha, provisión de capabilities y teardown queda regis
 
 Es el primer lugar donde mirar cuando un deploy "salió bien" pero no ves datos o dashboards.
 
-## 6. Sumar más usuarios (solo admin)
-⚙ Configuración → **Administración**:
-- **Usuarios autorizados**: agregá/quitá emails (allowlist) sin tocar archivos.
-- **Resetear contraseña** de un usuario (es el "olvidé mi contraseña": el usuario avisa, vos lo
-  reseteás y él fija una nueva en su próximo ingreso).
-- **Actividad**: audit log de quién hizo qué.
+## 6. Sumar usuarios y admins (🛡 Panel de control)
+El ítem **Panel de control** del menú aparece **solo si sos administrador**:
+- **Usuarios autorizados** (allowlist): agregá/quitá emails sin tocar archivos. Vacía = cualquiera
+  que sepa la URL puede registrarse, así que cargá al menos uno.
+- **Administradores**: promové a otro usuario (o quitale el rol). Promover **también** lo agrega a
+  la allowlist. Siempre queda al menos uno: no te podés dejar afuera.
+- **Cuentas creadas** + **Resetear contraseña** (es el "olvidé mi contraseña": el usuario avisa, vos
+  lo reseteás y él fija una nueva en su próximo ingreso; no pierde su rol).
+- **Actividad reciente**: audit log de quién hizo qué.
+
+### ¿Quién es admin?
+1. Los emails de la variable `SA_ADMINS`, si está seteada.
+2. Más los promovidos desde el Panel de control.
+3. Si no hay ninguno de los dos: **el primer usuario que se registró** en esa VM. Por eso una
+   instancia nueva funciona sin configurar nada — el que la estrena queda como admin.
+
+**Si no ves el Panel de control** es porque alguien se registró antes que vos. Pedile que te promueva
+desde ahí. Si no hay a quién pedirle, desde la VM:
+```bash
+cd ~/huaweicloudcss-blueprint
+docker compose -f docker-compose.hosted.yml exec app cat /app/data/users.json   # el `created` más chico es el admin
+echo 'SA_ADMINS=tu.email@huawei.com' >> .env.hosted
+./hosted-up.sh
+```
 
 ## 7. Notas
 - **Costos**: cada deploy son clusters CSS reales en TU cuenta → destruí los entornos de demo al

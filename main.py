@@ -1125,6 +1125,40 @@ def admin_allowlist_remove(request: dict) -> dict:
     return auth.allowlist_info()
 
 
+# ── Administradores ─────────────────────────────────────────────────────────
+# Mismo patrón que la allowlist: `SA_ADMINS` (env) es la base no-removible y lo
+# promovido desde el Panel de control se persiste en el volumen. Sin esto, una
+# instancia donde el bootstrap le dio el admin a otra cuenta no se podía corregir
+# sin editar el env y recrear el contenedor.
+@app.get("/api/v1/admin/admins", tags=["admin"], summary="Administradores (admin)")
+def admin_admins() -> dict:
+    _require_admin()
+    return auth.admins_info()
+
+
+@app.post("/api/v1/admin/admins/add", tags=["admin"], summary="Promueve un usuario a admin")
+def admin_admins_add(request: dict) -> dict:
+    admin_email = _require_admin()
+    email = str(request.get("email", "") or "").strip().lower()
+    if not auth.add_admin(email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "admin", "message": "Email inválido."})
+    audit.record("admin_add", f"{admin_email} → {email}", user=admin_email)
+    return auth.admins_info()
+
+
+@app.post("/api/v1/admin/admins/remove", tags=["admin"], summary="Quita el rol de admin")
+def admin_admins_remove(request: dict) -> dict:
+    admin_email = _require_admin()
+    email = str(request.get("email", "") or "").strip().lower()
+    ok, reason = auth.remove_admin(email)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "admin", "message": reason})
+    audit.record("admin_remove", f"{admin_email} → {email}", user=admin_email)
+    return auth.admins_info()
+
+
 @app.get("/api/v1/verticals", tags=["verticals"], summary="Registro de verticales de demo")
 def get_verticals() -> dict:
     """Payload declarativo de los verticales (grupos + specs de front). El mismo

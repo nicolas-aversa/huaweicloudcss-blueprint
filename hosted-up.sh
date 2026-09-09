@@ -7,7 +7,14 @@
 # Uso:  ./hosted-up.sh
 # Requisitos: puertos 80 y 443 abiertos en el security group.
 set -e
+# `.env.hosted` es el archivo que documenta docker-compose.hosted.yml para
+# configurar la instancia (SA_ADMINS, SA_ALLOWLIST, APP_SECRET_KEY). Compose no
+# lo lee solo: sin `--env-file` lo que pusieras ahí se ignoraba en silencio.
 COMPOSE="docker compose -f docker-compose.hosted.yml"
+if [ -f .env.hosted ]; then
+  COMPOSE="$COMPOSE --env-file .env.hosted"
+  echo "[hosted-up] usando .env.hosted"
+fi
 
 if [ -z "$APP_DOMAIN" ]; then
   # 1) Metadata de la ECS Huawei (la EIP bindeada). 2) fallback: echo de IP pública.

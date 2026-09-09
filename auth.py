@@ -139,21 +139,103 @@ def _admins() -> set[str]:
     return {e.strip().lower() for e in re.split(r"[,;\s]+", raw) if e.strip()}
 
 
+_ADMINS_FILE = DATA_ROOT / "admins.json"
+
+
+def _persisted_admins() -> set[str]:
+    """Admins promovidos en runtime desde el Panel de control (además de SA_ADMINS).
+
+    Mismo patrón que la allowlist persistida: sin esto, en una instancia donde el
+    bootstrap le dio el admin a otra cuenta no había forma de corregirlo sin
+    editar el env y recrear el contenedor.
+    """
+    try:
+        if _ADMINS_FILE.is_file():
+            data = json.loads(_ADMINS_FILE.read_text(encoding="utf-8"))
+            return {str(e).strip().lower() for e in data if str(e).strip()}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def _save_persisted_admins(emails: set[str]) -> None:
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    _ADMINS_FILE.write_text(json.dumps(sorted(emails), indent=2), encoding="utf-8")
+
+
+def _bootstrap_admin() -> str:
+    """El PRIMER usuario registrado, o '' si no hay ninguno. Es el admin cuando no
+    hay ninguno declarado (ni por env ni promovido): así una instancia recién
+    creada — la imagen que recibe un cliente — funciona sin configurar nada."""
+    users = _load_users()
+    if not users:
+        return ""
+    return min(users.items(), key=lambda kv: (kv[1].get("created", 0), kv[0]))[0]
+
+
 def is_admin(email: str | None) -> bool:
-    """True si el email es admin. Con SA_ADMINS: los de esa lista. SIN SA_ADMINS
-    (zero-config): el PRIMER usuario registrado es admin — así el que arranca la
-    instancia gestiona allowlist/usuarios desde la UI sin tocar el env."""
+    """True si el email es admin.
+
+    Admins = `SA_ADMINS` (env) ∪ los promovidos desde el Panel de control. Si esa
+    unión está vacía (zero-config), el admin es el PRIMER usuario registrado.
+    """
     if not email:
         return False
     email = email.lower()
-    admins = _admins()
-    if admins:
-        return email in admins
-    users = _load_users()
-    if not users:
+    declared = _admins() | _persisted_admins()
+    if declared:
+        return email in declared
+    return bool(email) and email == _bootstrap_admin()
+
+
+def add_admin(email: str) -> bool:
+    """Promueve a admin (persistido). Lo agrega también a la allowlist: ser admin
+    sin poder entrar no sirve de nada. True si el email es válido."""
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
         return False
-    first = min(users.items(), key=lambda kv: (kv[1].get("created", 0), kv[0]))[0]
-    return email == first
+    s = _persisted_admins()
+    # Al declarar el PRIMER admin se pierde el bootstrap implícito, así que se
+    # persiste también el admin actual — si no, quien estaba promoviendo se
+    # quedaría sin permisos en el mismo movimiento.
+    if not s and not _admins():
+        boot = _bootstrap_admin()
+        if boot:
+            s.add(boot)
+    s.add(email)
+    _save_persisted_admins(s)
+    add_allowed(email)
+    return True
+
+
+def remove_admin(email: str) -> tuple[bool, str]:
+    """Quita el admin (solo de los persistidos). Devuelve `(ok, motivo)`.
+
+    No deja la instancia sin ningún admin, que sería un lockout irreversible
+    desde la UI. Los de `SA_ADMINS` (env) no se tocan desde acá."""
+    email = (email or "").strip().lower()
+    s = _persisted_admins()
+    if email not in s:
+        if email in _admins():
+            return False, "Ese admin viene de la variable SA_ADMINS; se quita desde el entorno."
+        return False, "Ese usuario no es admin."
+    if not (s - {email}) and not _admins():
+        return False, "Es el único administrador: promové a otro antes de quitarlo."
+    s.discard(email)
+    _save_persisted_admins(s)
+    return True, ""
+
+
+def admins_info() -> dict:
+    """Para el Panel de control: admins de env (no removibles), promovidos
+    (removibles) y el bootstrap implícito, si es el que está mandando."""
+    env = sorted(_admins())
+    added = sorted(_persisted_admins())
+    return {
+        "env": env,
+        "added": added,
+        "bootstrap": "" if (env or added) else _bootstrap_admin(),
+    }
 
 
 # ── Password hashing (pbkdf2-sha256, stdlib) ─────────────────────────────────
@@ -215,20 +297,28 @@ def list_users() -> list[dict]:
 
 
 def admin_reset_user(email: str) -> bool:
-    """Resetea la contraseña de un usuario borrando su registro: al próximo login
-    (si sigue en la allowlist) crea una nueva. True si existía."""
+    """Resetea la contraseña de un usuario: vacía su password y en el próximo
+    login (si sigue en la allowlist) fija la que elija. True si existía.
+
+    NO borra el registro: hacerlo perdía el `created`, y con él la antigüedad que
+    define el admin de bootstrap — resetear al admin lo dejaba sin permisos, y si
+    era el único, la instancia quedaba sin ningún admin.
+    """
     email = (email or "").lower().strip()
     users = _load_users()
-    if email in users:
-        users.pop(email, None)
-        _save_users(users)
-        return True
-    return False
+    rec = users.get(email)
+    if rec is None:
+        return False
+    rec["pw"] = ""
+    users[email] = rec
+    _save_users(users)
+    return True
 
 
 def check_login(email: str, password: str) -> bool:
     """Verifica credenciales. Si el email está permitido y aún no tiene cuenta,
-    la crea con este password (first-login = alta, apto para grupo de confianza)."""
+    la crea con este password (first-login = alta, apto para grupo de confianza).
+    Un registro con la password vacía es un reset pendiente: fija la nueva."""
     email = email.lower().strip()
     if not email or not password or not is_allowed(email):
         return False
@@ -236,6 +326,11 @@ def check_login(email: str, password: str) -> bool:
     rec = users.get(email)
     if rec is None:
         create_user(email, password)
+        return True
+    if not rec.get("pw"):
+        rec["pw"] = hash_password(password)
+        users[email] = rec
+        _save_users(users)
         return True
     return verify_password(password, rec.get("pw", ""))
 
