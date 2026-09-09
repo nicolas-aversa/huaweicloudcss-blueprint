@@ -671,13 +671,29 @@
       border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle);
     }
     .admin-user__email { flex: 1; min-width: 0; font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .admin-user__badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-tint); padding: 2px 7px; border-radius: var(--radius-pill); }
-    .admin-user__reset {
-      flex: none; font-size: 12px; font-weight: 600; cursor: pointer; padding: 5px 11px;
-      border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary);
+    .admin-user__badge { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-tint); padding: 2px 7px; border-radius: var(--radius-pill); }
+    /* Cuenta con la contraseña vacía: entró un reset y todavía no eligió la nueva. */
+    .admin-user__badge--warn { color: var(--text-muted); background: var(--bg-tertiary); }
+    /* Acciones de fila (Quitar / Resetear). Un solo estilo compartido: antes eran
+       dos declaraciones distintas y — el detalle que las hacía desentonar — sin
+       `font-family: inherit`, así que el browser les metía SU fuente por defecto
+       en vez de la de la app. Discretas hasta el hover, para que una lista larga
+       no se llene de bordes. */
+    .admin-user__reset,
+    .admin-allow-remove {
+      flex: none; display: inline-flex; align-items: center; gap: 5px;
+      font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1;
+      cursor: pointer; padding: 6px 10px; white-space: nowrap;
+      border: 1px solid transparent; border-radius: var(--radius-sm);
+      background: transparent; color: var(--text-muted);
       transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
     }
-    .admin-user__reset:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
+    .admin-user__reset .icon,
+    .admin-allow-remove .icon { width: 13px; height: 13px; }
+    .admin-user__reset:hover,
+    .admin-allow-remove:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
+    .admin-user__reset:focus-visible,
+    .admin-allow-remove:focus-visible { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
     .admin-audit { max-height: 260px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
     .admin-audit__row { display: grid; grid-template-columns: 130px 150px 1fr; gap: 10px; padding: 6px 12px; font-size: 11.5px; border-bottom: 1px solid var(--border-subtle); }
     .admin-audit__row:last-child { border-bottom: none; }
@@ -699,8 +715,7 @@
     .admin-allow-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); }
     .admin-allow-email { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .admin-allow-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 7px; border-radius: var(--radius-pill); }
-    .admin-allow-remove { flex: none; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary); }
-    .admin-allow-remove:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
+    /* (.admin-allow-remove comparte el estilo de .admin-user__reset, más arriba.) */
 
     /* ── App views (router de secciones, mismo patrón que step-pane) ─ */
     .app-view { display: none; }
@@ -1209,6 +1224,7 @@
       margin-bottom: 2px;
     }
     .mapping-business-input {
+      font-family: inherit;
       font-weight: 600;
       padding: 4px 8px;
       border-radius: var(--radius-sm);
@@ -1302,6 +1318,7 @@
       color: #9333ea;
     }
     .mapping-type-select {
+      font-family: inherit;
       padding: 4px 8px;
       font-size: 11px;
       font-weight: 600;
@@ -1322,6 +1339,7 @@
       margin-left: 6px;
     }
     .mapping-unit-input {
+      font-family: inherit;
       font-size: 11px;
       padding: 2px 6px;
       border-radius: var(--radius-sm);
@@ -1335,6 +1353,7 @@
       border-color: var(--accent-red);
     }
     .mapping-edit-btn {
+      font-family: inherit;
       padding: 4px 8px;
       font-size: 11px;
       border-radius: var(--radius-sm);
@@ -1486,6 +1505,7 @@
       border-radius: var(--radius-pill);
     }
     .mode-toggle__btn {
+      font-family: inherit;
       padding: 8px 22px;
       font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em;
       color: var(--text-muted);
@@ -1840,6 +1860,7 @@
     }
     .lp-q-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-tint, #f0f7ff); }
     .lp-tab-btn {
+      font-family: inherit;
       padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px);
       background: transparent; color: var(--text-muted); transition: all .15s;
@@ -7514,7 +7535,7 @@
           var env = (d && d.env) || [], added = (d && d.added) || [];
           var rows = '';
           env.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><span class="admin-allow-tag">env</span></div>'; });
-          added.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><button class="admin-allow-remove" type="button" data-email="' + esc(e) + '">Quitar</button></div>'; });
+          added.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><button class="admin-allow-remove" type="button" title="Quitar de la allowlist" data-email="' + esc(e) + '"><svg class="icon"><use href="#ic-x"/></svg>Quitar</button></div>'; });
           box.innerHTML = rows || '<span class="admin-empty">Sin emails autorizados (registro abierto).</span>';
           box.querySelectorAll('.admin-allow-remove').forEach(function (btn) {
             btn.addEventListener('click', async function () {
@@ -7583,7 +7604,7 @@
             });
             added.forEach(function (e) {
               var row = document.createElement('div'); row.className = 'admin-allow-row';
-              row.innerHTML = '<span class="admin-allow-email"></span><button class="admin-allow-remove" type="button">Quitar</button>';
+              row.innerHTML = '<span class="admin-allow-email"></span><button class="admin-allow-remove" type="button" title="Quitar administrador"><svg class="icon"><use href="#ic-x"/></svg>Quitar</button>';
               row.querySelector('.admin-allow-email').textContent = e;
               row.querySelector('.admin-allow-remove').addEventListener('click', async function () {
                 var msg = '¿Quitarle el rol de administrador a ' + e + '?';
@@ -7659,7 +7680,11 @@
           box.innerHTML = '';
           users.forEach(function (u) {
             var row = document.createElement('div'); row.className = 'admin-user';
-            row.innerHTML = '<span class="admin-user__email"></span>' + (u.is_admin ? '<span class="admin-user__badge">admin</span>' : '') + '<button class="admin-user__reset" type="button">Resetear contraseña</button>';
+            row.innerHTML = '<span class="admin-user__email"></span>'
+              + (u.has_password ? '' : '<span class="admin-user__badge admin-user__badge--warn">reset pendiente</span>')
+              + (u.is_admin ? '<span class="admin-user__badge">admin</span>' : '')
+              + '<button class="admin-user__reset" type="button" title="Resetear contraseña">'
+              + '<svg class="icon"><use href="#ic-refresh"/></svg>Contraseña</button>';
             row.querySelector('.admin-user__email').textContent = u.email;
             row.querySelector('.admin-user__reset').addEventListener('click', async function () {
               var msg = '¿Resetear la contraseña de ' + u.email + '? Va a fijar una nueva en su próximo ingreso.';
