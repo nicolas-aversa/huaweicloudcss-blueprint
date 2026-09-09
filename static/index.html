@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Blueprint · Huawei Cloud</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Inter como fuente VARIABLE (100..900): la app usa pesos intermedios (550,
+       650, 750, 800) que con la lista fija 400;500;600;700 el browser tenía que
+       sintetizar — de ahí que algunos textos se vieran "falsos negrita". -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
       /* Superficies — base off-white cálida (ref. teramot), cards blancas. */
@@ -39,7 +43,11 @@
       --radius-lg: 18px;
       --radius-xl: 24px;
       --radius-pill: 999px;
-      --font-sans: 'Huawei Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      /* Inter, no Huawei Sans: esta última estaba declarada primero pero nunca se
+         cargaba (no está en Google Fonts ni hay @font-face), así que solo la veía
+         quien la tuviera instalada en su máquina y la app se veía distinta según
+         quién la abriera. Inter viaja con la página → todos ven lo mismo. */
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
       /* Tints del acento de marca */
       --accent-red-hover: #cc0000;
