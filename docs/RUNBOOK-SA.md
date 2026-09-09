@@ -78,8 +78,9 @@ Es el primer lugar donde mirar cuando un deploy "salió bien" pero no ves datos 
 El ítem **Panel de control** del menú aparece **solo si sos administrador**:
 - **Usuarios autorizados** (allowlist): agregá/quitá emails sin tocar archivos. Vacía = cualquiera
   que sepa la URL puede registrarse, así que cargá al menos uno.
-- **Administradores**: promové a otro usuario (o quitale el rol). Promover **también** lo agrega a
-  la allowlist. Siempre queda al menos uno: no te podés dejar afuera.
+- **Administradores**: elegís del desplegable una cuenta que **ya haya entrado** y la promovés (o le
+  quitás el rol). Promover **también** la agrega a la allowlist. Siempre queda al menos uno: no te
+  podés dejar afuera.
 - **Cuentas creadas** + **Resetear contraseña** (es el "olvidé mi contraseña": el usuario avisa, vos
   lo reseteás y él fija una nueva en su próximo ingreso; no pierde su rol).
 - **Actividad reciente**: audit log de quién hizo qué.

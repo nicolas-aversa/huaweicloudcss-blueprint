@@ -443,6 +443,9 @@
     .hidden { display: none !important; }
 
     .btn-sm { padding: 6px 12px; font-size: 12px; }
+    /* Botón cuadrado de solo icono (ej. refrescar). El label va en title/aria-label. */
+    .btn-icon { padding: 7px; line-height: 0; }
+    .btn-icon .icon { width: 15px; height: 15px; }
 
     /* ── App nav (rail izquierdo, altura completa) ───────────────── */
     .app-nav {
@@ -685,7 +688,13 @@
     .admin-allow-form { display: flex; gap: 8px; margin-bottom: 10px; }
     .admin-allow-form input { flex: 1; padding: 8px 11px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
     .admin-allow-form input:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
+    /* El de administradores es un <select> (se elige una cuenta existente), pero
+       comparte la fila con el mismo alto que el input de la allowlist. */
+    .admin-allow-form select { flex: 1; min-width: 0; padding: 8px 11px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+    .admin-allow-form select:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
+    .admin-allow-form select:disabled { color: var(--text-muted); cursor: not-allowed; }
     .admin-allow-form .btn { flex: none; }
+    .admin-allow-form .btn:disabled { opacity: .5; cursor: not-allowed; }
     .admin-allowlist { display: flex; flex-direction: column; gap: 6px; }
     .admin-allow-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); }
     .admin-allow-email { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2121,6 +2130,7 @@
     <symbol id="ic-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></symbol>
     <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
     <symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.7 4.3"/><path d="M20 5v6h-6"/></symbol>
     <symbol id="ic-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4-2v-4L3 5z"/></symbol>
     <symbol id="ic-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5"/></symbol>
     <symbol id="ic-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
@@ -2416,7 +2426,8 @@
         <div class="app-view" id="view-activity">
           <p class="view-subtitle">Qué ejecutó la plataforma: deploys, puesta en marcha y teardowns, con su salida.</p>
           <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
-            <button class="btn btn-secondary btn-sm" id="activity-refresh"><svg class="icon"><use href="#ic-arrow-right"/></svg> Actualizar</button>
+            <button class="btn btn-secondary btn-sm btn-icon" id="activity-refresh" type="button"
+                    title="Actualizar" aria-label="Actualizar"><svg class="icon"><use href="#ic-refresh"/></svg></button>
             <span class="form-hint" id="activity-count" style="margin:0;"></span>
           </div>
           <div id="activity-list"></div>
@@ -2449,12 +2460,16 @@
               </div>
               <div class="admin-section">
                 <div class="admin-section__title">Administradores</div>
+                <!-- Se promueve ELIGIENDO una cuenta ya registrada: escribir el
+                     email a mano se prestaba a typos que creaban un admin fantasma
+                     (válido pero de nadie). El select lo puebla _loadAdmins() con
+                     los usuarios que todavía no son admin. -->
                 <form id="admin-admins-form" class="admin-allow-form">
-                  <input id="admin-admins-input" type="email" placeholder="otro.sa@huawei.com" autocomplete="off">
-                  <button type="submit" class="btn btn-primary">Promover</button>
+                  <select id="admin-admins-select" class="form-select"></select>
+                  <button type="submit" class="btn btn-primary" id="admin-admins-submit">Promover</button>
                 </form>
                 <div id="admin-admins" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
-                <p class="form-hint" style="margin:8px 0 0;">Promover a alguien también lo agrega a la allowlist. Siempre tiene que quedar al menos un administrador.</p>
+                <p class="form-hint" style="margin:8px 0 0;">Solo se puede promover a alguien que ya haya entrado al menos una vez. Siempre tiene que quedar al menos un administrador.</p>
               </div>
             </div>
 
@@ -2462,16 +2477,24 @@
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-shield"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Cuentas y actividad</div>
-                  <div class="settings-card__hint">Cuentas creadas en esta instancia y quién hizo qué.</div>
+                  <div class="settings-card__title">Cuentas</div>
+                  <div class="settings-card__hint">Cuentas creadas en esta instancia. Resetear una contraseña es el "olvidé mi contraseña".</div>
                 </div>
               </div>
               <div class="admin-section">
-                <div class="admin-section__title">Cuentas creadas</div>
                 <div id="admin-users" class="admin-users"><span class="admin-empty">Cargando…</span></div>
               </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="settings-card__head">
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-clock"/></svg></span>
+                <div>
+                  <div class="settings-card__title">Actividad</div>
+                  <div class="settings-card__hint">Quién hizo qué en la instancia: logins, cambios de configuración, deploys.</div>
+                </div>
+              </div>
               <div class="admin-section">
-                <div class="admin-section__title">Actividad reciente</div>
                 <div id="admin-audit" class="admin-audit"><span class="admin-empty">Cargando…</span></div>
               </div>
             </div>
@@ -7505,11 +7528,42 @@
       // Administradores: mismo shape que la allowlist. `env` viene de SA_ADMINS y
       // no se puede quitar desde acá; `bootstrap` es el primer usuario registrado,
       // que manda solo mientras no haya ninguno declarado.
+      // Puebla el select de promoción con las cuentas registradas que todavía NO
+      // son admin. Si no queda ninguna, el form se deshabilita con el motivo:
+      // solo se puede promover a alguien que ya entró al menos una vez.
+      function _fillPromoteOptions(current) {
+        var sel = document.getElementById('admin-admins-select');
+        var btn = document.getElementById('admin-admins-submit');
+        if (!sel) return;
+        _fetch('/api/v1/admin/users', { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); }).then(function (d) {
+            var users = (d && d.users) || [];
+            var yaAdmin = {};
+            current.forEach(function (e) { yaAdmin[e] = true; });
+            var libres = users.filter(function (u) { return !yaAdmin[u.email] && !u.is_admin; });
+            sel.innerHTML = '';
+            if (!libres.length) {
+              sel.innerHTML = '<option value="">— No hay cuentas para promover —</option>';
+              sel.disabled = true;
+              if (btn) btn.disabled = true;
+              return;
+            }
+            sel.disabled = false;
+            if (btn) btn.disabled = false;
+            libres.forEach(function (u) {
+              var o = document.createElement('option');
+              o.value = u.email; o.textContent = u.email;
+              sel.appendChild(o);
+            });
+          }).catch(function () {});
+      }
+
       function _loadAdmins() {
         _fetch('/api/v1/admin/admins', { credentials: 'same-origin' })
           .then(function (r) { return r.json(); }).then(function (d) {
             var box = document.getElementById('admin-admins'); if (!box) return;
             var env = (d && d.env) || [], added = (d && d.added) || [], boot = (d && d.bootstrap) || '';
+            _fillPromoteOptions(env.concat(added, boot ? [boot] : []));
             if (boot) {
               box.innerHTML = '<div class="admin-allow-row"><span class="admin-allow-email"></span>'
                 + '<span class="admin-allow-tag">primer usuario</span></div>';
@@ -7565,19 +7619,23 @@
           adf.dataset.wired = '1';
           adf.addEventListener('submit', async function (e) {
             e.preventDefault();
-            var inp = document.getElementById('admin-admins-input');
-            var email = (inp.value || '').trim();
+            var sel = document.getElementById('admin-admins-select');
+            var email = (sel && sel.value || '').trim();
             if (!email) return;
+            var msg = '¿Darle permisos de administrador a ' + email + '? Va a poder gestionar usuarios, admins y ver la actividad.';
+            var ok = window.confirmModal
+              ? await window.confirmModal({ title: 'Promover a administrador', message: msg, confirmLabel: 'Promover' })
+              : window.confirm(msg);
+            if (!ok) return;
             var r = await _fetch('/api/v1/admin/admins/add', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               credentials: 'same-origin', body: JSON.stringify({ email: email }),
             });
             if (r.ok) {
-              inp.value = '';
               if (window.toast) window.toast('Ahora es administrador: ' + email, 'success');
               initAdminPanel();
             } else if (window.toast) {
-              window.toast('Email inválido.', 'error');
+              window.toast('No se pudo promover.', 'error');
             }
           });
         }

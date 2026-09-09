@@ -107,11 +107,19 @@ def is_allowed(email: str) -> bool:
 
 
 def add_allowed(email: str) -> bool:
-    """Agrega un email a la allowlist persistida (panel admin). True si es válido."""
+    """Agrega un email a la allowlist persistida (panel admin). True si es válido.
+
+    Si la allowlist estaba **vacía** (= registro abierto), agregar el primer email
+    la vuelve restrictiva de golpe. Para no echar a nadie que ya venía usando la
+    app — incluido el admin que está haciendo el cambio — se siembra también con
+    las cuentas ya registradas.
+    """
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         return False
     s = _persisted_allowlist()
+    if not s and not _allowlist():
+        s |= set(_load_users().keys())
     s.add(email)
     _save_persisted_allowlist(s)
     return True

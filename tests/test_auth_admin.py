@@ -110,6 +110,33 @@ def test_add_admin_also_allows_the_email():
     assert auth.is_allowed("nuevo@huawei.com") is True
 
 
+def test_closing_an_empty_allowlist_does_not_lock_out_existing_users():
+    """Una allowlist vacía = registro abierto. Agregar el primer email la vuelve
+    restrictiva de golpe, y sin sembrarla con las cuentas ya registradas echaba a
+    todos los que venían usando la app — incluido el admin que hacía el cambio."""
+    _user("ana@huawei.com", 1000)
+    _user("beto@huawei.com", 2000)
+    assert auth.is_allowed("ana@huawei.com") is True
+
+    auth.add_allowed("nuevo@huawei.com")
+
+    assert auth.is_allowed("ana@huawei.com") is True, "se quedó afuera un usuario existente"
+    assert auth.is_allowed("beto@huawei.com") is True
+    assert auth.is_allowed("nuevo@huawei.com") is True
+    assert auth.is_allowed("desconocido@huawei.com") is False, "la allowlist ya es restrictiva"
+
+
+def test_promoting_does_not_lock_out_the_promoter():
+    """Mismo caso, por la vía de promover: `add_admin` llama a `add_allowed`."""
+    _user("ana@huawei.com", 1000)
+    _user("nico@huawei.com", 2000)
+
+    auth.add_admin("nico@huawei.com")
+
+    assert auth.is_allowed("ana@huawei.com") is True, "el que promovía perdió el acceso"
+    assert auth.is_admin("ana@huawei.com") is True
+
+
 def test_add_admin_rejects_invalid_email():
     assert auth.add_admin("no-es-un-email") is False
     assert auth.add_admin("") is False
