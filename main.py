@@ -1125,6 +1125,33 @@ def admin_allowlist_remove(request: dict) -> dict:
     return auth.allowlist_info()
 
 
+@app.get("/api/v1/admin/people", tags=["admin"], summary="Vista unificada de usuarios (admin)")
+def admin_people() -> dict:
+    """Un email = una fila, con sus tres dimensiones: si puede entrar (allowlist),
+    si ya tiene cuenta y si administra. Reemplaza las tres listas separadas."""
+    _require_admin()
+    rows = auth.people()
+    for r in rows:
+        # Se marca acá y no en auth para no leer el tfstate de todos en cada request
+        # innecesariamente: solo importa para los que se pueden borrar.
+        r["active_env"] = auth.has_active_env(r["email"]) if r["registered"] else False
+    return {"people": rows, "allowlist_open": all(p["allow_source"] == "open" for p in rows) if rows else True}
+
+
+@app.post("/api/v1/admin/users/delete", tags=["admin"], summary="Borra una cuenta (admin)")
+def admin_delete_user(request: dict) -> dict:
+    """Borra la credencial, el acceso y el rol. **No** borra el workspace: ahí vive
+    el estado de Terraform, lo único que puede destruir un entorno ya desplegado."""
+    admin_email = _require_admin()
+    email = str(request.get("email", "") or "").strip().lower()
+    ok, reason = auth.delete_user(email, actor=admin_email)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "admin", "message": reason})
+    audit.record("user_delete", f"{admin_email} → {email}", user=admin_email)
+    return {"status": "deleted", "email": email}
+
+
 # ── Administradores ─────────────────────────────────────────────────────────
 # Mismo patrón que la allowlist: `SA_ADMINS` (env) es la base no-removible y lo
 # promovido desde el Panel de control se persiste en el volumen. Sin esto, una

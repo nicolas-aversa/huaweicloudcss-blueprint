@@ -75,15 +75,28 @@ Cada deploy, puesta en marcha, provisión de capabilities y teardown queda regis
 Es el primer lugar donde mirar cuando un deploy "salió bien" pero no ves datos o dashboards.
 
 ## 6. Sumar usuarios y admins (🛡 Panel de control)
-El ítem **Panel de control** del menú aparece **solo si sos administrador**:
-- **Usuarios autorizados** (allowlist): agregá/quitá emails sin tocar archivos. Vacía = cualquiera
-  que sepa la URL puede registrarse, así que cargá al menos uno.
-- **Administradores**: elegís del desplegable una cuenta que **ya haya entrado** y la promovés (o le
-  quitás el rol). Promover **también** la agrega a la allowlist. Siempre queda al menos uno: no te
-  podés dejar afuera.
-- **Cuentas creadas** + **Resetear contraseña** (es el "olvidé mi contraseña": el usuario avisa, vos
-  lo reseteás y él fija una nueva en su próximo ingreso; no pierde su rol).
-- **Actividad reciente**: audit log de quién hizo qué.
+El ítem **Panel de control** del menú aparece **solo si sos administrador**. Hay una sola lista de
+**Usuarios**: cada email es una fila con sus etiquetas y sus acciones.
+
+- **Invitar**: cargás un email y esa persona queda autorizada a registrarse. Aparece como
+  `invitado` hasta que entra por primera vez.
+- **Hacer admin / Quitar admin**: sobre cualquier cuenta que ya haya entrado. Siempre queda al
+  menos un administrador: no te podés dejar afuera.
+- **Contraseña**: es el "olvidé mi contraseña". El usuario avisa, vos la reseteás y él fija una
+  nueva en su próximo ingreso. No pierde su rol.
+- **Eliminar**: borra la credencial, el acceso y el rol. **No** borra sus datos de trabajo — el
+  estado de Terraform se conserva, porque es lo único capaz de destruir un entorno ya desplegado.
+  Si la cuenta tiene un entorno activo, la fila lo marca y la confirmación te avisa: pedile que lo
+  **destruya antes**, o esos clusters van a seguir facturando sin que nadie pueda darlos de baja
+  desde la app.
+
+> **El registro abierto es el default.** Con la lista de invitados vacía, cualquiera que tenga el
+> link puede crearse una cuenta — y entonces eliminar a alguien no sirve de nada, porque vuelve a
+> entrar. El panel te lo avisa en rojo. **Invitá al menos un email** para cerrarlo: a partir de ahí
+> solo entran los de la lista (los que ya tenían cuenta no se ven afectados).
+
+Al lado de **Usuarios** está **Actividad**: el audit log de quién hizo qué. Ambos tienen su botón
+de refrescar.
 
 ### ¿Quién es admin?
 1. Los emails de la variable `SA_ADMINS`, si está seteada.

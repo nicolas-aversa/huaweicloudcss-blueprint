@@ -304,6 +304,99 @@ def list_users() -> list[dict]:
     return out
 
 
+def has_active_env(email: str) -> bool:
+    """True si el usuario dejó un entorno de Terraform desplegado.
+
+    Importa antes de borrarlo: su `terraform.tfstate` es lo ÚNICO que sabe cómo
+    destruir esos clusters CSS, que siguen facturando. El workspace no se toca al
+    borrar la cuenta justamente por esto."""
+    uid = _user_id(email or "")
+    state = DATA_ROOT / "users" / uid / "terraform" / "terraform.tfstate"
+    try:
+        if not state.is_file():
+            return False
+        data = json.loads(state.read_text(encoding="utf-8"))
+        return bool(data.get("resources"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def delete_user(email: str, actor: str | None = None) -> tuple[bool, str]:
+    """Borra la cuenta: credencial + allowlist + rol de admin. Devuelve `(ok, motivo)`.
+
+    **No borra el workspace** (`data/users/<id>/`): ahí vive el estado de Terraform,
+    que es lo único capaz de destruir un entorno desplegado. Si el usuario vuelve a
+    darse de alta con el mismo email, lo recupera.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return False, "Email vacío."
+    if actor and email == actor.strip().lower():
+        return False, "No podés borrar tu propia cuenta."
+    if email in _admins():
+        return False, "Ese admin viene de la variable SA_ADMINS; se quita desde el entorno."
+    users = _load_users()
+    if email not in users:
+        return False, "Esa cuenta no existe."
+    if is_admin(email):
+        # Si es el último admin efectivo, borrarlo deja la instancia sin gobierno.
+        otros = (_persisted_admins() - {email}) or {
+            e for e in users if e != email and is_admin(e)}
+        if not otros and not _admins():
+            return False, "Es el único administrador: promové a otro antes de borrarlo."
+    users.pop(email, None)
+    _save_users(users)
+    remove_allowed(email)
+    s = _persisted_admins()
+    if email in s:
+        s.discard(email)
+        _save_persisted_admins(s)
+    return True, ""
+
+
+def people() -> list[dict]:
+    """Vista unificada para el Panel de control: un email = una fila.
+
+    Junta las tres listas que antes se mostraban por separado (allowlist, admins,
+    cuentas creadas) porque son **dimensiones del mismo email**, no grupos
+    distintos: quién puede entrar, quién ya entró y quién administra.
+    """
+    users = _load_users()
+    env_allow, added_allow = _allowlist(), _persisted_allowlist()
+    env_adm, added_adm = _admins(), _persisted_admins()
+    boot = "" if (env_adm or added_adm) else _bootstrap_admin()
+    abierta = not (env_allow | added_allow)
+
+    out = []
+    for email in sorted(set(users) | env_allow | added_allow | env_adm | added_adm):
+        rec = users.get(email) or {}
+        registered = email in users
+        if email in env_adm:
+            admin_src = "env"
+        elif email in added_adm:
+            admin_src = "added"
+        elif email == boot:
+            admin_src = "bootstrap"
+        else:
+            admin_src = ""
+        out.append({
+            "email": email,
+            "registered": registered,
+            "created": rec.get("created"),
+            "has_password": bool(rec.get("pw")),
+            "is_admin": bool(admin_src),
+            "admin_source": admin_src,
+            # `allowed` es efectivo: con la allowlist vacía entra cualquiera.
+            "allowed": abierta or email in (env_allow | added_allow),
+            "allow_source": ("open" if abierta
+                             else "env" if email in env_allow
+                             else "added" if email in added_allow else ""),
+        })
+    # Los que ya entraron primero; después los invitados que nunca aparecieron.
+    out.sort(key=lambda p: (not p["registered"], p.get("created") or 0, p["email"]))
+    return out
+
+
 def admin_reset_user(email: str) -> bool:
     """Resetea la contraseña de un usuario: vacía su password y en el próximo
     login (si sigue en la allowlist) fija la que elija. True si existía.

@@ -675,9 +675,12 @@
     .admin-empty { color: var(--text-muted); font-size: 12.5px; }
     .admin-users { display: flex; flex-direction: column; gap: 6px; }
     .admin-user {
-      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle);
     }
+    /* El email empuja las acciones al borde derecho; con varias acciones + badges
+       la fila envuelve en vez de desbordar. */
+    .admin-user__email { flex: 1 1 200px; }
     .admin-user__email { flex: 1; min-width: 0; font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .admin-user__badge { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-tint); padding: 2px 7px; border-radius: var(--radius-pill); }
     /* Cuenta con la contraseña vacía: entró un reset y todavía no eligió la nueva. */
@@ -712,17 +715,8 @@
     .admin-allow-form { display: flex; gap: 8px; margin-bottom: 10px; }
     .admin-allow-form input { flex: 1; padding: 8px 11px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
     .admin-allow-form input:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
-    /* El de administradores es un <select> (se elige una cuenta existente), pero
-       comparte la fila con el mismo alto que el input de la allowlist. */
-    .admin-allow-form select { flex: 1; min-width: 0; padding: 8px 11px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
-    .admin-allow-form select:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
-    .admin-allow-form select:disabled { color: var(--text-muted); cursor: not-allowed; }
     .admin-allow-form .btn { flex: none; }
     .admin-allow-form .btn:disabled { opacity: .5; cursor: not-allowed; }
-    .admin-allowlist { display: flex; flex-direction: column; gap: 6px; }
-    .admin-allow-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); }
-    .admin-allow-email { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .admin-allow-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); background: var(--bg-tertiary); padding: 2px 7px; border-radius: var(--radius-pill); }
     /* (.admin-allow-remove comparte el estilo de .admin-user__reset, más arriba.) */
 
     /* ── App views (router de secciones, mismo patrón que step-pane) ─ */
@@ -2471,48 +2465,27 @@
         <div class="app-view" id="view-control">
           <p class="view-subtitle">Quién puede usar esta instancia, quién la administra y qué hizo cada uno.</p>
           <div class="settings-grid">
+            <!-- UNA sola lista: allowlist, cuentas y admins no son grupos
+                 distintos sino tres dimensiones del mismo email (si puede entrar,
+                 si ya entró, si administra). Tenerlas separadas obligaba a cruzar
+                 tres listas a ojo para entender el estado de una persona. -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Acceso</div>
-                  <div class="settings-card__hint">Solo estos emails pueden registrarse y entrar. Vacío = registro abierto.</div>
+                  <div class="settings-card__title">Usuarios</div>
+                  <div class="settings-card__hint">Quién puede entrar, quién ya tiene cuenta y quién administra.</div>
                 </div>
+                <div class="spacer" style="flex:1;"></div>
+                <button class="btn btn-secondary btn-sm btn-icon" id="admin-people-refresh" type="button"
+                        title="Actualizar" aria-label="Actualizar"><svg class="icon"><use href="#ic-refresh"/></svg></button>
               </div>
-              <div class="admin-section">
-                <div class="admin-section__title">Usuarios autorizados (allowlist)</div>
-                <form id="admin-allow-form" class="admin-allow-form">
-                  <input id="admin-allow-input" type="email" placeholder="nuevo.sa@huawei.com" autocomplete="off">
-                  <button type="submit" class="btn btn-primary">Agregar</button>
-                </form>
-                <div id="admin-allowlist" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
-              </div>
-              <div class="admin-section">
-                <div class="admin-section__title">Administradores</div>
-                <!-- Se promueve ELIGIENDO una cuenta ya registrada: escribir el
-                     email a mano se prestaba a typos que creaban un admin fantasma
-                     (válido pero de nadie). El select lo puebla _loadAdmins() con
-                     los usuarios que todavía no son admin. -->
-                <form id="admin-admins-form" class="admin-allow-form">
-                  <select id="admin-admins-select" class="form-select"></select>
-                  <button type="submit" class="btn btn-primary" id="admin-admins-submit">Promover</button>
-                </form>
-                <div id="admin-admins" class="admin-allowlist"><span class="admin-empty">Cargando…</span></div>
-                <p class="form-hint" style="margin:8px 0 0;">Solo se puede promover a alguien que ya haya entrado al menos una vez. Siempre tiene que quedar al menos un administrador.</p>
-              </div>
-            </div>
-
-            <div class="settings-card">
-              <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-shield"/></svg></span>
-                <div>
-                  <div class="settings-card__title">Cuentas</div>
-                  <div class="settings-card__hint">Cuentas creadas en esta instancia. Resetear una contraseña es el "olvidé mi contraseña".</div>
-                </div>
-              </div>
-              <div class="admin-section">
-                <div id="admin-users" class="admin-users"><span class="admin-empty">Cargando…</span></div>
-              </div>
+              <form id="admin-allow-form" class="admin-allow-form">
+                <input id="admin-allow-input" type="email" placeholder="invitar: nuevo.sa@huawei.com" autocomplete="off">
+                <button type="submit" class="btn btn-primary">Invitar</button>
+              </form>
+              <div id="admin-people-warn" class="form-hint hidden" style="margin:0 0 10px; color:var(--accent-red);"></div>
+              <div id="admin-people" class="admin-users"><span class="admin-empty">Cargando…</span></div>
             </div>
 
             <div class="settings-card">
@@ -2522,6 +2495,9 @@
                   <div class="settings-card__title">Actividad</div>
                   <div class="settings-card__hint">Quién hizo qué en la instancia: logins, cambios de configuración, deploys.</div>
                 </div>
+                <div class="spacer" style="flex:1;"></div>
+                <button class="btn btn-secondary btn-sm btn-icon" id="admin-audit-refresh" type="button"
+                        title="Actualizar" aria-label="Actualizar"><svg class="icon"><use href="#ic-refresh"/></svg></button>
               </div>
               <div class="admin-section">
                 <div id="admin-audit" class="admin-audit"><span class="admin-empty">Cargando…</span></div>
@@ -7537,103 +7513,159 @@
       }).catch(function () {});
 
       function _fmtTs(ts) { try { return new Date(ts * 1000).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) { return String(ts); } }
-      function _loadAllowlist() {
-        _fetch('/api/v1/admin/allowlist', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
-          var box = document.getElementById('admin-allowlist'); if (!box) return;
-          var env = (d && d.env) || [], added = (d && d.added) || [];
-          var rows = '';
-          env.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><span class="admin-allow-tag">env</span></div>'; });
-          added.forEach(function (e) { rows += '<div class="admin-allow-row"><span class="admin-allow-email">' + esc(e) + '</span><button class="admin-allow-remove" type="button" title="Quitar de la allowlist" data-email="' + esc(e) + '"><svg class="icon"><use href="#ic-x"/></svg>Quitar</button></div>'; });
-          box.innerHTML = rows || '<span class="admin-empty">Sin emails autorizados (registro abierto).</span>';
-          box.querySelectorAll('.admin-allow-remove').forEach(function (btn) {
-            btn.addEventListener('click', async function () {
-              await _fetch('/api/v1/admin/allowlist/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ email: btn.dataset.email }) });
-              if (window.toast) window.toast('Quitado: ' + btn.dataset.email, 'success');
-              _loadAllowlist();
-            });
-          });
-        }).catch(function () {});
-      }
-      // Administradores: mismo shape que la allowlist. `env` viene de SA_ADMINS y
-      // no se puede quitar desde acá; `bootstrap` es el primer usuario registrado,
-      // que manda solo mientras no haya ninguno declarado.
-      // Puebla el select de promoción con las cuentas registradas que todavía NO
-      // son admin. Si no queda ninguna, el form se deshabilita con el motivo:
-      // solo se puede promover a alguien que ya entró al menos una vez.
-      function _fillPromoteOptions(current) {
-        var sel = document.getElementById('admin-admins-select');
-        var btn = document.getElementById('admin-admins-submit');
-        if (!sel) return;
-        _fetch('/api/v1/admin/users', { credentials: 'same-origin' })
-          .then(function (r) { return r.json(); }).then(function (d) {
-            var users = (d && d.users) || [];
-            var yaAdmin = {};
-            current.forEach(function (e) { yaAdmin[e] = true; });
-            var libres = users.filter(function (u) { return !yaAdmin[u.email] && !u.is_admin; });
-            sel.innerHTML = '';
-            if (!libres.length) {
-              sel.innerHTML = '<option value="">— No hay cuentas para promover —</option>';
-              sel.disabled = true;
-              if (btn) btn.disabled = true;
-              return;
-            }
-            sel.disabled = false;
-            if (btn) btn.disabled = false;
-            libres.forEach(function (u) {
-              var o = document.createElement('option');
-              o.value = u.email; o.textContent = u.email;
-              sel.appendChild(o);
-            });
-          }).catch(function () {});
+      // ── Panel de control ────────────────────────────────────────────────
+      // Una sola lista de personas. `people` trae por email si puede entrar
+      // (allowlist), si ya tiene cuenta y si administra, con el origen de cada
+      // cosa (env / agregado / bootstrap) para saber qué se puede modificar.
+      var _ADMIN_BUSY = false;
+
+      async function _adminPost(url, body) {
+        var r = await _fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin', body: JSON.stringify(body || {}),
+        });
+        if (!r.ok) {
+          var d = await r.json().catch(function () { return {}; });
+          throw new Error((d.detail && d.detail.message) || d.detail || ('HTTP ' + r.status));
+        }
+        return r;
       }
 
-      function _loadAdmins() {
-        _fetch('/api/v1/admin/admins', { credentials: 'same-origin' })
+      function _confirm(title, message, confirmLabel) {
+        return window.confirmModal
+          ? window.confirmModal({ title: title, message: message, confirmLabel: confirmLabel })
+          : Promise.resolve(window.confirm(message));
+      }
+
+      function _peopleAction(label, icon, title, onClick) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'admin-user__reset';
+        b.title = title || label;
+        b.innerHTML = '<svg class="icon"><use href="#ic-' + icon + '"/></svg>' + label;
+        b.addEventListener('click', async function () {
+          if (_ADMIN_BUSY) return;
+          _ADMIN_BUSY = true;
+          try { await onClick(); } catch (err) {
+            if (window.toast) window.toast(err.message, 'error');
+          } finally { _ADMIN_BUSY = false; }
+        });
+        return b;
+      }
+
+      function _loadPeople() {
+        var box = document.getElementById('admin-people');
+        var warn = document.getElementById('admin-people-warn');
+        if (!box) return;
+        _fetch('/api/v1/admin/people', { credentials: 'same-origin' })
           .then(function (r) { return r.json(); }).then(function (d) {
-            var box = document.getElementById('admin-admins'); if (!box) return;
-            var env = (d && d.env) || [], added = (d && d.added) || [], boot = (d && d.bootstrap) || '';
-            _fillPromoteOptions(env.concat(added, boot ? [boot] : []));
-            if (boot) {
-              box.innerHTML = '<div class="admin-allow-row"><span class="admin-allow-email"></span>'
-                + '<span class="admin-allow-tag">primer usuario</span></div>';
-              box.querySelector('.admin-allow-email').textContent = boot;
-              return;
+            var rows = (d && d.people) || [];
+            // Allowlist vacía = cualquiera con la URL puede registrarse. Vale
+            // avisarlo: es lo que hace que borrar una cuenta no sirva de nada.
+            if (warn) {
+              var abierta = !!(d && d.allowlist_open);
+              warn.classList.toggle('hidden', !abierta);
+              warn.textContent = abierta
+                ? '⚠ El registro está abierto: cualquiera con el link puede crearse una cuenta. Invitá al menos un email para cerrarlo.'
+                : '';
             }
-            if (!env.length && !added.length) {
-              box.innerHTML = '<span class="admin-empty">Sin administradores declarados.</span>';
+            if (!rows.length) {
+              box.innerHTML = '<span class="admin-empty">Todavía no hay nadie.</span>';
               return;
             }
             box.innerHTML = '';
-            env.forEach(function (e) {
-              var row = document.createElement('div'); row.className = 'admin-allow-row';
-              row.innerHTML = '<span class="admin-allow-email"></span><span class="admin-allow-tag">del entorno</span>';
-              row.querySelector('.admin-allow-email').textContent = e;
+            rows.forEach(function (u) {
+              var row = document.createElement('div');
+              row.className = 'admin-user';
+              var em = document.createElement('span');
+              em.className = 'admin-user__email';
+              em.textContent = u.email;
+              row.appendChild(em);
+
+              var badge = function (txt, cls) {
+                var s = document.createElement('span');
+                s.className = 'admin-user__badge' + (cls || '');
+                s.textContent = txt;
+                row.appendChild(s);
+              };
+              if (u.is_admin) {
+                badge(u.admin_source === 'env' ? 'admin (env)'
+                  : u.admin_source === 'bootstrap' ? 'admin (1er usuario)' : 'admin');
+              }
+              if (!u.registered) badge('invitado', ' admin-user__badge--warn');
+              else if (!u.has_password) badge('reset pendiente', ' admin-user__badge--warn');
+              if (u.registered && !u.allowed) badge('sin acceso', ' admin-user__badge--warn');
+              if (u.active_env) badge('entorno activo', ' admin-user__badge--warn');
+
+              // Admin: promover / quitar. Los de SA_ADMINS no se tocan desde acá.
+              if (u.registered && !u.is_admin) {
+                row.appendChild(_peopleAction('Hacer admin', 'shield', 'Darle permisos de administrador', async function () {
+                  var ok = await _confirm('Promover a administrador',
+                    '¿Darle permisos de administrador a ' + u.email + '? Va a poder gestionar usuarios y ver la actividad.', 'Promover');
+                  if (!ok) return;
+                  await _adminPost('/api/v1/admin/admins/add', { email: u.email });
+                  if (window.toast) window.toast('Ahora es administrador: ' + u.email, 'success');
+                  initAdminPanel();
+                }));
+              } else if (u.admin_source === 'added') {
+                row.appendChild(_peopleAction('Quitar admin', 'x', 'Quitarle los permisos de administrador', async function () {
+                  var ok = await _confirm('Quitar administrador',
+                    '¿Quitarle el rol de administrador a ' + u.email + '?', 'Quitar');
+                  if (!ok) return;
+                  await _adminPost('/api/v1/admin/admins/remove', { email: u.email });
+                  if (window.toast) window.toast('Ya no es administrador: ' + u.email, 'success');
+                  initAdminPanel();
+                }));
+              }
+
+              if (u.registered) {
+                row.appendChild(_peopleAction('Contraseña', 'refresh', 'Resetear contraseña', async function () {
+                  var ok = await _confirm('Resetear contraseña',
+                    '¿Resetear la contraseña de ' + u.email + '? Va a fijar una nueva en su próximo ingreso.', 'Resetear');
+                  if (!ok) return;
+                  await _adminPost('/api/v1/admin/users/reset', { email: u.email });
+                  if (window.toast) window.toast('Contraseña de ' + u.email + ' reseteada.', 'success');
+                  initAdminPanel();
+                }));
+                row.appendChild(_peopleAction('Eliminar', 'trash', 'Eliminar la cuenta', async function () {
+                  var msg = 'Se elimina la cuenta de ' + u.email + ': su credencial, su acceso y su rol.'
+                    + ' Sus datos de trabajo (incluido el estado de Terraform) NO se borran.';
+                  if (u.active_env) {
+                    msg += ' ⚠ OJO: tiene un entorno CSS desplegado. Si borrás la cuenta, nadie va a poder'
+                      + ' destruirlo desde la app y va a seguir facturando: pedile que lo destruya primero.';
+                  }
+                  var ok = await _confirm('Eliminar cuenta', msg, 'Eliminar');
+                  if (!ok) return;
+                  await _adminPost('/api/v1/admin/users/delete', { email: u.email });
+                  if (window.toast) window.toast('Cuenta eliminada: ' + u.email, 'success');
+                  initAdminPanel();
+                }));
+              } else if (u.allow_source === 'added') {
+                row.appendChild(_peopleAction('Quitar', 'x', 'Cancelar la invitación', async function () {
+                  await _adminPost('/api/v1/admin/allowlist/remove', { email: u.email });
+                  if (window.toast) window.toast('Invitación cancelada: ' + u.email, 'success');
+                  initAdminPanel();
+                }));
+              }
               box.appendChild(row);
             });
-            added.forEach(function (e) {
-              var row = document.createElement('div'); row.className = 'admin-allow-row';
-              row.innerHTML = '<span class="admin-allow-email"></span><button class="admin-allow-remove" type="button" title="Quitar administrador"><svg class="icon"><use href="#ic-x"/></svg>Quitar</button>';
-              row.querySelector('.admin-allow-email').textContent = e;
-              row.querySelector('.admin-allow-remove').addEventListener('click', async function () {
-                var msg = '¿Quitarle el rol de administrador a ' + e + '?';
-                var ok = window.confirmModal
-                  ? await window.confirmModal({ title: 'Quitar administrador', message: msg, confirmLabel: 'Quitar' })
-                  : window.confirm(msg);
-                if (!ok) return;
-                var r = await _fetch('/api/v1/admin/admins/remove', {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  credentials: 'same-origin', body: JSON.stringify({ email: e }),
-                });
-                if (!r.ok) {
-                  var err = await r.json().catch(function () { return {}; });
-                  if (window.toast) window.toast((err.detail && err.detail.message) || 'No se pudo quitar.', 'error');
-                  return;
-                }
-                if (window.toast) window.toast('Ya no es administrador: ' + e, 'success');
-                initAdminPanel();
-              });
-              box.appendChild(row);
-            });
+          }).catch(function () {
+            box.innerHTML = '<span class="admin-empty">No pude leer los usuarios.</span>';
+          });
+      }
+
+      function _loadAudit() {
+        _fetch('/api/v1/admin/audit?limit=100', { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); }).then(function (d) {
+            var box = document.getElementById('admin-audit'); if (!box) return;
+            var rows = (d && d.entries) || [];
+            if (!rows.length) { box.innerHTML = '<span class="admin-empty">Sin actividad registrada.</span>'; return; }
+            box.innerHTML = rows.map(function (e) {
+              return '<div class="admin-audit__row"><span class="admin-audit__ts">' + _fmtTs(e.ts)
+                + '</span><span class="admin-audit__user">' + esc(e.user || '-')
+                + '</span><span class="admin-audit__act"><b>' + esc(e.action || '') + '</b> '
+                + esc(e.detail || '') + '</span></div>';
+            }).join('');
           }).catch(function () {});
       }
 
@@ -7641,33 +7673,8 @@
         // Revela el ítem del nav: es el único punto del front que sabe si sos admin.
         var navItem = document.getElementById('nav-control');
         if (navItem) navItem.classList.remove('hidden');
-        _loadAllowlist();
-        _loadAdmins();
-        var adf = document.getElementById('admin-admins-form');
-        if (adf && !adf.dataset.wired) {
-          adf.dataset.wired = '1';
-          adf.addEventListener('submit', async function (e) {
-            e.preventDefault();
-            var sel = document.getElementById('admin-admins-select');
-            var email = (sel && sel.value || '').trim();
-            if (!email) return;
-            var msg = '¿Darle permisos de administrador a ' + email + '? Va a poder gestionar usuarios, admins y ver la actividad.';
-            var ok = window.confirmModal
-              ? await window.confirmModal({ title: 'Promover a administrador', message: msg, confirmLabel: 'Promover' })
-              : window.confirm(msg);
-            if (!ok) return;
-            var r = await _fetch('/api/v1/admin/admins/add', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin', body: JSON.stringify({ email: email }),
-            });
-            if (r.ok) {
-              if (window.toast) window.toast('Ahora es administrador: ' + email, 'success');
-              initAdminPanel();
-            } else if (window.toast) {
-              window.toast('No se pudo promover.', 'error');
-            }
-          });
-        }
+        _loadPeople();
+        _loadAudit();
         var af = document.getElementById('admin-allow-form');
         if (af && !af.dataset.wired) {
           af.dataset.wired = '1';
@@ -7676,47 +7683,22 @@
             var inp = document.getElementById('admin-allow-input');
             var email = (inp.value || '').trim();
             if (!email) return;
-            var r = await _fetch('/api/v1/admin/allowlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ email: email }) });
-            if (r.ok) { inp.value = ''; if (window.toast) window.toast('Agregado a la allowlist: ' + email, 'success'); _loadAllowlist(); }
-            else if (window.toast) window.toast('Email inválido.', 'error');
+            try {
+              await _adminPost('/api/v1/admin/allowlist/add', { email: email });
+              inp.value = '';
+              if (window.toast) window.toast('Invitado: ' + email, 'success');
+              _loadPeople();
+            } catch (err) {
+              if (window.toast) window.toast(err.message, 'error');
+            }
           });
         }
-        _fetch('/api/v1/admin/users', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
-          var box = document.getElementById('admin-users'); if (!box) return;
-          var users = (d && d.users) || [];
-          if (!users.length) { box.innerHTML = '<span class="admin-empty">Sin usuarios registrados todavía.</span>'; return; }
-          box.innerHTML = '';
-          users.forEach(function (u) {
-            var row = document.createElement('div'); row.className = 'admin-user';
-            row.innerHTML = '<span class="admin-user__email"></span>'
-              + (u.has_password ? '' : '<span class="admin-user__badge admin-user__badge--warn">reset pendiente</span>')
-              + (u.is_admin ? '<span class="admin-user__badge">admin</span>' : '')
-              + '<button class="admin-user__reset" type="button" title="Resetear contraseña">'
-              + '<svg class="icon"><use href="#ic-refresh"/></svg>Contraseña</button>';
-            row.querySelector('.admin-user__email').textContent = u.email;
-            row.querySelector('.admin-user__reset').addEventListener('click', async function () {
-              var msg = '¿Resetear la contraseña de ' + u.email + '? Va a fijar una nueva en su próximo ingreso.';
-              var ok = window.confirmModal ? await window.confirmModal({ title: 'Resetear contraseña', message: msg, confirmLabel: 'Resetear' }) : window.confirm(msg);
-              if (!ok) return;
-              await _fetch('/api/v1/admin/users/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ email: u.email }) });
-              if (window.toast) window.toast('Contraseña de ' + u.email + ' reseteada.', 'success');
-              initAdminPanel();
-            });
-            box.appendChild(row);
-          });
-        }).catch(function () {});
-        _fetch('/api/v1/admin/audit?limit=100', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
-          var box = document.getElementById('admin-audit'); if (!box) return;
-          var rows = (d && d.entries) || [];
-          if (!rows.length) { box.innerHTML = '<span class="admin-empty">Sin actividad registrada.</span>'; return; }
-          box.innerHTML = rows.map(function (e) {
-            return '<div class="admin-audit__row"><span class="admin-audit__ts">' + _fmtTs(e.ts) + '</span><span class="admin-audit__user">' + esc(e.user || '-') + '</span><span class="admin-audit__act"><b>' + esc(e.action || '') + '</b> ' + esc(e.detail || '') + '</span></div>';
-          }).join('');
-        }).catch(function () {});
+        var pr = document.getElementById('admin-people-refresh');
+        if (pr && !pr.dataset.wired) { pr.dataset.wired = '1'; pr.addEventListener('click', _loadPeople); }
+        var ar = document.getElementById('admin-audit-refresh');
+        if (ar && !ar.dataset.wired) { ar.dataset.wired = '1'; ar.addEventListener('click', _loadAudit); }
       }
 
-      // El router de vistas vive en el otro <script>: se expone para que
-      // showView('control') pueda refrescar el panel al entrar.
       window.initAdminPanel = initAdminPanel;
     })();
   </script>

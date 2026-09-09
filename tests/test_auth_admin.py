@@ -197,6 +197,131 @@ def test_last_persisted_admin_can_go_if_env_has_one(monkeypatch):
     assert ok is True, "queda el de env, así que no hay lockout"
 
 
+# ── Borrar cuentas ──────────────────────────────────────────────────────────
+def test_delete_user_removes_credential_access_and_role():
+    _user("ana@huawei.com", 1000)
+    _user("beto@huawei.com", 2000)
+    auth.add_admin("beto@huawei.com")
+
+    ok, reason = auth.delete_user("beto@huawei.com", actor="ana@huawei.com")
+
+    assert ok is True and reason == ""
+    assert "beto@huawei.com" not in auth._load_users()
+    assert auth.is_admin("beto@huawei.com") is False
+    assert "beto@huawei.com" not in auth._persisted_admins()
+
+
+def test_delete_user_does_not_touch_the_workspace(isolated):
+    """El workspace guarda el tfstate, lo único capaz de destruir un entorno ya
+    desplegado. Borrarlo con la cuenta dejaría clusters facturando sin dueño."""
+    _user("ana@huawei.com", 1000)
+    ws = isolated / "users" / "ana_huawei_com" / "terraform"
+    ws.mkdir(parents=True)
+    (ws / "terraform.tfstate").write_text('{"resources": [{"type": "css"}]}', encoding="utf-8")
+
+    auth.delete_user("ana@huawei.com", actor="otro@huawei.com")
+
+    assert (ws / "terraform.tfstate").is_file(), "se borró el estado de Terraform"
+
+
+def test_has_active_env_detects_deployed_resources(isolated):
+    _user("ana@huawei.com", 1000)
+    assert auth.has_active_env("ana@huawei.com") is False
+
+    ws = isolated / "users" / "ana_huawei_com" / "terraform"
+    ws.mkdir(parents=True)
+    (ws / "terraform.tfstate").write_text('{"resources": []}', encoding="utf-8")
+    assert auth.has_active_env("ana@huawei.com") is False, "state vacío no es un entorno"
+
+    (ws / "terraform.tfstate").write_text('{"resources": [{"type": "css"}]}', encoding="utf-8")
+    assert auth.has_active_env("ana@huawei.com") is True
+
+
+def test_cannot_delete_yourself():
+    _user("ana@huawei.com", 1000)
+    ok, reason = auth.delete_user("ana@huawei.com", actor="ana@huawei.com")
+    assert ok is False and "tu propia cuenta" in reason
+    assert "ana@huawei.com" in auth._load_users()
+
+
+def test_cannot_delete_the_last_admin():
+    _user("ana@huawei.com", 1000)   # única cuenta → admin por bootstrap
+    ok, reason = auth.delete_user("ana@huawei.com", actor="otro@huawei.com")
+    assert ok is False and "único administrador" in reason
+
+
+def test_cannot_delete_an_env_admin(monkeypatch):
+    monkeypatch.setenv("SA_ADMINS", "jefe@huawei.com")
+    _user("jefe@huawei.com", 1000)
+    ok, reason = auth.delete_user("jefe@huawei.com", actor="otro@huawei.com")
+    assert ok is False and "SA_ADMINS" in reason
+
+
+def test_delete_unknown_user():
+    ok, reason = auth.delete_user("nadie@huawei.com", actor="a@b.com")
+    assert ok is False and "no existe" in reason
+
+
+def test_deleted_user_can_register_again_if_registration_is_open():
+    """Sin allowlist, borrar una cuenta no impide que vuelva a entrar: es
+    justamente por eso que la allowlist NO es redundante."""
+    _user("ana@huawei.com", 1000)
+    _user("beto@huawei.com", 2000)
+    auth.delete_user("beto@huawei.com", actor="ana@huawei.com")
+
+    assert auth.check_login("beto@huawei.com", "otra-clave") is True, "registro abierto"
+
+    # Con allowlist cerrada, en cambio, el borrado sí lo deja afuera.
+    auth.add_allowed("ana@huawei.com")
+    auth.delete_user("beto@huawei.com", actor="ana@huawei.com")
+    assert auth.check_login("beto@huawei.com", "otra-clave") is False
+
+
+# ── Vista unificada ─────────────────────────────────────────────────────────
+def test_people_merges_allowlist_users_and_admins(monkeypatch):
+    monkeypatch.setenv("SA_ADMINS", "jefe@huawei.com")
+    _user("ana@huawei.com", 1000)
+    auth.add_allowed("invitado@huawei.com")   # autorizado, todavía sin cuenta
+
+    rows = {p["email"]: p for p in auth.people()}
+
+    assert set(rows) == {"jefe@huawei.com", "ana@huawei.com", "invitado@huawei.com"}
+    assert rows["ana@huawei.com"]["registered"] is True
+    assert rows["invitado@huawei.com"]["registered"] is False
+    assert rows["invitado@huawei.com"]["allow_source"] == "added"
+    assert rows["jefe@huawei.com"]["is_admin"] is True
+    assert rows["jefe@huawei.com"]["admin_source"] == "env"
+    assert rows["ana@huawei.com"]["is_admin"] is False
+
+
+def test_people_marks_open_registration():
+    _user("ana@huawei.com", 1000)
+    assert auth.people()[0]["allow_source"] == "open", "allowlist vacía = entra cualquiera"
+    assert auth.people()[0]["allowed"] is True
+
+
+def test_people_marks_a_registered_user_without_access():
+    _user("ana@huawei.com", 1000)
+    _user("beto@huawei.com", 2000)
+    auth.add_allowed("ana@huawei.com")   # cierra la allowlist dejando fuera a beto
+
+    rows = {p["email"]: p for p in auth.people()}
+    # add_allowed siembra con los existentes, así que beto sigue adentro...
+    assert rows["beto@huawei.com"]["allowed"] is True
+    auth.remove_allowed("beto@huawei.com")
+    rows = {p["email"]: p for p in auth.people()}
+    assert rows["beto@huawei.com"]["allowed"] is False
+    assert rows["beto@huawei.com"]["registered"] is True
+
+
+def test_people_flags_bootstrap_admin():
+    _user("ana@huawei.com", 1000)
+    _user("beto@huawei.com", 2000)
+    rows = {p["email"]: p for p in auth.people()}
+    assert rows["ana@huawei.com"]["admin_source"] == "bootstrap"
+    assert rows["beto@huawei.com"]["admin_source"] == ""
+
+
 # ── Reset de contraseña ─────────────────────────────────────────────────────
 def test_reset_keeps_created_and_admin_role():
     """El reset borraba el registro entero: el usuario perdía su antigüedad y con
