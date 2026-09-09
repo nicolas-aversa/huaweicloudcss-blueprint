@@ -729,7 +729,6 @@
       background: var(--accent); color: #fff; font-weight: 700; font-size: 12px;
       display: inline-flex; align-items: center; justify-content: center;
     }
-    .guide-step-t { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
 
     .infra-card {
       background: var(--bg-primary);
@@ -756,6 +755,33 @@
       background: rgba(22, 163, 74, 0.1);
       color: var(--accent-green);
     }
+
+    /* ── Vista Cómo usar ────────────────────────────────────────────────── */
+    .guide-flow { display: flex; flex-direction: column; gap: 14px; max-width: 780px; }
+    .guide-block {
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+      background: var(--bg-primary); padding: 18px 22px; box-shadow: var(--shadow-xs);
+    }
+    .guide-block__head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .guide-block__num {
+      flex: none; width: 26px; height: 26px; border-radius: 8px;
+      background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .guide-block__title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0; }
+    .guide-block__once {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--text-muted); background: var(--bg-tertiary); padding: 3px 8px; border-radius: var(--radius-pill);
+    }
+    .guide-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+    .guide-list li { font-size: 13.5px; line-height: 1.55; color: var(--text-secondary); }
+    .guide-list strong { color: var(--text-primary); }
+    .guide-more {
+      display: flex; flex-direction: column; gap: 5px; padding: 14px 20px;
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+      background: var(--bg-subtle); font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+    }
+    .guide-more > strong { color: var(--text-primary); }
 
     /* Empty state con centro de gravedad propio: un tile, un titular y una
        salida, en vez de un párrafo suelto dentro de un panel. */
@@ -1584,6 +1610,19 @@
     #log-file-drop:hover, #log-file-drop.is-dragover {
       border-color: var(--accent); background: var(--accent-tint);
     }
+    #log-file-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    /* Vía secundaria del paso 1 (fuente en vivo): colapsada, discreta, para que
+       la decisión por default siga siendo "subo mi archivo". */
+    .live-source { margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px; }
+    .live-source__summary {
+      display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none;
+      font-size: 13px; font-weight: 600; color: var(--text-secondary);
+    }
+    .live-source__summary::-webkit-details-marker { display: none; }
+    .live-source__summary:hover { color: var(--accent); }
+    .live-source__summary .icon { width: 13px; height: 13px; transition: transform .18s var(--ease); }
+    .live-source[open] > .live-source__summary .icon { transform: rotate(90deg); }
+    .live-source[open] > .live-source__summary { color: var(--accent); margin-bottom: 12px; }
     .example-card.is-custom { background: var(--accent-red-tint); }
     .example-card.is-custom .example-card__tile { background: var(--accent-red); color: #fff; }
     .example-card.is-custom .example-card__label { color: var(--accent-red); }
@@ -1692,11 +1731,18 @@
        El Home además NO deja crecer sus bandas: estirarlas abría huecos
        internos entre el hero y los caminos. */
     .app-view.is-home.active,
-    /* Antes se centraba vertical para que "entrara en una pantalla". Al mover la
-       card de administración al Panel de control quedaron dos cards y el centrado
-       las empujaba al medio, lejos del título. Ahora arranca arriba, como el resto. */
-    .app-view.is-settings.active { display: flex; flex-direction: column; }
+    .app-view.is-infra.active {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      /* 96px = padding vertical de .main-content (48 + 48, simétrico). */
+      min-height: calc(100vh - 96px);
+    }
     .app-view.is-home.active { gap: 30px; }
+    /* Configuración NO se centra: al mover la card de administración al Panel de
+       control quedaron dos cards, y centrarlas las dejaba flotando lejos del
+       título. Arranca arriba, como las vistas con lista. */
+    .app-view.is-settings.active { display: flex; flex-direction: column; }
 
     /* Dashboard de infra (entorno activo): banner con wash (mismo lenguaje que
        el hero) agrupando header + stat-cards. */
@@ -2058,6 +2104,7 @@
        que el Home siga entrando sin scroll, sin achicarlo en monitores altos. */
     @media (min-width: 901px) and (max-height: 780px) {
       .app-view.is-home.active,
+      .app-view.is-infra.active { min-height: calc(100vh - 72px); }   /* 36 + 36, simétrico */
       .app-view.is-home.active { gap: 24px; }
       .main-content { padding-top: 36px; padding-bottom: 36px; }
       .paths { padding-top: 22px; }
@@ -2083,6 +2130,7 @@
       /* Apiladas, estas vistas scrollean: se libera el alto forzado y el
          centrado (si no, el contenido arrancaría fuera de pantalla). */
       .app-view.is-home.active,
+      .app-view.is-infra.active { min-height: 0; justify-content: flex-start; }
       .app-view.is-home.active { gap: 30px; }
     }
 
@@ -2359,82 +2407,50 @@
         <!-- ═══ Vista: Cómo usar (onboarding: preparar → usar → explicar) ═══ -->
         <div class="app-view" id="view-guide">
           <p class="view-subtitle">La secuencia para dejar la solución lista y cómo mostrarla.</p>
-          <div style="display:flex; flex-direction:column; gap:18px; max-width:840px;">
+          <div class="guide-flow">
 
-            <!-- 1 · Prepararlo -->
-            <section style="border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-primary); padding:20px 22px; box-shadow:var(--shadow-xs);">
-              <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
-                <span style="flex:none; width:30px; height:30px; border-radius:8px; background:var(--accent-tint); color:var(--accent); display:inline-flex; align-items:center; justify-content:center;"><svg class="icon" style="width:17px;height:17px;"><use href="#ic-settings"/></svg></span>
-                <h2 style="font-size:16px; font-weight:700; color:var(--text-primary); margin:0;">1 · Prepararlo</h2>
+            <section class="guide-block">
+              <div class="guide-block__head">
+                <span class="guide-block__num">1</span>
+                <h2 class="guide-block__title">Preparar</h2>
+                <span class="guide-block__once">una sola vez</span>
               </div>
-              <p class="form-hint" style="margin:0 0 10px;">Una sola vez, para dejar el entorno operativo.</p>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">1</span>
-                <div style="min-width:0;"><div class="guide-step-t">Prerequisitos</div><div class="form-hint" style="margin-top:2px;">Cuenta Huawei Cloud con permisos CSS / OBS / VPC / NAT y una <strong>VPC + subnet + security group</strong> ya creados (anotá los IDs). Una <strong>API key de MaaS</strong>. En tu máquina: <strong>Docker</strong> (trae Python y Terraform adentro; el camino nativo con Python 3.11+/Terraform es opcional).</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">2</span>
-                <div style="min-width:0;"><div class="guide-step-t">Entrar a la plataforma</div><div class="form-hint" style="margin-top:2px;">Abrí la URL y registrate con tu email + una contraseña (tu primer ingreso crea la cuenta). Si la hosteás vos: <code>./hosted-up.sh</code> (HTTPS automático) o <code>docker compose -f docker-compose.hosted.yml up --build -d</code>.</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">3</span>
-                <div style="min-width:0;"><div class="guide-step-t">Configurar (⚙ Configuración)</div><div class="form-hint" style="margin-top:2px;">Seguí el checklist: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS + MaaS API key + bucket de demos) e <strong>Infraestructura General</strong> (project id, región, AZ, VPC/subnet/security group).</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">4</span>
-                <div style="min-width:0;"><div class="guide-step-t">Preparar el bucket de demos</div><div class="form-hint" style="margin-top:2px;">En la card <strong>Credenciales de la cuenta</strong> tocá <strong>Preparar bucket</strong>: sube los datasets de demo a tu bucket OBS con los prefijos que esperan las pipelines. Necesario antes de desplegar una demo.</div></div>
-              </div>
+              <ol class="guide-list">
+                <li><strong>⚙ Configuración</strong> → cargá tus credenciales (AK/SK de OBS, MaaS API key, bucket) y tu infraestructura (project ID, región, AZ, VPC/subnet/SG). Cada card valida al guardar.</li>
+                <li><strong>Preparar bucket</strong> → sube los datos de las demos a tu bucket. Sin esto el primer deploy falla.</li>
+              </ol>
             </section>
 
-            <!-- 2 · Usarlo -->
-            <section style="border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-primary); padding:20px 22px; box-shadow:var(--shadow-xs);">
-              <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
-                <span style="flex:none; width:30px; height:30px; border-radius:8px; background:var(--accent-tint); color:var(--accent); display:inline-flex; align-items:center; justify-content:center;"><svg class="icon" style="width:17px;height:17px;"><use href="#ic-rocket"/></svg></span>
-                <h2 style="font-size:16px; font-weight:700; color:var(--text-primary); margin:0;">2 · Usarlo</h2>
+            <section class="guide-block">
+              <div class="guide-block__head">
+                <span class="guide-block__num">2</span>
+                <h2 class="guide-block__title">Desplegar</h2>
+                <span class="guide-block__once">~20 min la primera vez</span>
               </div>
-              <p class="form-hint" style="margin:0 0 10px;">Dos caminos: usar un dataset ya armado, o crear el tuyo.</p>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-rocket"/></svg>Demo</span>
-                <div style="min-width:0;"><div class="guide-step-t">Despliega de verdad en tu cuenta</div><div class="form-hint" style="margin-top:2px;"><strong>Crear pipeline</strong> → elegí uno o varios verticales → <strong>Desplegar</strong>. El primer deploy tarda ~20 min (clusters CSS); los siguientes reusan el entorno. Después, en <strong>Mi Infraestructura</strong>, completá la puesta en marcha: (1) index template + dashboards, (2) iniciar ingesta, (3) capabilities (chatbot + forecasts).</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-code"/></svg>Builder</span>
-                <div style="min-width:0;"><div class="guide-step-t">Subí tu log → dataset nuevo</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Dataset nuevo”</strong> → subís el archivo <code>.log</code> → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Guardar dataset</strong>. Queda como una card más del grid, para desplegar cuando quieras. Ver las guías en <code>docs/guides/</code>.</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-clock"/></svg>Actividad</span>
-                <div style="min-width:0;"><div class="guide-step-t">¿Qué se ejecutó? ¿Por qué falló?</div><div class="form-hint" style="margin-top:2px;">Cada deploy, puesta en marcha y teardown queda registrado en <strong>Actividad</strong>: los sub-pasos con ✓/✗ y su motivo (apply, index template, dashboards por caso, subida a OBS, cada capability) y la <strong>salida cruda de Terraform</strong>. Es el primer lugar donde mirar si el deploy “salió bien” pero no ves datos.</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-shield"/></svg>Admin</span>
-                <div style="min-width:0;"><div class="guide-step-t">Sumar gente al equipo</div><div class="form-hint" style="margin-top:2px;">El <strong>Panel de control</strong> (solo visible si sos administrador) maneja quién puede entrar (<strong>allowlist</strong>), quién administra, las cuentas creadas con <strong>“Resetear contraseña”</strong> — el “olvidé mi contraseña” — y el audit log. Admin = los de <code>SA_ADMINS</code> + los que promuevas ahí; si no hay ninguno, el <strong>primer usuario registrado</strong>.</div></div>
-              </div>
+              <ol class="guide-list">
+                <li><strong>Crear pipeline</strong> → elegí uno o más datasets → <strong>Desplegar</strong>. Podés cerrar el browser: sigue solo y se reengancha.</li>
+                <li>En <strong>Mi Infraestructura</strong>, la puesta en marcha: index template + dashboards → ingesta → capabilities.</li>
+                <li>Al terminar, <strong>Destruir entorno</strong>. Los clusters CSS cuestan mientras corren.</li>
+              </ol>
             </section>
 
-            <!-- 3 · Explicarlo -->
-            <section style="border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-primary); padding:20px 22px; box-shadow:var(--shadow-xs);">
-              <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
-                <span style="flex:none; width:30px; height:30px; border-radius:8px; background:var(--accent-tint); color:var(--accent); display:inline-flex; align-items:center; justify-content:center;"><svg class="icon" style="width:17px;height:17px;"><use href="#ic-chat"/></svg></span>
-                <h2 style="font-size:16px; font-weight:700; color:var(--text-primary); margin:0;">3 · Explicarlo</h2>
+            <section class="guide-block">
+              <div class="guide-block__head">
+                <span class="guide-block__num">3</span>
+                <h2 class="guide-block__title">Mostrar</h2>
               </div>
-              <p class="form-hint" style="margin:0 0 10px;">Qué mostrar en una demo, en orden.</p>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">1</span>
-                <div style="min-width:0;"><div class="guide-step-t">Dashboards</div><div class="form-hint" style="margin-top:2px;">Abrí los dashboards curados: métricas clave, series en el tiempo y el panel de <strong>Controls</strong> para filtrar sin escribir queries.</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">2</span>
-                <div style="min-width:0;"><div class="guide-step-t">Chatbot NL → PPL</div><div class="form-hint" style="margin-top:2px;">En el chat de OpenSearch Dashboards preguntá en lenguaje natural (“¿cuántos eventos por estado?”): el agente lo traduce a <strong>PPL</strong> y responde con el dato real.</div></div>
-              </div>
-              <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
-                <span class="guide-num">3</span>
-                <div style="min-width:0;"><div class="guide-step-t">Forecasts</div><div class="form-hint" style="margin-top:2px;">Mostrá el pronóstico de volumen (RCF) sobre la serie del vertical.</div></div>
-              </div>
+              <ol class="guide-list">
+                <li><strong>Dashboards</strong> — métricas, series y top-N, con filtros. Abrilos desde Mi Infraestructura.</li>
+                <li><strong>Asistente de datos</strong> — preguntás en castellano, responde con el dato real y un gráfico.</li>
+                <li><strong>Forecasts</strong> — proyección del volumen sobre la serie real.</li>
+              </ol>
             </section>
 
-            <!-- Cierre / pitch -->
-            <div style="border:1px solid var(--accent); background:var(--accent-tint); border-radius:var(--radius-lg); padding:16px 20px; font-size:14px; line-height:1.6; color:var(--text-primary);">
-              <strong>En resumen:</strong> pegás un log (o elegís un vertical) → la plataforma arma el pipeline, los dashboards y el chatbot → lo desplegás en CSS. <strong>Del log crudo al insight, sin escribir el parseo a mano.</strong>
+            <div class="guide-more">
+              <strong>¿Y además?</strong>
+              <span><strong>Dataset nuevo</strong>: subís tu propio log y queda como una card más del grid.</span>
+              <span><strong>Actividad</strong>: qué se ejecutó y por qué falló, con la salida de Terraform.</span>
+              <span><strong>Panel de control</strong> (admins): quién entra, quién administra.</span>
             </div>
 
           </div>
@@ -2442,7 +2458,7 @@
 
         <!-- ═══ Vista: Mi Infraestructura ═══════════════════════════════ -->
         <!-- Estado del entorno CSS, hidratado desde /terraform/status. -->
-        <div class="app-view" id="view-infra">
+        <div class="app-view is-infra" id="view-infra">
           <p class="view-subtitle">El entorno CSS que desplegaste con esta plataforma.</p>
           <!-- renderInfraView() inyecta acá la tarjeta activa o el empty state -->
           <div id="infra-body"></div>
@@ -2644,11 +2660,16 @@
               <!-- Alternativa: sin archivo, pegás unas líneas. Sirve cuando los datos
                    no los traés vos sino que llegan en vivo desde la fuente del cliente
                    (Kafka/Beats/JDBC/OBS ya levantados) → el caso se guarda sin dataset. -->
-              <div style="display:flex; align-items:center; gap:10px; margin:18px 0 12px;">
-                <div style="flex:1; height:1px; background:var(--border-subtle);"></div>
-                <span style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted);">o conectá una fuente en vivo</span>
-                <div style="flex:1; height:1px; background:var(--border-subtle);"></div>
-              </div>
+              <!-- Vía secundaria, colapsada: cuando los datos no los traés vos
+                   sino que llegan en vivo de una fuente del cliente. Arranca
+                   cerrada porque el camino normal es subir el archivo. -->
+              <details class="live-source">
+                <summary class="live-source__summary">
+                  <svg class="icon"><use href="#ic-chevron"/></svg>
+                  No tengo el archivo: los datos llegan de una fuente en vivo
+                </summary>
+                <div class="live-source__body">
+                  <p class="form-hint" style="margin:0 0 12px;">Pegá 2-3 líneas de muestra para que el LLM detecte la estructura. El dataset se guarda sin datos: al desplegar, Logstash los lee de la fuente que configures en el paso 3 — que tiene que estar levantada.</p>
               <label class="form-label">Pegá unas líneas del log</label>
               <textarea id="builder-paste" class="form-input" rows="6"
                 placeholder="Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV… cualquier formato). GLM-5.2 detecta la estructura y arma el pipeline."
@@ -2699,6 +2720,9 @@
                   <div id="productive-creds-status" style="font-size:11px; padding:0 14px 10px;"></div>
                 </details>
               </div>
+
+                </div>
+              </details>
 
               <div id="productive-analyze-status" class="hidden" style="font-size:13px; color:var(--text-secondary); margin-top:12px;"></div>
               <div id="industry-match-panel" class="hidden" style="margin-top:12px; padding:14px 16px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
@@ -6707,7 +6731,7 @@
       const desc = document.getElementById('step1-desc');
       if (desc) {
         desc.innerHTML = mode === 'custom'
-          ? 'Subí un archivo de log y GLM-5.2 arma el pipeline y detecta los campos. Elegís la fuente (OBS, Kafka, Beats, JDBC) y lo guardás como un <strong>dataset nuevo</strong>, que queda en el grid junto a los de fábrica.'
+          ? 'Subí un archivo de log: <strong>1)</strong> el LLM detecta la estructura y los campos, <strong>2)</strong> los revisás, <strong>3)</strong> elegís de dónde salen los datos y <strong>4)</strong> lo guardás. Queda como una card más del grid, lista para desplegar.'
           : 'Elegí un caso de uso pre-cargado: un log real de ejemplo con su pipeline ya armado, listo para desplegar y analizar en OpenSearch.';
       }
 
