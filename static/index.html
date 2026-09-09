@@ -451,9 +451,6 @@
     .hidden { display: none !important; }
 
     .btn-sm { padding: 6px 12px; font-size: 12px; }
-    /* Botón cuadrado de solo icono (ej. refrescar). El label va en title/aria-label. */
-    .btn-icon { padding: 7px; line-height: 0; }
-    .btn-icon .icon { width: 15px; height: 15px; }
 
     /* ── App nav (rail izquierdo, altura completa) ───────────────── */
     .app-nav {
@@ -759,6 +756,22 @@
       background: rgba(22, 163, 74, 0.1);
       color: var(--accent-green);
     }
+
+    /* Empty state con centro de gravedad propio: un tile, un titular y una
+       salida, en vez de un párrafo suelto dentro de un panel. */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center; text-align: center;
+      padding: 44px 24px; border: 1px dashed var(--border-default);
+      border-radius: var(--radius-lg); background: var(--bg-subtle);
+    }
+    .empty-state__tile {
+      width: 44px; height: 44px; border-radius: 12px; margin-bottom: 14px;
+      background: var(--accent-tint); color: var(--accent);
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .empty-state__tile .icon { width: 21px; height: 21px; }
+    .empty-state__title { font-size: 15px; font-weight: 650; color: var(--text-primary); margin-bottom: 6px; }
+    .empty-state__text { font-size: 13px; color: var(--text-muted); max-width: 46ch; line-height: 1.55; margin: 0 0 18px; }
 
     /* ── Vista Actividad: historial de ejecuciones ───────────────────────── */
     .activity-row {
@@ -1679,13 +1692,10 @@
        El Home además NO deja crecer sus bandas: estirarlas abría huecos
        internos entre el hero y los caminos. */
     .app-view.is-home.active,
-    .app-view.is-settings.active {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      /* 96px = padding vertical de .main-content (48 + 48, simétrico). */
-      min-height: calc(100vh - 96px);
-    }
+    /* Antes se centraba vertical para que "entrara en una pantalla". Al mover la
+       card de administración al Panel de control quedaron dos cards y el centrado
+       las empujaba al medio, lejos del título. Ahora arranca arriba, como el resto. */
+    .app-view.is-settings.active { display: flex; flex-direction: column; }
     .app-view.is-home.active { gap: 30px; }
 
     /* Dashboard de infra (entorno activo): banner con wash (mismo lenguaje que
@@ -2048,9 +2058,6 @@
        que el Home siga entrando sin scroll, sin achicarlo en monitores altos. */
     @media (min-width: 901px) and (max-height: 780px) {
       .app-view.is-home.active,
-      .app-view.is-settings.active {
-        min-height: calc(100vh - 72px);   /* 36 + 36, simétrico */
-      }
       .app-view.is-home.active { gap: 24px; }
       .main-content { padding-top: 36px; padding-bottom: 36px; }
       .paths { padding-top: 22px; }
@@ -2076,7 +2083,6 @@
       /* Apiladas, estas vistas scrollean: se libera el alto forzado y el
          centrado (si no, el contenido arrancaría fuera de pantalla). */
       .app-view.is-home.active,
-      .app-view.is-settings.active { min-height: 0; justify-content: flex-start; }
       .app-view.is-home.active { gap: 30px; }
     }
 
@@ -2449,8 +2455,7 @@
         <div class="app-view" id="view-activity">
           <p class="view-subtitle">Qué ejecutó la plataforma: deploys, puesta en marcha y teardowns, con su salida.</p>
           <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
-            <button class="btn btn-secondary btn-sm btn-icon" id="activity-refresh" type="button"
-                    title="Actualizar" aria-label="Actualizar"><svg class="icon"><use href="#ic-refresh"/></svg></button>
+            <button class="btn btn-secondary btn-sm" id="activity-refresh" type="button"><svg class="icon"><use href="#ic-refresh"/></svg> Actualizar</button>
             <span class="form-hint" id="activity-count" style="margin:0;"></span>
           </div>
           <div id="activity-list"></div>
@@ -2477,12 +2482,11 @@
                   <div class="settings-card__hint">Quién puede entrar, quién ya tiene cuenta y quién administra.</div>
                 </div>
                 <div class="spacer" style="flex:1;"></div>
-                <button class="btn btn-secondary btn-sm btn-icon" id="admin-people-refresh" type="button"
-                        title="Actualizar" aria-label="Actualizar"><svg class="icon"><use href="#ic-refresh"/></svg></button>
+                <button class="btn btn-secondary btn-sm" id="admin-people-refresh" type="button"><svg class="icon"><use href="#ic-refresh"/></svg> Actualizar</button>
               </div>
               <form id="admin-allow-form" class="admin-allow-form">
                 <input id="admin-allow-input" type="email" placeholder="invitar: nuevo.sa@huawei.com" autocomplete="off">
-                <button type="submit" class="btn btn-primary">Invitar</button>
+                <button type="submit" class="btn btn-primary btn-sm">Invitar</button>
               </form>
               <div id="admin-people-warn" class="form-hint hidden" style="margin:0 0 10px; color:var(--accent-red);"></div>
               <div id="admin-people" class="admin-users"><span class="admin-empty">Cargando…</span></div>
@@ -2496,8 +2500,7 @@
                   <div class="settings-card__hint">Quién hizo qué en la instancia: logins, cambios de configuración, deploys.</div>
                 </div>
                 <div class="spacer" style="flex:1;"></div>
-                <button class="btn btn-secondary btn-sm btn-icon" id="admin-audit-refresh" type="button"
-                        title="Actualizar" aria-label="Actualizar"><svg class="icon"><use href="#ic-refresh"/></svg></button>
+                <button class="btn btn-secondary btn-sm" id="admin-audit-refresh" type="button"><svg class="icon"><use href="#ic-refresh"/></svg> Actualizar</button>
               </div>
               <div class="admin-section">
                 <div id="admin-audit" class="admin-audit"><span class="admin-empty">Cargando…</span></div>
@@ -2526,13 +2529,17 @@
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
+                <!-- "Preparar bucket" va pegado al campo que opera, no en la fila de
+                     acciones de la card: sube los datasets a ESE bucket. -->
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-hw-bucket">Bucket de demos</label>
+                  <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css">
+                  <button class="btn btn-secondary btn-sm" id="settings-hw-preload" style="margin-top:8px;" title="Sube los datasets de demo a este bucket">Preparar bucket</button>
+                </div>
               </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
-                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket">Preparar bucket</button>
                 <span id="settings-obs-status" class="settings-status"></span>
-                <span id="settings-maas-status" class="settings-status"></span>
               </div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
@@ -5952,7 +5959,17 @@
       }
       if (count) count.textContent = rows.length ? `${rows.length} ejecución${rows.length === 1 ? '' : 'es'}` : '';
       if (!rows.length) {
-        list.innerHTML = `<div class="deploy-panel"><p class="form-hint" style="margin:0;">Todavía no se ejecutó nada. Cuando despliegues un entorno o corras la puesta en marcha, va a quedar registrado acá.</p></div>`;
+        list.innerHTML = `
+          <div class="empty-state">
+            <span class="empty-state__tile">${icon('clock')}</span>
+            <div class="empty-state__title">Todavía no se ejecutó nada</div>
+            <p class="empty-state__text">Cuando despliegues un entorno, arranques la ingesta o provisiones capabilities, cada paso va a quedar registrado acá — con su resultado y la salida de Terraform.</p>
+            <button class="btn btn-primary btn-sm" id="activity-empty-cta">${icon('rocket')} Crear un pipeline</button>
+          </div>`;
+        document.getElementById('activity-empty-cta')?.addEventListener('click', () => {
+          showView('pipeline');
+          goToStep(1);
+        });
         return;
       }
       list.innerHTML = rows.map(r => {
@@ -7106,19 +7123,33 @@
 
     // ── Vista Configuración ──────────────────────────────────────────────────
     // Estado de la MaaS API key (GET al backend; nunca viaja la key entera).
+    // Si la key ya está guardada, el campo se muestra relleno con puntitos —
+    // igual que el SK — en vez de un cartel aparte. Nunca viaja la key real: el
+    // relleno es decorativo y, si el usuario no lo toca, no se reenvía.
+    const _MAAS_PLACEHOLDER = '••••••••••••';
     async function refreshMaasKeyStatus() {
-      const statusEl = document.getElementById('settings-maas-status');
-      if (!statusEl) return;
+      const keyIn = document.getElementById('settings-maas-key');
       try {
         const res = await fetch('/api/v1/settings/maas');
         const d = await res.json();
         state._maasConfigured = !!(d.source && d.source !== 'none');
-        // Solo mostramos el ✓ cuando está configurada; sin ella no alertamos
-        // proactivamente (el botón Guardar valida que la cargues).
-        statusEl.innerHTML = state._maasConfigured
-          ? `<span style="color:#16a34a;">✓ MaaS API key configurada${d.masked ? ` (${escapeHtml(d.masked)})` : ''}</span>`
-          : '';
-      } catch (_e) { statusEl.textContent = ''; }
+        if (keyIn) {
+          keyIn.value = state._maasConfigured ? _MAAS_PLACEHOLDER : '';
+          keyIn.dataset.masked = state._maasConfigured ? '1' : '';
+        }
+      } catch (_e) {
+        state._maasConfigured = false;
+        if (keyIn) { keyIn.value = ''; keyIn.dataset.masked = ''; }
+      }
+    }
+
+    // La key del form solo cuenta si el usuario la escribió: si sigue el relleno
+    // decorativo, no hay nada nuevo que guardar.
+    function maasKeyInput() {
+      const el = document.getElementById('settings-maas-key');
+      if (!el) return '';
+      const v = (el.value || '').trim();
+      return v === _MAAS_PLACEHOLDER ? '' : v;
     }
 
     // Al entrar a la vista: precargar OBS del navegador + estado de la key + mapa.
@@ -7127,9 +7158,7 @@
       const skIn = document.getElementById('settings-obs-sk');
       if (akIn) akIn.value = (state.obsCreds || {}).ak || '';
       if (skIn) skIn.value = (state.obsCreds || {}).sk || '';
-      const keyIn = document.getElementById('settings-maas-key');
-      if (keyIn) keyIn.value = '';   // nunca se rellena con la key real
-      refreshMaasKeyStatus();
+      refreshMaasKeyStatus();   // rellena el campo con puntitos si ya está guardada
       refreshHuaweiSettings();
       renderConfigChecklist();
     }
@@ -7314,13 +7343,13 @@
       const okReq = validateRequired([
         { id: 'settings-obs-ak', label: 'el Access Key (AK)' },
         { id: 'settings-obs-sk', label: 'el Secret Access Key (SK)' },
-        { id: 'settings-maas-key', label: 'la MaaS API key', test: v => !!v || !!state._maasConfigured, msg: 'Ingresá la MaaS API key.' },
+        { id: 'settings-maas-key', label: 'la MaaS API key', test: () => !!maasKeyInput() || !!state._maasConfigured, msg: 'Ingresá la MaaS API key.' },
         { id: 'settings-hw-bucket', label: 'el Bucket de demos' },
       ]);
       if (!okReq) return;
       const ak = document.getElementById('settings-obs-ak').value.trim();
       const sk = document.getElementById('settings-obs-sk').value.trim();
-      const maasKey = document.getElementById('settings-maas-key')?.value.trim() || '';
+      const maasKey = maasKeyInput();   // '' si sigue el relleno decorativo
       state.obsCreds.ak = ak;
       state.obsCreds.sk = sk;
       try { localStorage.setItem('obsCreds', JSON.stringify({ ak, sk })); } catch (_) {}
@@ -7338,7 +7367,6 @@
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ api_key: maasKey }),
           });
-          const keyIn = document.getElementById('settings-maas-key'); if (keyIn) keyIn.value = '';
         } catch (_) {}
       }
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);

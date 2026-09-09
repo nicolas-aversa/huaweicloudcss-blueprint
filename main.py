@@ -1674,7 +1674,7 @@ def set_huawei_settings_endpoint(request: dict) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "settings", "message": "Project ID inválido: deben ser 32 caracteres hex."})
     _mi.set_huawei_settings(values)
-    audit.record("settings_huawei", "cuenta Huawei actualizada")
+    audit.record("settings_huawei", "Infraestructura General actualizada")
     return get_huawei_settings_endpoint()
 
 
