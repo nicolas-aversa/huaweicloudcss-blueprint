@@ -48,6 +48,11 @@
          quien la tuviera instalada en su máquina y la app se veía distinta según
          quién la abriera. Inter viaja con la página → todos ven lo mismo. */
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      /* Solo para el título del hero: si la máquina tiene Huawei Sans instalada,
+         el titular sale con la tipografía de marca; si no, cae a Inter y se ve
+         igual que el resto. Mejora progresiva — no se puede empaquetar porque no
+         tenemos los archivos de la fuente. */
+      --font-display: 'Huawei Sans', var(--font-sans);
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
       /* Tints del acento de marca */
       --accent-red-hover: #cc0000;
@@ -1469,6 +1474,7 @@
       /* Fluido: evita el salto brusco entre desktop y mobile. Sin max-width —
          los saltos de línea los marca el <br>, así el título usa todo el ancho
          del container en vez de cortarse a media caja. */
+      font-family: var(--font-display);
       font-size: clamp(30px, 4.8vw, 58px);
       line-height: 1.03; font-weight: 800;
       letter-spacing: -0.03em; color: var(--text-primary);
@@ -2399,7 +2405,7 @@
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-code"/></svg>Builder</span>
-                <div style="min-width:0;"><div class="guide-step-t">Subí tu log → dataset nuevo</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Custom builder”</strong> → subís el archivo <code>.log</code> → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Guardar dataset</strong>. Queda como una card más del grid, para desplegar cuando quieras. Ver las guías en <code>docs/guides/</code>.</div></div>
+                <div style="min-width:0;"><div class="guide-step-t">Subí tu log → dataset nuevo</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Dataset nuevo”</strong> → subís el archivo <code>.log</code> → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Guardar dataset</strong>. Queda como una card más del grid, para desplegar cuando quieras. Ver las guías en <code>docs/guides/</code>.</div></div>
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-clock"/></svg>Actividad</span>
@@ -2620,8 +2626,8 @@
 
             <div class="form-group">
               <div class="mode-toggle" id="example-mode-toggle" role="group" aria-label="Modo del builder">
-                <button type="button" class="mode-toggle__btn is-active" data-mode="demo" aria-pressed="true">Demo builder</button>
-                <button type="button" class="mode-toggle__btn" data-mode="custom" aria-pressed="false">Custom builder</button>
+                <button type="button" class="mode-toggle__btn is-active" data-mode="demo" aria-pressed="true">Datasets de ejemplo</button>
+                <button type="button" class="mode-toggle__btn" data-mode="custom" aria-pressed="false">Dataset nuevo</button>
               </div>
             </div>
 
@@ -2912,7 +2918,7 @@
                 <div class="form-group" style="flex:1; min-width:180px;">
                   <label class="form-label">Cantidad: <span id="deploy-synthetic-label">200</span></label>
                   <input type="range" id="deploy-synthetic-count" min="0" max="2000" step="50" value="200" style="width:100%; margin-top:10px;">
-                  <p class="form-hint" style="margin-top:6px;">Variantes del log de muestra (solo para el Custom builder).</p>
+                  <p class="form-hint" style="margin-top:6px;">Variantes del log de muestra (solo para "Dataset nuevo").</p>
                 </div>
                 <div class="form-group" style="flex:1; min-width:180px;">
                   <label class="form-label">Distribuir en</label>
@@ -3126,7 +3132,7 @@
       //    path del LLM y llegaba al paso 2 con el mapping mal; ahora muestra el curado.
       //  - CTS (array de traces + `user` JSON anidado).
       // Renderizamos el mapping directo y dejamos "Regenerar" deshabilitado (read-only).
-      // Solo el modo custom (Custom builder) / pegar log crudo usa el LLM.
+      // Solo el modo custom ("Dataset nuevo") / pegar log crudo usa el LLM.
       const isCustomOnly = state.selectedExamples.length === 1 && state.selectedExamples[0] === 'custom';
       const isPredefinedDemo = state.selectedExamples.length >= 1 && !isCustomOnly;
 
@@ -6477,7 +6483,7 @@
       // Cualquier cambio de selección invalida el error inline del paso 1.
       document.getElementById('step1-demo-error')?.classList.remove('show');
 
-      // El bloque de texto (textarea) solo aparece en el Custom builder.
+      // El bloque de texto (textarea) solo aparece en modo "Dataset nuevo".
       // En logs de ejemplo se muestran solo las cards.
       const isCustomMode = state.selectedExamples.length === 1 && state.selectedExamples[0] === 'custom';
       document.getElementById('rawlog-group')?.classList.toggle('hidden', !isCustomMode);
@@ -6662,7 +6668,7 @@
 
     document.getElementById('load-all-demos-btn')?.addEventListener('click', loadAllDemos);
 
-    // Toggle entre "Demo builder" (grid multi-select) y "Custom builder"
+    // Toggle entre "Datasets de ejemplo" (grid multi-select) y "Dataset nuevo"
     // (pegar el log propio). Solo se muestra una sección a la vez. Entrar a
     // custom activa ese flujo; volver a demos limpia la selección custom.
     function _updateProductiveCredsStatus() {
@@ -6733,7 +6739,7 @@
       if (btn) switchExampleMode(btn.dataset.mode);
     });
 
-    // ── Import de archivo (camino Custom builder) ─────────────────────────
+    // ── Import de archivo (camino "Dataset nuevo") ────────────────────────
     // El custom ya no genera sintéticos: el archivo importado se sube tal cual a
     // OBS (como los datasets de ejemplo). La primera línea no vacía / no `#`
     // alimenta la detección de campos (igual que los de ejemplo: el usuario solo

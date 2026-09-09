@@ -126,7 +126,7 @@ Logstash — eso lo provee CSS en la nube.
 dashboards, forecasts y chatbot.
 
 ### Custom builder (tu propio log → dataset nuevo)
-Toggle **"Custom builder"** en el paso 1. Sirve para convertir un log propio en un dataset que
+Toggle **"Dataset nuevo"** en el paso 1. Sirve para convertir un log propio en un dataset que
 después se despliega igual que los que vienen de fábrica:
 
 1. Subís el `.log` del cliente (o pegás unas líneas si los datos van a llegar de una fuente en

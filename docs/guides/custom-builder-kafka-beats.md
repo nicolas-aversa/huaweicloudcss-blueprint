@@ -120,7 +120,7 @@ Logstash. Antes había que hacerlo a mano y no estaba documentado que faltaba.
 
 ## Correr el Builder
 
-**Crear pipeline** → toggle **"Custom builder"**. Una corrida por fuente:
+**Crear pipeline** → toggle **"Dataset nuevo"**. Una corrida por fuente:
 
 1. **Paso 1** — subí el `.log`, o pegá las 3 líneas si los datos van a llegar en vivo desde la
    fuente → **Siguiente** (el LLM arma el `filter{}` y detecta campos).

@@ -47,7 +47,7 @@ Con eso estás listo para desplegar.
 Si tenés un log (tuyo o que te pasó un cliente), podés convertirlo en un dataset propio — con su
 card, sus dashboards y su chatbot — sin tocar código:
 
-1. **Crear pipeline** → toggle **"Custom builder"**.
+1. **Crear pipeline** → toggle **"Dataset nuevo"**.
 2. **Subí el archivo `.log`** (un evento por línea, hasta 50 MB). Se detecta el formato solo.
    Si en vez de un archivo los datos van a llegar en vivo (Kafka/Beats/JDBC del cliente), pegá
    2-3 líneas de muestra.
