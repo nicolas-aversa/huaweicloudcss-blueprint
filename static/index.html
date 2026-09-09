@@ -1701,11 +1701,6 @@
     }
     .path__icon .icon { width: 16px; height: 16px; }
     .path__name { font-size: 17px; font-weight: 700; letter-spacing: -0.015em; }
-    .path__badge {
-      font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-      color: var(--text-muted); background: var(--bg-tertiary);
-      padding: 3px 9px; border-radius: var(--radius-pill);
-    }
     .path__lead {
       font-size: 14px; color: var(--text-secondary); line-height: 1.5;
       max-width: 46ch; margin-bottom: 20px;
@@ -1745,8 +1740,7 @@
        display:none del router.
        El Home además NO deja crecer sus bandas: estirarlas abría huecos
        internos entre el hero y los caminos. */
-    .app-view.is-home.active,
-    .app-view.is-infra.active {
+    .app-view.is-home.active {
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -2118,9 +2112,7 @@
     /* Pantallas bajas (notebooks 768p): se aprieta el aire entre bandas para
        que el Home siga entrando sin scroll, sin achicarlo en monitores altos. */
     @media (min-width: 901px) and (max-height: 780px) {
-      .app-view.is-home.active,
-      .app-view.is-infra.active { min-height: calc(100vh - 72px); }   /* 36 + 36, simétrico */
-      .app-view.is-home.active { gap: 24px; }
+      .app-view.is-home.active { min-height: calc(100vh - 72px); gap: 24px; }   /* 36 + 36, simétrico */
       .main-content { padding-top: 36px; padding-bottom: 36px; }
       .paths { padding-top: 22px; }
       .path__lead { margin-bottom: 16px; }
@@ -2144,9 +2136,7 @@
       }
       /* Apiladas, estas vistas scrollean: se libera el alto forzado y el
          centrado (si no, el contenido arrancaría fuera de pantalla). */
-      .app-view.is-home.active,
-      .app-view.is-infra.active { min-height: 0; justify-content: flex-start; }
-      .app-view.is-home.active { gap: 30px; }
+      .app-view.is-home.active { min-height: 0; justify-content: flex-start; gap: 30px; }
     }
 
     @media (max-width: 768px) {
@@ -2395,7 +2385,6 @@
               <div class="path__head">
                 <span class="path__icon"><svg class="icon"><use href="#ic-rocket"/></svg></span>
                 <h2 class="path__name">Datasets de ejemplo</h2>
-                <span class="path__badge">Despliega de verdad</span>
               </div>
               <p class="path__lead">Un vertical completo, con datos reales, corriendo en tu cuenta Huawei.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="demo">Ver los datasets <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
@@ -2405,7 +2394,6 @@
               <div class="path__head">
                 <span class="path__icon"><svg class="icon"><use href="#ic-code"/></svg></span>
                 <h2 class="path__name">Dataset nuevo</h2>
-                <span class="path__badge">Sin tocar sus datos</span>
               </div>
               <p class="path__lead">Tu archivo de log convertido en un dataset propio, listo para desplegar.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un dataset <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
@@ -2473,7 +2461,7 @@
 
         <!-- ═══ Vista: Mi Infraestructura ═══════════════════════════════ -->
         <!-- Estado del entorno CSS, hidratado desde /terraform/status. -->
-        <div class="app-view is-infra" id="view-infra">
+        <div class="app-view" id="view-infra">
           <p class="view-subtitle">El entorno CSS que desplegaste con esta plataforma.</p>
           <!-- renderInfraView() inyecta acá la tarjeta activa o el empty state -->
           <div id="infra-body"></div>
@@ -4607,14 +4595,20 @@
       const config = {};
       
       if (state.inputPlugin === 'obs') {
-        // En modo productivo, bucket/prefijo vienen del step 1; AK/SK de la config global.
+        // En custom manda el paso 3 (es el que se llama "Origen y destino" y el
+        // que el usuario ve y edita); los campos del paso 1 solo actúan de
+        // fallback para lo que vino de leer una muestra de OBS. Antes se leía
+        // siempre el paso 1 y, si habías subido un archivo, estaba vacío: el
+        // prefijo que declarabas en el paso 3 no llegaba al .conf.
         if (state.deployMode === 'custom') {
-          config.bucket = document.getElementById('productive-bucket')?.value || '';
+          const v = (a, b) => (document.getElementById(a)?.value || '').trim()
+                           || (document.getElementById(b)?.value || '').trim();
+          config.bucket = v('input-bucket', 'productive-bucket');
           config.access_key_id = state.obsCreds.ak || '';
           config.secret_access_key = state.obsCreds.sk || '';
-          config.endpoint = document.getElementById('productive-endpoint')?.value || `https://obs.${hwRegion()}.myhuaweicloud.com`;
-          config.region = document.getElementById('productive-region')?.value || hwRegion();
-          config.prefix = document.getElementById('productive-prefix')?.value || '';
+          config.endpoint = v('input-endpoint', 'productive-endpoint') || `https://obs.${hwRegion()}.myhuaweicloud.com`;
+          config.region = v('input-region', 'productive-region') || hwRegion();
+          config.prefix = v('input-prefix', 'productive-prefix');
         } else {
           config.bucket = document.getElementById('input-bucket')?.value || '';
           config.access_key_id = document.getElementById('input-access-key-id')?.value || '';
@@ -7508,6 +7502,14 @@
           matchSuggestion.textContent = 'No se pudo determinar la industria automáticamente. Elegí una manualmente.';
           state.matchedIndustry = '';
         }
+        // El bucket del que se leyó la muestra es el origen real del dataset:
+        // se propaga al paso 3, que es donde el usuario lo ve y lo edita. Sin
+        // esto había que volver a tipearlo ahí para que llegara al .conf.
+        [['input-bucket', bucket], ['input-prefix', prefix || ''],
+         ['input-region', region], ['input-endpoint', endpoint]].forEach(([id, val]) => {
+          const el = document.getElementById(id);
+          if (el && val) el.value = val;
+        });
         return true;
       } catch (e) {
         statusEl.innerHTML = `<div class="status status-error" style="margin:0;">No se pudo analizar el bucket: ${escapeHtml(e.message)}</div>`;
