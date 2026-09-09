@@ -7,9 +7,9 @@ fuente, pegarlas en el paso 1 del Builder, y ver el pipeline que arma.
 > Para **detectar el schema** el Builder solo necesita **3 líneas de log**. Todo lo demás
 > (instalar Filebeat, consumers) es para el envío real / end-to-end.
 >
-> Si en vez de conectar la fuente en vivo querés un caso de demo **repetible**, subí el archivo
-> `.log` completo en el paso 1: se guarda con el caso y se sube a tu bucket OBS, así lo desplegás
-> las veces que quieras sin depender de que el Kafka/Filebeat del cliente esté levantado.
+> Si en vez de conectar la fuente en vivo querés un dataset **repetible**, subí el archivo `.log`
+> completo en el paso 1: se guarda con el dataset y se sube a tu bucket OBS, así lo desplegás las
+> veces que quieras sin depender de que el Kafka/Filebeat del cliente esté levantado.
 
 ---
 
@@ -120,32 +120,32 @@ Logstash. Antes había que hacerlo a mano y no estaba documentado que faltaba.
 
 ## Correr el Builder
 
-**Crear pipeline** → toggle **"Tu log específico"**. Una corrida por fuente:
+**Crear pipeline** → toggle **"Custom builder"**. Una corrida por fuente:
 
 1. **Paso 1** — subí el `.log`, o pegá las 3 líneas si los datos van a llegar en vivo desde la
    fuente → **Siguiente** (el LLM arma el `filter{}` y detecta campos).
 2. **Paso 2** — revisá el mapping.
 3. **Paso 3** — elegí la fuente (Kafka / Beats) y sus datos de conexión; output OpenSearch.
-4. **Paso 4** — **Guardar como caso**: nombre, icono y grupo. Queda como una card del grid del
-   paso 1 y se despliega desde ahí, igual que un caso de fábrica.
+4. **Paso 4** — **Guardar dataset**: nombre, icono y grupo. Queda como una card del grid del
+   paso 1 y se despliega desde ahí, igual que un dataset de fábrica.
 
-### Dos tipos de caso
+### Dos tipos de dataset
 Lo que decide el tipo es **si subiste un archivo**:
 
 | | **Con `.log`** (repetible) | **Sin `.log`** (en vivo) |
 |---|---|---|
 | De dónde salen los datos | del dataset guardado, que se sube a tu bucket OBS | de la fuente del cliente (Kafka/Beats/JDBC/OBS), que **tiene que estar levantada** |
 | Se puede redesplegar | sí, las veces que quieras | solo mientras la fuente exista y sea alcanzable |
-| Para qué sirve | demo repetible del log de un cliente | PoC sobre datos productivos |
+| Para qué sirve | demo repetible sobre un log propio | PoC sobre datos productivos |
 
 Las credenciales de la fuente (SASL de Kafka, password de JDBC) se guardan **cifradas** con el
-caso y se enmascaran en la consola de CSS.
+dataset y se enmascaran en la consola de CSS.
 
 ### Qué resuelve el deploy y qué no
 
 | Fuente | Estado |
 |---|---|
-| **OBS** | Anda. Es el camino de todos los casos con dataset. |
+| **OBS** | Anda. Es el camino de todos los datasets con archivo. |
 | **Kafka** | El Logstash sale por el SNAT y el deploy le agrega las *Cluster Routes* hacia las IPs del broker. Requiere que el broker sea **alcanzable** desde la VPC; uno privado en la red del cliente necesita peering/VPN, que este stack no crea. |
 | **Beats** | El deploy abre el puerto (SG + DNAT). El Filebeat del cliente apunta a la EIP del NAT. |
 | **JDBC** | ⚠️ **No funciona todavía.** El input necesita el `.jar` del driver en el nodo, y la Logstash de CSS no da acceso al filesystem ni tiene salida a internet para instalarlo. La UI y el `.conf` se generan bien, pero el pipeline va a fallar al arrancar salvo que el driver ya esté en la ruta indicada. Mismo problema con el truststore `.jks` de Kafka SASL_SSL. |

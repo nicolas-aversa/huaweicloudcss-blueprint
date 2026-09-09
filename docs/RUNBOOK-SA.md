@@ -43,24 +43,24 @@ Con eso estás listo para desplegar.
    responde con el dato real + gráfico), y los **forecasts**.
 4. Al terminar la demo, **Destruir entorno** para no dejar clusters corriendo (cuestan).
 
-## 4. Crear un caso de demo con el log de un cliente
-Si el cliente te pasa sus logs, podés convertirlos en un caso propio — con su card, sus dashboards
-y su chatbot — sin tocar código:
+## 4. Crear un dataset nuevo con tus propios logs
+Si tenés un log (tuyo o que te pasó un cliente), podés convertirlo en un dataset propio — con su
+card, sus dashboards y su chatbot — sin tocar código:
 
-1. **Crear pipeline** → toggle **"Tu log específico"**.
+1. **Crear pipeline** → toggle **"Custom builder"**.
 2. **Subí el archivo `.log`** (un evento por línea, hasta 50 MB). Se detecta el formato solo.
    Si en vez de un archivo los datos van a llegar en vivo (Kafka/Beats/JDBC del cliente), pegá
    2-3 líneas de muestra.
 3. **Siguiente** → el LLM arma el `filter{}` y detecta los campos. Revisalos en el paso 2.
-4. Paso 3: elegí la **fuente**. Paso 4: **Guardar como caso** → nombre, icono y grupo.
-5. La card aparece en el grid del paso 1. Desplegala como cualquier otra demo.
+4. Paso 3: elegí la **fuente**. Paso 4: **Guardar dataset** → nombre, icono y grupo.
+5. La card aparece en el grid del paso 1. Desplegala como cualquier otro dataset.
 
 Notas:
-- El dataset se sube solo a **tu** bucket al guardar. Los demás usuarios de esta VM ven la card,
-  pero tienen que tocar **Preparar bucket** una vez para tener los datos en el suyo.
-- Los casos son **compartidos en esta instancia**; los borra quien los creó (o un admin) con la
-  ✕ de la card.
-- Los casos que vienen de fábrica no se pueden borrar ni pisar.
+- Los datos se suben solos a **tu** bucket al guardar. Los demás usuarios de esta VM ven la card,
+  pero tienen que tocar **Preparar bucket** una vez para tenerlos en el suyo.
+- Los datasets creados son **compartidos en esta instancia**; los borra quien los creó (o un admin)
+  con la ✕ de la card.
+- Los que vienen de fábrica no se pueden borrar ni pisar.
 
 ## 5. Ver qué se ejecutó (⏱ Actividad)
 Cada deploy, puesta en marcha, provisión de capabilities y teardown queda registrado. Entrá a

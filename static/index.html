@@ -2317,7 +2317,7 @@
           <section class="hero">
             <span class="eyebrow eyebrow--muted">Kit de preventa · Huawei Cloud CSS</span>
             <h1 class="hero__title">Del log crudo a OpenSearch,<br><span class="accent">con dashboards y chatbot</span>.</h1>
-            <p class="hero__sub" id="home-hero-sub">El pipeline lo escribe el LLM. Elegí un caso listo o traé el log del cliente y guardalo como un caso nuevo.</p>
+            <p class="hero__sub" id="home-hero-sub">El pipeline lo escribe el LLM. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.</p>
             <!-- La entrada al wizard son los dos caminos de abajo; acá solo
                  aparece el atajo a infraestructura cuando hay entorno activo. -->
             <div class="hero__actions">
@@ -2344,8 +2344,8 @@
                 <h2 class="path__name">Custom builder</h2>
                 <span class="path__badge">Sin tocar sus datos</span>
               </div>
-              <p class="path__lead">El log del cliente convertido en un caso de demo propio, listo para desplegar.</p>
-              <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Empezar con mi log <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
+              <p class="path__lead">Tu archivo de log convertido en un dataset propio, listo para desplegar.</p>
+              <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un dataset <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
           </section>
 
@@ -2392,14 +2392,14 @@
                 <span style="flex:none; width:30px; height:30px; border-radius:8px; background:var(--accent-tint); color:var(--accent); display:inline-flex; align-items:center; justify-content:center;"><svg class="icon" style="width:17px;height:17px;"><use href="#ic-rocket"/></svg></span>
                 <h2 style="font-size:16px; font-weight:700; color:var(--text-primary); margin:0;">2 · Usarlo</h2>
               </div>
-              <p class="form-hint" style="margin:0 0 10px;">Dos caminos: usar un caso ya armado, o crear el tuyo con el log del cliente.</p>
+              <p class="form-hint" style="margin:0 0 10px;">Dos caminos: usar un dataset ya armado, o crear el tuyo.</p>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-rocket"/></svg>Demo</span>
                 <div style="min-width:0;"><div class="guide-step-t">Despliega de verdad en tu cuenta</div><div class="form-hint" style="margin-top:2px;"><strong>Crear pipeline</strong> → elegí uno o varios verticales → <strong>Desplegar</strong>. El primer deploy tarda ~20 min (clusters CSS); los siguientes reusan el entorno. Después, en <strong>Mi Infraestructura</strong>, completá la puesta en marcha: (1) index template + dashboards, (2) iniciar ingesta, (3) capabilities (chatbot + forecasts).</div></div>
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-code"/></svg>Builder</span>
-                <div style="min-width:0;"><div class="guide-step-t">Traé el log del cliente → caso nuevo</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Tu log específico”</strong> → subís el <code>.log</code> del cliente → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Guardar como caso</strong>. Queda como una card más del grid, para desplegar cuando quieras. Ver las guías en <code>docs/guides/</code>.</div></div>
+                <div style="min-width:0;"><div class="guide-step-t">Subí tu log → dataset nuevo</div><div class="form-hint" style="margin-top:2px;">Toggle <strong>“Custom builder”</strong> → subís el archivo <code>.log</code> → GLM arma el pipeline y detecta los campos → elegís la <strong>fuente</strong> (OBS, Kafka/DMS, Beats, JDBC) → <strong>Guardar dataset</strong>. Queda como una card más del grid, para desplegar cuando quieras. Ver las guías en <code>docs/guides/</code>.</div></div>
               </div>
               <div style="display:flex; gap:12px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-subtle);">
                 <span style="flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-tint); padding:3px 9px; border-radius:999px;"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-clock"/></svg>Actividad</span>
@@ -2638,12 +2638,12 @@
 
 
             <div class="form-group hidden" id="rawlog-group">
-              <!-- Entrada PRINCIPAL del Builder: subir el .log del cliente. El archivo
-                   se guarda con el caso y se sube a OBS, así el caso es repetible
+              <!-- Entrada PRINCIPAL del Builder: subir el archivo de log. Se guarda
+                   con el dataset y se sube a OBS, así el dataset es repetible
                    (se despliega las veces que quieras, igual que un caso built-in).
                    `_handleLogFile()` toma la primera línea de datos como muestra para
                    que GLM-5.2 detecte la estructura. -->
-              <label class="form-label">Subí el archivo de log del caso</label>
+              <label class="form-label">Subí el archivo de log</label>
               <div id="log-file-drop" tabindex="0" role="button"
                    style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
                 <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
@@ -2666,7 +2666,7 @@
                 <span style="font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted);">o conectá una fuente en vivo</span>
                 <div style="flex:1; height:1px; background:var(--border-subtle);"></div>
               </div>
-              <label class="form-label">Pegá unas líneas de tu log</label>
+              <label class="form-label">Pegá unas líneas del log</label>
               <textarea id="builder-paste" class="form-input" rows="6"
                 placeholder="Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV… cualquier formato). GLM-5.2 detecta la estructura y arma el pipeline."
                 style="font-family:var(--font-mono); font-size:12px; resize:vertical; line-height:1.5;"></textarea>
@@ -2900,8 +2900,8 @@
             <div class="step-nav">
               <button class="btn btn-secondary" data-go-prev><svg class="icon"><use href="#ic-arrow-left"/></svg> Atrás</button>
               <div class="spacer"></div>
-              <!-- Builder: guarda lo analizado como un caso de demo (no despliega acá). -->
-              <button class="btn btn-primary hidden" id="builder-save-case-btn"><svg class="icon"><use href="#ic-plus"/></svg> Guardar como caso</button>
+              <!-- Builder: guarda lo analizado como un dataset nuevo (no despliega acá). -->
+              <button class="btn btn-primary hidden" id="builder-save-case-btn"><svg class="icon"><use href="#ic-plus"/></svg> Guardar dataset</button>
               <button class="btn btn-primary" id="deploy-provision-btn">Desplegar <svg class="icon"><use href="#ic-rocket"/></svg></button>
             </div>
             <div id="deploy-status-1" class="hidden" style="margin-top:12px;" aria-live="polite" aria-atomic="true"></div>
@@ -2912,7 +2912,7 @@
                 <div class="form-group" style="flex:1; min-width:180px;">
                   <label class="form-label">Cantidad: <span id="deploy-synthetic-label">200</span></label>
                   <input type="range" id="deploy-synthetic-count" min="0" max="2000" step="50" value="200" style="width:100%; margin-top:10px;">
-                  <p class="form-hint" style="margin-top:6px;">Variantes del log de muestra (solo para "Tu log específico").</p>
+                  <p class="form-hint" style="margin-top:6px;">Variantes del log de muestra (solo para el Custom builder).</p>
                 </div>
                 <div class="form-group" style="flex:1; min-width:180px;">
                   <label class="form-label">Distribuir en</label>
@@ -2953,25 +2953,25 @@
     </div>
   </div>
 
-  <!-- Modal "Guardar como caso": cierre del Builder. Lo que se analizó (filter,
-       campos, muestra, dataset) se persiste como un caso de demo y aparece como
+  <!-- Modal "Guardar dataset": cierre del Builder. Lo que se analizó (filter,
+       campos, muestra, datos) se persiste como un dataset y aparece como
        una card más del grid del paso 1. Ver custom_cases.py. -->
   <div id="save-case-modal" class="hidden" style="position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
     <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:560px; width:92%; max-height:88vh; display:flex; flex-direction:column; box-shadow:var(--shadow-lg);">
       <div style="padding:20px 24px; border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
-        <h3 style="font-size:16px; font-weight:600; margin:0;">Guardar como caso de demo</h3>
+        <h3 style="font-size:16px; font-weight:600; margin:0;">Guardar dataset nuevo</h3>
         <button id="save-case-close" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-x"/></svg> Cerrar</button>
       </div>
       <div style="padding:20px 24px; overflow-y:auto; flex:1;">
         <p class="form-hint" style="margin:0 0 16px;">Queda como una card en el grid del paso 1, para vos y para el resto de los usuarios de esta instancia.</p>
         <div class="form-group">
-          <label class="form-label" for="save-case-label">Nombre del caso</label>
+          <label class="form-label" for="save-case-label">Nombre del dataset</label>
           <input type="text" class="form-input settings-field" id="save-case-label" maxlength="60" placeholder="Ej: Firewall de ACME">
           <div class="field-error" id="save-case-label-error"></div>
         </div>
         <div class="form-group">
           <label class="form-label" for="save-case-desc">Descripción</label>
-          <input type="text" class="form-input settings-field" id="save-case-desc" maxlength="200" placeholder="Una línea que explique qué muestra el caso">
+          <input type="text" class="form-input settings-field" id="save-case-desc" maxlength="200" placeholder="Una línea que explique qué muestra el dataset">
         </div>
         <div class="form-group">
           <label class="form-label" for="save-case-group">Grupo del grid</label>
@@ -2985,7 +2985,7 @@
       </div>
       <div style="padding:16px 24px; border-top:1px solid var(--border-subtle); display:flex; gap:8px; align-items:center;">
         <div id="save-case-status" style="flex:1; font-size:12.5px;"></div>
-        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-check"/></svg> Guardar caso</button>
+        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-check"/></svg> Guardar dataset</button>
       </div>
     </div>
   </div>
@@ -3126,7 +3126,7 @@
       //    path del LLM y llegaba al paso 2 con el mapping mal; ahora muestra el curado.
       //  - CTS (array de traces + `user` JSON anidado).
       // Renderizamos el mapping directo y dejamos "Regenerar" deshabilitado (read-only).
-      // Solo el modo custom ("Tu log específico") / pegar log crudo usa el LLM.
+      // Solo el modo custom (Custom builder) / pegar log crudo usa el LLM.
       const isCustomOnly = state.selectedExamples.length === 1 && state.selectedExamples[0] === 'custom';
       const isPredefinedDemo = state.selectedExamples.length >= 1 && !isCustomOnly;
 
@@ -3755,7 +3755,7 @@
     // backend inyecta en `window.__VERTICALS__` (ver verticals/ y main.index()).
     // Los consumidores no cambiaron: mismos nombres y shapes que los literales.
     // Todas se RE-DERIVAN en applyVerticalsPayload(): los casos creados desde el
-    // Builder ("Guardar como caso") se dan de alta en runtime, así que el
+    // Builder ("Guardar dataset") se dan de alta en runtime, así que el
     // catálogo se refresca sin recargar la página. Por eso son `let` y no `const`.
     let _VDATA = { groups: [], verticals: [] };
     let _VVIS = [];
@@ -3791,7 +3791,7 @@
           if (v.custom) { e.custom = true; e.createdBy = v.createdBy || ''; }
           return e;
         }),
-        { id: 'custom', label: 'Tu log específico', icon: 'code', indexBase: 'logs', description: 'Traé tu propio log y configura tu pipeline usando un LLM' },
+        { id: 'custom', label: 'Dataset nuevo', icon: 'plus', indexBase: 'logs', description: 'Subí tu propio log: el LLM arma el pipeline y lo guardás como un dataset más' },
       ];
 
       // DEMO_VERTICALS = grupos del grid (id/label/icon/members) del registro.
@@ -3823,7 +3823,7 @@
       if (typeof renderExampleCards === 'function') renderExampleCards();
     }
 
-    // ── Guardar como caso de demo (cierre del Builder) ─────────────────────
+    // ── Guardar dataset nuevo (cierre del Builder) ─────────────────────────
     // Persiste lo analizado (filter + campos + muestra + dataset) como un caso
     // nuevo. El backend lo mergea al catálogo (main._front_payload) y lo sube al
     // bucket de demos del creador, así queda desplegable en el acto.
@@ -3865,8 +3865,8 @@
         const plugin = state.inputPlugin || 'obs';
         const PLUGIN_LABEL = { obs: 'OBS', kafka: 'Kafka', beats: 'Beats/Filebeat', jdbc: 'una base (JDBC)' };
         summary.innerHTML = state.logFileContent
-          ? `<strong>Caso repetible.</strong> Se guarda el dataset <strong>${escapeHtml(state.logFileName || 'log')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket de demos, así lo desplegás las veces que quieras.`
-          : `<strong>Caso en vivo.</strong> Sin archivo: Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión que cargaste en el paso 3. Esa fuente tiene que estar levantada y alcanzable al desplegar.`;
+          ? `<strong>Dataset repetible.</strong> Se guarda el dataset <strong>${escapeHtml(state.logFileName || 'log')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket de demos, así lo desplegás las veces que quieras.`
+          : `<strong>Dataset en vivo.</strong> Sin archivo: Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión que cargaste en el paso 3. Esa fuente tiene que estar levantada y alcanzable al desplegar.`;
         summary.innerHTML += ` · ${state.fields.length} campo${state.fields.length === 1 ? '' : 's'} detectado${state.fields.length === 1 ? '' : 's'}.`;
       }
 
@@ -3897,7 +3897,7 @@
     });
 
     document.getElementById('save-case-submit')?.addEventListener('click', async (e) => {
-      if (!validateRequired([{ id: 'save-case-label', label: 'el nombre del caso' }])) return;
+      if (!validateRequired([{ id: 'save-case-label', label: 'el nombre del dataset' }])) return;
       const btn = e.currentTarget;
       const statusEl = document.getElementById('save-case-status');
       btn.disabled = true;
@@ -3939,8 +3939,8 @@
         }
         goToStep(1);
         toast(data.uploaded
-          ? `Caso "${data.case.label}" guardado y cargado en tu bucket. Ya lo podés desplegar.`
-          : `Caso "${data.case.label}" guardado. Para desplegarlo, subí los datos con ⚙ Configuración → Preparar bucket${data.upload_error ? ` (${data.upload_error})` : ''}.`,
+          ? `Dataset "${data.case.label}" guardado y cargado en tu bucket. Ya lo podés desplegar.`
+          : `Dataset "${data.case.label}" guardado. Para desplegarlo, subí los datos con ⚙ Configuración → Preparar bucket${data.upload_error ? ` (${data.upload_error})` : ''}.`,
           data.uploaded ? 'success' : 'info', data.uploaded ? 5000 : 8000);
       } catch (err) {
         statusEl.style.color = 'var(--accent-red)';
@@ -3954,8 +3954,8 @@
     // el usuario puede borrar; el backend revalida creador/admin.
     async function deleteCustomCase(slug, label) {
       const ok = await confirmModal({
-        title: 'Borrar el caso',
-        message: `Se elimina "${label}" y su dataset guardado. Los entornos ya desplegados no se tocan.`,
+        title: 'Borrar el dataset',
+        message: `Se elimina "${label}" y sus datos. Los entornos ya desplegados no se tocan.`,
         confirmLabel: 'Borrar',
       });
       if (!ok) return;
@@ -3968,9 +3968,9 @@
         state.selectedExamples = state.selectedExamples.filter(s => s !== slug);
         await refreshVerticals();
         _applySelectionState();
-        toast(`Caso "${label}" borrado.`, 'success');
+        toast(`Dataset "${label}" borrado.`, 'success');
       } catch (err) {
-        toast('No pude borrar el caso: ' + err.message, 'error');
+        toast('No pude borrar el dataset: ' + err.message, 'error');
       }
     }
 
@@ -4377,7 +4377,7 @@
       document.getElementById('deploy-provision-btn')?.classList.toggle('hidden', isBuilder);
       const rt = document.getElementById('deploy-review-title')?.closest('.card')?.querySelector('.card-description');
       if (rt) rt.textContent = isBuilder
-        ? 'Revisá el pipeline (fuente, filter y destino) y guardalo como un caso de demo reutilizable.'
+        ? 'Revisá el pipeline (fuente, filter y destino) y guardalo como un dataset reutilizable.'
         : 'Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.';
 
       const reuse = !!state.envActive;
@@ -4414,7 +4414,7 @@
           li('code', 'Configuration file de Logstash (con tu fuente elegida)'),
           li('dashboard', 'Index template + dashboards de tus campos'),
           li('spark', 'Chatbot (NL→PPL) + forecasts sobre tus datos'),
-          li('plus', 'Queda como una card más, lista para desplegar cuando quieras'),
+          li('plus', 'Queda como una card más del grid, lista para desplegar cuando quieras'),
         ].join('') : [
           ...(reuse ? [] : [
             ...(useExistingCluster ? [] : [li('search', 'Cluster <strong>OpenSearch</strong> (CSS)')]),
@@ -4426,7 +4426,7 @@
         ].join('');
         closureEl.innerHTML = `
           <div class="deploy-panel">
-            <div class="deploy-panel__title">${isBuilder ? 'Qué guarda el caso' : 'Qué se va a crear'}</div>
+            <div class="deploy-panel__title">${isBuilder ? 'Qué guarda el dataset' : 'Qué se va a crear'}</div>
             <ul style="list-style:none; margin:0; padding:0;">${items}</ul>
           </div>`;
       }
@@ -5908,7 +5908,7 @@
     // infraestructura y el subtítulo refleja el estado real. Lo llama
     // renderInfraView (única fuente de verdad del estado del entorno).
     // Debe coincidir con el texto del markup de #home-hero-sub.
-    const HOME_SUB_DEFAULT = 'El pipeline lo escribe el LLM. Elegí un caso listo o traé el log del cliente y guardalo como un caso nuevo.';
+    const HOME_SUB_DEFAULT = 'El pipeline lo escribe el LLM. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.';
     function syncHomeHero(active, nPipelines) {
       document.getElementById('home-infra-btn')?.classList.toggle('hidden', !active);
       const sub = document.getElementById('home-hero-sub');
@@ -6477,7 +6477,7 @@
       // Cualquier cambio de selección invalida el error inline del paso 1.
       document.getElementById('step1-demo-error')?.classList.remove('show');
 
-      // El bloque de texto (textarea) solo aparece en modo "Tu log específico".
+      // El bloque de texto (textarea) solo aparece en el Custom builder.
       // En logs de ejemplo se muestran solo las cards.
       const isCustomMode = state.selectedExamples.length === 1 && state.selectedExamples[0] === 'custom';
       document.getElementById('rawlog-group')?.classList.toggle('hidden', !isCustomMode);
@@ -6619,7 +6619,7 @@
       // primero el ✕ y solo después trata el click como selección.
       const cardHtml = (e) => `
         <button type="button" class="example-card${e.disabled ? ' is-disabled' : ''}" data-example-id="${e.id}"${e.disabled ? ' disabled' : ''} title="${escapeHtml(e.description || '')}">
-          ${e.custom ? `<span class="example-card__del" data-delete-case="${escapeHtml(e.id)}" role="button" tabindex="0" title="Borrar este caso">${icon('x')}</span>` : ''}
+          ${e.custom ? `<span class="example-card__del" data-delete-case="${escapeHtml(e.id)}" role="button" tabindex="0" title="Borrar este dataset">${icon('x')}</span>` : ''}
           <span class="example-card__tile"><svg class="icon"><use href="#ic-${e.icon || 'box'}"/></svg></span>
           <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}</span>
         </button>`;
@@ -6662,7 +6662,7 @@
 
     document.getElementById('load-all-demos-btn')?.addEventListener('click', loadAllDemos);
 
-    // Toggle entre "Logs de ejemplo" (grid multi-select) y "Tu log específico"
+    // Toggle entre "Demo builder" (grid multi-select) y "Custom builder"
     // (pegar el log propio). Solo se muestra una sección a la vez. Entrar a
     // custom activa ese flujo; volver a demos limpia la selección custom.
     function _updateProductiveCredsStatus() {
@@ -6714,7 +6714,7 @@
       const desc = document.getElementById('step1-desc');
       if (desc) {
         desc.innerHTML = mode === 'custom'
-          ? 'Builder: pegá unas líneas de tu log y GLM-5.2 arma el pipeline. Elegís la fuente (OBS, Kafka, Beats, JDBC) y te llevás el paso a paso <strong>todo en un documento</strong>.'
+          ? 'Subí un archivo de log y GLM-5.2 arma el pipeline y detecta los campos. Elegís la fuente (OBS, Kafka, Beats, JDBC) y lo guardás como un <strong>dataset nuevo</strong>, que queda en el grid junto a los de fábrica.'
           : 'Elegí un caso de uso pre-cargado: un log real de ejemplo con su pipeline ya armado, listo para desplegar y analizar en OpenSearch.';
       }
 
@@ -6733,7 +6733,7 @@
       if (btn) switchExampleMode(btn.dataset.mode);
     });
 
-    // ── Import de archivo (camino "Tu log específico") ──────────────────────
+    // ── Import de archivo (camino Custom builder) ─────────────────────────
     // El custom ya no genera sintéticos: el archivo importado se sube tal cual a
     // OBS (como los datasets de ejemplo). La primera línea no vacía / no `#`
     // alimenta la detección de campos (igual que los de ejemplo: el usuario solo

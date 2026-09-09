@@ -25,9 +25,9 @@ Dos maneras de usarlo:
 - **Demo** — 8 escenarios verticales pre-armados (SIEM, FortiAnalyzer, wallet/pagos, ALyC,
   oil & gas, e-commerce, streaming, salud): dataset sintético, pipeline, index template, dashboards
   curados, forecasts y chatbot, desplegados con Terraform en un par de clicks.
-- **Builder** — traés el log de un cliente: subís el `.log`, un LLM (GLM) infiere la estructura y
-  arma el pipeline; elegís la fuente (OBS, Kafka, Beats, JDBC…) y lo **guardás como un caso de demo
-  propio**, que queda en el grid junto a los de fábrica y se despliega igual.
+- **Custom builder** — traés tu propio log: subís el `.log`, un LLM (GLM) infiere la estructura y
+  arma el pipeline; elegís la fuente (OBS, Kafka, Beats, JDBC…) y lo **guardás como un dataset
+  nuevo**, que queda en el grid junto a los de fábrica y se despliega igual.
 
 ---
 
@@ -43,7 +43,7 @@ Dos maneras de usarlo:
 | **Forecasting** | Forecasters (RCF) sobre las series de volumen del vertical. |
 | **Deploy con Terraform** | Levanta los clusters CSS (OpenSearch + Logstash) + NAT/DNAT en tu cuenta. |
 | **Registro declarativo** | Cada vertical se define en **un solo módulo** `verticals/<slug>.py`; backend y frontend lo consumen. |
-| **Casos creados desde la app** | El Builder guarda el log de un cliente como un caso nuevo (card + dataset + dashboards + chatbot), sin tocar código ni rebuildear la imagen. |
+| **Datasets creados desde la app** | El Custom builder guarda un log propio como un dataset nuevo (card + datos + dashboards + chatbot), sin tocar código ni rebuildear la imagen. |
 | **Actividad** | Historial persistido de cada ejecución: sub-pasos con ✓/✗ y motivo, más la salida cruda de Terraform. |
 
 ---
@@ -125,19 +125,19 @@ Logstash — eso lo provee CSS en la nube.
 (clusters CSS); los siguientes reusan el entorno. Cada vertical trae dataset, pipeline, template,
 dashboards, forecasts y chatbot.
 
-### Builder (traé tu propio log → caso de demo nuevo)
-Toggle **"Tu log específico"** en el paso 1. Sirve para convertir el log de un cliente en un caso
-propio, que después se despliega igual que los que vienen de fábrica:
+### Custom builder (tu propio log → dataset nuevo)
+Toggle **"Custom builder"** en el paso 1. Sirve para convertir un log propio en un dataset que
+después se despliega igual que los que vienen de fábrica:
 
 1. Subís el `.log` del cliente (o pegás unas líneas si los datos van a llegar de una fuente en
    vivo) → **Siguiente** dispara el análisis con el LLM (arma el `filter{}` y detecta campos).
 2. Revisás/ajustás el mapping.
 3. Elegís la **fuente** (OBS / Kafka / Beats / JDBC) y sus datos de conexión; output OpenSearch.
-4. **Guardar como caso**: le ponés nombre, icono y grupo. Queda como una card más del grid del
-   paso 1 — con su dataset, dashboards auto-generados y chatbot — lista para desplegar.
+4. **Guardar dataset**: le ponés nombre, icono y grupo. Queda como una card más del grid del
+   paso 1 — con sus datos, dashboards auto-generados y chatbot — lista para desplegar.
 
-Los casos creados se guardan en el volumen de datos (`$APP_DATA_DIR/cases/`), son **compartidos por
-instancia** y los borra quien los creó o un admin. Ver `custom_cases.py`.
+Los datasets creados se guardan en el volumen de datos (`$APP_DATA_DIR/cases/`), son **compartidos
+por instancia** y los borra quien los creó o un admin. Ver `custom_cases.py`.
 
 De dónde sacar la muestra según la fuente:
 
