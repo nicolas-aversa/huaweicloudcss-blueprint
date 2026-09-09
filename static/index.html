@@ -48,11 +48,6 @@
          quien la tuviera instalada en su máquina y la app se veía distinta según
          quién la abriera. Inter viaja con la página → todos ven lo mismo. */
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      /* Solo para el título del hero: si la máquina tiene Huawei Sans instalada,
-         el titular sale con la tipografía de marca; si no, cae a Inter y se ve
-         igual que el resto. Mejora progresiva — no se puede empaquetar porque no
-         tenemos los archivos de la fuente. */
-      --font-display: 'Huawei Sans', var(--font-sans);
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
       /* Tints del acento de marca */
       --accent-red-hover: #cc0000;
@@ -1474,7 +1469,6 @@
       /* Fluido: evita el salto brusco entre desktop y mobile. Sin max-width —
          los saltos de línea los marca el <br>, así el título usa todo el ancho
          del container en vez de cortarse a media caja. */
-      font-family: var(--font-display);
       font-size: clamp(30px, 4.8vw, 58px);
       line-height: 1.03; font-weight: 800;
       letter-spacing: -0.03em; color: var(--text-primary);
@@ -2337,17 +2331,17 @@
             <article class="path">
               <div class="path__head">
                 <span class="path__icon"><svg class="icon"><use href="#ic-rocket"/></svg></span>
-                <h2 class="path__name">Demo builder</h2>
+                <h2 class="path__name">Datasets de ejemplo</h2>
                 <span class="path__badge">Despliega de verdad</span>
               </div>
               <p class="path__lead">Un vertical completo, con datos reales, corriendo en tu cuenta Huawei.</p>
-              <button class="btn btn-primary path__cta" type="button" data-home-mode="demo">Ver los casos de demo <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
+              <button class="btn btn-primary path__cta" type="button" data-home-mode="demo">Ver los datasets <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
 
             <article class="path">
               <div class="path__head">
                 <span class="path__icon"><svg class="icon"><use href="#ic-code"/></svg></span>
-                <h2 class="path__name">Custom builder</h2>
+                <h2 class="path__name">Dataset nuevo</h2>
                 <span class="path__badge">Sin tocar sus datos</span>
               </div>
               <p class="path__lead">Tu archivo de log convertido en un dataset propio, listo para desplegar.</p>

@@ -22,10 +22,10 @@ cosas a partir de **una muestra del log**.
 
 Dos maneras de usarlo:
 
-- **Demo** — 8 escenarios verticales pre-armados (SIEM, FortiAnalyzer, wallet/pagos, ALyC,
+- **Datasets de ejemplo** — 8 escenarios verticales pre-armados (SIEM, FortiAnalyzer, wallet/pagos, ALyC,
   oil & gas, e-commerce, streaming, salud): dataset sintético, pipeline, index template, dashboards
   curados, forecasts y chatbot, desplegados con Terraform en un par de clicks.
-- **Custom builder** — traés tu propio log: subís el `.log`, un LLM (GLM) infiere la estructura y
+- **Dataset nuevo** — traés tu propio log: subís el `.log`, un LLM (GLM) infiere la estructura y
   arma el pipeline; elegís la fuente (OBS, Kafka, Beats, JDBC…) y lo **guardás como un dataset
   nuevo**, que queda en el grid junto a los de fábrica y se despliega igual.
 
@@ -43,7 +43,7 @@ Dos maneras de usarlo:
 | **Forecasting** | Forecasters (RCF) sobre las series de volumen del vertical. |
 | **Deploy con Terraform** | Levanta los clusters CSS (OpenSearch + Logstash) + NAT/DNAT en tu cuenta. |
 | **Registro declarativo** | Cada vertical se define en **un solo módulo** `verticals/<slug>.py`; backend y frontend lo consumen. |
-| **Datasets creados desde la app** | El Custom builder guarda un log propio como un dataset nuevo (card + datos + dashboards + chatbot), sin tocar código ni rebuildear la imagen. |
+| **Datasets creados desde la app** | El modo "Dataset nuevo" guarda un log propio como un dataset más (card + datos + dashboards + chatbot), sin tocar código ni rebuildear la imagen. |
 | **Actividad** | Historial persistido de cada ejecución: sub-pasos con ✓/✗ y motivo, más la salida cruda de Terraform. |
 
 ---
@@ -125,7 +125,7 @@ Logstash — eso lo provee CSS en la nube.
 (clusters CSS); los siguientes reusan el entorno. Cada vertical trae dataset, pipeline, template,
 dashboards, forecasts y chatbot.
 
-### Custom builder (tu propio log → dataset nuevo)
+### Dataset nuevo (traé tu propio log)
 Toggle **"Dataset nuevo"** en el paso 1. Sirve para convertir un log propio en un dataset que
 después se despliega igual que los que vienen de fábrica:
 
