@@ -787,8 +787,7 @@
        salida, en vez de un párrafo suelto dentro de un panel. */
     .empty-state {
       display: flex; flex-direction: column; align-items: center; text-align: center;
-      padding: 44px 24px; border: 1px dashed var(--border-default);
-      border-radius: var(--radius-lg); background: var(--bg-subtle);
+      padding: 34px 24px; border-radius: var(--radius-md); background: var(--bg-subtle);
     }
     .empty-state__tile {
       width: 44px; height: 44px; border-radius: 12px; margin-bottom: 14px;
@@ -1629,6 +1628,20 @@
     .src-card__desc { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
     @media (max-width: 720px) { .src-cards { grid-template-columns: 1fr; } }
 
+    /* Fuente en vivo: chips en vez de un <select> nativo, que se veía enorme y
+       desalineado con las tarjetas de arriba. */
+    .src-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .src-chip {
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+      padding: 8px 14px; font-family: inherit; font-size: 12.5px; font-weight: 600;
+      color: var(--text-secondary); background: var(--bg-primary);
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
+      transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+    }
+    .src-chip .icon { width: 14px; height: 14px; }
+    .src-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+    .src-chip.is-active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
     /* Confirmación de que ya hay muestra, común a las tres vías. */
     .sample-found {
       margin-top: 14px; padding: 12px 14px;
@@ -1800,7 +1813,7 @@
     .stat-card__label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
     .stat-card__value { font-size: 14px; font-weight: 600; color: var(--text-primary); word-break: break-word; font-family: var(--font-mono); }
 
-    /* Lista de pipelines en paralelo (Mi Infraestructura) */
+    /* Lista de pipelines en paralelo (Entorno desplegado) */
     .pipe-list {
       display: flex; flex-direction: column; gap: 8px;
       margin: -8px 0 14px;
@@ -1955,7 +1968,7 @@
     }
     .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--text-secondary); border-color: var(--border-strong, #cbd5e1); }
 
-    /* ── Section card: patrón unificado de Mi Infraestructura (como Configuración) ── */
+    /* ── Section card: patrón unificado de Entorno desplegado (como Configuración) ── */
     .section-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
@@ -2320,7 +2333,7 @@
         </div>
         <button class="nav-item" data-view="infra">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-infra"/></svg></span>
-          <span class="nav-item__label">Mi Infraestructura</span>
+          <span class="nav-item__label">Entorno desplegado</span>
           <span class="nav-dot hidden" id="nav-infra-dot"></span>
         </button>
 
@@ -2392,7 +2405,7 @@
             <!-- La entrada al wizard son los dos caminos de abajo; acá solo
                  aparece el atajo a infraestructura cuando hay entorno activo. -->
             <div class="hero__actions">
-              <button class="btn btn-ghost btn-lg hidden" id="home-infra-btn"><svg class="icon"><use href="#ic-infra"/></svg> Ver mi infraestructura</button>
+              <button class="btn btn-ghost btn-lg hidden" id="home-infra-btn"><svg class="icon"><use href="#ic-infra"/></svg> Ver el entorno</button>
             </div>
           </section>
 
@@ -2450,7 +2463,7 @@
               </div>
               <ol class="guide-list">
                 <li><strong>Crear pipeline</strong> → elegí uno o más datasets → <strong>Desplegar</strong>. Podés cerrar el browser: sigue solo y se reengancha.</li>
-                <li>En <strong>Mi Infraestructura</strong>, la puesta en marcha: index template + dashboards → ingesta → capabilities.</li>
+                <li>En <strong>Entorno desplegado</strong>, la puesta en marcha: index template + dashboards → ingesta → capabilities.</li>
                 <li>Al terminar, <strong>Destruir entorno</strong>. Los clusters CSS cuestan mientras corren.</li>
               </ol>
             </section>
@@ -2461,7 +2474,7 @@
                 <h2 class="guide-block__title">Mostrar</h2>
               </div>
               <ol class="guide-list">
-                <li><strong>Dashboards</strong> — métricas, series y top-N, con filtros. Abrilos desde Mi Infraestructura.</li>
+                <li><strong>Dashboards</strong> — métricas, series y top-N, con filtros. Abrilos desde Entorno desplegado.</li>
                 <li><strong>Asistente de datos</strong> — preguntás en castellano, responde con el dato real y un gráfico.</li>
                 <li><strong>Forecasts</strong> — proyección del volumen sobre la serie real.</li>
               </ol>
@@ -2477,7 +2490,7 @@
           </div>
         </div>
 
-        <!-- ═══ Vista: Mi Infraestructura ═══════════════════════════════ -->
+        <!-- ═══ Vista: Entorno desplegado ═══════════════════════════════ -->
         <!-- Estado del entorno CSS, hidratado desde /terraform/status. -->
         <div class="app-view" id="view-infra">
           <p class="view-subtitle">El entorno CSS que desplegaste con esta plataforma.</p>
@@ -2491,12 +2504,21 @@
              importaron los dashboards?" después del hecho. -->
         <div class="app-view" id="view-activity">
           <p class="view-subtitle">Qué ejecutó la plataforma: deploys, puesta en marcha y teardowns, con su salida.</p>
-          <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
-            <button class="btn btn-secondary btn-sm" id="activity-refresh" type="button"><svg class="icon"><use href="#ic-refresh"/></svg> Actualizar</button>
-            <span class="form-hint" id="activity-count" style="margin:0;"></span>
+          <div class="settings-grid">
+            <div class="settings-card">
+              <div class="settings-card__head">
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-clock"/></svg></span>
+                <div>
+                  <div class="settings-card__title">Ejecuciones</div>
+                  <div class="settings-card__hint" id="activity-count">Las últimas 50, con sus sub-pasos y la salida de Terraform.</div>
+                </div>
+                <div class="spacer" style="flex:1;"></div>
+                <button class="btn btn-secondary btn-sm" id="activity-refresh" type="button"><svg class="icon"><use href="#ic-refresh"/></svg> Actualizar</button>
+              </div>
+              <div id="activity-list"></div>
+              <div id="activity-detail" class="hidden" style="margin-top:16px;"></div>
+            </div>
           </div>
-          <div id="activity-list"></div>
-          <div id="activity-detail" class="hidden" style="margin-top:16px;"></div>
         </div>
 
         <!-- ═══ Vista: Panel de control (solo admins) ═══════════════════════ -->
@@ -2566,16 +2588,14 @@
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
-                <!-- "Preparar bucket" va pegado al campo que opera, no en la fila de
-                     acciones de la card: sube los datasets a ESE bucket. -->
-                <div class="form-group settings-field">
-                  <label class="form-label" for="settings-hw-bucket">Bucket de demos</label>
-                  <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css">
-                  <button class="btn btn-secondary btn-sm" id="settings-hw-preload" style="margin-top:8px;" title="Sube los datasets de demo a este bucket">Preparar bucket</button>
-                </div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"></div>
               </div>
+              <!-- Las dos acciones en la misma fila: metido dentro del campo del
+                   bucket, el botón estiraba esa celda del grid y empujaba Guardar
+                   más abajo que en la card de al lado. -->
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
+                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
                 <span id="settings-obs-status" class="settings-status"></span>
               </div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
@@ -2667,7 +2687,7 @@
                 <button type="button" class="src-card is-active" data-src="file" role="radio" aria-checked="true">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-upload"/></svg></span>
                   <span class="src-card__name">Tengo el archivo</span>
-                  <span class="src-card__desc">Lo subís y queda guardado. Podés desplegarlo las veces que quieras.</span>
+                  <span class="src-card__desc">Lo subís, se guarda en tu bucket y lo desplegás las veces que quieras.</span>
                 </button>
                 <button type="button" class="src-card" data-src="obs" role="radio" aria-checked="false">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
@@ -2677,7 +2697,7 @@
                 <button type="button" class="src-card" data-src="live" role="radio" aria-checked="false">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-activity"/></svg></span>
                   <span class="src-card__name">Llegan en vivo</span>
-                  <span class="src-card__desc">Kafka, Beats o una base que ya tenés corriendo.</span>
+                  <span class="src-card__desc">Kafka, Beats o una base de datos vía JDBC.</span>
                 </button>
               </div>
 
@@ -2715,13 +2735,19 @@
               </div>
 
               <div id="source-pane-live" class="hidden">
-                <div class="form-group" style="margin-bottom:12px;">
-                  <label class="form-label" style="font-size:11px;">¿Qué fuente?</label>
-                  <select class="form-select" id="live-plugin" style="font-size:12.5px;">
-                    <option value="kafka">Kafka (incl. Huawei DMS)</option>
-                    <option value="beats">Beats / Filebeat</option>
-                    <option value="jdbc">Base de datos (JDBC)</option>
-                  </select>
+                <div class="form-group" style="margin-bottom:14px;">
+                  <label class="form-label">¿Qué fuente?</label>
+                  <div class="src-chips" id="live-plugin" role="radiogroup">
+                    <button type="button" class="src-chip is-active" data-plugin="kafka" role="radio" aria-checked="true">
+                      <svg class="icon"><use href="#ic-queue"/></svg> Kafka
+                    </button>
+                    <button type="button" class="src-chip" data-plugin="beats" role="radio" aria-checked="false">
+                      <svg class="icon"><use href="#ic-activity"/></svg> Beats
+                    </button>
+                    <button type="button" class="src-chip" data-plugin="jdbc" role="radio" aria-checked="false">
+                      <svg class="icon"><use href="#ic-database"/></svg> Base de datos (JDBC)
+                    </button>
+                  </div>
                 </div>
                 <label class="form-label">Pegá 2-3 líneas de muestra</label>
                 <textarea id="builder-paste" class="form-input" rows="5"
@@ -2917,7 +2943,7 @@
             </div>
 
             <!-- CTA principal: como el botón de los otros pasos, debajo del config file.
-                 Provisiona el entorno y lleva a Mi Infraestructura, donde arranca solo
+                 Provisiona el entorno y lleva a Entorno desplegado, donde arranca solo
                  el primer paso de la puesta en marcha (index template + dashboards). -->
             <p class="form-hint" id="deploy-hint-1" style="margin:0 0 10px;"></p>
             <div class="step-nav">
@@ -3561,7 +3587,7 @@
       if (state.deployMode === 'custom' && !picked.length) {
         isDemo = true;
         forced = state.sourceMode === 'live'
-          ? (document.getElementById('live-plugin')?.value || 'kafka')
+          ? livePlugin()
           : 'obs';
       }
       document.querySelectorAll('#input-plugins .plugin-option').forEach(o => {
@@ -4729,7 +4755,7 @@
       return config;
     }
 
-    // ── Deploy desde Mi Infraestructura ───────────────────────────────────
+    // ── Deploy desde Entorno desplegado ───────────────────────────────────
     // Arma el body del deploy leyendo directo del state + el form de Fuente y
     // destino (step 4, siempre montado en el DOM). Sin handoff `pendingDeploy`.
     // Slug del pipeline a partir del índice (espeja `_slug_from_index` del
@@ -4957,7 +4983,7 @@
 
     // Botón "Desplegar" (paso 4): crea los clusters (OpenSearch + Logstash) con la
     // ingesta APAGADA. Al terminar, guarda el body completo del deploy (con creds)
-    // en `state.pendingDeploy`, lleva a Mi Infraestructura y arranca solo el PRIMER
+    // en `state.pendingDeploy`, lleva a Entorno desplegado y arranca solo el PRIMER
     // paso de la puesta en marcha (index template + dashboards); ingesta y
     // capabilities quedan como botones en infra.
     // Abre el stream de un deploy: lo lanza como JOB en background (sobrevive
@@ -5044,7 +5070,7 @@
       state.pendingDeploy = body;
       state.lastDeploySucceeded = false;
       const reuse = !!state.envActive;
-      // Ir YA a Mi Infraestructura: el progreso del aprovisionamiento se ve ahí.
+      // Ir YA a Entorno desplegado: el progreso del aprovisionamiento se ve ahí.
       state.provisioning = reuse ? 'reuse' : 'new';
       if (btn) btn.disabled = true;
       showView('infra');
@@ -5588,7 +5614,7 @@
     // Paso 4 del wizard (post-ingesta): provisiona las capabilities del tipo sobre
     // el cluster con datos ya cargados. Reintentable (AD/forecast se saltean si aún
     // no hay documentos — reejecutá cuando entren).
-    // ── Puesta en marcha desde Mi Infraestructura ─────────────────────────
+    // ── Puesta en marcha desde Entorno desplegado ─────────────────────────
     // La secuencia post-aprovisionar (index template + dashboards → ingesta →
     // capabilities) se opera desde la tarjeta del entorno. Estos handlers no
     // dependen del form del wizard: toman el body de `resolveDeployBody()`.
@@ -5726,7 +5752,7 @@
 
     // ── Destroy del entorno — FinOps manual, evita acumular costos.
     // Dispara desde dos lugares: botón en step 5 (wizard) y botón de la
-    // tarjeta en "Mi Infraestructura". Función compartida con feedback
+    // tarjeta en "Entorno desplegado". Función compartida con feedback
     // inline cuando el step 5 está visible, o un toast in-app en otro caso.
     async function destroyEnvironment({ source } = { source: 'step5' }) {
       const step5DestroyBtn = document.getElementById('tf-destroy-btn');
@@ -5997,7 +6023,9 @@
         list.innerHTML = `<p class="form-hint" style="color:var(--accent-red);">No pude leer el historial: ${escapeHtml(err.message)}</p>`;
         return;
       }
-      if (count) count.textContent = rows.length ? `${rows.length} ejecución${rows.length === 1 ? '' : 'es'}` : '';
+      if (count) count.textContent = rows.length
+        ? `${rows.length} ejecución${rows.length === 1 ? '' : 'es'} · las últimas 50, con sus sub-pasos y la salida de Terraform.`
+        : 'Las últimas 50, con sus sub-pasos y la salida de Terraform.';
       if (!rows.length) {
         list.innerHTML = `
           <div class="empty-state">
@@ -6094,7 +6122,7 @@
         copyToClipboard(logs.map(l => l.message).join('\n'), e.currentTarget));
     }
 
-    // ── Vista Mi Infraestructura ───────────────────────────────────────
+    // ── Vista Entorno desplegado ───────────────────────────────────────
     // Renderiza la tarjeta del entorno activo o el empty state, a partir
     // del payload de /terraform/status. Reusa formatAge/ticker para el
     // contador en vivo y destroyEnvironment para las
@@ -7457,16 +7485,20 @@
       // La fuente elegida acá manda en el paso 3: sin esto se podía subir un
       // archivo y después elegir Kafka, contradiciendo el paso 1.
       state.inputPlugin = (src === 'live')
-        ? (document.getElementById('live-plugin')?.value || 'kafka')
+        ? livePlugin()
         : 'obs';
       renderInputConfig(state.inputPlugin);
       applyStep3PluginVisibility();
     }
 
+    // Plugin de la fuente en vivo elegido con los chips (antes era un <select>).
+    function livePlugin() {
+      return document.querySelector('#live-plugin .src-chip.is-active')?.dataset.plugin || 'kafka';
+    }
+
     function _syncLivePlugin() {
-      const sel = document.getElementById('live-plugin');
       const hint = document.getElementById('live-hint');
-      const plugin = sel?.value || 'kafka';
+      const plugin = livePlugin();
       if (hint) hint.innerHTML = LIVE_HINTS[plugin] || '';
       const ta = document.getElementById('builder-paste');
       if (ta) {
@@ -7478,7 +7510,16 @@
       renderInputConfig(plugin);
       applyStep3PluginVisibility();
     }
-    document.getElementById('live-plugin')?.addEventListener('change', _syncLivePlugin);
+    document.getElementById('live-plugin')?.addEventListener('click', (e) => {
+      const chip = e.target.closest('.src-chip');
+      if (!chip) return;
+      document.querySelectorAll('#live-plugin .src-chip').forEach(c => {
+        const on = c === chip;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', String(on));
+      });
+      _syncLivePlugin();
+    });
 
     document.getElementById('source-cards')?.addEventListener('click', (e) => {
       const btn = e.target.closest('.src-card');

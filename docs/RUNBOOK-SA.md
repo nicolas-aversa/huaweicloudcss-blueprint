@@ -37,7 +37,7 @@ Con eso estás listo para desplegar.
 1. **Crear pipeline** → elegí uno o varios casos (SIEM, e-commerce, streaming, salud, ALyC,
    billetera, pozos, FortiAnalyzer…) → **Desplegar**. El primer deploy tarda ~20 min (crea los
    clusters CSS); podés cerrar/refrescar el browser, el deploy sigue y se reengancha.
-2. En **Mi Infraestructura**, completá la "puesta en marcha": *Aplicar index template + dashboards*
+2. En **Entorno desplegado**, completá la "puesta en marcha": *Aplicar index template + dashboards*
    → *Iniciar ingesta* → *Provisionar capabilities*.
 3. Mostrá: **Dashboards** (abrí el link), el **Asistente de datos** (preguntá en lenguaje natural →
    responde con el dato real + gráfico), y los **forecasts**.
