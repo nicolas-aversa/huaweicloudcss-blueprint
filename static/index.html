@@ -1063,7 +1063,12 @@
        están dimensionados para eso (ver también .settings-fields).
        Una sola columna: las tres cards comparten el mismo patrón y se leen
        de arriba abajo (claves del bucket → cuenta → key del LLM). */
-    .settings-grid { display: flex; flex-direction: column; gap: 26px; }
+    .settings-grid { display: flex; flex-direction: column; gap: 14px; }
+    /* Configuración son solo dos cards y la vista arranca arriba: con el gap
+       chico quedaba todo apretado contra el título y un hueco grande al pie.
+       Más aire entre ellas reparte mejor el alto. El Panel de control (tres
+       cards) mantiene el gap base. */
+    #view-settings .settings-grid { gap: 46px; }
     .settings-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); padding: 16px 20px;
@@ -2141,7 +2146,7 @@
       .home-logos { padding-top: 18px; }
       .home-logos img { height: 32px; }
       /* Configuración también tiene que seguir entrando sin scroll acá. */
-      .settings-grid { gap: 18px; }
+      #view-settings .settings-grid { gap: 30px; }
       .settings-card { padding: 12px 18px; }
       .settings-card__head { margin-bottom: 10px; }
     }
@@ -6010,8 +6015,8 @@
           <div class="infra-empty">
             <div class="infra-empty__tile">${icon('clock')}</div>
             <div class="infra-empty__title">Todavía no se ejecutó nada</div>
-            <div class="infra-empty__text">Cuando despliegues un entorno, arranques la ingesta o provisiones capabilities, cada paso va a quedar registrado acá — con su resultado y la salida de Terraform.</div>
-            <button class="btn btn-primary" id="activity-empty-cta">${icon('rocket')} Crear pipeline</button>
+            <div class="infra-empty__text">Desplegá un entorno y cada paso queda registrado acá, con su resultado.</div>
+            <button class="btn btn-primary" id="activity-empty-cta">${icon('spark')} Crear pipeline</button>
           </div>`;
         body.querySelector('#activity-empty-cta')?.addEventListener('click', () => {
           showView('pipeline');
