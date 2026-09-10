@@ -419,10 +419,46 @@ def get_maas_api_key() -> str:
     return key or os.getenv("MAAS_API_KEY", "")
 
 
-def set_maas_api_key(key: str) -> None:
-    """Persiste (o borra, si viene vacía) la key configurada desde la UI."""
-    data = _read_settings()
+class InvalidApiKey(ValueError):
+    """La key no tiene forma de key (se mapea a HTTP 400)."""
+
+
+# Piso bajo a propósito: lo que atrapa el error real (el relleno de puntitos del
+# campo) es el chequeo de caracteres, no el de largo. Acá solo se descartan
+# valores que claramente no son una key.
+_MIN_KEY_LEN = 12
+
+
+def validate_api_key(key: str) -> str:
+    """Devuelve la key normalizada, o levanta `InvalidApiKey`.
+
+    Existe porque no había NINGUNA validación en toda la cadena: la UI llegó a
+    guardar la cadena de puntitos que usaba como relleno decorativo del campo, el
+    backend la aceptó, y como el settings file tiene precedencia sobre el env,
+    quedó sombreando la key buena. El síntoma era un 401 críptico de ModelArts,
+    porque el header `Authorization` terminaba con caracteres no-ASCII.
+    """
     key = (key or "").strip()
+    if not key:
+        return ""
+    if not key.isascii() or not key.isprintable():
+        raise InvalidApiKey(
+            "La API key tiene caracteres no válidos. Copiala de nuevo desde la consola de MaaS "
+            "(si el campo mostraba puntos, borralo antes de pegar).")
+    if any(c.isspace() for c in key):
+        raise InvalidApiKey("La API key no puede tener espacios.")
+    if len(key) < _MIN_KEY_LEN:
+        raise InvalidApiKey(f"La API key es demasiado corta ({len(key)} caracteres).")
+    return key
+
+
+def set_maas_api_key(key: str) -> None:
+    """Persiste (o borra, si viene vacía) la key configurada desde la UI.
+
+    Valida el formato: es la última barrera para cualquier llamador, no solo el
+    endpoint."""
+    key = validate_api_key(key)
+    data = _read_settings()
     if key:
         data["maas_api_key"] = key
     else:

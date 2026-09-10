@@ -992,6 +992,55 @@ def test_obs_read_sample_handles_stream_folder_and_gz():
     assert "otra linea" in line
 
 
+def test_settings_maas_key_rejects_garbage(monkeypatch, tmp_path):
+    """La key se valida antes de persistirse.
+
+    Sin esto, la UI llegó a guardar la cadena de puntitos que usaba como relleno
+    del campo. Como el settings file tiene prioridad sobre el env, esa basura
+    sombreaba la key buena y MaaS devolvía un 401 imposible de diagnosticar
+    ("Invalid authorization header"), porque el header salía con no-ASCII.
+    """
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.setenv("MAAS_API_KEY", "env-key-zzz9")
+
+    invalidas = [
+        ("•" * 12, "caracteres no válidos"),          # el relleno decorativo del campo
+        ("•" * 12 + "clave-real-1234", "caracteres no válidos"),  # pegada ENCIMA del relleno
+        ("clave con espacios 123", "espacios"),
+        ("corta", "demasiado corta"),
+        ("ñoño-key-con-tilde-á", "caracteres no válidos"),
+    ]
+    for key, motivo in invalidas:
+        res = client.post("/api/v1/settings/maas", json={"api_key": key})
+        assert res.status_code == 400, f"se aceptó una key inválida: {key!r}"
+        assert motivo in res.json()["detail"]["message"]
+        # Y no se persistió nada: sigue mandando la del env.
+        assert mi.get_maas_api_key() == "env-key-zzz9"
+
+    # Una key con forma de key sí entra.
+    assert client.post("/api/v1/settings/maas", json={"api_key": "hk-abc123def456ghi"}).status_code == 200
+    assert mi.get_maas_api_key() == "hk-abc123def456ghi"
+
+    # Y se puede volver a borrar (la UI ahora puede hacerlo).
+    assert client.post("/api/v1/settings/maas", json={"api_key": ""}).status_code == 200
+    assert mi.get_maas_api_key() == "env-key-zzz9"
+
+
+def test_set_maas_api_key_validates_at_the_source(monkeypatch, tmp_path):
+    """La barrera también está en el setter, no solo en el endpoint."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    with pytest.raises(mi.InvalidApiKey):
+        mi.set_maas_api_key("•" * 12)
+    with pytest.raises(mi.InvalidApiKey):
+        mi.set_maas_api_key("corta")
+    mi.set_maas_api_key("hk-abc123def456ghi")   # válida, no levanta
+    assert mi.get_maas_api_key() == "hk-abc123def456ghi"
+
+
 def test_settings_maas_key_roundtrip(monkeypatch, tmp_path):
     """La API key de MaaS configurada desde ⚙ Configuración se persiste server-side,
     tiene PRIORIDAD sobre el env, se reporta enmascarada (nunca entera) y al borrarla

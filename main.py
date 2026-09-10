@@ -1627,9 +1627,14 @@ def set_maas_settings(request: dict) -> dict:
     """Body: ``{api_key}``. Vacía → se borra la configurada y se vuelve a la del
     env (si hay). La usan: el análisis del log y los connectors del chatbot de
     OpenSearch (queda embebida en el cluster al provisionar)."""
-    from maas_integrator import get_maas_api_key, maas_key_source, set_maas_api_key
+    from maas_integrator import (InvalidApiKey, get_maas_api_key, maas_key_source,
+                                 set_maas_api_key)
 
-    set_maas_api_key(str(request.get("api_key", "") or ""))
+    try:
+        set_maas_api_key(str(request.get("api_key", "") or ""))
+    except InvalidApiKey as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "settings_maas", "message": str(exc)}) from exc
     key = get_maas_api_key()
     audit.record("settings_maas", "MaaS API key actualizada" if key else "MaaS API key borrada")
     return {"configured": bool(key), "source": maas_key_source()}
