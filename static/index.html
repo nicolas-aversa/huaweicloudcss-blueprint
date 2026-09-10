@@ -1068,7 +1068,9 @@
        chico quedaba todo apretado contra el título y un hueco grande al pie.
        Más aire entre ellas reparte mejor el alto. El Panel de control (tres
        cards) mantiene el gap base. */
-    #view-settings .settings-grid { gap: 26px; }
+    /* Con la vista centrada, agrandar el gap sube la card de arriba y baja la de
+       abajo por igual: el aire de los extremos sigue simétrico. */
+    #view-settings .settings-grid { gap: 56px; }
     .settings-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); padding: 16px 20px;
@@ -2151,7 +2153,7 @@
       .home-logos { padding-top: 18px; }
       .home-logos img { height: 32px; }
       /* Configuración también tiene que seguir entrando sin scroll acá. */
-      #view-settings .settings-grid { gap: 18px; }
+      #view-settings .settings-grid { gap: 32px; }
       .app-view.is-settings.active { min-height: calc(100vh - 72px); }   /* 36 + 36 */
       .settings-card { padding: 12px 18px; }
       .settings-card__head { margin-bottom: 10px; }
