@@ -783,20 +783,6 @@
     }
     .guide-more > strong { color: var(--text-primary); }
 
-    /* Empty state con centro de gravedad propio: un tile, un titular y una
-       salida, en vez de un párrafo suelto dentro de un panel. */
-    .empty-state {
-      display: flex; flex-direction: column; align-items: center; text-align: center;
-      padding: 34px 24px; border-radius: var(--radius-md); background: var(--bg-subtle);
-    }
-    .empty-state__tile {
-      width: 44px; height: 44px; border-radius: 12px; margin-bottom: 14px;
-      background: var(--accent-tint); color: var(--accent);
-      display: inline-flex; align-items: center; justify-content: center;
-    }
-    .empty-state__tile .icon { width: 21px; height: 21px; }
-    .empty-state__title { font-size: 15px; font-weight: 650; color: var(--text-primary); margin-bottom: 6px; }
-    .empty-state__text { font-size: 13px; color: var(--text-muted); max-width: 46ch; line-height: 1.55; margin: 0 0 18px; }
 
     /* ── Vista Actividad: historial de ejecuciones ───────────────────────── */
     .activity-row {
@@ -879,6 +865,8 @@
       margin-bottom: 10px;
     }
 
+    /* Empty state de vista completa: una sola card centrada. Lo comparten
+       Entorno desplegado y Actividad, para que se lean igual. */
     .infra-empty {
       text-align: center;
       padding: 56px 24px;
@@ -1075,7 +1063,7 @@
        están dimensionados para eso (ver también .settings-fields).
        Una sola columna: las tres cards comparten el mismo patrón y se leen
        de arriba abajo (claves del bucket → cuenta → key del LLM). */
-    .settings-grid { display: flex; flex-direction: column; gap: 14px; }
+    .settings-grid { display: flex; flex-direction: column; gap: 26px; }
     .settings-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); padding: 16px 20px;
@@ -1100,6 +1088,9 @@
     .settings-field .form-input { padding: 8px 12px; font-size: 13.5px; }
     /* Acción de la card, al pie: el botón primero y el estado a continuación. */
     .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    /* La acción que opera sobre un campo puntual se alinea con la columna de ese
+       campo (el bucket, en la derecha del grid de dos columnas). */
+    .settings-actions__aside { margin-left: auto; }
     /* Cuando un campo del renglón lleva su propia acción debajo (el bucket con
        "Preparar"), ese campo es más alto y empuja esta fila al fondo, dejando
        un hueco bajo el resto. Se sube para que ambos botones queden a la misma
@@ -2150,7 +2141,7 @@
       .home-logos { padding-top: 18px; }
       .home-logos img { height: 32px; }
       /* Configuración también tiene que seguir entrando sin scroll acá. */
-      .settings-grid { gap: 10px; }
+      .settings-grid { gap: 18px; }
       .settings-card { padding: 12px 18px; }
       .settings-card__head { margin-bottom: 10px; }
     }
@@ -2504,21 +2495,10 @@
              importaron los dashboards?" después del hecho. -->
         <div class="app-view" id="view-activity">
           <p class="view-subtitle">Qué ejecutó la plataforma: deploys, puesta en marcha y teardowns, con su salida.</p>
-          <div class="settings-grid">
-            <div class="settings-card">
-              <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-clock"/></svg></span>
-                <div>
-                  <div class="settings-card__title">Ejecuciones</div>
-                  <div class="settings-card__hint" id="activity-count">Las últimas 50, con sus sub-pasos y la salida de Terraform.</div>
-                </div>
-                <div class="spacer" style="flex:1;"></div>
-                <button class="btn btn-secondary btn-sm" id="activity-refresh" type="button"><svg class="icon"><use href="#ic-refresh"/></svg> Actualizar</button>
-              </div>
-              <div id="activity-list"></div>
-              <div id="activity-detail" class="hidden" style="margin-top:16px;"></div>
-            </div>
-          </div>
+          <!-- renderActivityView() inyecta acá el empty state o la card con la
+               lista, igual que renderInfraView con #infra-body. -->
+          <div id="activity-body"></div>
+          <div id="activity-detail" class="hidden" style="margin-top:16px;"></div>
         </div>
 
         <!-- ═══ Vista: Panel de control (solo admins) ═══════════════════════ -->
@@ -2595,8 +2575,8 @@
                    más abajo que en la card de al lado. -->
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
-                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
                 <span id="settings-obs-status" class="settings-status"></span>
+                <button class="btn btn-secondary settings-actions__aside" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
               </div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
@@ -6011,36 +5991,36 @@
     }
 
     async function renderActivityView() {
-      const list = document.getElementById('activity-list');
-      const count = document.getElementById('activity-count');
-      if (!list) return;
+      const body = document.getElementById('activity-body');
+      if (!body) return;
       document.getElementById('activity-detail')?.classList.add('hidden');
-      list.innerHTML = '<p class="form-hint">Cargando…</p>';
+      body.innerHTML = '<p class="form-hint">Cargando…</p>';
       let rows = [];
       try {
         rows = (await (await fetch('/api/v1/runs?limit=50')).json()).runs || [];
       } catch (err) {
-        list.innerHTML = `<p class="form-hint" style="color:var(--accent-red);">No pude leer el historial: ${escapeHtml(err.message)}</p>`;
+        body.innerHTML = `<p class="form-hint" style="color:var(--accent-red);">No pude leer el historial: ${escapeHtml(err.message)}</p>`;
         return;
       }
-      if (count) count.textContent = rows.length
-        ? `${rows.length} ejecución${rows.length === 1 ? '' : 'es'} · las últimas 50, con sus sub-pasos y la salida de Terraform.`
-        : 'Las últimas 50, con sus sub-pasos y la salida de Terraform.';
+
+      // Vacío: una sola card centrada, igual que Entorno desplegado — sin header
+      // ni contenedor anidado.
       if (!rows.length) {
-        list.innerHTML = `
-          <div class="empty-state">
-            <span class="empty-state__tile">${icon('clock')}</span>
-            <div class="empty-state__title">Todavía no se ejecutó nada</div>
-            <p class="empty-state__text">Cuando despliegues un entorno, arranques la ingesta o provisiones capabilities, cada paso va a quedar registrado acá — con su resultado y la salida de Terraform.</p>
-            <button class="btn btn-primary btn-sm" id="activity-empty-cta">${icon('rocket')} Crear un pipeline</button>
+        body.innerHTML = `
+          <div class="infra-empty">
+            <div class="infra-empty__tile">${icon('clock')}</div>
+            <div class="infra-empty__title">Todavía no se ejecutó nada</div>
+            <div class="infra-empty__text">Cuando despliegues un entorno, arranques la ingesta o provisiones capabilities, cada paso va a quedar registrado acá — con su resultado y la salida de Terraform.</div>
+            <button class="btn btn-primary" id="activity-empty-cta">${icon('rocket')} Crear pipeline</button>
           </div>`;
-        document.getElementById('activity-empty-cta')?.addEventListener('click', () => {
+        body.querySelector('#activity-empty-cta')?.addEventListener('click', () => {
           showView('pipeline');
           goToStep(1);
         });
         return;
       }
-      list.innerHTML = rows.map(r => {
+
+      const filas = rows.map(r => {
         const k = RUN_KINDS[r.kind] || { label: r.kind, icon: 'box' };
         const st = RUN_STATUS[r.status] || { label: r.status, color: 'var(--text-muted)' };
         const fails = r.steps_failed
@@ -6056,13 +6036,24 @@
             <span class="status-pill" style="color:${st.color}; background:var(--bg-tertiary); flex:none;">${st.label}</span>
           </button>`;
       }).join('');
-    }
 
-    document.getElementById('activity-refresh')?.addEventListener('click', renderActivityView);
-    document.getElementById('activity-list')?.addEventListener('click', (e) => {
-      const row = e.target.closest('[data-run]');
-      if (row) showRunDetail(row.dataset.run);
-    });
+      body.innerHTML = `
+        <div class="settings-card">
+          <div class="settings-card__head">
+            <span class="settings-card__tile">${icon('clock')}</span>
+            <div>
+              <div class="settings-card__title">Ejecuciones</div>
+              <div class="settings-card__hint">${rows.length} registrada${rows.length === 1 ? '' : 's'} · se guardan las últimas 50, con sus sub-pasos y la salida de Terraform.</div>
+            </div>
+            <div class="spacer" style="flex:1;"></div>
+            <button class="btn btn-secondary btn-sm" id="activity-refresh-inline" type="button">${icon('refresh')} Actualizar</button>
+          </div>
+          ${filas}
+        </div>`;
+      body.querySelector('#activity-refresh-inline')?.addEventListener('click', renderActivityView);
+      body.querySelectorAll('[data-run]').forEach(b =>
+        b.addEventListener('click', () => showRunDetail(b.dataset.run)));
+    }
 
     async function showRunDetail(runId) {
       const box = document.getElementById('activity-detail');
