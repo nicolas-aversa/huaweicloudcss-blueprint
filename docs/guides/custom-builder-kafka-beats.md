@@ -122,12 +122,13 @@ Logstash. Antes había que hacerlo a mano y no estaba documentado que faltaba.
 
 **Crear pipeline** → toggle **"Dataset nuevo"**. Una corrida por fuente:
 
-1. **Paso 1** — subí el `.log`, o pegá las 3 líneas si los datos van a llegar en vivo desde la
-   fuente → **Siguiente** (el LLM arma el `filter{}` y detecta campos).
+1. **Paso 1** — elegí **Llegan en vivo**, marcá la fuente (Kafka / Beats / JDBC) y pegá las 3
+   líneas → **Siguiente** (el LLM arma el `filter{}` y detecta campos).
 2. **Paso 2** — revisá el mapping.
-3. **Paso 3** — elegí la fuente (Kafka / Beats) y sus datos de conexión; output OpenSearch.
-4. **Paso 4** — **Guardar dataset**: nombre, icono y grupo. Queda como una card del grid del
-   paso 1 y se despliega desde ahí, igual que un dataset de fábrica.
+3. **Paso 3** — los datos de conexión de esa fuente; output OpenSearch. Solo se muestra la fuente
+   que elegiste en el paso 1.
+4. **Paso 4** — **Guardar y desplegar**: nombre, icono y grupo, y arranca el entorno. Queda además
+   como una card del grid, igual que un dataset de fábrica.
 
 ### Dos tipos de dataset
 Lo que decide el tipo es **si subiste un archivo**:

@@ -1606,6 +1606,46 @@
     .example-card__del .icon { width: 11px; height: 11px; }
     .example-card:hover .example-card__del, .example-card__del:focus-visible { opacity: 1; }
     .example-card__del:hover { color: var(--accent-red); background: var(--accent-red-tint); }
+    /* Las tres vías de entrada del paso 1, al mismo nivel: antes eran dos tabs
+       + una escondida en un <details>, y no se leían como alternativas. */
+    .src-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .src-card {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+      padding: 13px 14px; font-family: inherit; cursor: pointer;
+      background: var(--bg-primary); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md); box-shadow: var(--shadow-xs);
+      transition: border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
+    }
+    .src-card:hover { border-color: var(--accent); }
+    .src-card.is-active { border-color: var(--accent); background: var(--accent-tint); box-shadow: 0 0 0 2px var(--accent-tint); }
+    .src-card__tile {
+      width: 26px; height: 26px; border-radius: 7px; margin-bottom: 2px;
+      background: var(--accent-tint); color: var(--accent);
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .src-card.is-active .src-card__tile { background: var(--accent); color: #fff; }
+    .src-card__tile .icon { width: 14px; height: 14px; }
+    .src-card__name { font-size: 13px; font-weight: 650; color: var(--text-primary); }
+    .src-card__desc { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+    @media (max-width: 720px) { .src-cards { grid-template-columns: 1fr; } }
+
+    /* Confirmación de que ya hay muestra, común a las tres vías. */
+    .sample-found {
+      margin-top: 14px; padding: 12px 14px;
+      background: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+    }
+    .sample-found__head {
+      display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
+      font-size: 12.5px; font-weight: 600; color: var(--accent-green);
+    }
+    .sample-found__head .icon { width: 14px; height: 14px; }
+    .sample-found pre {
+      margin: 0; padding: 9px 11px; background: var(--bg-tertiary); border-radius: var(--radius-sm);
+      font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);
+      max-height: 110px; overflow: auto;
+    }
+
     /* Drop-zone del Builder: feedback al arrastrar un archivo encima. */
     #log-file-drop:hover, #log-file-drop.is-dragover {
       border-color: var(--accent); background: var(--accent-tint);
@@ -1615,29 +1655,7 @@
        principal, para que se lea como una elección dentro del paso. */
     .src-toggle { margin-bottom: 12px; }
     .src-toggle .mode-toggle__btn { padding: 6px 16px; font-size: 12.5px; }
-    .live-source__hints { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-    .live-source__hints > div { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
-    .live-source__hints span {
-      flex: 0 0 46px; font-weight: 700; color: var(--text-primary);
-    }
-    .live-source__hints code {
-      flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px;
-      background: var(--bg-tertiary); padding: 3px 6px; border-radius: 4px;
-      color: var(--text-secondary); overflow-x: auto; white-space: pre;
-    }
 
-    /* Vía secundaria del paso 1 (fuente en vivo): colapsada, discreta, para que
-       la decisión por default siga siendo "subo mi archivo". */
-    .live-source { margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px; }
-    .live-source__summary {
-      display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none;
-      font-size: 13px; font-weight: 600; color: var(--text-secondary);
-    }
-    .live-source__summary::-webkit-details-marker { display: none; }
-    .live-source__summary:hover { color: var(--accent); }
-    .live-source__summary .icon { width: 13px; height: 13px; transition: transform .18s var(--ease); }
-    .live-source[open] > .live-source__summary .icon { transform: rotate(90deg); }
-    .live-source[open] > .live-source__summary { color: var(--accent); margin-bottom: 12px; }
     .example-card.is-custom { background: var(--accent-red-tint); }
     .example-card.is-custom .example-card__tile { background: var(--accent-red); color: #fff; }
     .example-card.is-custom .example-card__label { color: var(--accent-red); }
@@ -2451,7 +2469,7 @@
 
             <div class="guide-more">
               <strong>¿Y además?</strong>
-              <span><strong>Dataset nuevo</strong>: subís tu propio log y queda como una card más del grid.</span>
+              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo, un bucket o una fuente en vivo) y queda como una card más del grid.</span>
               <span><strong>Actividad</strong>: qué se ejecutó y por qué falló, con la salida de Terraform.</span>
               <span><strong>Panel de control</strong> (admins): quién entra, quién administra.</span>
             </div>
@@ -2640,14 +2658,27 @@
 
 
             <div class="form-group hidden" id="rawlog-group">
-              <!-- Entrada PRINCIPAL: traer el dataset. Dos formas equivalentes —
-                   subirlo desde la máquina, o apuntar a uno que ya está en OBS.
-                   En ambas se saca una línea de muestra para que GLM-5.2 detecte
-                   la estructura (`_handleLogFile` / `analyzeProductiveBucket`). -->
-              <label class="form-label">¿De dónde traemos los datos?</label>
-              <div class="mode-toggle src-toggle" id="source-toggle" role="group" aria-label="Origen del dataset">
-                <button type="button" class="mode-toggle__btn is-active" data-src="file" aria-pressed="true">Subir un archivo</button>
-                <button type="button" class="mode-toggle__btn" data-src="obs" aria-pressed="false">Ya está en OBS</button>
+              <!-- Una sola pregunta. `state.sourceMode` (file|obs|live) decide qué
+                   panel se ve, qué hace Siguiente, qué plugin usa el paso 3 y si el
+                   dataset queda repetible o en vivo. Antes eso se infería de si
+                   state.logFileContent estaba vacío: implícito y frágil. -->
+              <label class="form-label">¿De dónde salen los datos?</label>
+              <div class="src-cards" id="source-cards" role="radiogroup">
+                <button type="button" class="src-card is-active" data-src="file" role="radio" aria-checked="true">
+                  <span class="src-card__tile"><svg class="icon"><use href="#ic-upload"/></svg></span>
+                  <span class="src-card__name">Tengo el archivo</span>
+                  <span class="src-card__desc">Lo subís y queda guardado. Podés desplegarlo las veces que quieras.</span>
+                </button>
+                <button type="button" class="src-card" data-src="obs" role="radio" aria-checked="false">
+                  <span class="src-card__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
+                  <span class="src-card__name">Ya está en un bucket</span>
+                  <span class="src-card__desc">Logstash lee de ese prefijo en OBS. No se copia nada.</span>
+                </button>
+                <button type="button" class="src-card" data-src="live" role="radio" aria-checked="false">
+                  <span class="src-card__tile"><svg class="icon"><use href="#ic-activity"/></svg></span>
+                  <span class="src-card__name">Llegan en vivo</span>
+                  <span class="src-card__desc">Kafka, Beats o una base que ya tenés corriendo.</span>
+                </button>
               </div>
 
               <div id="source-pane-file">
@@ -2658,17 +2689,15 @@
                   <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
                 </div>
                 <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
-                <div id="log-file-meta" class="form-hint hidden" style="margin-top:8px; color:var(--accent);"></div>
               </div>
 
               <div id="source-pane-obs" class="hidden">
-                <p class="form-hint" style="margin:0 0 12px;">Si el log ya está en un bucket, Logstash lo lee de ahí: no hace falta volver a subirlo. Indicá dónde está y leemos una muestra para detectar la estructura.</p>
                 <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                  <div class="form-group" style="flex:1; min-width:180px;">
+                  <div class="form-group" style="flex:1; min-width:190px;">
                     <label class="form-label" style="font-size:11px;">Bucket</label>
                     <input type="text" class="form-input" id="productive-bucket" placeholder="mi-bucket-logs" style="font-size:12px;">
                   </div>
-                  <div class="form-group" style="flex:1; min-width:180px;">
+                  <div class="form-group" style="flex:1; min-width:190px;">
                     <label class="form-label" style="font-size:11px;">Prefijo</label>
                     <input type="text" class="form-input" id="productive-prefix" placeholder="logs/" style="font-size:12px;">
                   </div>
@@ -2685,31 +2714,31 @@
                 <button class="btn btn-secondary btn-sm" type="button" id="obs-read-sample"><svg class="icon"><use href="#ic-search"/></svg> Leer una muestra</button>
               </div>
 
-              <div class="form-group hidden" id="rawlog-sample-group" style="margin:12px 0 0;">
-                <label class="form-label">Registro de muestra</label>
-                <pre id="rawlog-sample-preview" style="margin:0; padding:10px 12px; background:var(--bg-tertiary); border-radius:var(--radius-md); font-family:var(--font-mono); font-size:11.5px; line-height:1.5; white-space:pre-wrap; word-break:break-all; color:var(--text-secondary); max-height:120px; overflow:auto;"></pre>
+              <div id="source-pane-live" class="hidden">
+                <div class="form-group" style="margin-bottom:12px;">
+                  <label class="form-label" style="font-size:11px;">¿Qué fuente?</label>
+                  <select class="form-select" id="live-plugin" style="font-size:12.5px;">
+                    <option value="kafka">Kafka (incl. Huawei DMS)</option>
+                    <option value="beats">Beats / Filebeat</option>
+                    <option value="jdbc">Base de datos (JDBC)</option>
+                  </select>
+                </div>
+                <label class="form-label">Pegá 2-3 líneas de muestra</label>
+                <textarea id="builder-paste" class="form-input" rows="5"
+                  placeholder="Pegá 2-3 líneas representativas de tu log."
+                  style="font-family:var(--font-mono); font-size:12px; resize:vertical; line-height:1.5;"></textarea>
+                <p class="form-hint" id="live-hint" style="margin:8px 0 0;"></p>
               </div>
 
-              <!-- Vía secundaria, colapsada: los datos NO los traés vos, llegan en
-                   vivo de una fuente del cliente (Kafka/Beats/JDBC). El dataset se
-                   guarda sin datos y esa fuente tiene que estar levantada. -->
-              <details class="live-source">
-                <summary class="live-source__summary">
-                  <svg class="icon"><use href="#ic-chevron"/></svg>
-                  Los datos llegan en vivo (Kafka, Beats, base de datos)
-                </summary>
-                <div class="live-source__body">
-                  <p class="form-hint" style="margin:0 0 12px;">Pegá 2-3 líneas de muestra para que el LLM detecte la estructura. El dataset se guarda sin datos: al desplegar, Logstash los lee de la fuente que configures en el paso 3 — que tiene que estar levantada y ser alcanzable.</p>
-                  <textarea id="builder-paste" class="form-input" rows="5"
-                    placeholder="Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV… cualquier formato)."
-                    style="font-family:var(--font-mono); font-size:12px; resize:vertical; line-height:1.5;"></textarea>
-                  <div class="live-source__hints">
-                    <div><span>Kafka</span><code>kafka-console-consumer --topic &lt;topic&gt; --bootstrap-server &lt;host:9092&gt; --max-messages 3</code></div>
-                    <div><span>Beats</span><code>tail -n 3 /var/log/tu-app.log</code></div>
-                    <div><span>JDBC</span><code>SELECT * FROM &lt;tabla&gt; LIMIT 3</code></div>
-                  </div>
+              <!-- Único widget de resultado para las tres vías: antes cada una
+                   mostraba el suyo (o ninguno, en la de pegar). -->
+              <div class="sample-found hidden" id="rawlog-sample-group">
+                <div class="sample-found__head">
+                  <svg class="icon"><use href="#ic-check"/></svg>
+                  <span id="sample-found-label">Muestra detectada</span>
                 </div>
-              </details>
+                <pre id="rawlog-sample-preview"></pre>
+              </div>
 
               <div id="productive-analyze-status" class="hidden" style="font-size:13px; color:var(--text-secondary); margin-top:12px;"></div>
               <div id="industry-match-panel" class="hidden" style="margin-top:12px; padding:14px 16px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
@@ -2717,13 +2746,13 @@
                 <div id="industry-match-suggestion" style="font-size:13.5px; color:var(--text-secondary); margin-bottom:10px;"></div>
                 <div class="form-group" style="margin:0;">
                   <label class="form-label">Confirmá o cambiá la industria</label>
-                  <!-- Opciones pobladas por JS desde window.__VERTICALS__ (populateIndustrySelect). -->
                   <select class="form-select" id="industry-match-select">
                     <option value="">-- Seleccionar --</option>
                   </select>
                 </div>
               </div>
               <div class="field-error" id="step1-custom-error"></div>
+              <div id="log-file-meta" class="hidden"></div>
               <textarea id="raw-log" style="display:none;"></textarea>
             </div>
 
@@ -2900,26 +2929,6 @@
             </div>
             <div id="deploy-status-1" class="hidden" style="margin-top:12px;" aria-live="polite" aria-atomic="true"></div>
 
-            <div class="deploy-panel" id="deploy-config-panel">
-              <div class="deploy-panel__title">Eventos sintéticos</div>
-              <div id="deploy-synthetic-wrap" style="display:flex; gap:16px; flex-wrap:wrap;">
-                <div class="form-group" style="flex:1; min-width:180px;">
-                  <label class="form-label">Cantidad: <span id="deploy-synthetic-label">200</span></label>
-                  <input type="range" id="deploy-synthetic-count" min="0" max="2000" step="50" value="200" style="width:100%; margin-top:10px;">
-                  <p class="form-hint" style="margin-top:6px;">Variantes del log de muestra (solo para "Dataset nuevo").</p>
-                </div>
-                <div class="form-group" style="flex:1; min-width:180px;">
-                  <label class="form-label">Distribuir en</label>
-                  <select class="form-select" id="deploy-synthetic-window">
-                    <option value="24">Último día (24h)</option>
-                    <option value="72" selected>Últimos 3 días</option>
-                    <option value="168">Últimos 7 días</option>
-                  </select>
-                  <p class="form-hint" style="margin-top:6px;">Reparte los timestamps en esta ventana (un índice diario por día).</p>
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
 
@@ -2979,7 +2988,8 @@
       </div>
       <div style="padding:16px 24px; border-top:1px solid var(--border-subtle); display:flex; gap:8px; align-items:center;">
         <div id="save-case-status" style="flex:1; font-size:12.5px;"></div>
-        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-check"/></svg> Guardar dataset</button>
+        <button id="save-case-only" class="btn btn-secondary">Solo guardar</button>
+        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-rocket"/></svg> Guardar y desplegar</button>
       </div>
     </div>
   </div>
@@ -3544,8 +3554,16 @@
       const liveCase = picked.length === 1
         ? LOG_EXAMPLES.find(e => e.id === picked[0] && e.caseType === 'live')
         : null;
-      const forced = liveCase ? (liveCase.inputPlugin === 's3' ? 'obs' : liveCase.inputPlugin) : 'obs';
-      const isDemo = picked.length > 0;
+      let forced = liveCase ? (liveCase.inputPlugin === 's3' ? 'obs' : liveCase.inputPlugin) : 'obs';
+      let isDemo = picked.length > 0;
+      // En "Dataset nuevo" manda la fuente elegida en el paso 1: el paso 3 no
+      // puede ofrecer Kafka si subiste un archivo.
+      if (state.deployMode === 'custom' && !picked.length) {
+        isDemo = true;
+        forced = state.sourceMode === 'live'
+          ? (document.getElementById('live-plugin')?.value || 'kafka')
+          : 'obs';
+      }
       document.querySelectorAll('#input-plugins .plugin-option').forEach(o => {
         o.classList.toggle('hidden', isDemo && o.dataset.plugin !== forced);
       });
@@ -3860,9 +3878,11 @@
         const lines = state.logFileLines || 0;
         const plugin = state.inputPlugin || 'obs';
         const PLUGIN_LABEL = { obs: 'OBS', kafka: 'Kafka', beats: 'Beats/Filebeat', jdbc: 'una base (JDBC)' };
-        summary.innerHTML = state.logFileContent
-          ? `<strong>Dataset repetible.</strong> Se guarda el dataset <strong>${escapeHtml(state.logFileName || 'log')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket de demos, así lo desplegás las veces que quieras.`
-          : `<strong>Dataset en vivo.</strong> Sin archivo: Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión que cargaste en el paso 3. Esa fuente tiene que estar levantada y alcanzable al desplegar.`;
+        summary.innerHTML = state.sourceMode === 'file'
+          ? `<strong>Dataset repetible.</strong> Se guarda <strong>${escapeHtml(state.logFileName || 'tu archivo')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket, así lo desplegás las veces que quieras.`
+          : state.sourceMode === 'obs'
+            ? `<strong>Lee de tu bucket.</strong> No se copia nada: al desplegar, Logstash lee del prefijo que indicaste en OBS.`
+            : `<strong>Dataset en vivo.</strong> Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión del paso 3. Esa fuente tiene que estar levantada y ser alcanzable al desplegar.`;
         summary.innerHTML += ` · ${state.fields.length} campo${state.fields.length === 1 ? '' : 's'} detectado${state.fields.length === 1 ? '' : 's'}.`;
       }
 
@@ -3892,7 +3912,7 @@
       if (e.target.id === 'save-case-modal') _closeSaveCase();
     });
 
-    document.getElementById('save-case-submit')?.addEventListener('click', async (e) => {
+    async function submitSaveCase(e, deployAfter) {
       if (!validateRequired([{ id: 'save-case-label', label: 'el nombre del dataset' }])) return;
       const btn = e.currentTarget;
       const statusEl = document.getElementById('save-case-status');
@@ -3925,14 +3945,27 @@
 
         _closeSaveCase();
         await refreshVerticals();
-        // El caso ya es una card: volvemos al grid con la nueva seleccionada,
-        // lista para desplegar como cualquier otra demo.
         const slug = data.case?.slug;
+        // El dataset ya es una card del grid; se deja seleccionada en los dos casos.
         switchExampleMode('demo');
         if (slug) {
           state.selectedExamples = [slug];
           _applySelectionState();
         }
+
+        if (deployAfter) {
+          if (!data.uploaded && state.sourceMode === 'file') {
+            // Sin los datos en el bucket el deploy arranca y falla en el guard:
+            // mejor decirlo acá que a los 20 minutos.
+            goToStep(1);
+            toast(`Dataset "${data.case.label}" guardado, pero no se pudieron subir los datos a tu bucket${data.upload_error ? ` (${data.upload_error})` : ''}. Corregilo en ⚙ Configuración y desplegalo desde el grid.`, 'error', 9000);
+            return;
+          }
+          toast(`Dataset "${data.case.label}" guardado. Desplegando…`, 'success');
+          await runDeploy({ btn: document.getElementById('deploy-provision-btn') });
+          return;
+        }
+
         goToStep(1);
         toast(data.uploaded
           ? `Dataset "${data.case.label}" guardado y cargado en tu bucket. Ya lo podés desplegar.`
@@ -3944,7 +3977,10 @@
       } finally {
         btn.disabled = false;
       }
-    });
+    }
+
+    document.getElementById('save-case-submit')?.addEventListener('click', (e) => submitSaveCase(e, true));
+    document.getElementById('save-case-only')?.addEventListener('click', (e) => submitSaveCase(e, false));
 
     // Borrar un caso creado (✕ en la card). Solo aparece para casos custom que
     // el usuario puede borrar; el backend revalida creador/admin.
@@ -3997,13 +4033,6 @@
       const caseIndex = p?.index || `${meta.indexBase}-%{+YYYY.MM}`;
       if (prefixEl) prefixEl.value = casePrefix;
       if (idxEl) idxEl.value = caseIndex;
-    }
-
-    function _setSynthetic(n) {
-      const el = document.getElementById('deploy-synthetic-count');
-      const lbl = document.getElementById('deploy-synthetic-label');
-      if (el) el.value = String(n);
-      if (lbl) lbl.textContent = String(n);
     }
 
     // Selecciona el plugin de input (visual + state + re-render de sus campos).
@@ -4392,12 +4421,6 @@
       // CTA final con ícono propio (cierre): agregar pipeline vs desplegar.
       if (pbtn) pbtn.innerHTML = reuse ? `Agregar pipeline ${icon('plus')}` : `Desplegar ${icon('rocket')}`;
 
-      // Ya no se generan sintéticos: el camino custom importa un archivo que se
-      // sube tal cual a OBS (como los datasets de ejemplo). El panel "Eventos
-      // sintéticos" queda oculto siempre.
-      const cfgPanel = document.getElementById('deploy-config-panel');
-      if (cfgPanel) cfgPanel.style.display = 'none';
-
       // ── Cierre: qué se va a crear / qué guarda el caso (closure antes del CTA) ──
       const closureEl = document.getElementById('deploy-closure');
       if (closureEl) {
@@ -4440,11 +4463,6 @@
     document.getElementById('deploy-conf-copy')?.addEventListener('click', () => {
       const txt = document.getElementById('deploy-conf-view')?.textContent || '';
       if (navigator.clipboard) navigator.clipboard.writeText(txt);
-    });
-
-    document.getElementById('deploy-synthetic-count')?.addEventListener('input', (e) => {
-      const lbl = document.getElementById('deploy-synthetic-label');
-      if (lbl) lbl.textContent = e.target.value;
     });
 
     // Escribir/borrar el endpoint del cluster existente cambia si Terraform va
@@ -4617,8 +4635,9 @@
           config.region = document.getElementById('input-region')?.value || '';
           config.prefix = document.getElementById('input-prefix')?.value || '';
         }
-        config.interval = parseInt(document.getElementById('input-interval')?.value) || 60;
-        config.temporary_directory = document.getElementById('input-temp-dir')?.value || '/opt/data/tmp/';
+        // Decisión de plataforma, no del operador: no hay campos para esto en la UI.
+        config.interval = 60;
+        config.temporary_directory = '/opt/data/tmp/';
         config.codec = 'plain';
         // watch_for_new_files y delete los inyecta el backend con default
         // true (decisión de plataforma, no del operador).
@@ -4732,8 +4751,10 @@
 
     function collectDeployBody(startIngestion) {
       const projectName = document.getElementById('deploy-project-name')?.value?.trim() || 'log-analytics';
-      const syntheticCount = parseInt(document.getElementById('deploy-synthetic-count')?.value || '200', 10);
-      const syntheticWindow = parseInt(document.getElementById('deploy-synthetic-window')?.value || '72', 10);
+      // El camino custom sube el archivo tal cual; los sintéticos ya no se
+      // generan. Se mandan los defaults que el backend espera en el modelo.
+      const syntheticCount = 200;
+      const syntheticWindow = 72;
       const inputCfg = collectInputConfig();
       const outputCfg = collectOutputConfig(state.outputPlugins[0]);
       const indexName = document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}';
@@ -6535,15 +6556,14 @@
         state.logFileContent = '';
         state.logFileName = '';
         state.logFileLines = 0;
-        const metaEl = document.getElementById('log-file-meta');
-        if (metaEl) { metaEl.classList.add('hidden'); metaEl.textContent = ''; }
         const fileInput = document.getElementById('log-file-input');
         if (fileInput) fileInput.value = '';
-        const sampleGroup = document.getElementById('rawlog-sample-group');
-        if (sampleGroup) sampleGroup.classList.add('hidden');
-        const samplePre = document.getElementById('rawlog-sample-preview');
-        if (samplePre) samplePre.textContent = '';
-        // El paso arranca siempre en "Subir un archivo", que es el camino normal.
+        const pasteEl = document.getElementById('builder-paste');
+        if (pasteEl) pasteEl.value = '';
+        document.getElementById('productive-analyze-status')?.classList.add('hidden');
+        document.getElementById('industry-match-panel')?.classList.add('hidden');
+        if (typeof showSample === 'function') showSample('');
+        // El paso arranca siempre en "Tengo el archivo", el camino normal.
         if (typeof switchSourceMode === 'function') switchSourceMode('file');
         _setExampleIndex('logs');
         return;
@@ -6608,11 +6628,9 @@
         });
         const idxEl = document.getElementById('output-index');
         if (idxEl && p.index) idxEl.value = p.index;
-        if (typeof p.synthetic === 'number') _setSynthetic(p.synthetic);
       } else {
         _selectInputPlugin('obs');
         _setExampleIndex(primaryMeta?.indexBase || 'logs');
-        _setSynthetic(200);
       }
 
       const step2 = document.getElementById('step-2');
@@ -6712,7 +6730,6 @@
         b.setAttribute('aria-pressed', String(on));
       });
       document.getElementById('example-section-demo')?.classList.toggle('hidden', mode !== 'demo');
-      document.getElementById('example-section-custom')?.classList.toggle('hidden', mode !== 'custom');
       state.deployMode = mode;
 
       // El campo de cluster existente solo se muestra en modo demo.
@@ -6723,12 +6740,19 @@
       // Placeholder del step 2 en modo builder (solo si aún no hay sample analizado).
       updateProductiveStep2();
       // Estado de creds OBS (para el atajo de leer muestra de OBS).
-      if (mode === 'custom') _updateProductiveCredsStatus();
+      // Y re-renderizar el form de fuente: `renderInputConfig` corre al boot en
+      // modo demo, y sin esto el paso 3 quedaba con el BUCKET DE DEMOS precargado
+      // en custom — y ese bucket, que nadie eligió, terminaba en el .conf.
+      if (mode === 'custom') {
+        _updateProductiveCredsStatus();
+        renderInputConfig(state.inputPlugin || 'obs');
+        applyStep3PluginVisibility();
+      }
 
       const desc = document.getElementById('step1-desc');
       if (desc) {
         desc.innerHTML = mode === 'custom'
-          ? 'Subí un archivo de log: <strong>1)</strong> el LLM detecta la estructura y los campos, <strong>2)</strong> los revisás, <strong>3)</strong> elegís de dónde salen los datos y <strong>4)</strong> lo guardás. Queda como una card más del grid, lista para desplegar.'
+          ? 'Decinos de dónde salen tus datos y el LLM detecta la estructura. Revisás los campos, confirmás el destino y lo guardás: queda como una card más del grid y se despliega ahí mismo.'
           : 'Elegí un caso de uso pre-cargado: un log real de ejemplo con su pipeline ya armado, listo para desplegar y analizar en OpenSearch.';
       }
 
@@ -6771,20 +6795,11 @@
         const rawLogEl = document.getElementById('raw-log');
         if (rawLogEl) rawLogEl.value = sample;
         state.rawLog = sample;
-        // Mostrar la muestra read-only (mismo estilo que los logs de ejemplo).
-        const sampleGroup = document.getElementById('rawlog-sample-group');
-        const samplePre = document.getElementById('rawlog-sample-preview');
-        if (samplePre) samplePre.textContent = sample.substring(0, 600);
-        if (sampleGroup) sampleGroup.classList.remove('hidden');
+        showSample(sample, `${file.name} · ${nonEmpty.length.toLocaleString('es')} líneas`);
         // Forzar re-detección de campos con la nueva muestra.
         state.filterCode = '';
         state.fields = [];
         state.generatedFromLog = '';
-        const metaEl = document.getElementById('log-file-meta');
-        if (metaEl) {
-          metaEl.classList.remove('hidden');
-          metaEl.textContent = `${file.name} · ${nonEmpty.length.toLocaleString('es')} líneas · ${(file.size / 1024).toFixed(0)} KB`;
-        }
         // Archivo importado OK → limpiar el error inline de la drop-zone.
         document.getElementById('step1-custom-error')?.classList.remove('show');
         document.getElementById('log-file-drop')?.classList.remove('input-error');
@@ -7018,22 +7033,26 @@
           btn.disabled = true;
           const prev = btn.innerHTML;
           let ok;
-          // Con el panel OBS activo se lee la muestra del bucket; si no, se
-          // analiza lo pegado (fuente en vivo). El archivo subido ya dejó su
-          // muestra en #raw-log, así que no entra por acá.
-          if (state.sourceMode === 'obs' && !pasted) {
+          // Cada vía tiene su acción; la decide `sourceMode`, no el contenido.
+          // (La de archivo no entra acá: _handleLogFile ya dejó la muestra.)
+          if (state.sourceMode === 'obs') {
             btn.innerHTML = 'Leyendo muestra de OBS…';
             ok = await analyzeProductiveBucket();
-          } else if (pasted) {
-            btn.innerHTML = 'Analizando con GLM-5.2…';
-            const rawLogEl = document.getElementById('raw-log');
-            if (rawLogEl) rawLogEl.value = pasted;
-            const r = await transformLog();
-            ok = r.ok;
-            if (ok) { updateProductiveStep2(); }
-            else if (errEl) errEl.textContent = 'No se pudo analizar el log: ' + (r.error || 'error');
+          } else if (state.sourceMode === 'live') {
+            if (!pasted) {
+              if (errEl) errEl.textContent = 'Pegá 2-3 líneas de tu log para detectar la estructura.';
+              ok = false;
+            } else {
+              btn.innerHTML = 'Analizando con GLM-5.2…';
+              const rawLogEl = document.getElementById('raw-log');
+              if (rawLogEl) rawLogEl.value = pasted;
+              const r = await transformLog();
+              ok = r.ok;
+              if (ok) { showSample(_firstLine(pasted), 'Pegada'); updateProductiveStep2(); }
+              else if (errEl) errEl.textContent = 'No se pudo analizar el log: ' + (r.error || 'error');
+            }
           } else {
-            if (errEl) errEl.textContent = 'Subí un archivo, leé una muestra de OBS, o pegá unas líneas.';
+            if (errEl) errEl.textContent = 'Subí el archivo de log para continuar.';
             ok = false;
           }
           btn.disabled = false;
@@ -7415,21 +7434,79 @@
     // Subir el archivo y leerlo de OBS traen el MISMO dataset: son dos paneles
     // del mismo paso, no dos flujos. `state.sourceMode` decide cuál se usa al
     // apretar Siguiente.
+    // Pistas de dónde sacar las líneas, por fuente. Antes era un panel fijo de
+    // cuatro filas siempre visible; ahora acompaña a la fuente elegida.
+    const LIVE_HINTS = {
+      kafka: 'Para sacar la muestra: <code>kafka-console-consumer --topic &lt;topic&gt; --bootstrap-server &lt;host:9092&gt; --max-messages 3</code> (o el Message Query de la consola DMS).',
+      beats: 'Para sacar la muestra: <code>tail -n 3 /var/log/tu-app.log</code> — el path de <code>filebeat.inputs</code>, no el registry.',
+      jdbc: 'Para sacar la muestra: <code>SELECT * FROM &lt;tabla&gt; LIMIT 3</code>. Cualquier query vale.',
+    };
+
     function switchSourceMode(src) {
       state.sourceMode = src;
-      document.querySelectorAll('#source-toggle .mode-toggle__btn').forEach(b => {
+      document.querySelectorAll('#source-cards .src-card').forEach(b => {
         const on = b.dataset.src === src;
         b.classList.toggle('is-active', on);
-        b.setAttribute('aria-pressed', String(on));
+        b.setAttribute('aria-checked', String(on));
       });
       document.getElementById('source-pane-file')?.classList.toggle('hidden', src !== 'file');
       document.getElementById('source-pane-obs')?.classList.toggle('hidden', src !== 'obs');
+      document.getElementById('source-pane-live')?.classList.toggle('hidden', src !== 'live');
       if (src === 'obs') _updateProductiveCredsStatus();
+      if (src === 'live') _syncLivePlugin();
+      // La fuente elegida acá manda en el paso 3: sin esto se podía subir un
+      // archivo y después elegir Kafka, contradiciendo el paso 1.
+      state.inputPlugin = (src === 'live')
+        ? (document.getElementById('live-plugin')?.value || 'kafka')
+        : 'obs';
+      renderInputConfig(state.inputPlugin);
+      applyStep3PluginVisibility();
     }
-    document.getElementById('source-toggle')?.addEventListener('click', (e) => {
-      const btn = e.target.closest('.mode-toggle__btn');
+
+    function _syncLivePlugin() {
+      const sel = document.getElementById('live-plugin');
+      const hint = document.getElementById('live-hint');
+      const plugin = sel?.value || 'kafka';
+      if (hint) hint.innerHTML = LIVE_HINTS[plugin] || '';
+      const ta = document.getElementById('builder-paste');
+      if (ta) {
+        ta.placeholder = plugin === 'jdbc'
+          ? 'Pegá 2-3 filas del resultado de la query.'
+          : 'Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV…).';
+      }
+      state.inputPlugin = plugin;
+      renderInputConfig(plugin);
+      applyStep3PluginVisibility();
+    }
+    document.getElementById('live-plugin')?.addEventListener('change', _syncLivePlugin);
+
+    document.getElementById('source-cards')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.src-card');
       if (btn) switchSourceMode(btn.dataset.src);
     });
+
+    // Muestra detectada: un solo widget para las tres vías (antes cada una tenía
+    // el suyo, y la de pegar no mostraba nada).
+    // Primera línea no vacía de un texto pegado. Sin regex a propósito: es lo
+    // único que hace falta y evita escapes en el template.
+    function _firstLine(txt) {
+      const parts = String(txt || '').split(String.fromCharCode(10));
+      for (const p of parts) {
+        if (p.trim()) return p.trim();
+      }
+      return '';
+    }
+
+    function showSample(line, origen) {
+      const box = document.getElementById('rawlog-sample-group');
+      const pre = document.getElementById('rawlog-sample-preview');
+      const lab = document.getElementById('sample-found-label');
+      if (!box || !pre) return;
+      if (!line) { box.classList.add('hidden'); return; }
+      pre.textContent = String(line).substring(0, 600);
+      if (lab) lab.textContent = origen || 'Muestra detectada';
+      box.classList.remove('hidden');
+    }
     document.getElementById('obs-read-sample')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
@@ -7502,6 +7579,7 @@
           matchSuggestion.textContent = 'No se pudo determinar la industria automáticamente. Elegí una manualmente.';
           state.matchedIndustry = '';
         }
+        showSample(data.sample_line, `Leída de ${bucket}${prefix ? '/' + prefix : ''}`);
         // El bucket del que se leyó la muestra es el origen real del dataset:
         // se propaga al paso 3, que es donde el usuario lo ve y lo edita. Sin
         // esto había que volver a tipearlo ahí para que llegara al .conf.

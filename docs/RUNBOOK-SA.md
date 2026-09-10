@@ -48,12 +48,14 @@ Si tenés un log (tuyo o que te pasó un cliente), podés convertirlo en un data
 card, sus dashboards y su chatbot — sin tocar código:
 
 1. **Crear pipeline** → toggle **"Dataset nuevo"**.
-2. **Subí el archivo `.log`** (un evento por línea, hasta 50 MB). Se detecta el formato solo.
-   Si en vez de un archivo los datos van a llegar en vivo (Kafka/Beats/JDBC del cliente), pegá
-   2-3 líneas de muestra.
+2. Elegí **de dónde salen los datos**:
+   - **Tengo el archivo** — subís el `.log` (un evento por línea, hasta 50 MB). Queda guardado y lo
+     desplegás las veces que quieras.
+   - **Ya está en un bucket** — indicás bucket y prefijo; Logstash lee de ahí, no se copia nada.
+   - **Llegan en vivo** — Kafka, Beats o una base ya corriendo: pegás 2-3 líneas de muestra.
 3. **Siguiente** → el LLM arma el `filter{}` y detecta los campos. Revisalos en el paso 2.
-4. Paso 3: elegí la **fuente**. Paso 4: **Guardar dataset** → nombre, icono y grupo.
-5. La card aparece en el grid del paso 1. Desplegala como cualquier otro dataset.
+4. Paso 3: confirmás el destino. Paso 4: **Guardar y desplegar** → nombre, icono y grupo, y el
+   entorno arranca. (Si solo querés dejarlo listo, **Solo guardar**.)
 
 Notas:
 - Los datos se suben solos a **tu** bucket al guardar. Los demás usuarios de esta VM ven la card,
