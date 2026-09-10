@@ -1068,7 +1068,7 @@
        chico quedaba todo apretado contra el título y un hueco grande al pie.
        Más aire entre ellas reparte mejor el alto. El Panel de control (tres
        cards) mantiene el gap base. */
-    #view-settings .settings-grid { gap: 46px; }
+    #view-settings .settings-grid { gap: 26px; }
     .settings-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); padding: 16px 20px;
@@ -1775,10 +1775,15 @@
       min-height: calc(100vh - 96px);
     }
     .app-view.is-home.active { gap: 30px; }
-    /* Configuración NO se centra: al mover la card de administración al Panel de
-       control quedaron dos cards, y centrarlas las dejaba flotando lejos del
-       título. Arranca arriba, como las vistas con lista. */
-    .app-view.is-settings.active { display: flex; flex-direction: column; }
+    /* Configuración se centra vertical: son dos cards y, alineadas arriba, todo
+       el sobrante se acumulaba al pie. Centrado, el aire queda repartido.
+       96px = padding vertical de .main-content (48 + 48, simétrico). */
+    .app-view.is-settings.active {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: calc(100vh - 96px);
+    }
 
     /* Dashboard de infra (entorno activo): banner con wash (mismo lenguaje que
        el hero) agrupando header + stat-cards. */
@@ -2146,7 +2151,8 @@
       .home-logos { padding-top: 18px; }
       .home-logos img { height: 32px; }
       /* Configuración también tiene que seguir entrando sin scroll acá. */
-      #view-settings .settings-grid { gap: 30px; }
+      #view-settings .settings-grid { gap: 18px; }
+      .app-view.is-settings.active { min-height: calc(100vh - 72px); }   /* 36 + 36 */
       .settings-card { padding: 12px 18px; }
       .settings-card__head { margin-bottom: 10px; }
     }
@@ -2164,6 +2170,7 @@
       /* Apiladas, estas vistas scrollean: se libera el alto forzado y el
          centrado (si no, el contenido arrancaría fuera de pantalla). */
       .app-view.is-home.active { min-height: 0; justify-content: flex-start; gap: 30px; }
+      .app-view.is-settings.active { min-height: 0; justify-content: flex-start; }
     }
 
     @media (max-width: 768px) {
