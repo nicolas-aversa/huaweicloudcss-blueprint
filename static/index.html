@@ -4358,12 +4358,6 @@
 
     // Oculta secretos en el .conf mostrado (la SK y la password). El deploy real
     // manda los valores por separado; esto es solo para no exponerlos en pantalla.
-    function maskSecrets(conf) {
-      return (conf || '')
-        .replace(/(secret_access_key\s*=>\s*)["'][^"']*["']/g, '$1"****"')
-        .replace(/(password\s*=>\s*)["'][^"']*["']/g, '$1"****"');
-    }
-
     function renderDeploySummary() {
       const types = deployTypes();
       if (!types.includes(state.deployActiveType)) state.deployActiveType = types[0];
@@ -4415,7 +4409,7 @@
         } else {
           confEl.textContent = 'Generando configuration file…';
           fetchCaseConf(active).then(conf => {
-            const masked = maskSecrets(conf);
+            const masked = maskConf(conf);
             state.caseConfs[active] = masked;
             if (state.deployActiveType === active) confEl.textContent = masked;
           }).catch(() => {
@@ -4508,6 +4502,24 @@
 
     // Builder: guarda lo analizado como un caso de demo reutilizable.
     document.getElementById('builder-save-case-btn')?.addEventListener('click', () => openSaveCaseModal());
+
+    // El .conf lleva las credenciales embebidas (es lo que Logstash necesita).
+    // Para MOSTRARLO se enmascaran: estas pantallas se proyectan en demos con el
+    // cliente delante. El valor real solo viaja en el body del deploy, nunca se
+    // pinta. Ojo: enmascarar `state.pipelineCode` rompería el deploy — esto se
+    // aplica SOLO al pintar.
+    // `clave => "valor"` de Logstash. Regex literal (no `new RegExp`) para no
+    // pelear con el doble escapado de las backreferences.
+    const _CONF_SECRET_RE =
+      /((?:secret_access_key|access_key_id|jdbc_password|ssl_truststore_password|sasl_password|password)\s*=>\s*)(?:"[^"]*"|'[^']*')/g;
+    // El JAAS de Kafka mete la password inline dentro de otro string.
+    const _JAAS_SECRET_RE = /(password=)(?:"[^"]*"|'[^']*')/g;
+
+    function maskConf(conf) {
+      return String(conf || '')
+        .replace(_CONF_SECRET_RE, '$1"••••••••"')
+        .replace(_JAAS_SECRET_RE, '$1"••••••••"');
+    }
 
     // ── Modal para ver .conf ─────────────────────────────────────────────
     // Toast in-app no bloqueante (reemplaza alert()). type: success | error | info.
@@ -4609,7 +4621,7 @@
       const modal = document.getElementById('conf-modal');
       const content = document.getElementById('conf-modal-content');
       if (!modal || !content) return;
-      content.textContent = conf;
+      content.textContent = maskConf(conf);
       modal.classList.remove('hidden');
       modal.style.display = 'flex';
     }
@@ -7175,18 +7187,13 @@
 
     // ── Config global: OBS AK/SK en nav bar ───────────────────────────────────
     state.obsCreds = { ak: '', sk: '' };
-    // Cache local (arranque instantáneo); la fuente de verdad es la cuenta (servidor).
-    (function loadObsCredsLocal() {
-      try {
-        const saved = JSON.parse(localStorage.getItem('obsCreds') || '{}');
-        if (saved.ak) state.obsCreds.ak = saved.ak;
-        if (saved.sk) state.obsCreds.sk = saved.sk;
-      } catch (_) {}
-      const badge = document.getElementById('nav-settings-label');
-      if (badge && state.obsCreds.ak) badge.textContent = 'Configuración';
-    })();
-    // Las AK/SK guardadas en la cuenta del usuario pisan las del navegador → persisten
-    // por-cuenta y funcionan al entrar desde otro navegador o con el login del owner.
+    // Las credenciales NO se guardan en el navegador. Antes se cacheaban en
+    // localStorage para un arranque instantáneo, pero desde que viven cifradas en
+    // el servidor eso es duplicación: sobrevivía al logout y al cierre del
+    // browser sin aportar nada. Se limpia lo que haya quedado de esa época.
+    try { localStorage.removeItem('obsCreds'); } catch (_) {}
+    // Única fuente: la cuenta del usuario en el servidor. Así funcionan al entrar
+    // desde otro navegador o con el login del owner, sin re-tipearlas.
     (async function loadObsCredsServer() {
       try {
         const r = await fetch('/api/v1/settings/obs', { credentials: 'same-origin' });
@@ -7194,7 +7201,6 @@
         const d = await r.json();
         if (d && d.ak) state.obsCreds.ak = d.ak;
         if (d && d.sk) state.obsCreds.sk = d.sk;
-        try { localStorage.setItem('obsCreds', JSON.stringify({ ak: state.obsCreds.ak, sk: state.obsCreds.sk })); } catch (_) {}
         const akIn = document.getElementById('settings-obs-ak');
         const skIn = document.getElementById('settings-obs-sk');
         if (akIn && !akIn.value) akIn.value = state.obsCreds.ak || '';
@@ -7460,7 +7466,6 @@
       const maasEdit = maasKeyEdit();   // changed=false si no tocó el campo
       state.obsCreds.ak = ak;
       state.obsCreds.sk = sk;
-      try { localStorage.setItem('obsCreds', JSON.stringify({ ak, sk })); } catch (_) {}
       let okObs = true;
       try {
         const r = await fetch('/api/v1/settings/obs', {
