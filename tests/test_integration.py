@@ -4506,3 +4506,229 @@ def test_workspace_refreshes_template_source(tmp_path, monkeypatch):
 
     _auth.build_user_ctx("sa@huawei.com")
     assert (ctx.terraform_dir / "main.tf").read_text(encoding="utf-8") == "size = 300\n"
+
+
+# ── El OBS Secret Access Key no sale del servidor ────────────────────────────
+# El SK viajaba al navegador en dos respuestas (`GET /settings/obs` y el
+# `pipeline_conf` de `/terraform/status`) y volvía en cada body de deploy. Ahora
+# vive solo en el servidor: el front manda el campo vacío y el backend completa.
+
+
+def test_get_obs_settings_never_returns_the_secret_key(monkeypatch, tmp_path):
+    """El GET dice SI hay SK y sus últimos 4, pero nunca el valor."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AKIAEXAMPLE", "sk-super-secreto-1234")
+
+    body = client.get("/api/v1/settings/obs").json()
+    assert "sk" not in body
+    assert "sk-super-secreto-1234" not in str(body)
+    assert body == {"configured": True, "ak": "AKIAEXAMPLE",
+                    "sk_configured": True, "sk_last4": "1234"}
+
+
+def test_post_obs_settings_keeps_saved_sk_when_body_omits_it(monkeypatch, tmp_path):
+    """Guardar la card con el SK vacío (el relleno decorativo no se re-tipeó) NO
+    borra el secreto: solo actualiza el AK. Vaciar ambos sí borra."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-VIEJO", "sk-guardada")
+
+    r = client.post("/api/v1/settings/obs", json={"access_key": "AK-NUEVO", "secret_key": ""})
+    assert r.status_code == 200 and r.json()["configured"] is True
+    assert mi.get_obs_creds() == {"ak": "AK-NUEVO", "sk": "sk-guardada"}
+
+    # Re-tipeada: gana la del body.
+    client.post("/api/v1/settings/obs", json={"access_key": "AK-NUEVO", "secret_key": "sk-nueva"})
+    assert mi.get_obs_creds()["sk"] == "sk-nueva"
+
+    # Ambas vacías = borrar (el único camino para limpiar las credenciales).
+    client.post("/api/v1/settings/obs", json={"access_key": "", "secret_key": ""})
+    assert mi.get_obs_creds() == {"ak": "", "sk": ""}
+
+
+def test_resolve_obs_creds_body_wins_over_saved(monkeypatch, tmp_path):
+    """Vacío → las de la cuenta. Con valor → el body (usar las de un tercero)."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-CUENTA", "SK-CUENTA")
+
+    assert mi.resolve_obs_creds("", "") == ("AK-CUENTA", "SK-CUENTA")
+    assert mi.resolve_obs_creds("  ", "  ") == ("AK-CUENTA", "SK-CUENTA")
+    assert mi.resolve_obs_creds("AK-CLIENTE", "SK-CLIENTE") == ("AK-CLIENTE", "SK-CLIENTE")
+    # Mixto: el AK del body con el SK de la cuenta (cambiar solo uno).
+    assert mi.resolve_obs_creds("AK-CLIENTE", "") == ("AK-CLIENTE", "SK-CUENTA")
+
+
+def test_input_block_fills_obs_creds_from_the_account(monkeypatch, tmp_path):
+    """El front ya no manda el SK: el `.conf` generado igual sale con la
+    credencial real, tomada de la cuenta del usuario que despliega."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-CUENTA", "SK-CUENTA")
+
+    block = main.generate_input_block({
+        "plugin_type": "obs",
+        "obs": {"bucket": "b", "region": "la-south-2", "prefix": "p/",
+                "endpoint": "https://obs.la-south-2.myhuaweicloud.com",
+                "access_key_id": "", "secret_access_key": ""},
+    })
+    assert 'access_key_id => "AK-CUENTA"' in block
+    assert 'secret_access_key => "SK-CUENTA"' in block
+
+    # Las del body siguen ganando (bucket de un cliente).
+    block = main.generate_input_block({
+        "plugin_type": "obs",
+        "obs": {"bucket": "b", "region": "la-south-2",
+                "endpoint": "https://obs.la-south-2.myhuaweicloud.com",
+                "access_key_id": "AK-CLIENTE", "secret_access_key": "SK-CLIENTE"},
+    })
+    assert 'secret_access_key => "SK-CLIENTE"' in block
+
+
+def test_mask_conf_hides_secrets_and_keeps_the_rest():
+    """El `.conf` que va al navegador sale sin credenciales, pero legible."""
+    conf = (
+        'input { s3 {\n'
+        '  access_key_id => "AKIAEXAMPLE"\n'
+        '  secret_access_key => "sk-super-secreto"\n'
+        '  bucket => "demo2css"\n'
+        '  region => "la-south-2"\n'
+        '} }\n'
+        'output { elasticsearch {\n'
+        '  password => "Huawei1234"\n'
+        '  index => "siem-%{+YYYY.MM}"\n'
+        '} }'
+    )
+    masked = main.mask_conf(conf)
+    for secreto in ("AKIAEXAMPLE", "sk-super-secreto", "Huawei1234"):
+        assert secreto not in masked
+    for visible in ("demo2css", "la-south-2", "siem-%{+YYYY.MM}"):
+        assert visible in masked
+
+
+def test_unmask_conf_restores_creds_on_a_redeploy():
+    """El front puede reenviar un `.conf` que recibió enmascarado (redeploy tras
+    un refresh): sin reponer, Logstash intentaría autenticarse con bullets."""
+    conf = ('input { s3 {\n  access_key_id => "AK-REAL"\n'
+            '  secret_access_key => "SK-REAL"\n  bucket => "b"\n} }')
+    masked = main.mask_conf(conf)
+    assert main.unmask_conf(masked, "AK-REAL", "SK-REAL") == conf
+    # Sin bullets es un no-op (no toca un .conf que llegó completo).
+    assert main.unmask_conf(conf, "AK-REAL", "SK-REAL") == conf
+
+
+def test_terraform_status_masks_the_pipeline_conf(monkeypatch, tmp_path):
+    """`/terraform/status` alimenta la vista de Entorno desplegado: su
+    `pipeline_conf` no puede llevar el SK en claro. El bucket sí se sigue viendo."""
+    import json as _json
+    import main as _main
+
+    fake_main, _ = _write_fake_state_with_cluster(tmp_path)
+    (tmp_path / "terraform" / _main._PIPELINES_REGISTRY_NAME).write_text(_json.dumps({
+        "logs": {"pipeline_conf": 'input { s3 { access_key_id => "AK-REAL" '
+                                  'secret_access_key => "SK-REAL" '
+                                  'bucket => "demo2css" } }',
+                 "index": "logs-%{+YYYY.MM}", "obs_prefix": "logs/"},
+    }))
+
+    class _FakeProc:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    monkeypatch.setattr(_main, "__file__", str(fake_main))
+    monkeypatch.setattr(_main.subprocess, "run", lambda *a, **kw: _FakeProc())
+
+    body = client.get("/api/v1/terraform/status").json()
+    assert "SK-REAL" not in _json.dumps(body)
+    assert "AK-REAL" not in _json.dumps(body)
+    assert "demo2css" in body["pipeline_conf"]
+
+
+def test_generate_pipeline_response_hides_the_obs_creds(monkeypatch, tmp_path):
+    """El preview del paso 4 sale del backend con las credenciales inyectadas:
+    el AK/SK se enmascaran antes de responder. Un secreto de otro plugin NO se
+    enmascara acá — esta pipeline no está desplegada, no hay de dónde reponerlo."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-CUENTA", "SK-CUENTA")
+
+    r = client.post("/api/v1/onboarding/generate-pipeline", json={
+        "filter_code": "filter { mutate { add_field => { \"a\" => \"b\" } } }",
+        "input_config": {"plugin_type": "obs",
+                         "obs": {"bucket": "demo2css", "region": "la-south-2",
+                                 "endpoint": "https://obs.la-south-2.myhuaweicloud.com"}},
+        "output_config": {"plugins": ["opensearch"],
+                          "opensearch": {"hosts": [], "index": "logs",
+                                         "user": "admin", "password": "Huawei1234"}},
+    })
+    assert r.status_code == 200
+    conf = r.json()["pipeline_code"]
+    assert "SK-CUENTA" not in conf and "AK-CUENTA" not in conf
+    assert "demo2css" in conf
+    assert "Huawei1234" in conf   # el deploy lo reenvía tal cual; no es reponible
+
+
+def test_deploy_restores_every_secret_from_the_stored_conf(monkeypatch, tmp_path):
+    """Redeploy con el `.conf` que vino de `/terraform/status`: se restaura el
+    original completo, incluida una password que el servidor no podría
+    reconstruir (Kafka), porque el `.conf` guardado sirve de referencia."""
+    import maas_integrator as mi
+    import main as _main
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-CUENTA", "SK-CUENTA")
+
+    original = ('input { s3 { access_key_id => "AK-CUENTA" '
+                'secret_access_key => "SK-CUENTA" bucket => "b" }\n'
+                '  kafka { sasl_password => "kafka-secreta" } }')
+    monkeypatch.setattr(_main, "_stored_confs", lambda: [original])
+
+    req = _main.TerraformDeployRequest(pipeline_conf=_main.mask_conf(original))
+    assert "kafka-secreta" not in req.pipeline_conf   # así viaja al navegador
+    _main._fill_obs_creds(req)
+    assert req.pipeline_conf == original              # y así vuelve al deploy
+    assert req.obs_secret_key == "SK-CUENTA"
+
+
+def test_deploy_falls_back_to_obs_creds_without_a_stored_conf(monkeypatch, tmp_path):
+    """Sin referencia (primer deploy), se reponen las credenciales de OBS: son
+    las únicas que la cuenta conoce."""
+    import maas_integrator as mi
+    import main as _main
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-CUENTA", "SK-CUENTA")
+    monkeypatch.setattr(_main, "_stored_confs", lambda: [])
+
+    masked = _main.mask_obs_creds(
+        'input { s3 { access_key_id => "x" secret_access_key => "y" bucket => "b" } }')
+    req = _main.TerraformDeployRequest(pipeline_conf=masked)
+    _main._fill_obs_creds(req)
+    assert 'access_key_id => "AK-CUENTA"' in req.pipeline_conf
+    assert 'secret_access_key => "SK-CUENTA"' in req.pipeline_conf
+
+
+def test_deploy_body_creds_win_over_the_account(monkeypatch, tmp_path):
+    """Leer el bucket de un cliente: si el body trae credenciales, son esas las
+    que van al `.conf`, no las de la cuenta."""
+    import maas_integrator as mi
+    import main as _main
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK-CUENTA", "SK-CUENTA")
+    monkeypatch.setattr(_main, "_stored_confs", lambda: [])
+
+    masked = _main.mask_obs_creds(
+        'input { s3 { access_key_id => "x" secret_access_key => "y" bucket => "b" } }')
+    req = _main.TerraformDeployRequest(
+        pipeline_conf=masked, obs_access_key="AK-CLIENTE", obs_secret_key="SK-CLIENTE")
+    _main._fill_obs_creds(req)
+    assert 'secret_access_key => "SK-CLIENTE"' in req.pipeline_conf
+    assert req.obs_secret_key == "SK-CLIENTE"

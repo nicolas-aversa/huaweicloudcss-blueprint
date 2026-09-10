@@ -513,6 +513,20 @@ def get_obs_creds() -> dict:
     return {"ak": (data.get("ak") or "").strip(), "sk": (data.get("sk") or "").strip()}
 
 
+def resolve_obs_creds(ak: str = "", sk: str = "") -> tuple[str, str]:
+    """Credenciales efectivas: lo que venga en el request gana, y si viene vacío
+    se usan las guardadas en la cuenta.
+
+    Existe para que el **SK no tenga que bajar al navegador**: el front manda el
+    campo vacío y el servidor completa con lo suyo. Lo que sí se respeta es el
+    caso legítimo de usar credenciales distintas a las de la cuenta (leer el
+    bucket de un cliente, un teardown de un entorno viejo), porque ahí el body
+    llega con valor y ese gana.
+    """
+    saved = get_obs_creds()
+    return ((ak or "").strip() or saved["ak"], (sk or "").strip() or saved["sk"])
+
+
 def set_obs_creds(ak: str, sk: str) -> None:
     """Persiste (o borra, si ambas vacías) las OBS AK/SK del usuario en su settings file."""
     data = _read_settings()

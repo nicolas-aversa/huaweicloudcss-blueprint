@@ -3107,6 +3107,63 @@
       // intenta tocarlas.
     };
 
+    // ── El Secret Access Key nunca baja al navegador ──────────────────────────
+    // El servidor lo guarda cifrado y `GET /settings/obs` devuelve solo
+    // `sk_configured` / `sk_last4`: acá no hay con qué rellenar el campo. Los
+    // campos de SK muestran un relleno DECORATIVO ("ya está guardada") que se
+    // borra al hacer foco. Sin ese borrado, pegar encima dejaría `••••<key>` y se
+    // guardaría esa basura — es exactamente el 401 indiagnosticable que rompió la
+    // MaaS key, que usa el mismo patrón.
+    //
+    // Si el campo no se tocó se manda VACÍO y el backend completa con lo guardado
+    // (`resolve_obs_creds`). Que el body gane cuando trae valor es lo que deja
+    // seguir usando credenciales de un tercero: leer el bucket de un cliente, o
+    // el teardown de un entorno viejo desplegado con otra cuenta.
+    const _SECRET_PLACEHOLDER = '••••••••••••';
+
+    // Deja el campo en su estado "configurada" y le engancha focus-clear +
+    // dirty-tracking. Idempotente en los listeners: `renderInputConfig` re-crea
+    // el input en cada render y hay que volver a llamarlo sobre el nodo nuevo.
+    // No pisa lo que el usuario esté tipeando (el GET inicial es async).
+    function wireSecretField(el, configured) {
+      if (!el) return;
+      if (!el.dataset.wired) {
+        el.dataset.wired = '1';
+        el.addEventListener('focus', () => {
+          // En modo productivo el campo es readonly (las credenciales salen de
+          // Configuración): vaciarlo ahí lo dejaría en blanco y sin forma de
+          // volver a llenarlo, y el paso 3 no validaría.
+          if (el.readOnly || el.disabled) return;
+          if (el.dataset.masked === '1') { el.value = ''; el.dataset.masked = ''; }
+        });
+        el.addEventListener('input', () => { el.dataset.dirty = '1'; });
+      }
+      if (el.dataset.dirty === '1') return;
+      el.value = configured ? _SECRET_PLACEHOLDER : '';
+      el.dataset.masked = configured ? '1' : '';
+    }
+
+    // `{ value, changed }`. `changed === false` → mandar vacío y que el servidor
+    // use la guardada. Tocado y vacío = el usuario la quiere borrar.
+    function secretFieldEdit(el) {
+      if (!el || el.dataset.dirty !== '1') return { value: '', changed: false };
+      const v = (el.value || '').trim();
+      // Cinturón y tirantes: si algún navegador restaura el relleno, no se manda.
+      return { value: v === _SECRET_PLACEHOLDER ? '' : v, changed: true };
+    }
+
+    // Lo que va en el body por un campo de SK: '' salvo que lo hayan re-tipeado.
+    function secretFieldValue(id) {
+      return secretFieldEdit(document.getElementById(id)).value;
+    }
+
+    // ¿Hay un SK utilizable? El guardado en la cuenta, o uno recién tipeado.
+    function skAvailable() {
+      return !!((state.obsCreds && state.obsCreds.skConfigured)
+                || secretFieldValue('settings-obs-sk')
+                || secretFieldValue('input-secret-access-key'));
+    }
+
     // Llama al LLM con el raw log y guarda el filter + fields en `state`.
     // No muestra UI por sí misma: la dispara `runFilterGeneration` (al entrar
     // al step 2 Mapping) o `runPipelineGeneration` (al entrar al step 5). El
@@ -3618,7 +3675,9 @@
       
       const isProductive = state.deployMode === 'custom';
       const obsAk = (state.obsCreds || {}).ak || '';
-      const obsSk = (state.obsCreds || {}).sk || '';
+      // El SK no está en el navegador: el campo se rellena después del innerHTML
+      // con `wireSecretField`, que pone el relleno decorativo si ya está guardada.
+      const skConfigured = !!(state.obsCreds || {}).skConfigured;
       const credsNote = isProductive
         ? (obsAk
            ? '<span style="font-size:12px;color:var(--accent-green,#16a34a);font-weight:600;">Cargado desde configuración global</span>'
@@ -3656,7 +3715,7 @@
             </div>
             <div class="form-group" style="flex:1;min-width:200px;">
               <label class="form-label">Secret Access Key</label>
-              <input type="password" class="form-input" id="input-secret-access-key" value="${escapeHtml(obsSk)}" ${credsReadonly}>
+              <input type="password" class="form-input" id="input-secret-access-key" ${credsReadonly}>
             </div>
           </div>`,
         'kafka': `
@@ -3751,8 +3810,11 @@
           </div>
           <div class="form-hint" style="color:var(--accent-red);">⚠ El input JDBC necesita el <strong>.jar del driver</strong> en el nodo de Logstash. La Logstash de CSS no da acceso al filesystem ni tiene salida a internet para instalarlo, así que este deploy va a fallar salvo que el driver ya esté en esa ruta.</div>`
       };
-      
+
       container.innerHTML = configs[plugin] || '';
+      // El input se acaba de re-crear: hay que re-enganchar el focus-clear y
+      // repintar el relleno, porque el valor real no existe de este lado.
+      wireSecretField(document.getElementById('input-secret-access-key'), skConfigured);
     }
 
     // Renderiza los campos del plugin de OUTPUT en `#output-config`. Los ids
@@ -4667,14 +4729,17 @@
                            || (document.getElementById(b)?.value || '').trim();
           config.bucket = v('input-bucket', 'productive-bucket');
           config.access_key_id = state.obsCreds.ak || '';
-          config.secret_access_key = state.obsCreds.sk || '';
+          // Vacío a propósito: el SK no bajó al navegador. `generate_input_block`
+          // lo completa server-side con el de la cuenta antes de armar el .conf.
+          config.secret_access_key = '';
           config.endpoint = v('input-endpoint', 'productive-endpoint') || `https://obs.${hwRegion()}.myhuaweicloud.com`;
           config.region = v('input-region', 'productive-region') || hwRegion();
           config.prefix = v('input-prefix', 'productive-prefix');
         } else {
           config.bucket = document.getElementById('input-bucket')?.value || '';
           config.access_key_id = document.getElementById('input-access-key-id')?.value || '';
-          config.secret_access_key = document.getElementById('input-secret-access-key')?.value || '';
+          // '' si el campo tiene el relleno decorativo → lo pone el servidor.
+          config.secret_access_key = secretFieldValue('input-secret-access-key');
           config.endpoint = document.getElementById('input-endpoint')?.value || '';
           config.region = document.getElementById('input-region')?.value || '';
           config.prefix = document.getElementById('input-prefix')?.value || '';
@@ -5682,7 +5747,8 @@
         // reload use el mismo bucket que se preparó en ⚙ Configuración.
         obs_bucket: demoBucket(),
         obs_access_key: (state.obsCreds || {}).ak || '',
-        obs_secret_key: (state.obsCreds || {}).sk || '',
+        obs_secret_key: '',   // lo completa el servidor con el de la cuenta
+
         obs_endpoint: `https://obs.${hwRegion()}.myhuaweicloud.com`,
         obs_region: hwRegion(),
         start_ingestion: false,
@@ -5799,10 +5865,10 @@
       try {
         // Reenviar creds del form si están a mano (cubre entornos legacy sin
         // creds persistidas). Si el form está vacío (vista infra post-F5), el
-        // backend usa las creds que persistió el deploy.
+        // backend usa las creds de la cuenta o las que persistió el deploy.
         let destroyBody = {
           obs_access_key: document.getElementById('input-access-key-id')?.value || '',
-          obs_secret_key: document.getElementById('input-secret-access-key')?.value || '',
+          obs_secret_key: secretFieldValue('input-secret-access-key'),
           opensearch_password: document.getElementById('output-password')?.value || '',
         };
         let res = await fetch('/api/v1/terraform/destroy', {
@@ -6749,7 +6815,7 @@
     function _updateProductiveCredsStatus() {
       const el = document.getElementById('productive-creds-status');
       if (!el) return;
-      const hasCreds = state.obsCreds && state.obsCreds.ak && state.obsCreds.sk;
+      const hasCreds = state.obsCreds && state.obsCreds.ak && skAvailable();
       if (hasCreds) {
         el.innerHTML = '';
       } else {
@@ -7138,7 +7204,7 @@
         logFileContent: '',
         logFileName: '', logFileLines: 0, pendingDeploy: null, lastStatus: null,
         provisioning: false, previewMode: false,
-        obsCreds: state.obsCreds || { ak: '', sk: '' },  // global: no se pierde al reiniciar el wizard
+        obsCreds: state.obsCreds || { ak: '', skConfigured: false, skLast4: '' },  // global: no se pierde al reiniciar el wizard
       };
       if (elements.rawLog) elements.rawLog.value = '';
       document.getElementById('step1-demo-error')?.classList.remove('show');
@@ -7186,7 +7252,10 @@
     });
 
     // ── Config global: OBS AK/SK en nav bar ───────────────────────────────────
-    state.obsCreds = { ak: '', sk: '' };
+    // Ojo: `sk` NO está acá y no debe volver. El navegador solo sabe SI hay una
+    // guardada (`skConfigured`) y sus últimos 4 dígitos, para poder mostrarla
+    // como configurada sin tenerla.
+    state.obsCreds = { ak: '', skConfigured: false, skLast4: '' };
     // Las credenciales NO se guardan en el navegador. Antes se cacheaban en
     // localStorage para un arranque instantáneo, pero desde que viven cifradas en
     // el servidor eso es duplicación: sobrevivía al logout y al cierre del
@@ -7200,11 +7269,12 @@
         if (!r.ok) return;
         const d = await r.json();
         if (d && d.ak) state.obsCreds.ak = d.ak;
-        if (d && d.sk) state.obsCreds.sk = d.sk;
+        state.obsCreds.skConfigured = !!(d && d.sk_configured);
+        state.obsCreds.skLast4 = (d && d.sk_last4) || '';
         const akIn = document.getElementById('settings-obs-ak');
-        const skIn = document.getElementById('settings-obs-sk');
         if (akIn && !akIn.value) akIn.value = state.obsCreds.ak || '';
-        if (skIn && !skIn.value) skIn.value = state.obsCreds.sk || '';
+        wireSecretField(document.getElementById('settings-obs-sk'), state.obsCreds.skConfigured);
+        _updateProductiveCredsStatus();
         const badge = document.getElementById('nav-settings-label');
         if (badge && state.obsCreds.ak) badge.textContent = 'Configuración';
       } catch (_) {}
@@ -7220,7 +7290,7 @@
     // se ve idéntico a una key enmascarada, y pegar encima dejaba
     // `••••••••••••<key>`, que se guardaba tal cual y rompía la autenticación con
     // un 401 imposible de diagnosticar.
-    const _MAAS_PLACEHOLDER = '••••••••••••';
+    const _MAAS_PLACEHOLDER = _SECRET_PLACEHOLDER;
 
     function _maasField() { return document.getElementById('settings-maas-key'); }
 
@@ -7271,7 +7341,9 @@
       const akIn = document.getElementById('settings-obs-ak');
       const skIn = document.getElementById('settings-obs-sk');
       if (akIn) akIn.value = (state.obsCreds || {}).ak || '';
-      if (skIn) skIn.value = (state.obsCreds || {}).sk || '';
+      // Mismo tratamiento que la MaaS key: puntitos si ya está guardada, y el
+      // campo se vacía al hacer foco para poder reemplazarla sin concatenar.
+      wireSecretField(skIn, !!(state.obsCreds || {}).skConfigured);
       refreshMaasKeyStatus();   // rellena el campo con puntitos si ya está guardada
       refreshHuaweiSettings();
       renderConfigChecklist();
@@ -7394,10 +7466,14 @@
       const bucket = document.getElementById('settings-hw-bucket')?.value.trim() || '';
       const region = document.getElementById('settings-hw-region')?.value.trim() || '';
       // Leer de los inputs (lo que el SA ve), no solo de state.obsCreds: si tipeó
-      // las claves pero no tocó "Guardar", igual funciona.
+      // las claves pero no tocó "Guardar", igual funciona. El SK va vacío si no
+      // lo re-tipeó: el servidor completa con el guardado.
       const ak = (document.getElementById('settings-obs-ak')?.value.trim()) || state.obsCreds.ak || '';
-      const sk = (document.getElementById('settings-obs-sk')?.value.trim()) || state.obsCreds.sk || '';
-      if (!ak || !sk) { toast('Completá el AK y el SK de esta card para subir los datasets.', 'error'); return; }
+      const sk = secretFieldValue('settings-obs-sk');
+      if (!ak || (!sk && !state.obsCreds.skConfigured)) {
+        toast('Completá el AK y el SK de esta card para subir los datasets.', 'error');
+        return;
+      }
       if (!bucket) { toast('Ingresá el bucket de demos (y guardá) antes de prepararlo.', 'error'); return; }
       btn.disabled = true;
       progressEl?.classList.remove('hidden');
@@ -7462,18 +7538,28 @@
       ]);
       if (!okReq) return;
       const ak = document.getElementById('settings-obs-ak').value.trim();
-      const sk = document.getElementById('settings-obs-sk').value.trim();
+      // El SK solo viaja si lo re-tipearon. Con AK y sin SK, el backend conserva
+      // el guardado (ver `set_obs_settings`): así se puede corregir el AK sin
+      // tener que volver a escribir un secreto que el navegador no tiene.
+      const skEdit = secretFieldEdit(document.getElementById('settings-obs-sk'));
       const maasEdit = maasKeyEdit();   // changed=false si no tocó el campo
       state.obsCreds.ak = ak;
-      state.obsCreds.sk = sk;
       let okObs = true;
       try {
         const r = await fetch('/api/v1/settings/obs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-          body: JSON.stringify({ access_key: ak, secret_key: sk }),
+          body: JSON.stringify({ access_key: ak, secret_key: skEdit.value }),
         });
         okObs = r.ok;
+        if (okObs) {
+          const d = await r.json().catch(() => ({}));
+          state.obsCreds.skConfigured = !!d.configured;
+        }
       } catch (_) { okObs = false; }
+      // Repintar el relleno: el campo vuelve a "configurada" y deja de estar sucio.
+      const skIn = document.getElementById('settings-obs-sk');
+      if (skIn) skIn.dataset.dirty = '';
+      wireSecretField(skIn, state.obsCreds.skConfigured);
       // Solo se postea si el usuario tocó el campo. Vacío + tocado = borrar la
       // key, que antes no se podía hacer desde la UI.
       let maasError = '';
@@ -7508,7 +7594,8 @@
         // un "✓ guardado".
         st.style.color = maasError ? 'var(--accent-red)' : '';
         st.textContent = maasError ? '⚠ ' + maasError
-          : (!ak || !sk) ? '⚠ Falta AK o SK.' : '✓ Credenciales guardadas.';
+          : (!ak || !state.obsCreds.skConfigured) ? '⚠ Falta AK o SK.'
+          : '✓ Credenciales guardadas.';
       }
     });
 
@@ -7628,10 +7715,10 @@
       const endpoint = document.getElementById('productive-endpoint')?.value?.trim() || `https://obs.${hwRegion()}.myhuaweicloud.com`;
       const region = document.getElementById('productive-region')?.value?.trim() || hwRegion();
       const ak = state.obsCreds.ak || '';
-      const sk = state.obsCreds.sk || '';
+      const sk = '';   // el servidor pone el de la cuenta: nunca bajó al navegador
 
       // Errores accionables (inline en el campo; toast solo para lo que no es de campo).
-      if (!ak || !sk) {
+      if (!ak || !state.obsCreds.skConfigured) {
         _updateProductiveCredsStatus();
         toast('Faltan las credenciales OBS: cargalas en Configuración antes de continuar.', 'error');
         return false;

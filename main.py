@@ -733,7 +733,20 @@ def generate_input_block(raw: dict | None) -> str:
         sub = raw[ui_name]
     else:
         sub = {k: v for k, v in raw.items() if k != "plugin_type"}
-    cfg = model_cls(**(sub or {}))
+    sub = dict(sub or {})
+    # El input s3 necesita las credenciales reales para que Logstash pueda leer el
+    # bucket, pero el front ya no las tiene (el SK no baja al navegador): se
+    # completan acá con las de la cuenta. Si el body las trae, ganan.
+    if canonical == "s3":
+        import maas_integrator as _mi
+        ak, sk = _mi.resolve_obs_creds(
+            sub.get("access_key_id", "") or sub.get("access_key", ""),
+            sub.get("secret_access_key", "") or sub.get("secret_key", ""))
+        if ak:
+            sub["access_key_id"] = ak
+        if sk:
+            sub["secret_access_key"] = sk
+    cfg = model_cls(**sub)
     return f"input {{\n{gen_fn(cfg)}\n}}"
 
 
@@ -1482,7 +1495,14 @@ def generate_pipeline(request: OnboardingRequest) -> PipelineResponse:
         output_block = generate_output_block(request.output_config)
         if output_block:
             parts.append(output_block)
-        pipeline_code = "\n\n".join(parts)
+        # `generate_input_block` acaba de inyectar las credenciales de la cuenta y
+        # este `.conf` va al navegador (preview del paso 4 y modal "ver
+        # configuration file"): el AK/SK de OBS se enmascaran antes de salir. El
+        # front lo reenvía tal cual como `pipeline_conf` del deploy y ahí
+        # `_fill_obs_creds` los repone. Solo esos dos: esta pipeline todavía no se
+        # desplegó, así que no hay un `.conf` guardado contra el cual restaurar el
+        # resto (una password de Kafka enmascarada acá se perdería).
+        pipeline_code = mask_obs_creds("\n\n".join(parts))
 
     return PipelineResponse(
         status="success",
@@ -1540,15 +1560,18 @@ def obs_read_sample(request: dict) -> dict:
     """
     from obs_client import OBSClient, OBSConfigError, OBSUploadError
 
-    ak = request.get("access_key", "")
-    sk = request.get("secret_key", "")
+    # El front manda estos campos vacíos: el SK ya no baja al navegador. Si
+    # vienen con valor (leer el bucket de un tercero), ese gana.
+    import maas_integrator as _mi
+    ak, sk = _mi.resolve_obs_creds(request.get("access_key", ""), request.get("secret_key", ""))
     endpoint = request.get("endpoint") or _default_obs_endpoint()
     region = request.get("region") or get_region()
     bucket = request.get("bucket", "")
     prefix = request.get("prefix", "")
 
     if not ak or not sk:
-        raise HTTPException(status_code=400, detail="Faltan credenciales OBS (AK/SK).")
+        raise HTTPException(status_code=400,
+                            detail="Faltan credenciales OBS: cargalas en ⚙ Configuración.")
     if not bucket:
         raise HTTPException(status_code=400, detail="Falta el nombre del bucket.")
 
@@ -1695,10 +1718,15 @@ def get_obs_settings() -> dict:
     import maas_integrator as _mi
 
     creds = _mi.get_obs_creds()
+    sk = creds.get("sk", "")
+    # El SK NO se devuelve: el navegador no lo necesita para nada. Cuando hay que
+    # usarlo (deploy, leer un bucket, preparar datasets) el front manda el campo
+    # vacío y el servidor completa con lo guardado — ver `resolve_obs_creds`.
     return {
-        "configured": bool(creds.get("ak") and creds.get("sk")),
+        "configured": bool(creds.get("ak") and sk),
         "ak": creds.get("ak", ""),
-        "sk": creds.get("sk", ""),
+        "sk_configured": bool(sk),
+        "sk_last4": sk[-4:] if sk else "",
     }
 
 
@@ -1709,10 +1737,20 @@ def get_obs_settings() -> dict:
 )
 def set_obs_settings(request: dict) -> dict:
     """Body: ``{access_key, secret_key}`` (ambas vacías = borra). Se guardan por-usuario
-    en el settings file del servidor."""
+    en el settings file del servidor.
+
+    Con AK y **sin** SK se conserva el SK guardado: como el SK no baja al
+    navegador, el campo se muestra con un relleno decorativo y llega vacío si el
+    usuario no lo re-tipeó. Sin esta excepción, guardar la card para cambiar solo
+    el AK borraría el SK. Para borrar las credenciales hay que vaciar las dos.
+    """
     import maas_integrator as _mi
 
-    _mi.set_obs_creds(str(request.get("access_key", "") or ""), str(request.get("secret_key", "") or ""))
+    ak = str(request.get("access_key", "") or "").strip()
+    sk = str(request.get("secret_key", "") or "").strip()
+    if ak and not sk:
+        sk = _mi.get_obs_creds().get("sk", "")
+    _mi.set_obs_creds(ak, sk)
     creds = _mi.get_obs_creds()
     audit.record("settings_obs", "OBS AK/SK actualizadas" if creds.get("ak") else "OBS AK/SK borradas")
     return {"configured": bool(creds.get("ak") and creds.get("sk"))}
@@ -1754,8 +1792,9 @@ def preload_datasets(request: dict):
     mismo formato que el deploy: eventos ``file`` y ``complete``)."""
     from obs_client import OBSClient, OBSConfigError, OBSUploadError
 
-    ak = str(request.get("access_key", "") or "")
-    sk = str(request.get("secret_key", "") or "")
+    import maas_integrator as _mi2
+    ak, sk = _mi2.resolve_obs_creds(str(request.get("access_key", "") or ""),
+                                    str(request.get("secret_key", "") or ""))
     region = str(request.get("region", "") or "") or get_region()
     endpoint = str(request.get("endpoint", "") or "") or f"https://obs.{region}.myhuaweicloud.com"
     bucket = (str(request.get("bucket", "") or "")
@@ -2429,6 +2468,51 @@ def _do_terraform_sequence(
     return json.loads(output_result.stdout)
 
 
+def _fill_obs_creds(request) -> None:
+    """Completa las AK/SK del request con las guardadas en la cuenta.
+
+    El front ya no tiene el SK (no baja al navegador), así que manda los campos
+    vacíos. Se hace UNA vez al entrar al endpoint: de acá para abajo todo el
+    camino del deploy —upload a OBS, guard de datasets, tfvars, creds del
+    destroy, rutas del cluster, .conf por caso— sigue leyendo `request.obs_*`
+    como siempre. Si el body trae credenciales (usar las de un tercero), ganan.
+    """
+    import maas_integrator as _mi
+    request.obs_access_key, request.obs_secret_key = _mi.resolve_obs_creds(
+        request.obs_access_key, request.obs_secret_key)
+    # El .conf puede venir enmascarado: lo emite así `/generate-pipeline` (preview
+    # del paso 4) y `/terraform/status` (redeploy tras un refresh). Los `.conf`
+    # que guardó el deploy anterior son la referencia para reponer TODO lo
+    # enmascarado, no solo las credenciales de OBS.
+    refs = _stored_confs()
+    if getattr(request, "pipeline_conf", ""):
+        request.pipeline_conf = _unmask_against(
+            request.pipeline_conf, request, refs)
+    for case in (getattr(request, "cases", None) or []):
+        if getattr(case, "filter_code", ""):
+            case.filter_code = _unmask_against(case.filter_code, request, refs)
+
+
+def _stored_confs() -> list[str]:
+    """`.conf` reales de las pipelines ya desplegadas del usuario actual."""
+    try:
+        registry = _read_pipelines_registry(_active_terraform_dir())
+    except Exception:
+        return []
+    return [c for c in (e.get("pipeline_conf") or "" for e in registry.values()) if c]
+
+
+def _unmask_against(conf: str, request, refs: list[str]) -> str:
+    """Desenmascara `conf` probando cada `.conf` guardado como referencia."""
+    if _CONF_MASK not in (conf or ""):
+        return conf or ""
+    for ref in refs:
+        out = unmask_conf(conf, request.obs_access_key, request.obs_secret_key, ref)
+        if _CONF_MASK not in out:
+            return out
+    return unmask_conf(conf, request.obs_access_key, request.obs_secret_key)
+
+
 @app.post(
     "/api/v1/terraform/deploy",
     response_model=TerraformDeployResponse,
@@ -2437,6 +2521,7 @@ def _do_terraform_sequence(
 )
 def terraform_deploy(request: TerraformDeployRequest) -> TerraformDeployResponse:
     """Deploy con Terraform, protegido por el lock de deploy por-usuario."""
+    _fill_obs_creds(request)
     with _deploy_guard():
         return _terraform_deploy_impl(request)
 
@@ -2668,6 +2753,68 @@ def _parse_tf_line(line: str, completed: set[str]) -> dict | None:
         if "Creating..." in line or "Modifying..." in line:
             return {"percent": start, "phase": label, "message": f"{label}…", "key": res_type, "done": False}
     return None
+
+
+# ── Credenciales en las respuestas ──────────────────────────────────────────
+# El `.conf` de Logstash lleva las credenciales embebidas (las necesita para
+# autenticarse contra OBS). Ese texto viajaba entero al navegador en
+# `/terraform/status`, así que el SK salía del servidor aunque el resto del
+# esfuerzo fuera evitarlo. Se enmascara al salir y se repone al volver: el token
+# es fijo, así que la operación es reversible con las credenciales de la cuenta.
+_CONF_MASK = "••••••••"
+_CONF_SECRET_KEYS = ("secret_access_key", "access_key_id", "jdbc_password",
+                     "ssl_truststore_password", "sasl_password", "password")
+_CONF_SECRET_RE = re.compile(
+    r'((?:' + "|".join(_CONF_SECRET_KEYS) + r')\s*=>\s*)(["\'])(?:(?!\2).)*\2')
+# Solo las de OBS: son las únicas que el servidor puede reponer SIEMPRE (salen de
+# la cuenta o del body). Se usa donde el `.conf` no tiene una versión guardada
+# contra la cual restaurar — el preview de una pipeline que todavía no se
+# desplegó. Enmascarar ahí la password de Kafka la perdería para siempre.
+_CONF_OBS_RE = re.compile(
+    r'((?:secret_access_key|access_key_id)\s*=>\s*)(["\'])(?:(?!\2).)*\2')
+
+
+def mask_conf(conf: str) -> str:
+    """Reemplaza TODOS los valores secretos del `.conf` por el token de enmascarado."""
+    if not conf:
+        return conf or ""
+    return _CONF_SECRET_RE.sub(lambda m: f'{m.group(1)}"{_CONF_MASK}"', conf)
+
+
+def mask_obs_creds(conf: str) -> str:
+    """Enmascara solo el AK/SK de OBS, dejando el resto del `.conf` intacto."""
+    if not conf:
+        return conf or ""
+    return _CONF_OBS_RE.sub(lambda m: f'{m.group(1)}"{_CONF_MASK}"', conf)
+
+
+def unmask_conf(conf: str, ak: str = "", sk: str = "", reference: str = "") -> str:
+    """Repone en el `.conf` los secretos que se enmascararon al enviarlo.
+
+    El front reenvía como `pipeline_conf` el mismo `.conf` que recibió (un
+    redeploy después de un refresh, o el preview del paso 4): sin reponer, se
+    desplegaría un pipeline con bullets por credenciales.
+
+    Dos caminos, en orden:
+
+    1. Con `reference` (el `.conf` REAL que guardó el deploy anterior): si
+       enmascararlo da exactamente lo que llegó, el front no lo editó y se
+       devuelve el original. Restaura TODO —también la password de Kafka o de
+       JDBC, que el servidor no puede reconstruir de otra fuente.
+    2. Sin referencia (o con el `.conf` editado a mano): se reponen las
+       credenciales de OBS, que son las que la cuenta sí conoce. Un secreto de
+       otro plugin quedaría enmascarado; por eso el `.conf` que el front puede
+       editar se enmascara solo cuando hay una referencia de dónde volver.
+    """
+    if not conf or _CONF_MASK not in conf:
+        return conf or ""
+    if reference and mask_conf(reference) == conf:
+        return reference
+    import maas_integrator as _mi
+    ak, sk = _mi.resolve_obs_creds(ak, sk)
+    out = conf.replace(f'access_key_id => "{_CONF_MASK}"', f'access_key_id => "{ak}"')
+    out = out.replace(f'secret_access_key => "{_CONF_MASK}"', f'secret_access_key => "{sk}"')
+    return out
 
 
 def _sse(data: dict) -> str:
@@ -2979,6 +3126,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
 
     El frontend lee el stream con ``fetch`` + ``response.body.getReader()``.
     """
+    _fill_obs_creds(request)
     terraform_dir = _active_terraform_dir()
     if not terraform_dir.exists():
         raise HTTPException(
@@ -3037,6 +3185,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
 def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
     """Igual que deploy-stream pero el apply corre en background: devuelve un
     `job_id` para engancharse al stream (sobrevive refresh/cierre del browser)."""
+    _fill_obs_creds(request)
     import maas_integrator as _mi
 
     terraform_dir = _active_terraform_dir()
@@ -5937,9 +6086,12 @@ def terraform_status() -> TerraformStatusResponse:
     ]
     # `pipeline_conf` (lo reusa el redeploy tras un refresh) = la última
     # pipeline registrada.
+    # Va enmascarado: este endpoint alimenta la vista del navegador y el `.conf`
+    # lleva las credenciales de OBS embebidas. Si el front lo reenvía en un
+    # redeploy, `_fill_obs_creds` las repone server-side (ver `unmask_conf`).
     last_conf = None
     if registry:
-        last_conf = list(registry.values())[-1].get("pipeline_conf") or None
+        last_conf = mask_conf(list(registry.values())[-1].get("pipeline_conf") or "") or None
 
     # dashboards_imported global = True si al menos una pipeline tiene dashboards.
     any_dashboards_imported = any(p.get("dashboards_imported", False) for p in pipelines)
@@ -5971,6 +6123,7 @@ def terraform_status() -> TerraformStatusResponse:
 )
 def terraform_destroy(request: TerraformDestroyRequest = Body(default_factory=TerraformDestroyRequest)) -> TerraformDestroyResponse:
     """Destroy con Terraform, protegido por el lock de deploy por-usuario."""
+    _fill_obs_creds(request)
     with _deploy_guard():
         audit.record("destroy", "terraform destroy")
         run = runs.start("destroy", detail="terraform destroy")
