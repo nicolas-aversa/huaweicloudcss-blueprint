@@ -360,3 +360,36 @@ def test_un_error_inesperado_no_tumba_la_funcion(monkeypatch):
     monkeypatch.setattr(panel, "_api", explota)
 
     assert "algo raro" in panel.handler({"action": "status"}, FakeContext())["error"]
+
+
+# ── El evento puede llegar como string ───────────────────────────────────────
+# FunctionGraph entrega el body ya parseado o como el JSON crudo según por dónde
+# entre. Con un string, `event.get(...)` no existe y la invocación directa se iba
+# por la rama del timer, devolviendo "parameters invalid." sin más pistas.
+def test_evento_como_string_json_se_parsea(api):
+    api.status = "ACTIVE"
+
+    r = panel.handler('{"action": "status"}', FakeContext())
+
+    assert r["ecs"] == "ACTIVE"
+
+
+def test_evento_como_bytes_tambien(api):
+    api.status = "ACTIVE"
+
+    assert panel.handler(b'{"action": "status"}', FakeContext())["ecs"] == "ACTIVE"
+
+
+def test_el_timer_tambien_tolera_el_string(api):
+    r = panel.handler('{"user_event": "%s,startup"}' % CFG["ecs_id"], FakeContext())
+
+    assert "initiated" in r
+    assert ("POST", "ecs-action") in api.verbos
+
+
+@pytest.mark.parametrize("basura", [None, [], 42, "no es json", '"solo un string"'])
+def test_eventos_sin_forma_no_rompen(basura, api):
+    """Cualquier cosa rara cae a la rama del timer y devuelve su string, sin
+    levantar una excepción que la consola muestre como un stacktrace."""
+    assert isinstance(panel.handler(basura, FakeContext()), str)
+    assert api.calls == []

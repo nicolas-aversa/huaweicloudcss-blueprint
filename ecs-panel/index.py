@@ -214,10 +214,30 @@ def run_action(accion, cfg, token, logger):
     return {"ok": True, "message": mensaje, "ecs": estado}
 
 
+def _as_dict(event):
+    """El evento como dict, venga como venga.
+
+    Según por dónde entre, FunctionGraph entrega el body ya parseado o como el
+    string JSON crudo. Con un string, `event.get("action")` no existe y la
+    invocación directa se iba por la rama del timer: el síntoma era un
+    `parameters invalid.` sin ninguna pista de la causa.
+    """
+    if isinstance(event, (str, bytes)):
+        try:
+            event = json.loads(event)
+        except (ValueError, TypeError):
+            return {}
+    return event if isinstance(event, dict) else {}
+
+
 # ── Handler ──────────────────────────────────────────────────────────────────
 def handler(event, context):
     logger = context.getLogger()
-    event = event or {}
+    # El evento crudo, como llega. Vale la pena el ruido: cada integración nueva
+    # (timer, invocación directa, un gateway) manda una forma distinta, y sin
+    # esto el síntoma es un "parameters invalid." sin ninguna pista de por qué.
+    logger.info("event (%s): %r", type(event).__name__, event)
+    event = _as_dict(event)
 
     # Dos formas de llegar, y cada una espera una respuesta distinta:
     #   action      → invocación directa desde el frente: dict JSON.
