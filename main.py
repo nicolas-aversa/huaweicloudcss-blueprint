@@ -99,6 +99,8 @@ import custom_cases  # noqa: E402
 # Historial persistido de ejecuciones (vista Actividad + cola de jobs del deploy).
 import runs  # noqa: E402
 
+import tfstate  # noqa: E402  (lectura del state de Terraform, local o en OBS)
+
 app.add_middleware(auth.AuthMiddleware)
 
 
@@ -712,6 +714,36 @@ def _canonical_output(name: str) -> str:
     return _OUTPUT_ALIASES.get(name, name)
 
 
+def _guard_state_bucket(sub: dict) -> None:
+    """Impide que Logstash lea a la raíz del bucket que guarda el terraform state.
+
+    El input s3 lista POR PREFIJO, así que un pipeline sobre `<slug>-logs/` nunca
+    ve `tfstate/` y los dos pueden convivir en el mismo bucket. Pero el prefijo
+    por default es `""`, y con `delete => true` (también default, recomendado por
+    la UG de CSS) un input sin prefijo listaría el bucket entero **y borraría lo
+    que lee** — incluido el estado de Terraform, que es lo único capaz de
+    destruir los clusters CSS.
+
+    Es un 400 y no un warning a propósito: el daño no se puede deshacer.
+    """
+    bucket = (sub.get("bucket") or "").strip()
+    if not bucket or (sub.get("prefix") or "").strip():
+        return
+    if bucket != tfstate.state_bucket():
+        return      # bucket ajeno (el del cliente): leer desde la raíz es válido
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "stage": "input_config",
+            "message": (
+                f"Sin prefijo, Logstash leería «{bucket}» entero y borraría lo que "
+                f"lee — incluido el estado de Terraform, que vive en "
+                f"«{tfstate.STATE_PREFIX}/» de ese mismo bucket. Indicá un prefijo "
+                f"(por ejemplo «mis-logs/»)."),
+        },
+    )
+
+
 def generate_input_block(raw: dict | None) -> str:
     """Genera el bloque `input { ... }`.
 
@@ -746,6 +778,7 @@ def generate_input_block(raw: dict | None) -> str:
             sub["access_key_id"] = ak
         if sk:
             sub["secret_access_key"] = sk
+        _guard_state_bucket(sub)
     cfg = model_cls(**sub)
     return f"input {{\n{gen_fn(cfg)}\n}}"
 
@@ -2406,13 +2439,13 @@ def _do_terraform_sequence(
     # variables por stdin. Es la cuenta del propio operador en su máquina.
     _write_destroy_creds(terraform_dir, request)
 
-    # ── terraform init (si el cache de providers no existe) ──────────
+    # ── terraform init (si el cache de providers no existe, o cambió el backend) ──
     # `-input=false`: nunca pedir variables por stdin (en un server colgaría).
-    providers_cache = terraform_dir / ".terraform" / "providers"
-    if not providers_cache.exists():
-        print("[terraform_sequence] cache de providers no existe, ejecutando init...")
+    init_extra = _backend_init_args(terraform_dir)
+    if init_extra is not None:
+        print("[terraform_sequence] ejecutando init %s..." % (init_extra or ""))
         init_result = subprocess.run(
-            ["terraform", "init", "-input=false"],
+            ["terraform", "init", "-input=false", *init_extra],
             cwd=terraform_dir,
             capture_output=True,
             text=True,
@@ -2466,6 +2499,24 @@ def _do_terraform_sequence(
                     "message": output_result.stderr},
         )
     return json.loads(output_result.stdout)
+
+
+def _backend_init_args(terraform_dir: Path) -> list[str] | None:
+    """Deja el workspace apuntando al backend correcto y decide si hay que hacer
+    `terraform init`.
+
+    Devuelve los flags extra para el init, o `None` si no hace falta inicializar.
+    Ojo con la condición: antes bastaba con "el cache de providers no existe",
+    pero un cambio de backend OBLIGA a inicializar aunque los providers ya estén
+    —si no, Terraform seguiría escribiendo el state donde estaba— y al revés, un
+    init con `-migrate-state` sobre un backend que no cambió falla.
+    """
+    ctx = auth.current_user_var.get()
+    clave = tfstate.state_key_for(ctx.user_id if ctx is not None else "")
+    necesita_init, extra = tfstate.prepare(terraform_dir, clave)
+    if necesita_init or not (terraform_dir / ".terraform" / "providers").exists():
+        return extra
+    return None
 
 
 def _fill_obs_creds(request) -> None:
@@ -2927,11 +2978,13 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         obs_future = obs_executor.submit(_do_obs_upload, request)
 
     # ── terraform init (si hace falta) ────────────────────────────────────
-    if not (terraform_dir / ".terraform" / "providers").exists():
+    init_extra = _backend_init_args(terraform_dir)
+    if init_extra is not None:
         yield _sse({"type": "progress", "percent": 3, "phase": "Terraform init",
-                    "message": "Descargando provider HuaweiCloud…"})
+                    "message": ("Migrando el estado a OBS…" if init_extra
+                                else "Descargando provider HuaweiCloud…")})
         init_result = subprocess.run(
-            ["terraform", "init", "-input=false"],
+            ["terraform", "init", "-input=false", *init_extra],
             cwd=terraform_dir, capture_output=True, text=True, timeout=180,
         )
         for ln in (init_result.stdout or "").splitlines():
@@ -3392,47 +3445,37 @@ def _read_css_resource_from_state(terraform_dir: Path, resource_type: str) -> di
     `resource_type` distingue OpenSearch (`huaweicloud_css_cluster`) de
     Logstash (`huaweicloud_css_logstash_cluster`).
     """
-    state_file = terraform_dir / "terraform.tfstate"
-    if not state_file.exists():
+    attrs = tfstate.resource_attributes(tfstate.read_state(terraform_dir), resource_type)
+    if not attrs:
         return {}
-    try:
-        st = json.loads(state_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-    for res in st.get("resources", []):
-        if res.get("type") == resource_type:
-            instances = res.get("instances") or []
-            if instances:
-                attrs = instances[0].get("attributes", {})
-                # Endpoint público (EIP) si el cluster tiene public_access activo.
-                # El bloque `public_access` es una lista; `public_ip` es la EIP
-                # (computed). Lo exponemos como "<ip>:9200" para que el import de
-                # dashboards lo alcance desde fuera de la VPC.
-                public_endpoint = ""
-                pa = attrs.get("public_access") or []
-                if isinstance(pa, list) and pa:
-                    public_ip = (pa[0] or {}).get("public_ip", "") or ""
-                    if public_ip:
-                        # El atributo ya viene como "IP:9200" (igual que `endpoint`).
-                        # Solo agregar el puerto si no lo trae (evita ":9200:9200").
-                        public_endpoint = public_ip if ":" in public_ip else f"{public_ip}:9200"
-                # Endpoint público de Kibana/Dashboards (servicio aparte del 9200):
-                # ahí vive la API de saved_objects para el import de dashboards.
-                # `kibana_public_access[0].public_ip` viene como "IP:puerto".
-                kibana_endpoint = ""
-                kpa = attrs.get("kibana_public_access") or []
-                if isinstance(kpa, list) and kpa:
-                    kibana_ip = (kpa[0] or {}).get("public_ip", "") or ""
-                    if kibana_ip:
-                        kibana_endpoint = kibana_ip if ":" in kibana_ip else f"{kibana_ip}:5601"
-                return {
-                    "id": attrs.get("id", "") or "",
-                    "endpoint": attrs.get("endpoint", "") or "",
-                    "public_endpoint": public_endpoint,
-                    "kibana_endpoint": kibana_endpoint,
-                    "name": attrs.get("name", "") or "",
-                }
-    return {}
+    # Endpoint público (EIP) si el cluster tiene public_access activo.
+    # El bloque `public_access` es una lista; `public_ip` es la EIP
+    # (computed). Lo exponemos como "<ip>:9200" para que el import de
+    # dashboards lo alcance desde fuera de la VPC.
+    public_endpoint = ""
+    pa = attrs.get("public_access") or []
+    if isinstance(pa, list) and pa:
+        public_ip = (pa[0] or {}).get("public_ip", "") or ""
+        if public_ip:
+            # El atributo ya viene como "IP:9200" (igual que `endpoint`).
+            # Solo agregar el puerto si no lo trae (evita ":9200:9200").
+            public_endpoint = public_ip if ":" in public_ip else f"{public_ip}:9200"
+    # Endpoint público de Kibana/Dashboards (servicio aparte del 9200):
+    # ahí vive la API de saved_objects para el import de dashboards.
+    # `kibana_public_access[0].public_ip` viene como "IP:puerto".
+    kibana_endpoint = ""
+    kpa = attrs.get("kibana_public_access") or []
+    if isinstance(kpa, list) and kpa:
+        kibana_ip = (kpa[0] or {}).get("public_ip", "") or ""
+        if kibana_ip:
+            kibana_endpoint = kibana_ip if ":" in kibana_ip else f"{kibana_ip}:5601"
+    return {
+        "id": attrs.get("id", "") or "",
+        "endpoint": attrs.get("endpoint", "") or "",
+        "public_endpoint": public_endpoint,
+        "kibana_endpoint": kibana_endpoint,
+        "name": attrs.get("name", "") or "",
+    }
 
 
 def _read_opensearch_cluster_from_state(terraform_dir: Path) -> dict[str, str]:
@@ -3462,19 +3505,9 @@ def _overlay_public_endpoints(cluster: dict[str, str], tf_outputs: dict[str, Any
 
 def _read_nat_eip_from_state(terraform_dir: Path) -> str:
     """Address de la EIP del NAT gateway desde el tfstate (huaweicloud_vpc_eip)."""
-    state_file = terraform_dir / "terraform.tfstate"
-    if not state_file.exists():
-        return ""
-    try:
-        st = json.loads(state_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ""
-    for res in st.get("resources", []):
-        if res.get("type") == "huaweicloud_vpc_eip":
-            inst = res.get("instances") or []
-            if inst:
-                return (inst[0].get("attributes", {}) or {}).get("address", "") or ""
-    return ""
+    attrs = tfstate.resource_attributes(
+        tfstate.read_state(terraform_dir), "huaweicloud_vpc_eip")
+    return attrs.get("address", "") or ""
 
 
 def _cluster_with_public_access(terraform_dir: Path) -> dict[str, str]:
@@ -3501,25 +3534,18 @@ _PLATFORM_MARKER_NAME = ".platform_deploy.json"
 
 def _read_https_enabled_from_state(terraform_dir: Path) -> bool:
     """Lee https_enabled del tfstate (huaweicloud_css_cluster). Default False."""
-    state_file = terraform_dir / "terraform.tfstate"
-    if not state_file.exists():
-        return False
-    try:
-        st = json.loads(state_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False
-    for res in st.get("resources", []):
-        if res.get("type") == "huaweicloud_css_cluster":
-            instances = res.get("instances") or []
-            if instances:
-                return bool(instances[0].get("attributes", {}).get("https_enabled", False))
-    return False
+    attrs = tfstate.resource_attributes(
+        tfstate.read_state(terraform_dir), "huaweicloud_css_cluster")
+    return bool(attrs.get("https_enabled", False))
 
 
 def _write_platform_marker(terraform_dir: Path, project_name: str) -> None:
     """Escribe el marcador de deploy. Best-effort: si falla, no rompe el
     deploy (el entorno igual quedó levantado); solo perdemos el tracking
     en la UI hasta el próximo deploy."""
+    # El apply acaba de cambiar el mundo: descartar el state cacheado, o el
+    # status mostraría hasta 5 s el entorno anterior (o ninguno).
+    tfstate.invalidate(terraform_dir)
     marker = terraform_dir / _PLATFORM_MARKER_NAME
     try:
         marker.write_text(
@@ -3559,6 +3585,9 @@ def _effective_project_name(request, terraform_dir: Path) -> str:
 
 def _remove_platform_marker(terraform_dir: Path) -> None:
     """Borra el marcador (best-effort). Lo llama el destroy al terminar."""
+    # Igual que en el apply: el destroy vació el state, y el cache no puede
+    # seguir reportando recursos que ya no existen.
+    tfstate.invalidate(terraform_dir)
     marker = terraform_dir / _PLATFORM_MARKER_NAME
     try:
         if marker.exists():
@@ -3584,8 +3613,7 @@ def _reap_expired_envs(ttl_hours: float) -> None:
         try:
             tdir = udir / "terraform"
             marker = tdir / _PLATFORM_MARKER_NAME
-            state = tdir / "terraform.tfstate"
-            if not marker.is_file() or not state.is_file() or state.stat().st_size < 200:
+            if not marker.is_file() or not tfstate.has_resources(tdir):
                 continue
             data = json.loads(marker.read_text(encoding="utf-8"))
             ts = data.get("deployed_at")
@@ -5994,25 +6022,26 @@ def terraform_status() -> TerraformStatusResponse:
     Si dice active=true, /destroy opera sobre un entorno real.
     """
     terraform_dir = _active_terraform_dir()
-    state_file = terraform_dir / "terraform.tfstate"
 
     marker = _read_platform_marker(terraform_dir)
-    has_state = state_file.exists() and state_file.stat().st_size >= 200
-    if marker is None or not has_state:
+    if marker is None or not tfstate.has_resources(terraform_dir):
         # Sin marcador (entorno no desplegado desde la app) o sin state real
         # → empty state. El operador solo ve lo que levantó con el wizard.
         return TerraformStatusResponse(active=False)
 
-    # Timestamp del deploy: preferimos el del marcador (momento exacto del
-    # deploy por la plataforma); si no es parseable, caemos al mtime del state.
+    # Timestamp del deploy: preferimos el del marcador (momento exacto del deploy
+    # por la plataforma); si no es parseable, caemos al mtime del propio marcador.
+    # Antes se usaba el del tfstate, que con backend remoto no existe como
+    # archivo — y el marcador es mejor fallback igual: se escribe al terminar el
+    # deploy, mientras que el state se toca en cualquier operación.
     deployed_at_str = marker.get("deployed_at")
     try:
         deployed_at = datetime.fromisoformat(deployed_at_str) if deployed_at_str else None
     except (TypeError, ValueError):
         deployed_at = None
     if deployed_at is None:
-        mtime = state_file.stat().st_mtime
-        deployed_at = datetime.fromtimestamp(mtime, tz=timezone.utc)
+        marker_file = terraform_dir / _PLATFORM_MARKER_NAME
+        deployed_at = datetime.fromtimestamp(marker_file.stat().st_mtime, tz=timezone.utc)
     seconds_ago = max(0, int(time.time() - deployed_at.timestamp()))
 
     # `terraform output -json` para reconstruir los botones del banner
@@ -6157,10 +6186,8 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
             detail="Directorio terraform/ no encontrado",
         )
 
-    # Guard noop: si el tfstate está vacío o tiene <200 bytes (struct base
-    # de Terraform sin recursos), no hay nada que destruir.
-    state_file = terraform_dir / "terraform.tfstate"
-    if not state_file.exists() or state_file.stat().st_size < 200:
+    # Guard noop: si el state no tiene recursos, no hay nada que destruir.
+    if not tfstate.has_resources(terraform_dir):
         print("[terraform_destroy] state vacío → noop, no se invoca terraform")
         return TerraformDestroyResponse(
             status="noop",

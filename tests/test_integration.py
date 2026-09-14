@@ -4732,3 +4732,78 @@ def test_deploy_body_creds_win_over_the_account(monkeypatch, tmp_path):
     _main._fill_obs_creds(req)
     assert 'secret_access_key => "SK-CLIENTE"' in req.pipeline_conf
     assert req.obs_secret_key == "SK-CLIENTE"
+
+
+# ── El state y los datasets comparten bucket ─────────────────────────────────
+# Conviven porque el input s3 lista POR PREFIJO: un pipeline sobre `<slug>-logs/`
+# nunca ve `tfstate/`. El agujero es el prefijo vacío: el default es "" y
+# `delete => true` también, así que un input sin prefijo listaría el bucket
+# entero y BORRARÍA lo que lee, incluido el estado de Terraform.
+
+
+def _s3_input(bucket, prefix):
+    return {"plugin_type": "obs",
+            "obs": {"bucket": bucket, "prefix": prefix, "region": "la-south-2",
+                    "endpoint": "https://obs.la-south-2.myhuaweicloud.com"}}
+
+
+@pytest.fixture
+def bucket_con_state(monkeypatch, tmp_path):
+    """El backend remoto activado sobre el bucket de demos."""
+    import maas_integrator as mi
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK", "SK")
+    monkeypatch.setattr(mi, "get_huawei_settings", lambda: {"demo_bucket": "demos-css"})
+    return "demos-css"
+
+
+def test_input_sin_prefijo_sobre_el_bucket_del_state_se_rechaza(bucket_con_state):
+    """Es un 400 y no un warning porque el daño no se puede deshacer: Logstash
+    borraría el terraform.tfstate y quedarías sin forma de destruir los clusters."""
+    with pytest.raises(main.HTTPException) as exc:
+        main.generate_input_block(_s3_input(bucket_con_state, ""))
+
+    assert exc.value.status_code == 400
+    msg = exc.value.detail["message"]
+    assert "tfstate/" in msg and "prefijo" in msg
+
+
+def test_input_con_prefijo_sobre_el_mismo_bucket_es_valido(bucket_con_state):
+    """El caso normal: los datasets viven en `<slug>-logs/` del mismo bucket."""
+    block = main.generate_input_block(_s3_input(bucket_con_state, "siem-logs/"))
+
+    assert 'prefix => "siem-logs/"' in block
+    assert 'bucket => "demos-css"' in block
+
+
+def test_el_prefijo_del_state_no_colisiona_con_los_datasets(bucket_con_state):
+    """`tfstate/` no puede ser el prefijo de ningún caso: los slugs terminan en
+    `-logs`, así que un `terraform state pull` y una ingesta nunca se cruzan."""
+    import tfstate as _tfs
+    assert not _tfs.STATE_PREFIX.endswith("-logs")
+    assert _tfs.state_key_for("u1").startswith(_tfs.STATE_PREFIX + "/")
+
+
+def test_un_bucket_ajeno_sin_prefijo_sigue_siendo_valido(bucket_con_state):
+    """El bucket del cliente en modo productivo suele tener los logs en la raíz.
+    El guard apunta SOLO al bucket que guarda el state."""
+    block = main.generate_input_block(_s3_input("bucket-del-cliente", ""))
+
+    assert 'bucket => "bucket-del-cliente"' in block
+
+
+def test_sin_bucket_configurado_no_hay_guard(monkeypatch, tmp_path):
+    """Sin bucket de demos el estado sigue local, así que no hay nada que
+    proteger y el guard no tiene por qué activarse."""
+    import maas_integrator as mi
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    mi.set_obs_creds("AK", "SK")
+    monkeypatch.setattr(mi, "get_huawei_settings", lambda: {"demo_bucket": ""})
+
+    assert 'bucket => "cualquiera"' in main.generate_input_block(_s3_input("cualquiera", ""))
+
+
+def test_el_guard_tolera_espacios_en_el_prefijo(bucket_con_state):
+    """Un prefijo de puros espacios es un prefijo vacío."""
+    with pytest.raises(main.HTTPException):
+        main.generate_input_block(_s3_input(bucket_con_state, "   "))

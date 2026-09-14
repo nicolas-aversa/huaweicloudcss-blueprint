@@ -310,15 +310,10 @@ def has_active_env(email: str) -> bool:
     Importa antes de borrarlo: su `terraform.tfstate` es lo ÚNICO que sabe cómo
     destruir esos clusters CSS, que siguen facturando. El workspace no se toca al
     borrar la cuenta justamente por esto."""
+    import tfstate as _tfstate
+
     uid = _user_id(email or "")
-    state = DATA_ROOT / "users" / uid / "terraform" / "terraform.tfstate"
-    try:
-        if not state.is_file():
-            return False
-        data = json.loads(state.read_text(encoding="utf-8"))
-        return bool(data.get("resources"))
-    except (OSError, json.JSONDecodeError):
-        return False
+    return _tfstate.has_resources(DATA_ROOT / "users" / uid / "terraform")
 
 
 def delete_user(email: str, actor: str | None = None) -> tuple[bool, str]:
@@ -484,6 +479,10 @@ _TF_SEED_IGNORE = shutil.ignore_patterns(
     "terraform.tfstate", "terraform.tfstate.*", "*.backup",
     "*.auto.tfvars.json", "pipeline.conf",
     ".platform_deploy.json", ".pipelines.json",
+    # `backend.tf` es POR USUARIO: lleva la clave del state de ese SA dentro del
+    # bucket. Copiarlo desde el template haría que todos compartan un mismo
+    # state y se destruyan la infra entre sí.
+    "backend.tf",
 )
 
 
@@ -499,6 +498,11 @@ def _ensure_workspace(ctx: "UserCtx") -> None:
     # del usuario, que ya tiene una copia del primer deploy. State, secretos y
     # registros viven en archivos ignorados/runtime → se preservan.
     for src in TERRAFORM_TEMPLATE.glob("*.tf"):
+        # `backend.tf` NO: es generado por-usuario (lleva la clave del state de
+        # ESE SA). Este refresh corre en cada request, así que copiarlo acá
+        # pisaría el de cada uno y todos terminarían compartiendo un state.
+        if src.name == "backend.tf":
+            continue
         shutil.copy2(src, ctx.terraform_dir / src.name)
     for src in TERRAFORM_TEMPLATE.glob("*.tfvars.example"):
         shutil.copy2(src, ctx.terraform_dir / src.name)

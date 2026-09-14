@@ -36,6 +36,9 @@ terraform/deploy.auto.tfvars.json
 terraform/pipeline.conf
 terraform/*.auto.tfvars.json
 terraform/.pipelines.json
+# Backend remoto del state (OBS): lo genera tfstate.prepare() por workspace y
+# lleva las AK/SK del bucket en claro, igual que destroy.auto.tfvars.json.
+terraform/backend.tf
 
 # Hosting multi-SA: datos por-usuario (settings + terraform + state + user store,
 # con credenciales) y el env con el secreto de sesión. NUNCA versionar.

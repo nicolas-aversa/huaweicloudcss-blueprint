@@ -116,6 +116,45 @@ fuente, con las credenciales **cifradas** (Fernet, misma clave que el settings f
 - Aun así, para el modo "cuenta del owner" conviene una **AK/SK dedicada y
   revocable** en vez de tu key principal.
 
+## Estado de Terraform: local u OBS
+
+El `terraform.tfstate` es **lo único que sabe qué clusters CSS existen y cómo
+destruirlos**. Por default vive como archivo en el workspace del usuario, dentro del
+volumen `appdata`: si se pierde ese disco, los clusters siguen facturando y la
+plataforma ya no puede darlos de baja.
+
+Por eso, **si el SA tiene cargado su bucket de demos, el state va ahí solo**: no hay nada
+que activar.
+
+- Vive en `tfstate/<usuario>/terraform.tfstate` **dentro del mismo bucket de demos**. Sin
+  bucket cargado (instalación recién levantada) se queda local.
+  **Un archivo por SA**: los entornos son independientes y nunca comparten state.
+- La **primera operación después de actualizar migra** el state que ya tenías
+  (`terraform init -migrate-state -force-copy`). No hay que hacer nada a mano — pero si
+  OBS no está alcanzable en ese momento, el deploy falla en vez de seguir con el state
+  local. Es a propósito: fallar ruidoso es mejor que escribir el state en un lugar que no
+  es el que creés.
+- **Convive con los datasets** porque el input s3 de Logstash lista *por prefijo*: un
+  pipeline sobre `<slug>-logs/` nunca ve `tfstate/`. La única forma de cruzarlos sería un
+  input **sin prefijo**, que listaría el bucket entero y —con `delete => true`, el default
+  recomendado por la UG de CSS— **borraría el state**. Por eso la plataforma rechaza con
+  un 400 cualquier input s3 sin prefijo sobre el bucket que guarda el state. Un bucket
+  ajeno (el del cliente, en modo productivo) sigue pudiendo leerse desde la raíz.
+- **Borrar el bucket de la configuración lo trae de vuelta** al disco, con la misma
+  migración en reverso. No queda a medias: dejar el backend sin el state sería la forma
+  más fácil de perderlo.
+- Usa las mismas AK/SK de OBS que el resto de la plataforma, y se conecta por el backend
+  `s3` de Terraform contra el endpoint de OBS ([documentado por
+  Huawei](https://github.com/huaweicloud/terraform-provider-huaweicloud/blob/master/docs/guides/remote-state-backend.md)).
+- Activá **versioning** en ese bucket: te da historial del state gratis.
+
+Sin bucket cargado, todo funciona exactamente como antes y no se paga ninguna ida a la
+red: la lectura del state sigue siendo la del archivo local.
+
+> **Locking**: se pinea Terraform 1.9.8, y el lock nativo sobre S3 (`use_lockfile`) llegó
+> en la 1.10. No hay lock remoto. En la práctica no hace falta: cada SA tiene su propio
+> state y la app ya serializa deploys por usuario.
+
 ## Estado
 
 - ✅ **Cola de jobs**: el deploy corre en background y sobrevive un refresh del browser.
@@ -125,8 +164,9 @@ fuente, con las credenciales **cifradas** (Fernet, misma clave que el settings f
   cliente como un caso más del grid, sin tocar código ni rebuildear la imagen.
 - ✅ **Actividad** (`runs.py`): historial persistido de cada ejecución, con la salida
   cruda de Terraform y un sub-paso por acción.
-- ⏳ **Estado de Terraform remoto en OBS**: pendiente (hoy el state vive en el volumen
-  persistente `appdata`; para durabilidad extra, respaldá ese volumen).
+- ✅ **Estado de Terraform remoto en OBS** (`tfstate.py`): opcional, por usuario. Se activa
+  cargando **Bucket para el estado de Terraform** en ⚙ Configuración → Infraestructura
+  General. Ver abajo.
 - ⚠️ **Input JDBC**: la config se genera bien pero el deploy falla — el plugin necesita el
   `.jar` del driver en el nodo y CSS no da acceso al filesystem. Ídem el truststore
   `.jks` de Kafka SASL_SSL. Ver `docs/guides/custom-builder-kafka-beats.md`.

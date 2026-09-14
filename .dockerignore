@@ -41,3 +41,4 @@ graphify-out/
 terraform/*.auto.tfvars.json
 terraform/.pipelines.json
 terraform/pipeline.conf
+terraform/backend.tf

@@ -1,0 +1,18 @@
+name = "ecs-panel"
+main = "worker.js"
+compat_date = "2025-01-01"
+
+# Los secretos NO van acá: se cargan con `wrangler secret put <NOMBRE>` y quedan
+# cifrados del lado de Cloudflare. Este archivo se versiona; ahí no puede haber
+# ni la contraseña del panel ni las credenciales de Huawei.
+#
+#   wrangler secret put PANEL_PASSWORD
+#   wrangler secret put PANEL_SECRET
+#   wrangler secret put HW_USER
+#   wrangler secret put HW_DOMAIN
+#   wrangler secret put HW_PASSWORD
+
+[vars]
+HW_REGION = "la-south-2"
+HW_PROJECT_ID = ""     # project id de esa región
+FUNCTION_URN = ""      # urn:fss:la-south-2:<project>:function:default:ecs-panel:latest
