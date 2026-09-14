@@ -217,10 +217,11 @@ def run_action(accion, cfg, token, logger):
 def _as_dict(event):
     """El evento como dict, venga como venga.
 
-    Según por dónde entre, FunctionGraph entrega el body ya parseado o como el
-    string JSON crudo. Con un string, `event.get("action")` no existe y la
-    invocación directa se iba por la rama del timer: el síntoma era un
-    `parameters invalid.` sin ninguna pista de la causa.
+    Defensivo, no correctivo: la documentación dice que el body llega parseado y
+    en la práctica así fue. Pero `event.get(...)` sobre cualquier otra cosa tira
+    un AttributeError que la consola muestra como stacktrace, y este handler
+    atiende tres orígenes distintos (timer, invocación directa, y un gateway si
+    algún día lo hay). Normalizar cuesta cuatro líneas.
     """
     if isinstance(event, (str, bytes)):
         try:
@@ -233,9 +234,10 @@ def _as_dict(event):
 # ── Handler ──────────────────────────────────────────────────────────────────
 def handler(event, context):
     logger = context.getLogger()
-    # El evento crudo, como llega. Vale la pena el ruido: cada integración nueva
-    # (timer, invocación directa, un gateway) manda una forma distinta, y sin
-    # esto el síntoma es un "parameters invalid." sin ninguna pista de por qué.
+    # El evento crudo, como llega. Vale el ruido: sin esto, una URN mal apuntada
+    # se manifestó como un "parameters invalid." —el string que devolvía la
+    # función VIEJA— y costó varias hipótesis equivocadas darse cuenta de que lo
+    # que respondía no era este código.
     logger.info("event (%s): %r", type(event).__name__, event)
     event = _as_dict(event)
 
