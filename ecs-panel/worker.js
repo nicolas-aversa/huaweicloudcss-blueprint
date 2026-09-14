@@ -231,8 +231,12 @@ function html(cuerpo, status = 200, extra = {}) {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-      // La página no carga nada de afuera: todo va inline.
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+      // La página no carga nada de afuera: todo va inline. `connect-src` y
+      // `form-action` tienen que estar SÍ O SÍ: con `default-src 'none'` solo,
+      // el navegador bloquea el propio fetch de la página hacia `?a=status`
+      // (connect-src cae al default) y el panel queda en "Consultando…".
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; " +
+        "script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'",
       "Referrer-Policy": "no-referrer",
       ...extra,
     },

@@ -113,6 +113,16 @@ for (let i = 0; i < 4; i++) await pedir({ qs: "?a=status", cookie });
 const tokens = llamadas.filter(l => l.url.includes("/v3/auth/tokens")).length;
 check("un solo pedido de token para 4 llamadas", tokens === 0 || tokens === 1, `fueron ${tokens}`);
 
+console.log("── la CSP no puede bloquear a la propia página ──");
+// Con `default-src 'none'` a secas, el navegador bloquea el fetch de la página
+// hacia ?a=status y el panel queda colgado en "Consultando…". Esto no se ve sin
+// un browser de verdad, así que al menos se fija que las directivas estén.
+r = await pedir({ cookie });
+const csp = r.headers.get("Content-Security-Policy") || "";
+check("declara connect-src (el fetch de status)", /connect-src\s+'self'/.test(csp), csp);
+check("declara form-action (el POST del login)", /form-action\s+'self'/.test(csp), csp);
+check("sigue sin permitir recursos externos", csp.includes("default-src 'none'"), csp);
+
 console.log("── la página no filtra secretos ──");
 const panelHtml = await (await pedir({ cookie })).text();
 const loginHtml = await (await pedir()).text();
