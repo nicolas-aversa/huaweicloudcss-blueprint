@@ -1043,9 +1043,6 @@
     .settings-field .form-input { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-base); }
     /* Acción de la card, al pie: el botón primero y el estado a continuación. */
     .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    /* La acción que opera sobre un campo puntual se alinea con la columna de ese
-       campo (el bucket, en la derecha del grid de dos columnas). */
-    .settings-actions__aside { margin-left: auto; }
     /* Los botones se re-escalan a esta vista: con labels de 12px e inputs de
        13.5px, el .btn base (11/22, 14px) se ve desproporcionado. */
     .settings-actions .btn{ padding: var(--sp-2) 18px; font-size: var(--fs-base); }
@@ -1374,11 +1371,19 @@
     /* Eyebrow neutro: en el Home el color queda reservado para el CTA. */
     .eyebrow--muted { color: var(--text-muted); }
     /* Verticales a lo ancho: cada grupo es una columna (header arriba, cards
-       apiladas abajo). Todos los grupos en una sola línea, sin wrap. */
+       apiladas abajo).
+       Grilla con `auto-fit` en vez de un flex `nowrap` con columnas `1 1 0`: así
+       cada columna tiene un ancho MÍNIMO y, si no entran todas, bajan a una
+       segunda fila en vez de comprimirse. Con el flex anterior, al aparecer el
+       grupo "Mis casos" los siete grupos se repartían 1/7 cada uno y los nombres
+       se cortaban a mitad de palabra ("Transaccio", "FortiAnalyz"). El número de
+       grupos no es fijo —depende de qué casos existan—, así que la regla tiene
+       que aguantar cualquier cantidad. */
     .example-verticals {
-      display: flex; flex-wrap: nowrap; gap: 8px; align-items: flex-start; margin: 20px 0 2px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px 8px; align-items: start; margin: 20px 0 2px;
     }
-    .example-group { display: inline-flex; flex-direction: column; gap: 5px; flex: 1 1 0; min-width: 0; }
+    .example-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
     .example-group__head {
       display: flex; align-items: center; gap: 4px; padding-bottom: 3px;
       border-bottom: 1px solid var(--border-subtle);
@@ -1443,6 +1448,9 @@
     .example-card__label {
       font-size: var(--fs-xs); font-weight: 600; color: var(--text-primary); line-height: 1.25; min-width: 0;
       display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      /* Una palabra más ancha que la card se parte en vez de quedar tajeada:
+         "Transacciones" aparecía como "Transaccio". */
+      overflow-wrap: anywhere;
     }
     .example-card__preview {
       font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted);
@@ -2320,7 +2328,7 @@
               <div class="guide-block__head">
                 <span class="guide-block__num">2</span>
                 <h2 class="guide-block__title">Desplegar</h2>
-                <span class="guide-block__once">~10 min la primera vez</span>
+                <span class="guide-block__once">~10 min</span>
               </div>
               <ol class="guide-list">
                 <li><strong>Pipeline</strong> → elegí uno o más datasets → <strong>Desplegar</strong>. Podés cerrar el browser: sigue solo y se reengancha.</li>
@@ -2431,34 +2439,27 @@
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
                   <div class="settings-card__title">Credenciales de la cuenta</div>
-                  <div class="settings-card__hint">Las claves de OBS y de MaaS se guardan cifradas. El bucket es el de tu cuenta: ahí viven los datasets de demo y el estado de Terraform. <strong>Preparar bucket</strong> sube los datasets.</div>
+                  <div class="settings-card__hint">Las claves se guardan cifradas. <strong>Preparar bucket</strong> sube los datasets de demo al bucket de tu cuenta.</div>
                 </div>
               </div>
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field">
-                  <label class="form-label" for="settings-maas-key">MaaS API Key</label>
-                  <div style="display:flex; gap:8px; align-items:flex-start;">
-                    <input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••" style="flex:1; min-width:0;">
-                    <!-- Sin esto, la única forma de saber si la key servía era subir
-                         un log y esperar: si estaba mal, el error llegaba como un
-                         volcado del JSON de ModelArts en medio del wizard. -->
-                    <button class="btn btn-secondary btn-sm" type="button" id="settings-maas-test"
-                            title="Llama a MaaS con esta key y te dice si funciona">Probar</button>
-                  </div>
-                  <div id="settings-maas-test-status" style="font-size:var(--fs-sm); margin-top:6px;"></div>
-                </div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss"></div>
               </div>
-              <!-- Las dos acciones en la misma fila: metido dentro del campo del
-                   bucket, el botón estiraba esa celda del grid y empujaba Guardar
-                   más abajo que en la card de al lado. -->
+              <!-- Las tres acciones juntas y en orden de uso, con el estado al final
+                   de la fila. El botón "Probar" estuvo un rato metido DENTRO de la
+                   celda de la MaaS key: le comía ancho al input y ese campo quedaba
+                   más angosto que el del bucket, rompiendo la grilla de dos columnas. -->
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
+                <button class="btn btn-secondary" type="button" id="settings-maas-test"
+                        title="Llama a MaaS con la API key y te dice si funciona">Probar la MaaS key</button>
+                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
                 <span id="settings-obs-status" class="settings-status"></span>
-                <button class="btn btn-secondary settings-actions__aside" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
               </div>
+              <div id="settings-maas-test-status" style="font-size:var(--fs-sm); margin-top:8px;"></div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
