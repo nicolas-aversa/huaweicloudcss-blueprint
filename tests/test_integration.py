@@ -468,63 +468,9 @@ def test_json_pretty_printed_multiline_parsed():
     _assert_nested_json_parsed(result)
 
 
-# --- Validadores de shape (LLM hardening) ----------------------------------
-#
-# `generate_synthetic_shapes` aplica dos filtros al output del LLM antes de
-# devolverlo: `_clean_shape` (strip de markdown/comentarios/numbered-lists)
-# y `_shape_matches_format` (descarta alucinaciones de formato). Estos
-# tests ejercitan los validadores aislados, sin necesidad de API key.
-
-
-# --- Defensive: generate_synthetic_shapes nunca debe raise ----------------
-#
-# Por contrato la función es best-effort. Cualquier error del SDK del LLM,
-# IndexError por choices vacío, JSON malformado, etc. debe devolver None
-# sin propagar — sino el handler /terraform/deploy explota con 500.
-
-
-def test_generate_synthetic_shapes_returns_none_on_empty_choices(monkeypatch):
-    """MaaS devuelve choices=[] (puede pasar por content-filter o length cutoff).
-    Antes esto disparaba IndexError fuera de cualquier try → 500 en el handler."""
-    from maas_integrator import generate_synthetic_shapes
-    import maas_integrator as _m
-
-    class _EmptyChoicesResponse:
-        choices = []
-
-    class _StubClient:
-        class chat:
-            class completions:
-                @staticmethod
-                def create(**kwargs):
-                    return _EmptyChoicesResponse()
-
-    monkeypatch.setattr(_m, "_build_client", lambda: _StubClient())
-    # Asegurar que no se valida API key real.
-    monkeypatch.setenv("MAAS_API_KEY", "fake-test-key")
-
-    result = generate_synthetic_shapes("any sample log", n_shapes=5)
-    assert result is None  # no raise, devuelve None
-
-
-def test_generate_synthetic_shapes_returns_none_on_unexpected_exception(monkeypatch):
-    """El SDK puede tirar excepciones que no son OpenAIError (httpx, validation,
-    runtime). El outer try/except Exception las atrapa todas."""
-    from maas_integrator import generate_synthetic_shapes
-    import maas_integrator as _m
-
-    class _BoomClient:
-        class chat:
-            class completions:
-                @staticmethod
-                def create(**kwargs):
-                    raise RuntimeError("simulación de SDK error no-OpenAIError")
-
-    monkeypatch.setattr(_m, "_build_client", lambda: _BoomClient())
-    monkeypatch.setenv("MAAS_API_KEY", "fake-test-key")
-
-    result = generate_synthetic_shapes("any sample log", n_shapes=5)
-    assert result is None  # no raise
+# Los dos tests de `generate_synthetic_shapes` (que devolvía None en vez de
+# propagar errores del SDK) se fueron con la función: los datos sintéticos ya no
+# se generan, el upload sube el dataset bundleado o el archivo importado.
 
 
 # --- Prefix-alias matching + race fix + date+time (3 fixes genéricos) -----
@@ -3009,7 +2955,6 @@ def test_obs_upload_handles_multiple_cases(monkeypatch, tmp_path):
         obs_secret_key="sk",
         obs_bucket="bucket",
         obs_endpoint="https://obs.example.com",
-        synthetic_count=0,
         cases=cases,
     )
 
@@ -3045,8 +2990,7 @@ def test_obs_upload_cleans_prefix_before_uploading(monkeypatch):
 
     request = _main.TerraformDeployRequest(
         pipeline_conf="filter {}", obs_access_key="ak", obs_secret_key="sk",
-        obs_bucket="bucket", obs_endpoint="https://obs.example.com", synthetic_count=0,
-        cases=[
+        obs_bucket="bucket", obs_endpoint="https://obs.example.com",        cases=[
             _main.PipelineCase(slug="firewall", raw_log="x", filter_code="f", fields=[],
                                index_name="firewall-*", obs_prefix="logs/firewall/"),
             _main.PipelineCase(slug="cts", raw_log="x", filter_code="f", fields=[],
@@ -3088,13 +3032,11 @@ def test_bundled_dataset_reads_and_strips_comments():
 @requires_datasets
 def test_obs_upload_uses_dataset_and_skips_synthetic_for_predefined(monkeypatch):
     """Para un caso predefinido (firewall), `_do_obs_upload` sube el dataset
-    bundleado tal cual y NO llama a la generación sintética, aunque
-    `synthetic_count > 0`."""
+    bundleado tal cual. La generación sintética que este test vigilaba ya no
+    existe; lo que queda verificado es que el dataset sube verbatim."""
     import main as _main
-    import maas_integrator as _maas
 
     uploaded = []
-    synth_called = {"n": 0}
 
     class FakeOBS:
         def __init__(self, **kwargs):
@@ -3106,18 +3048,13 @@ def test_obs_upload_uses_dataset_and_skips_synthetic_for_predefined(monkeypatch)
         def close(self):
             pass
 
-    def _boom_synth(*a, **k):
-        synth_called["n"] += 1
-        return "SYNTHETIC"
 
     monkeypatch.setattr("obs_client.OBSClient", FakeOBS)
-    monkeypatch.setattr(_maas, "generate_synthetic_shapes", _boom_synth)
 
     request = _main.TerraformDeployRequest(
         pipeline_conf="filter {}",
         obs_access_key="ak", obs_secret_key="sk", obs_bucket="bucket",
         obs_endpoint="https://obs.example.com",
-        synthetic_count=200,
         cases=[_main.PipelineCase(
             slug="firewall", raw_log="ignored", filter_code="f",
             fields=[], index_name="firewall", obs_prefix="logs/firewall/",
@@ -3126,7 +3063,6 @@ def test_obs_upload_uses_dataset_and_skips_synthetic_for_predefined(monkeypatch)
 
     _main._do_obs_upload(request)
 
-    assert synth_called["n"] == 0
     assert len(uploaded) == 1
     assert "dataset_" in uploaded[0]["key"]
     assert uploaded[0]["data"] == _main._bundled_dataset("firewall")
@@ -3137,10 +3073,8 @@ def test_obs_upload_custom_single_no_synthetic_raw_fallback(monkeypatch):
     sintéticos. Cae al fallback defensivo (sube la única línea `raw_log` como
     `sample_log_*`) y NO llama a los generadores sintéticos."""
     import main as _main
-    import maas_integrator as _maas
 
     uploaded = []
-    synth_called = {"n": 0}
 
     class FakeOBS:
         def __init__(self, **kwargs):
@@ -3152,12 +3086,8 @@ def test_obs_upload_custom_single_no_synthetic_raw_fallback(monkeypatch):
         def close(self):
             pass
 
-    def _spy_synth(*a, **k):
-        synth_called["n"] += 1
-        return "SYNTHETIC-BATCH"
 
     monkeypatch.setattr("obs_client.OBSClient", FakeOBS)
-    monkeypatch.setattr(_maas, "generate_synthetic_shapes", _spy_synth)
 
     request = _main.TerraformDeployRequest(
         pipeline_conf="filter {}",
@@ -3165,12 +3095,10 @@ def test_obs_upload_custom_single_no_synthetic_raw_fallback(monkeypatch):
         obs_endpoint="https://obs.example.com",
         pipeline_slug="logs",
         raw_log='{"foo":"bar"}',
-        synthetic_count=200,
     )
 
     _main._do_obs_upload(request)
 
-    assert synth_called["n"] == 0
     assert len(uploaded) == 1
     assert "sample_log_" in uploaded[0]["key"]
     assert uploaded[0]["data"] == '{"foo":"bar"}'
@@ -3193,10 +3121,8 @@ def test_obs_upload_imported_file_verbatim_single(monkeypatch):
     """Custom single con `log_file_content`: se sube TAL CUAL (verbatim) como
     `dataset_*` y NO se invocan los generadores sintéticos."""
     import main as _main
-    import maas_integrator as _maas
 
     uploaded = []
-    synth_called = {"n": 0}
 
     class FakeOBS:
         def __init__(self, **kwargs):
@@ -3208,12 +3134,7 @@ def test_obs_upload_imported_file_verbatim_single(monkeypatch):
         def close(self):
             pass
 
-    def _boom(*a, **k):
-        synth_called["n"] += 1
-        raise AssertionError("no debería generar sintéticos en custom")
-
     monkeypatch.setattr("obs_client.OBSClient", FakeOBS)
-    monkeypatch.setattr(_maas, "generate_synthetic_shapes", _boom)
 
     request = _main.TerraformDeployRequest(
         pipeline_conf="filter {}",
@@ -3222,13 +3143,11 @@ def test_obs_upload_imported_file_verbatim_single(monkeypatch):
         pipeline_slug="logs",
         raw_log="L1",
         log_file_content="L1\nL2\nL3",
-        synthetic_count=200,
         obs_prefix="logs-logs/",
     )
 
     _main._do_obs_upload(request)
 
-    assert synth_called["n"] == 0
     assert len(uploaded) == 1
     assert "dataset_" in uploaded[0]["key"]
     assert uploaded[0]["data"] == "L1\nL2\nL3"  # verbatim
@@ -3238,7 +3157,6 @@ def test_obs_upload_imported_file_verbatim_multicase(monkeypatch):
     """Custom como caso (multi): `log_file_content` se sube verbatim bajo su
     prefijo, `delete_prefix` se llamó, y sin sintéticos."""
     import main as _main
-    import maas_integrator as _maas
 
     uploaded = []
     cleaned = []
@@ -3258,13 +3176,11 @@ def test_obs_upload_imported_file_verbatim_multicase(monkeypatch):
         raise AssertionError("no debería generar sintéticos")
 
     monkeypatch.setattr("obs_client.OBSClient", FakeOBS)
-    monkeypatch.setattr(_maas, "generate_synthetic_shapes", _boom)
 
     request = _main.TerraformDeployRequest(
         pipeline_conf="filter {}",
         obs_access_key="ak", obs_secret_key="sk", obs_bucket="bucket",
         obs_endpoint="https://obs.example.com",
-        synthetic_count=200,
         cases=[_main.PipelineCase(
             slug="logs", raw_log="", filter_code="f", fields=[],
             index_name="logs-%{+YYYY.MM}", obs_prefix="logs-logs/",
@@ -3304,7 +3220,6 @@ def test_obs_upload_bundled_wins_over_imported_file(monkeypatch):
         pipeline_conf="filter {}",
         obs_access_key="ak", obs_secret_key="sk", obs_bucket="bucket",
         obs_endpoint="https://obs.example.com",
-        synthetic_count=0,
         cases=[_main.PipelineCase(
             slug="firewall", raw_log="x", filter_code="f", fields=[],
             index_name="firewall-*", obs_prefix="firewall-logs/",
@@ -3342,7 +3257,6 @@ def test_obs_upload_skips_case_with_no_raw_and_no_file(monkeypatch):
         pipeline_conf="filter {}",
         obs_access_key="ak", obs_secret_key="sk", obs_bucket="bucket",
         obs_endpoint="https://obs.example.com",
-        synthetic_count=0,
         cases=[
             _main.PipelineCase(slug="vacio", raw_log="", filter_code="f", fields=[],
                                index_name="vacio-*", obs_prefix="vacio-logs/"),
@@ -3382,7 +3296,6 @@ def test_obs_upload_skips_read_existing_case_in_multi(monkeypatch):
         pipeline_conf="filter {}",
         obs_access_key="ak", obs_secret_key="sk", obs_bucket="mi-tracker-cts",
         obs_endpoint="https://obs.example.com",
-        synthetic_count=0,
         cases=[
             _main.PipelineCase(
                 slug="huawei-cts", raw_log='{"trace_id":"x"}', filter_code="f",

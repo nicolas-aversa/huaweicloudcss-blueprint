@@ -376,38 +376,6 @@ class PostgreSQLOutputConfig(BaseModel):
     idle_flush_time: int = 1
 
 
-# --- Discriminadores por nodo ----------------------------------------------
-class InputNodeConfig(BaseModel):
-    """Config genérica de nodo Input: plugin_type + sub-config por tipo."""
-
-    plugin_type: str = "s3"
-    s3: S3InputConfig | None = None
-    beats: BeatsInputConfig | None = None
-    file: FileInputConfig | None = None
-    kafka: KafkaInputConfig | None = None
-    http: HttpInputConfig | None = None
-    jdbc: JdbcInputConfig | None = None
-
-
-class OutputNodeConfig(BaseModel):
-    """Config genérica de nodo Output: plugin_type + sub-config por tipo."""
-
-    plugin_type: str = "elasticsearch"
-    elasticsearch: ElasticsearchOutputConfig | None = None
-    s3: S3OutputConfig | None = None
-    stdout: StdoutOutputConfig | None = None
-    kafka: KafkaOutputConfig | None = None
-    mongodb: MongoDBOutputConfig | None = None
-    postgresql: PostgreSQLOutputConfig | None = None
-
-
-# Legacy multi-output (mantenido por compatibilidad con clientes/tests viejos
-# que envían `{"elasticsearch": {...}, "s3": {...}}` sin plugin_type).
-class OutputConfig(BaseModel):
-    elasticsearch: ElasticsearchOutputConfig | None = None
-    s3: S3OutputConfig | None = None
-
-
 # ===========================================================================
 # Generadores de bloques Logstash (uno por plugin)
 # ===========================================================================
@@ -1947,8 +1915,6 @@ class TerraformDeployRequest(BaseModel):
     namespace: str = Field(default="data", description="Namespace de los campos (para el index template).")
     industry_label: str = Field(default="", description="Etiqueta de la industria confirmada en el paso 1 (despliegue productivo). Se persiste en el registro y nombra la fuente en el chatbot.")
     log_file_content: str = Field(default="", description="Contenido del archivo importado (custom single-case). Se sube tal cual a OBS, sin sintéticos.")
-    synthetic_count: int = Field(default=200, ge=0, le=5000)
-    synthetic_window_hours: int = Field(default=24, ge=1, le=168)
     start_ingestion: bool = Field(default=False)
     cases: list[PipelineCase] = Field(default_factory=list, description="Casos múltiples para deploy en paralelo")
     fresh_deploy: bool = Field(default=False, description="Si True, limpia el registro de pipelines existentes antes de agregar los nuevos (deploy desde wizard). Si False, mergea con pipelines existentes (Nuevo pipeline).")

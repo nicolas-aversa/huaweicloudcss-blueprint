@@ -4985,10 +4985,6 @@
 
     function collectDeployBody(startIngestion) {
       const projectName = document.getElementById('deploy-project-name')?.value?.trim() || 'log-analytics';
-      // El camino custom sube el archivo tal cual; los sintéticos ya no se
-      // generan. Se mandan los defaults que el backend espera en el modelo.
-      const syntheticCount = 200;
-      const syntheticWindow = 72;
       const inputCfg = collectInputConfig();
       const outputCfg = collectOutputConfig(state.outputPlugins[0]);
       const indexName = document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}';
@@ -5015,8 +5011,6 @@
         // Industria confirmada en el paso 1 (productivo): nombra la fuente del
         // cliente en el chatbot ("Retail / E-commerce" en vez del slug crudo).
         industry_label: (state.matchedIndustry && SLUG_LABELS[state.matchedIndustry]) || '',
-        synthetic_count: state.readExistingMode ? 0 : syntheticCount,
-        synthetic_window_hours: syntheticWindow,
         read_existing_bucket: !!state.readExistingMode,
         document_id: state.dedupId || '',
         start_ingestion: startIngestion,

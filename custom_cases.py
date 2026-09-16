@@ -48,11 +48,6 @@ _SLUG_MIN, _SLUG_MAX = 3, 40
 _RESERVED = {"custom", "logs", "mis-casos"}
 _MAX_LOG_BYTES = 50 * 1024 * 1024  # mismo cap que la drop-zone del front
 
-# Tipos de caso:
-#   dataset -> trae su `.log`, se sube a OBS y se puede replayear (repetible).
-#   live    -> los datos llegan de una fuente del cliente ya levantada
-#              (Kafka/Beats/JDBC/OBS): no guarda dataset, solo el input_config.
-CASE_TYPES = ("dataset", "live")
 
 # Plugins de entrada que el backend sabe emitir (`main.generate_input_block`).
 INPUT_PLUGINS = ("obs", "s3", "kafka", "beats", "jdbc", "http", "file")

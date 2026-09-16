@@ -99,16 +99,6 @@ def _load_spec() -> dict[str, str]:
     return spec
 
 
-def is_ecs_field(path: str) -> bool:
-    """``True`` si ``path`` está en la spec ECS."""
-    return normalize_path(path) in _load_spec()
-
-
-def get_ecs_type(path: str) -> str | None:
-    """Tipo declarado por ECS para ese field, o ``None`` si no existe."""
-    return _load_spec().get(normalize_path(path))
-
-
 def classify_field(path: str) -> dict:
     """Resumen completo para que el endpoint enriquezca cada FieldMapping.
 

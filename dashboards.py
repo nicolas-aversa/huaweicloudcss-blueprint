@@ -4,16 +4,15 @@ dashboards.py
 
 Generador de dashboards baseline por caso de uso para OpenSearch Dashboards.
 
-Dos formatos de spec conviven:
-
-- **Rich** (`"panels"`): dashboards profesionales modelados en los *sample data*
-  de OpenSearch (eCommerce / Flights / [Logs] Web Traffic), mapeados a los campos
-  REALES de cada tipo.
-- **Legacy** (`"visualizations"`): el generador simple original.
+Un solo formato de spec: `"panels"`, dashboards modelados en los *sample data* de
+OpenSearch (eCommerce / Flights / [Logs] Web Traffic) y mapeados a los campos
+REALES de cada tipo. Hubo un segundo formato (`"visualizations"`) con su propio
+builder, pero ningún spec lo usaba desde hacía tiempo: la rama era inalcanzable y
+se fue con su cadena de funciones.
 
 Los specs de cada vertical salen del registro declarativo `verticals/`
-(`_verticals.dashboard_specs()`); acá solo queda `_LEGACY_DASHBOARD_SPECS` con
-los que NO son un vertical de demo (hoy `firewall`, naming ECS previo al SIEM).
+(`_verticals.dashboard_specs()`); acá solo queda `_SPECS_SIN_VERTICAL` con los que
+NO tienen un vertical asociado (hoy `firewall`, naming ECS previo al SIEM).
 
 `build_ndjson(slug)` arma los saved objects (visState/searchSourceJSON/panelsJSON
 + references) y emite NDJSON listo para importar vía
@@ -491,9 +490,14 @@ def _build_rich_ndjson(slug: str, spec: dict[str, Any]) -> str:
 # Layout: grilla de 48 columnas. Fila de métricas arriba (h=8), serie temporal
 # ancha, breakdowns abajo. Modelado en los sample dashboards de OpenSearch.
 
-# Legacy: dashboards que NO pertenecen a un vertical de demo (ej. `firewall`,
-# naming ECS previo al SIEM). Los de los verticales se leen del registro.
-_LEGACY_DASHBOARD_SPECS: dict[str, dict[str, Any]] = {
+
+# Specs de dashboard que NO tienen un vertical en `verticals/`. Hoy solo
+# `firewall`: el slug no esta en el registro, asi que ninguna card del grid lo
+# puede seleccionar y el producto nunca importa este dashboard. Se conserva
+# porque es un spec rich completo y varios tests lo usan como fixture canonica;
+# vivia en un dict llamado `_LEGACY_DASHBOARD_SPECS`, nombre que enganaba: el
+# formato legacy ("visualizations") era otra cosa, y ese si estaba muerto.
+_SPECS_SIN_VERTICAL: dict[str, dict[str, Any]] = {
     "firewall": {
         "title": "Eventos de Firewall",
         "index_fields": [
@@ -541,92 +545,26 @@ _LEGACY_DASHBOARD_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
+
 _DASHBOARD_SPECS: dict[str, dict[str, Any]] = {
-    **_LEGACY_DASHBOARD_SPECS,
+    **_SPECS_SIN_VERTICAL,
     **_verticals.dashboard_specs(),
 }
-
-
-# ── Builder legacy (formato "visualizations") ────────────────────────────────
-
-def _generate_id() -> str:
-    return str(uuid.uuid4())
-
-
-def _legacy_index_pattern(slug: str) -> dict[str, Any]:
-    return {
-        "type": "index-pattern", "id": f"{slug}-*",
-        "attributes": {"title": f"{slug}-*", "timeFieldName": "@timestamp", "fields": json.dumps([])},
-        "references": [],
-    }
-
-
-def _legacy_vis_state(vis_type: str, field: str | None) -> dict[str, Any]:
-    if vis_type == "histogram":
-        return {
-            "type": "histogram",
-            "aggs": [
-                {"id": "1", "enabled": True, "type": "count", "schema": "metric", "params": {}},
-                {"id": "2", "enabled": True, "type": "date_histogram", "schema": "segment",
-                 "params": {"field": "@timestamp", "interval": "auto", "drop_partials": False,
-                            "min_doc_count": 1, "extended_bounds": {}}},
-            ],
-            "params": {"type": "histogram", "addLegend": True, "addTooltip": True,
-                       "legendPosition": "right", "grid": {"categoryLines": False},
-                       "categoryAxes": _category_axis(), "valueAxes": _value_axis()},
-        }
-    if vis_type == "pie":
-        return {
-            "type": "pie",
-            "aggs": [_metric_agg("count", None, None), _terms_agg("2", field or "", "segment", 10)],
-            "params": {"type": "pie", "addLegend": True, "addTooltip": True,
-                       "legendPosition": "right", "isDonut": True,
-                       "labels": {"show": False, "values": True, "last_level": True}},
-        }
-    if vis_type == "metric":
-        return {
-            "type": "metric",
-            "aggs": [_metric_agg("avg", field, None)],
-            "params": {"addLegend": False, "addTooltip": True,
-                       "metric": {"percentageMode": False, "useRanges": False,
-                                  "colorSchema": "Green to Red", "metricColorMode": "None",
-                                  "colorsRange": [{"from": 0, "to": 10000}],
-                                  "labels": {"show": True}, "invertColors": False,
-                                  "style": {"bgFill": "#000", "fontSize": 60}}},
-        }
-    return {"type": vis_type, "aggs": [], "params": {}}
-
-
-def _legacy_build_ndjson(slug: str, spec: dict[str, Any]) -> str:
-    lines: list[str] = []
-    ip_id = f"{slug}-*"
-    lines.append(json.dumps(_legacy_index_pattern(slug)))
-
-    vis_ids: list[str] = []
-    for vis_spec in spec["visualizations"]:
-        vis_id = _stable_id(slug, "vis", vis_spec["title"])
-        vis_ids.append(vis_id)
-        vis_state = _legacy_vis_state(vis_spec["type"], vis_spec.get("field"))
-        vis_state["title"] = f"{slug}-{vis_spec['title']}"
-        lines.append(json.dumps(_viz_obj(slug, vis_id, vis_spec["title"], vis_state, ip_id, True)))
-
-    panels_meta = [(vid, [(i % 2) * 24, (i // 2) * 15, 24, 15]) for i, vid in enumerate(vis_ids)]
-    dash_id = _stable_id(slug, "dashboard", spec["title"])
-    lines.append(json.dumps(_dashboard_obj(slug, spec["title"], dash_id, panels_meta)))
-    return "\n".join(lines)
 
 
 # ── API pública ──────────────────────────────────────────────────────────────
 
 def build_ndjson(slug: str) -> str:
     """Genera el NDJSON baseline para el caso dado (1 index-pattern + N viz + 1
-    dashboard, una línea por saved object). Despacha rich vs legacy según el spec."""
+    dashboard, una línea por saved object).
+
+    Hubo un segundo formato de spec (`"visualizations"`) con su propio builder.
+    Ningún spec lo usaba desde hace tiempo —los 15 declaran `"panels"`— así que
+    la rama era inalcanzable y se fue junto con su cadena de tres funciones."""
     spec = _DASHBOARD_SPECS.get(slug)
     if not spec:
         raise ValueError(f"No hay spec para el slug '{slug}'. Slugs válidos: {list(_DASHBOARD_SPECS)}")
-    if "panels" in spec:
-        return _build_rich_ndjson(slug, spec)
-    return _legacy_build_ndjson(slug, spec)
+    return _build_rich_ndjson(slug, spec)
 
 
 def get_available_slugs() -> list[str]:
