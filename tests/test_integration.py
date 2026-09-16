@@ -1386,7 +1386,12 @@ def test_non_cts_case_conf_deletes_and_watches():
 
 def test_deploy_sequence_writes_pipelines_map_to_tfvars(monkeypatch, tmp_path):
     """Deploy en dos fases: cada pipeline va en el mapa `pipelines` del tfvars
-    (slug => {pipeline_conf, start_ingestion}); fase 2 = start_ingestion True."""
+    (slug => {pipeline_conf, start_ingestion}); fase 2 = start_ingestion True.
+
+    Apunta a `_prepare_deploy_tfvars`, que es el setup que corre el deploy REAL
+    (el SSE). Antes llamaba a `_do_terraform_sequence`, el camino no-SSE que el
+    front nunca usó: el test pasaba mientras el tfvars que producción escribía
+    podía haber divergido sin que nadie se enterara."""
     import json as _json
     import main as _main
 
@@ -1398,7 +1403,7 @@ def test_deploy_sequence_writes_pipelines_map_to_tfvars(monkeypatch, tmp_path):
         pipeline_conf="filter {}", project_name="x", start_ingestion=True,
         opensearch_index="logs-%{+YYYY.MM}",
     )
-    _main._do_terraform_sequence(req, td)
+    _main._prepare_deploy_tfvars(req, td)
     tfvars = _json.loads((td / "deploy.auto.tfvars.json").read_text(encoding="utf-8"))
     assert "start_ingestion" not in tfvars  # ya no es escalar
     assert tfvars["pipelines"]["logs"]["start_ingestion"] is True
@@ -1416,11 +1421,11 @@ def test_deploy_sequence_merges_pipelines_registry_not_overwrite(monkeypatch, tm
     (td / ".terraform" / "providers").mkdir(parents=True)
     monkeypatch.setattr(_main.subprocess, "run", lambda *a, **k: _OkProc())
 
-    _main._do_terraform_sequence(_main.TerraformDeployRequest(
+    _main._prepare_deploy_tfvars(_main.TerraformDeployRequest(
         pipeline_conf="filter { A }", project_name="x", start_ingestion=True,
         opensearch_index="logs-%{+YYYY.MM}", obs_prefix="logs/",
     ), td)
-    _main._do_terraform_sequence(_main.TerraformDeployRequest(
+    _main._prepare_deploy_tfvars(_main.TerraformDeployRequest(
         pipeline_conf="filter { B }", project_name="x", start_ingestion=False,
         opensearch_index="logs-ej2-%{+YYYY.MM}", obs_prefix="logs/ej2/",
     ), td)
@@ -1457,7 +1462,9 @@ def test_deploy_caps_concurrent_pipelines(monkeypatch, tmp_path):
     monkeypatch.setattr(_main, "__file__", str(fake_main))
     monkeypatch.setattr(_main.subprocess, "run", _no_run)
 
-    res = client.post("/api/v1/terraform/deploy", json={
+    # Contra /deploy-job, que es el endpoint que usa el front. El cap se chequea
+    # antes de tocar terraform, así que el 400 llega sin lanzar el job.
+    res = client.post("/api/v1/terraform/deploy-job", json={
         "pipeline_conf": "filter {}", "opensearch_index": "logs-nuevo-%{+YYYY.MM}",
     })
     assert res.status_code == 400
@@ -2890,7 +2897,7 @@ def test_deploy_rejects_more_than_max_cases(monkeypatch, tmp_path):
         for i in range(6)
     ]
 
-    res = client.post("/api/v1/terraform/deploy", json={
+    res = client.post("/api/v1/terraform/deploy-job", json={
         "pipeline_conf": "filter {}",
         "cases": cases,
     })

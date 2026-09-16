@@ -57,7 +57,7 @@ from index_template import (  # noqa: E402
 )
 from ecs_validator import classify_field, spec_loaded, spec_size  # noqa: E402
 import verticals  # noqa: E402  (registro declarativo de los verticales de demo)
-# OBSClient se importa lazy dentro de terraform_deploy para que el resto
+# OBSClient se importa lazy dentro de cada función que lo usa para que el resto
 # del backend arranque aunque esdk-obs-python no esté instalado.
 
 # Sanity check del validador ECS al arrancar. Si docs/fields.csv falta o
@@ -2025,7 +2025,6 @@ class TerraformStatusResponse(BaseModel):
     https_enabled: bool = False
 
 
-
 _DATASETS_DIR = Path(__file__).parent / "datasets"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -2360,43 +2359,39 @@ def _build_pipeline_conf_for_case(case: "PipelineCase", request: "TerraformDeplo
     return "\n\n".join(parts)
 
 
-def _do_terraform_sequence(
-    request: TerraformDeployRequest, terraform_dir: Path,
-    logstash_flavor: str | None = None, opensearch_flavor: str | None = None,
-) -> dict:
-    """Escribe pipeline.conf + tfvars + corre init (si hace falta) + apply +
-    output. Devuelve el dict de outputs de terraform.
+def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path) -> dict:
+    """Deja el workspace listo para `terraform apply` y devuelve el registro.
 
-    Ejecutado en un thread separado del OBS upload. La limpieza del
-    tfvars.json con secrets NO ocurre acá — la hace el handler principal
-    en su `finally` después de que ambos futures completen, sino podría
-    quedar colgado si esta función raisea.
+    Escribe, en este orden: `pipeline.conf`, el registro de pipelines mergeado,
+    `deploy.auto.tfvars.json` y las credenciales de teardown. No corre terraform.
+
+    Vive suelta porque este bloque estaba **duplicado literalmente** entre el
+    camino SSE y el no-SSE: 49 líneas consecutivas idénticas, incluida la
+    construcción entera del tfvars. Dos copias del mapa `pipelines` es la clase de
+    duplicación que no se nota hasta que alguien arregla un caso en una sola y el
+    otro camino sigue mandando un tfvars distinto.
+
+    `fields`/`label` del registro: schema detectado en el paso 2. Habilitan las
+    capabilities (chatbot + forecasts) de un slug SIN spec curado — el despliegue
+    productivo y los casos creados desde el Builder. Para los verticales demo se
+    persisten igual, pero esos mandan sus specs (`capabilities._CAPABILITY_SPECS`).
+    Sin esto los campos viven solo en el browser y se pierden en un F5.
     """
-    # ── Escribir pipeline.conf en terraform/ ─────────────────────────
-    pipeline_file = terraform_dir / "pipeline.conf"
-    pipeline_file.write_text(request.pipeline_conf, encoding="utf-8")
+    (terraform_dir / "pipeline.conf").write_text(request.pipeline_conf, encoding="utf-8")
 
-    # ── Mergear pipelines en el registro ─────────────────────────────
     registry = {} if request.fresh_deploy else _read_pipelines_registry(terraform_dir)
-
-    # `fields`/`label`: schema detectado en el paso 2. Habilitan las capabilities
-    # (chatbot + forecasts) de un slug SIN spec curado — el despliegue productivo.
-    # Para los verticales demo se persisten igual pero mandan sus specs
-    # (`capabilities._CAPABILITY_SPECS`). Sin esto, los campos viven solo en el
-    # browser y se pierden en un F5.
     if request.cases:
         for case in request.cases:
-            case_conf = _build_pipeline_conf_for_case(case, request)
             registry[case.slug] = {
-                "pipeline_conf": case_conf,
+                "pipeline_conf": _build_pipeline_conf_for_case(case, request),
                 "start_ingestion": request.start_ingestion,
                 "index": case.index_name,
                 "obs_prefix": case.obs_prefix,
                 "fields": case.fields or [],
                 # `industry_label` es único para todo el request (camino
-                # productivo). En multi-caso, cada caso creado desde la
-                # plataforma aporta su propio label → el chatbot nombra bien la
-                # fuente en vez de rotular todo igual.
+                # productivo). En multi-caso, cada caso creado desde la plataforma
+                # aporta su propio label → el chatbot nombra bien la fuente en vez
+                # de rotular todo igual.
                 "label": _registry_label(request.industry_label, case.slug),
             }
     else:
@@ -2409,15 +2404,13 @@ def _do_terraform_sequence(
             "fields": request.fields or [],
             "label": _registry_label(request.industry_label, slug),
         }
-
     _write_pipelines_registry(terraform_dir, registry)
+
     pipelines_var = {
         k: {"pipeline_conf": v.get("pipeline_conf", ""),
             "start_ingestion": bool(v.get("start_ingestion", False))}
         for k, v in registry.items()
     }
-
-    # ── Escribir deploy.auto.tfvars.json con todas las creds del form ─
     tfvars: dict[str, Any] = {
         "pipelines": pipelines_var,
         "project_name": _effective_project_name(request, terraform_dir),
@@ -2442,90 +2435,24 @@ def _do_terraform_sequence(
         tfvars["opensearch_password"] = request.opensearch_password
     if request.existing_opensearch_endpoint:
         tfvars["existing_opensearch_endpoint"] = request.existing_opensearch_endpoint
-
-    # Project ID (⚙ Configuración > .env): solo para armar el `dashboards_url`
-    # con shape de consola Huawei. Si falta, el output cae al link interno VPC.
+    # Project ID (⚙ Configuración): solo para armar el `dashboards_url` con shape
+    # de consola Huawei. Si falta, el output cae al link interno de la VPC.
     huawei_project_id = get_huawei_project_id()
     if huawei_project_id:
         tfvars["huawei_project_id"] = huawei_project_id
     # Infra de la cuenta del SA (⚙ Configuración): si está configurada, pisa el
     # terraform.tfvars estático (que queda como fallback del setup original).
     tfvars.update(_huawei_infra_tfvars())
+    (terraform_dir / "deploy.auto.tfvars.json").write_text(
+        json.dumps(tfvars, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    tfvars_file = terraform_dir / "deploy.auto.tfvars.json"
-    tfvars_file.write_text(
-        json.dumps(tfvars, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    # ── Persistir SOLO las credenciales para el teardown ─────────────
-    # `deploy.auto.tfvars.json` se borra al terminar el deploy (tiene el
-    # pipeline_conf y demás), pero `terraform destroy` necesita las creds del
-    # provider. Las dejamos en un archivo aparte (auto-cargado por terraform)
-    # que persiste hasta el destroy — sino el destroy se cuelga pidiendo las
-    # variables por stdin. Es la cuenta del propio operador en su máquina.
+    # `deploy.auto.tfvars.json` se borra al terminar el deploy (lleva el
+    # pipeline_conf y los secretos), pero `terraform destroy` necesita las creds
+    # del provider. Van a un archivo aparte, auto-cargado por terraform, que
+    # persiste hasta el destroy — sin esto el destroy se cuelga pidiendo las
+    # variables por stdin.
     _write_destroy_creds(terraform_dir, request)
-
-    # ── terraform init (si el cache de providers no existe, o cambió el backend) ──
-    # `-input=false`: nunca pedir variables por stdin (en un server colgaría).
-    init_extra = _backend_init_args(terraform_dir)
-    if init_extra is not None:
-        print("[terraform_sequence] ejecutando init %s..." % (init_extra or ""))
-        init_result = subprocess.run(
-            ["terraform", "init", "-input=false", *init_extra],
-            cwd=terraform_dir,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        if init_result.returncode != 0:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"stage": "terraform_init",
-                        "message": init_result.stderr},
-            )
-        print("[terraform_sequence] init completado")
-
-    # ── terraform apply ──────────────────────────────────────────────
-    # Timeout 1800s (30 min): el provider HuaweiCloud típicamente termina
-    # de provisionar CSS clusters en 10-20 min, pero hemos visto casos de
-    # 25+ min con latencia de la API en Hong Kong/Santiago. Si nuestro
-    # timeout pega antes que el del provider, Python mata terraform con
-    # SIGKILL → el provider devuelve "context canceled" → quedan recursos
-    # huérfanos creados a medias en Huawei sin que la `_logstash_configuration`
-    # se haya aplicado. Mejor margen amplio y, en caso de re-deploy, terraform
-    # es idempotente y completa los recursos faltantes desde el state.
-    print("[terraform_sequence] apply iniciado (5-25 min creando clusters)...")
-    apply_result = subprocess.run(
-        ["terraform", "apply", "-auto-approve", "-input=false"],
-        cwd=terraform_dir,
-        capture_output=True,
-        text=True,
-        timeout=1800,
-    )
-    if apply_result.returncode != 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"stage": "terraform_apply",
-                    "message": apply_result.stderr or apply_result.stdout},
-        )
-    print("[terraform_sequence] apply completado")
-
-    # ── Obtener outputs ──────────────────────────────────────────────
-    output_result = subprocess.run(
-        ["terraform", "output", "-json"],
-        cwd=terraform_dir,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if output_result.returncode != 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"stage": "terraform_output",
-                    "message": output_result.stderr},
-        )
-    return json.loads(output_result.stdout)
+    return registry
 
 
 def _backend_init_args(terraform_dir: Path) -> list[str] | None:
@@ -2589,194 +2516,6 @@ def _unmask_against(conf: str, request, refs: list[str]) -> str:
         if _CONF_MASK not in out:
             return out
     return unmask_conf(conf, request.obs_access_key, request.obs_secret_key)
-
-
-@app.post(
-    "/api/v1/terraform/deploy",
-    response_model=TerraformDeployResponse,
-    tags=["terraform"],
-    summary="Deploya el pipeline en Huawei Cloud con Terraform",
-)
-def terraform_deploy(request: TerraformDeployRequest) -> TerraformDeployResponse:
-    """Deploy con Terraform, protegido por el lock de deploy por-usuario."""
-    _fill_obs_creds(request)
-    with _deploy_guard():
-        return _terraform_deploy_impl(request)
-
-
-def _terraform_deploy_impl(request: TerraformDeployRequest) -> TerraformDeployResponse:
-    """Deploy automático con Terraform.
-
-    Ejecuta DOS workloads en paralelo (no tienen dependencia entre sí):
-      A) OBS upload del log (raw o sintético) al bucket del operador.
-      B) Terraform sequence: write pipeline.conf + tfvars → init → apply
-         → output → endpoints.
-
-    Espera ambos completados antes de responder. Si alguno falla, propaga
-    el error correspondiente. La limpieza del tfvars.json con secrets se
-    hace siempre en el `finally` (incluso si terraform crasheó por el medio).
-
-    Ganancia vs ejecutarlos secuenciales: ~15-30s menos de latencia
-    percibida. El total del deploy sigue dominado por terraform apply
-    (5-15 min).
-    """
-    import concurrent.futures
-
-    terraform_dir = _active_terraform_dir()
-    if not terraform_dir.exists():
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Directorio terraform/ no encontrado",
-        )
-    _check_unavailable_plugins(request)
-
-    num_cases = len(request.cases) if request.cases else 1
-    if _MAX_PIPELINES and num_cases > _MAX_PIPELINES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "stage": "pipeline_cap",
-                "message": (
-                    f"Máximo {_MAX_PIPELINES} pipelines por cluster en la demo. "
-                    f"Solicitaste {num_cases}. Destruí pipelines o el entorno "
-                    f"antes de agregar más."
-                ),
-            },
-        )
-
-    logstash_flavor, opensearch_flavor = _determine_flavor(num_cases)
-
-    slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
-    registry = _read_pipelines_registry(terraform_dir)
-    if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "stage": "pipeline_cap",
-                "message": (
-                    f"Máximo {_MAX_PIPELINES} pipelines por cluster en la demo "
-                    f"(el Logstash es 1 nodo). Destruí una pipeline o el entorno "
-                    f"antes de agregar otra."
-                ),
-            },
-        )
-
-    tfvars_file = terraform_dir / "deploy.auto.tfvars.json"
-    try:
-        if request.start_ingestion:
-            print("[terraform_deploy] FASE 2 (iniciar ingesta) — sin OBS upload")
-            # Limpiar los índices de los casos ANTES de activar Logstash: cada
-            # ingesta arranca limpia (sin docs de corridas anteriores). El index
-            # template ya quedó del paso 2, así que el índice se recrea bien tipado.
-            try:
-                _clear_case_indices(request, _cluster_with_public_access(terraform_dir))
-            except Exception as exc:  # noqa: BLE001
-                print(f"[clear-index] fallo al limpiar índices (best-effort): {exc!r}")
-            tf_outputs = _do_terraform_sequence(
-                request, terraform_dir,
-                logstash_flavor=logstash_flavor,
-                opensearch_flavor=opensearch_flavor,
-            )
-        else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                obs_future = executor.submit(_do_obs_upload, request)
-                tf_future = executor.submit(
-                    _do_terraform_sequence, request, terraform_dir,
-                    logstash_flavor, opensearch_flavor,
-                )
-
-                obs_exc: Exception | None = None
-                tf_outputs = None
-                tf_exc: Exception | None = None
-
-                try:
-                    obs_future.result()
-                except Exception as exc:
-                    obs_exc = exc
-                try:
-                    tf_outputs = tf_future.result()
-                except Exception as exc:
-                    tf_exc = exc
-
-            # Priorizamos terraform: sin clusters no hay demo. OBS upload
-            # fallado pero terraform OK = cluster vacío (recuperable).
-            if tf_exc:
-                if obs_exc:
-                    print(
-                        f"[terraform_deploy] ambos workloads fallaron — "
-                        f"OBS: {obs_exc!r}, TF: {tf_exc!r}"
-                    )
-                raise tf_exc
-            if obs_exc:
-                raise obs_exc
-
-        assert tf_outputs is not None  # garantizado si no hay tf_exc
-        # Marcar este entorno como "desplegado por la plataforma" → habilita
-        # que aparezca en "Mi Infraestructura". Sin esta marca, un tfstate
-        # cualquiera (manual/leftover/stale) NO se reclama como propio.
-        _write_platform_marker(terraform_dir, _effective_project_name(request, terraform_dir))
-        # Persistir el index template para que "Mi Infraestructura" lo muestre
-        # (hidratado del disco, sin pasar por el wizard).
-        _write_index_template_artifact(terraform_dir, request)
-
-        # dashboards_url se construye en Python (state + project_id del .env),
-        # mismo criterio que /terraform/status — no dependemos del output de
-        # Terraform que queda atado a las vars del apply.
-        cluster = _read_opensearch_cluster_from_state(terraform_dir)
-        # Con NAT/DNAT los endpoints públicos (EIP del NAT) vienen de los outputs,
-        # no del state del cluster (ya sin public_access). Completar el cluster.
-        _overlay_public_endpoints(cluster, tf_outputs or {})
-
-        # Cluster Routes del CSS → salida a MaaS (para el agente/chatbot). Solo en
-        # provisión (cluster nuevo); en la fase de ingesta ya están. Best-effort.
-        if not request.start_ingestion:
-            try:
-                cluster_id = (tf_outputs.get("opensearch_cluster_id") or {}).get("value", "")
-                _add_css_cluster_routes(
-                    cluster_id, request.obs_access_key, request.obs_secret_key,
-                    get_huawei_project_id(),
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(f"[css-routes] fallo agregando cluster routes (best-effort): {exc!r}")
-
-        # NOTA: el index template + import de dashboards YA NO corren acá. Pasaron a
-        # un paso explícito del wizard (POST /api/v1/onboarding/apply-schema), que el
-        # operador dispara entre provisionar (este paso) y arrancar la ingesta. Así
-        # se puede reintentar el schema/dashboards sin re-provisionar el cluster.
-
-        # Security Analytics (Sigma rules + detector) para SIEM. Best-effort.
-        target_slugs = {c.slug for c in request.cases} if request.cases else set()
-        if not request.cases and request.pipeline_slug:
-            target_slugs = {request.pipeline_slug}
-        if "siem" in target_slugs and not request.start_ingestion:
-            try:
-                _provision_security_analytics(
-                    cluster, request.opensearch_user or "admin",
-                    request.opensearch_password, request.https_enabled,
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(f"[terraform_deploy] security-analytics falló (best-effort): {exc!r}")
-
-        index_template_applied = False
-        dashboards_imported = False
-
-        return TerraformDeployResponse(
-            opensearch_endpoint=tf_outputs.get("opensearch_endpoint", {}).get("value", ""),
-            logstash_endpoint=tf_outputs.get("logstash_endpoint", {}).get("value", ""),
-            dashboards_url=_build_dashboards_url(cluster, request.https_enabled),
-            status="success",
-            dashboards_imported=dashboards_imported,
-            index_template_applied=index_template_applied,
-        )
-    finally:
-        # Borrar el tfvars.json con secrets — best-effort, no rompemos
-        # el flujo si falla el unlink (el archivo queda hasta el próximo
-        # run pero con creds del último que igual tenían que estar acá).
-        try:
-            if tfvars_file.exists():
-                tfvars_file.unlink()
-        except OSError:
-            pass
 
 
 # ── Deploy con progreso streaming (SSE) ──────────────────────────────────────
@@ -2923,67 +2662,9 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     yield _sse({"type": "progress", "percent": 1, "phase": "Preparando",
                 "message": "Escribiendo configuración…"})
 
-    # ── Setup: pipeline.conf + registry + tfvars (igual que _do_terraform_sequence) ──
+    # ── Setup: pipeline.conf + registry + tfvars ──────────────────────────────
     try:
-        (terraform_dir / "pipeline.conf").write_text(request.pipeline_conf, encoding="utf-8")
-        registry = {} if request.fresh_deploy else _read_pipelines_registry(terraform_dir)
-        if request.cases:
-            for case in request.cases:
-                registry[case.slug] = {
-                    "pipeline_conf": _build_pipeline_conf_for_case(case, request),
-                    "start_ingestion": request.start_ingestion,
-                    "index": case.index_name,
-                    "obs_prefix": case.obs_prefix,
-                    "fields": case.fields or [],
-                    "label": _registry_label(request.industry_label, case.slug),
-                }
-        else:
-            slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
-            registry[slug] = {
-                "pipeline_conf": request.pipeline_conf,
-                "start_ingestion": request.start_ingestion,
-                "index": request.opensearch_index,
-                "obs_prefix": request.obs_prefix,
-                "fields": request.fields or [],
-                "label": _registry_label(request.industry_label, slug),
-            }
-        _write_pipelines_registry(terraform_dir, registry)
-        pipelines_var = {
-            k: {"pipeline_conf": v.get("pipeline_conf", ""),
-                "start_ingestion": bool(v.get("start_ingestion", False))}
-            for k, v in registry.items()
-        }
-        tfvars: dict[str, Any] = {
-            "pipelines": pipelines_var,
-            "project_name": _effective_project_name(request, terraform_dir),
-            "https_enabled": request.https_enabled,
-        }
-        # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
-        _cap = _capacity_for(len(pipelines_var))
-        tfvars["pipeline_secrets"] = _pipeline_secrets(request)
-        tfvars["beats_port"] = _beats_port(request)
-        tfvars["logstash_flavor"] = _cap["logstash_flavor"]
-        tfvars["opensearch_flavor"] = _cap["opensearch_flavor"]
-        tfvars["pipeline_workers"] = _cap["pipeline_workers"]
-        tfvars["opensearch_volume_size"] = _cap["opensearch_volume_size"]
-        tfvars["logstash_volume_size"] = _cap["logstash_volume_size"]
-        if request.obs_access_key:
-            tfvars["obs_access_key"] = request.obs_access_key
-            tfvars["hwc_access_key"] = request.obs_access_key
-        if request.obs_secret_key:
-            tfvars["obs_secret_key"] = request.obs_secret_key
-            tfvars["hwc_secret_key"] = request.obs_secret_key
-        if request.opensearch_password:
-            tfvars["opensearch_password"] = request.opensearch_password
-        if request.existing_opensearch_endpoint:
-            tfvars["existing_opensearch_endpoint"] = request.existing_opensearch_endpoint
-        huawei_project_id = get_huawei_project_id()
-        if huawei_project_id:
-            tfvars["huawei_project_id"] = huawei_project_id
-        tfvars.update(_huawei_infra_tfvars())
-        (terraform_dir / "deploy.auto.tfvars.json").write_text(
-            json.dumps(tfvars, ensure_ascii=False, indent=2), encoding="utf-8")
-        _write_destroy_creds(terraform_dir, request)
+        _prepare_deploy_tfvars(request, terraform_dir)
     except Exception as exc:
         yield _sse({"type": "error", "message": f"Error en setup: {exc}"})
         return
