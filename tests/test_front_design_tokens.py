@@ -117,6 +117,68 @@ def test_el_favicon_esta_declarado():
         "falta static/favicon.png — regeneralo con `py build_favicon.py`")
 
 
+def test_los_comentarios_abren_y_cierran_en_orden():
+    """Tokeniza el `<style>` buscando `/*` y `*/` huérfanos.
+
+    Este es EL chequeo. Los otros dos no alcanzaron: un `*/` suelto no desbalancea
+    el conteo (sigue habiendo tantas aperturas como cierres), no desbalancea las
+    llaves, y no produce ningún comentario "largo con llaves adentro". Pero el
+    navegador lo toma como el arranque de un selector y **consume hasta el `{`
+    siguiente**, tirando esa regla entera a la basura.
+
+    Pasó exactamente eso: un `*/` huérfano se comió `.app-view { display: none; }`
+    y todas las vistas de la app se apilaron una debajo de otra, con el CSS
+    aparentemente sano por cualquier otra medida.
+    """
+    html = _INDEX.read_text(encoding="utf-8")
+    style = html[html.index("<style>"):html.index("</style>")]
+    base = html[:html.index("<style>")].count("\n") + 1
+
+    problemas, dentro, i = [], False, 0
+    while i < len(style) - 1:
+        par = style[i:i + 2]
+        if par == "/*":
+            if dentro:
+                problemas.append(f"L{base + style[:i].count(chr(10))}: `/*` dentro de un comentario")
+            dentro, i = True, i + 2
+            continue
+        if par == "*/":
+            if not dentro:
+                problemas.append(f"L{base + style[:i].count(chr(10))}: `*/` huérfano, sin apertura")
+            dentro, i = False, i + 2
+            continue
+        i += 1
+    if dentro:
+        problemas.append("el último comentario del bloque nunca cierra")
+
+    assert not problemas, "comentarios CSS mal formados:\n  " + "\n  ".join(problemas)
+
+
+def test_todas_las_vistas_arrancan_ocultas():
+    """`.app-view { display: none }` es lo único que impide que las 7 vistas se
+    dibujen apiladas. Si el parser la descarta, la app se ve como una sola página
+    larguísima con todas las secciones pegadas — y ningún test lo notaba."""
+    html = _INDEX.read_text(encoding="utf-8")
+    style = html[html.index("<style>"):html.index("</style>")]
+    sin_comentarios = re.sub(r"/\*.*?\*/", "", style, flags=re.DOTALL)
+
+    # Las reglas cuya pérdida rompe la app de forma evidente. Cada una se fue
+    # alguna vez sin que ningún test lo notara.
+    for selector, porque in (
+        (r"\.app-view", "las 7 vistas se apilan una debajo de otra"),
+        (r"\.step-pane", "los 4 pasos del wizard se apilan"),
+        (r"\.hidden", "nada de lo que se oculta se oculta"),
+    ):
+        m = re.search(rf"(?m)^\s*{selector}\s*\{{([^}}]*)\}}", sin_comentarios)
+        assert m, f"desapareció la regla base {selector} → {porque}"
+        assert "display" in m.group(1) and "none" in m.group(1), \
+            f"{selector} perdió `display: none` → {porque}: {m.group(1).strip()[:80]}"
+
+    # Y en el markup, una sola vista arranca activa.
+    activas = re.findall(r'<div class="app-view[^"]*\bactive\b[^"]*" id="(view-[\w-]+)"', html)
+    assert activas == ["view-home"], f"vistas activas al cargar: {activas}"
+
+
 def test_ningun_comentario_se_traga_css():
     """Un `*/` perdido convierte el resto del archivo en comentario.
 
