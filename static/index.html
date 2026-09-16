@@ -1531,6 +1531,10 @@
       font-size: var(--fs-sm); font-weight: 600; color: var(--accent-green);
     }
     .sample-found__head .icon { width: 14px; height: 14px; }
+    /* Releer / Borrar, empujados a la derecha. Heredan el verde del head, así que
+       se les repone el color de botón. */
+    .sample-found__actions { margin-left: auto; display: flex; gap: var(--sp-2); }
+    .sample-found__actions .btn { color: var(--text-secondary); }
     .sample-found pre {
       margin: 0; padding: 9px 11px; background: var(--bg-tertiary); border-radius: var(--radius-sm);
       font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5;
@@ -2642,20 +2646,26 @@
                 <div class="sample-found__head">
                   <svg class="icon"><use href="#ic-check"/></svg>
                   <span id="sample-found-label">Muestra detectada</span>
+                  <!-- Solo en la vía OBS: las otras dos (archivo, pegar) se
+                       rehacen cambiando el archivo o el texto. -->
+                  <span id="sample-found-actions" class="sample-found__actions hidden">
+                    <button class="btn btn-secondary btn-sm" type="button" id="sample-refresh"
+                            title="Volver a leer del bucket"><svg class="icon"><use href="#ic-refresh"/></svg> Releer</button>
+                    <button class="btn btn-secondary btn-sm" type="button" id="sample-clear"
+                            title="Descartar la muestra y empezar de nuevo"><svg class="icon"><use href="#ic-x"/></svg> Borrar</button>
+                  </span>
                 </div>
                 <pre id="rawlog-sample-preview"></pre>
               </div>
 
+              <!-- Sin contenido propio: es el canal de "leyendo…" y de error del
+                   flujo OBS. El eco de la muestra que mostraba acá repetía la
+                   primera línea que el panel de arriba ya muestra entera. -->
               <div id="productive-analyze-status" class="hidden" style="font-size:var(--fs-base); color:var(--text-secondary); margin-top:12px;"></div>
-              <div id="industry-match-panel" class="hidden" style="margin-top:12px; padding:14px 16px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-                <div style="font-size:var(--fs-sm); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:8px;">Industry matching</div>
-                <div id="industry-match-suggestion" style="font-size:var(--fs-base); color:var(--text-secondary); margin-bottom:10px;"></div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Confirmá o cambiá la industria</label>
-                  <select class="form-select" id="industry-match-select">
-                    <option value="">-- Seleccionar --</option>
-                  </select>
-                </div>
+
+              <div id="industry-match-panel" class="hidden" style="margin-top:12px;">
+                <label class="form-label" id="industry-match-suggestion">¿De qué industria son estos datos?</label>
+                <div class="src-chips" id="industry-match-chips"></div>
               </div>
               <div class="field-error" id="step1-custom-error"></div>
                   <textarea id="raw-log" style="display:none;"></textarea>
@@ -3740,20 +3750,6 @@
     let CAPABILITY_SLUGS = new Set();
     let SLUG_LABELS = {};
 
-    // Poblar el select de industria (paso 1 productivo) desde los verticales.
-    function populateIndustrySelect() {
-      const sel = document.getElementById('industry-match-select');
-      if (!sel) return;
-      const prev = sel.value;
-      sel.innerHTML = '<option value="">-- Seleccionar --</option>';
-      _VVIS.forEach(v => {
-        const opt = document.createElement('option');
-        opt.value = v.slug; opt.textContent = v.fullLabel;
-        sel.appendChild(opt);
-      });
-      if (prev) sel.value = prev;
-    }
-
     function applyVerticalsPayload(data) {
       _VDATA = data || { groups: [], verticals: [] };
       _VVIS = _VDATA.verticals.filter(v => !v.hidden);
@@ -3785,7 +3781,6 @@
       CAPABILITY_SLUGS = new Set(_VVIS.filter(v => v.hasCapability).map(v => v.slug));
       SLUG_LABELS = Object.fromEntries(_VVIS.map(v => [v.slug, v.fullLabel]));
 
-      populateIndustrySelect();
     }
     applyVerticalsPayload(window.__VERTICALS__);
 
@@ -4711,7 +4706,9 @@
         namespace: pipelineNamespace(),
         // Industria confirmada en el paso 1 (productivo): nombra la fuente del
         // cliente en el chatbot ("Retail / E-commerce" en vez del slug crudo).
-        industry_label: (state.matchedIndustry && SLUG_LABELS[state.matchedIndustry]) || '',
+        // Etiqueta de la INDUSTRIA ("Fintech"), no del caso: es cómo el chatbot
+        // nombra la fuente. Sale de DEMO_VERTICALS, que son los grupos.
+        industry_label: (DEMO_VERTICALS.find(g => g.id === state.matchedIndustry)?.label) || '',
         read_existing_bucket: !!state.readExistingMode,
         document_id: state.dedupId || '',
         start_ingestion: startIngestion,
@@ -7589,16 +7586,75 @@
       return '';
     }
 
-    function showSample(line, origen) {
+    function showSample(line, origen, conAcciones) {
       const box = document.getElementById('rawlog-sample-group');
       const pre = document.getElementById('rawlog-sample-preview');
       const lab = document.getElementById('sample-found-label');
+      const acc = document.getElementById('sample-found-actions');
       if (!box || !pre) return;
       if (!line) { box.classList.add('hidden'); return; }
       pre.textContent = String(line).substring(0, 600);
       if (lab) lab.textContent = origen || 'Muestra detectada';
+      // Releer/Borrar solo tienen sentido leyendo de un bucket: las otras dos vías
+      // se rehacen cambiando el archivo o el texto pegado.
+      if (acc) acc.classList.toggle('hidden', !conAcciones);
       box.classList.remove('hidden');
     }
+
+    // Industrias como chips, con el ícono de cada grupo del registro. `sugerida`
+    // es el group id que devolvió el matcher; puede venir vacío.
+    function pintarIndustrias(sugerida) {
+      const panel = document.getElementById('industry-match-panel');
+      const chips = document.getElementById('industry-match-chips');
+      const lab = document.getElementById('industry-match-suggestion');
+      if (!panel || !chips) return;
+      state.matchedIndustry = sugerida || '';
+      chips.innerHTML = DEMO_VERTICALS.map(g => `
+        <button type="button" class="src-chip${g.id === sugerida ? ' is-active' : ''}"
+                role="radio" aria-checked="${g.id === sugerida}" data-industria="${escapeHtml(g.id)}">
+          <svg class="icon"><use href="#ic-${escapeHtml(g.icon || 'box')}"/></svg>${escapeHtml(g.label)}
+        </button>`).join('');
+      if (lab) {
+        lab.textContent = sugerida
+          ? 'Detectamos esta industria. Cambiala si no es la correcta.'
+          : '¿De qué industria son estos datos?';
+      }
+      panel.classList.remove('hidden');
+    }
+
+    document.getElementById('industry-match-chips')?.addEventListener('click', (e) => {
+      const chip = e.target.closest('.src-chip');
+      if (!chip) return;
+      document.querySelectorAll('#industry-match-chips .src-chip').forEach(c => {
+        const on = c === chip;
+        c.classList.toggle('is-active', on);
+        c.setAttribute('aria-checked', String(on));
+      });
+      state.matchedIndustry = chip.dataset.industria || '';
+    });
+
+    // Releer: vuelve a pedir la muestra con los valores que estén AHORA en los
+    // campos (bucket/prefijo/región/endpoint se releen en cada llamada).
+    document.getElementById('sample-refresh')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try { await analyzeProductiveBucket(); } finally { btn.disabled = false; }
+    });
+
+    // Borrar: descarta la muestra Y lo que se derivó de ella. Sin `clearMapping`
+    // quedarían los campos del dataset anterior y el paso 2 mostraría un mapping
+    // que no corresponde a nada.
+    document.getElementById('sample-clear')?.addEventListener('click', () => {
+      state.rawLog = '';
+      const ta = document.getElementById('raw-log');
+      if (ta) ta.value = '';
+      clearMapping();
+      state.matchedIndustry = '';
+      showSample('');
+      document.getElementById('industry-match-panel')?.classList.add('hidden');
+      document.getElementById('productive-analyze-status')?.classList.add('hidden');
+      updateProductiveStep2();
+    });
     document.getElementById('obs-read-sample')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
@@ -7612,8 +7668,6 @@
     async function analyzeProductiveBucket() {
       const statusEl = document.getElementById('productive-analyze-status');
       const matchPanel = document.getElementById('industry-match-panel');
-      const matchSuggestion = document.getElementById('industry-match-suggestion');
-      const matchSelect = document.getElementById('industry-match-select');
       const bucketEl = document.getElementById('productive-bucket');
 
       const bucket = bucketEl?.value?.trim();
@@ -7646,7 +7700,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(detailMsg(data));
 
-        statusEl.innerHTML = `<div style="padding:10px 14px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);"><strong>Muestra leída:</strong> ${escapeHtml(data.sample_line.slice(0, 120))}${data.sample_line.length > 120 ? '…' : ''}<br><span style="font-size:var(--fs-sm);color:var(--text-muted);">${data.total_objects} objetos bajo el prefijo.</span></div>`;
+        statusEl.classList.add('hidden');   // el panel de arriba ya muestra la muestra
 
         // Guardar el sample para que el pipeline generation lo use.
         const rawLogEl = document.getElementById('raw-log');
@@ -7659,19 +7713,11 @@
         const gen = await transformLog();
         if (!gen.ok) throw new Error(gen.error);
 
-        // Industry matching (heurístico, sin LLM).
-        matchPanel.classList.remove('hidden');
-        if (data.industry_match && data.industry_match.slug) {
-          const label = SLUG_LABELS[data.industry_match.slug] || data.industry_match.slug;
-          const score = Math.round((data.industry_match.score || 0) * 100);
-          matchSuggestion.innerHTML = `Tu log matchea con: <strong>${escapeHtml(label)}</strong> (${score}% confianza)`;
-          matchSelect.value = data.industry_match.slug;
-          state.matchedIndustry = data.industry_match.slug;
-        } else {
-          matchSuggestion.textContent = 'No se pudo determinar la industria automáticamente. Elegí una manualmente.';
-          state.matchedIndustry = '';
-        }
-        showSample(data.sample_line, `Leída de ${bucket}${prefix ? '/' + prefix : ''}`);
+        // Industria (heurístico, sin LLM). Antes esto ofrecía los CASOS de demo
+        // ("SIEM", "Traces de CTS"), que no es lo que se pregunta: la industria es
+        // el eje de `verticals.GROUPS` — Fintech, Seguridad, Retail…
+        pintarIndustrias(data.industry_match && data.industry_match.group);
+        showSample(data.sample_line, `Leída de ${bucket}${prefix ? '/' + prefix : ''}`, true);
         // El bucket del que se leyó la muestra es el origen real del dataset:
         // se propaga al paso 3, que es donde el usuario lo ve y lo edita. Sin
         // esto había que volver a tipearlo ahí para que llegara al .conf.
@@ -7687,10 +7733,6 @@
         return false;
       }
     }
-
-    document.getElementById('industry-match-select')?.addEventListener('change', (e) => {
-      state.matchedIndustry = e.target.value;
-    });
 
     // ── Auto-cargar ejemplo para pruebas rápidas ───────────────────────────────
     // ?sample=<slug> (o ?sample=1 / ?dev=1 → siem) pre-carga un caso de uso.

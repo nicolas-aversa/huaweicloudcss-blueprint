@@ -1540,27 +1540,53 @@ def generate_pipeline(request: OnboardingRequest) -> PipelineResponse:
 # modelos. `chatbot.py`/`document_loader.py` quedan en el repo por si se reexpone.
 
 
-# ── Industry matching: campos típicos por industria ──────────────────────────
-# Industry matching: vocabulario por industria, del registro declarativo
-# verticals/ (cada vertical aporta `industry_fields` + los sub-specs).
-_INDUSTRY_FIELDS = verticals.industry_fields()
+# ── Industry matching: vocabulario por INDUSTRIA ─────────────────────────────
+# El eje es `verticals.GROUPS` (Fintech, Seguridad, Retail, Media, Oil & Gas,
+# Salud), no los casos. Antes esto puntuaba slug por slug y devolvía un CASO, así
+# que el wizard terminaba preguntando "¿tu log es SIEM o Traces de CTS?" cuando lo
+# que quiere saber es de qué industria son los datos. El vocabulario de cada
+# industria es la unión del de sus casos.
+def _industry_vocab() -> dict[str, set[str]]:
+    """`group_id -> {campos}`, uniendo el `industry_fields` de cada miembro.
+
+    Se arma en cada llamada y no como constante de módulo porque los casos
+    creados desde el Builder se dan de alta en runtime.
+    """
+    por_slug = verticals.industry_fields()
+    out: dict[str, set[str]] = {}
+    for v in verticals.all_verticals():
+        campos = por_slug.get(v["slug"]) or []
+        if campos:
+            out.setdefault(v.get("group", ""), set()).update(f.lower() for f in campos)
+    # Los sub-specs (ej. fortianalyzer-soc) no son verticales del registro pero
+    # aportan vocabulario: se los cuelga del grupo de su vertical padre.
+    slugs = {v["slug"]: v.get("group", "") for v in verticals.all_verticals()}
+    for slug, campos in por_slug.items():
+        if slug in slugs:
+            continue
+        padre = next((g for s, g in slugs.items() if slug.startswith(s + "-")), "")
+        if padre:
+            out.setdefault(padre, set()).update(f.lower() for f in campos)
+    out.pop("", None)
+    return out
 
 
 def _match_industry(detected_fields: list[str]) -> dict:
-    """Matchea los campos detectados contra las industrias conocidas."""
-    detected_set = {f.lower() for f in detected_fields}
-    best_slug = ""
-    best_score = 0.0
-    for slug, industry_fields in _INDUSTRY_FIELDS.items():
-        industry_set = {f.lower() for f in industry_fields}
-        if not industry_set:
+    """Matchea los campos detectados contra las industrias conocidas.
+
+    Devuelve `{group, score}`. `group` es un id de `verticals.GROUPS`, que es lo
+    que el front pinta como chips y lo que termina siendo el `industry_label` con
+    el que el chatbot nombra la fuente.
+    """
+    detectados = {f.lower() for f in detected_fields}
+    mejor, mejor_score = "", 0.0
+    for grupo, vocab in _industry_vocab().items():
+        if not vocab:
             continue
-        overlap = len(detected_set & industry_set)
-        score = overlap / len(industry_set)
-        if score > best_score:
-            best_score = score
-            best_slug = slug
-    return {"slug": best_slug, "score": best_score} if best_slug else {"slug": "", "score": 0.0}
+        score = len(detectados & vocab) / len(vocab)
+        if score > mejor_score:
+            mejor, mejor_score = grupo, score
+    return {"group": mejor, "score": mejor_score} if mejor else {"group": "", "score": 0.0}
 
 
 @app.post(
