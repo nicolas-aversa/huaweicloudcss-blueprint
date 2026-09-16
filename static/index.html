@@ -3,13 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Blueprint · Huawei Cloud</title>
+  <title>CSS Blueprint</title>
+  <!-- Compuesto de los tres logos (CSS + OpenSearch + Logstash), generado por
+       `build_favicon.py` desde los PNG de static/. A 16px se lee como una marca
+       violeta con anillo; a 32 ya se distinguen las dos insignias. -->
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="apple-touch-icon" href="/static/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <!-- Inter como fuente VARIABLE (100..900): la app usa pesos intermedios (550,
-       650, 750, 800) que con la lista fija 400;500;600;700 el browser tenía que
-       sintetizar — de ahí que algunos textos se vieran "falsos negrita". -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Inter en los pesos que realmente usa la escala. Antes se pedía el rango
+       variable 100..900 porque el CSS tenía nueve pesos distintos, incluidos 550,
+       650 y 750. El 700 está porque quedan títulos que lo usan: pedir un peso que
+       el archivo no trae hace que el navegador lo sintetice, y eso se ve como
+       falsa negrita. Lo verifica tests/test_front_design_tokens.py. -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
       /* Superficies — base off-white cálida (ref. teramot), cards blancas. */
@@ -19,45 +26,97 @@
       --bg-subtle: #faf9f6;       /* secciones apenas separadas del canvas */
       --border-subtle: #e7e5dd;
       --border-default: #d9d7cd;
-      --border-accent: #e50000;
       /* Texto — near-black cálido para display, grises cómodos. */
       --text-primary: #15161a;
       --text-secondary: #515463;
       --text-muted: #8a8b94;
-      /* Marca */
-      --accent-red: #e50000;
+      /* Marca. `--accent-red` es el mismo valor que `--accent`: se mantienen los
+         dos nombres porque marcan INTENCIÓN distinta (marca vs. estado de UI) y
+         separarlos de nuevo es cambiar una línea, pero hoy pintan igual. */
+      --accent-red: var(--accent);
       --accent-green: #16a34a;
-      /* Acento secundario (eyebrows, links, activos, tiles de ícono) */
-      --accent: #7f0001;
-      --accent-hover: #660001;
-      --accent-tint: rgba(127, 0, 1, 0.08);
-      --accent-tint-strong: rgba(127, 0, 1, 0.14);
-      --accent-ring: rgba(127, 0, 1, 0.22);
-      /* Sombras grandes y difusas, baja opacidad (estilo producto) */
+      /* Acento de UI (eyebrows, links, activos, tiles de ícono). Era un bordó
+         oscuro que convivía con el rojo oficial y hacía que la app tuviera dos
+         marcas; ahora es el rojo oficial. Se mantiene el nombre `--accent` para
+         no tocar los 89 usos: cambia el valor, no el vocabulario. */
+      --accent: #e50000;
+      /* El tono oscuro NO es decorativo: es el color de TEXTO del acento.
+         El rojo oficial sobre blanco da 4.85:1 y pasa AA, pero el modismo de esta
+         app es pintar el acento SOBRE su propio tint, y ahí cae a 4.20:1 — debajo
+         del 4.5 que pide AA para texto normal. #cc0000 da 5.10 sobre ese tint y
+         5.06 sobre --bg-tertiary: pasa contra todos los fondos del archivo. Es el
+         mismo valor que --accent-red-hover, así que no suma un rojo a la paleta,
+         le da un segundo rol al que ya estaba. */
+      --accent-hover: #cc0000;
+      --accent-tint: rgba(229, 0, 0, 0.08);
+      --accent-tint-strong: rgba(229, 0, 0, 0.14);
+      /* .14 y no .22: con el bordó el anillo casi no se veía y por eso estaba
+         fuerte. En rojo oficial .22 grita, y además tiene que coincidir con
+         --accent-red-ring, que es el que usan los botones. Un solo anillo. */
+      --accent-ring: rgba(229, 0, 0, 0.14);
+      /* Sombras casi planas: las superficies se definen por su borde de 1px, no
+         por elevación. Es de donde sale la sensación "limpio" — antes `--shadow-md`
+         y `--shadow-lg` levantaban cada card y el conjunto se leía apilado. Quedan
+         para lo que SÍ flota sobre el resto: modales, dropdowns, toasts. */
       --shadow-xs: 0 1px 2px rgba(20, 22, 30, 0.04);
-      --shadow-sm: 0 2px 6px rgba(20, 22, 30, 0.05);
-      --shadow-md: 0 6px 18px rgba(20, 22, 30, 0.07);
-      --shadow-lg: 0 16px 40px rgba(20, 22, 30, 0.10);
-      --radius-sm: 8px;
-      --radius-md: 12px;
-      --radius-lg: 18px;
-      --radius-xl: 24px;
+      --shadow-sm: 0 1px 3px rgba(20, 22, 30, 0.05);
+      --shadow-md: 0 4px 12px rgba(20, 22, 30, 0.06);
+      --shadow-lg: 0 12px 32px rgba(20, 22, 30, 0.10);
+      /* Radios apretados. Los anteriores (8/12/18/24) hacían que todo pareciera
+         una pastilla; estos dejan la geometría más sobria. */
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
       --radius-pill: 999px;
+
+      /* ── Escala tipográfica ────────────────────────────────────────────────
+         El CSS tenía 20 tamaños distintos (12.5px, 11.5px, 9.5px…) y 9 pesos,
+         cada componente con el suyo. Estos siete y estos tres son TODO lo que se
+         usa: si algo necesita un valor que no está acá, el que está mal es el
+         componente. Lo verifica tests/test_front_design_tokens.py. */
+      --fs-xs: 11px;      /* chips, badges, micro-etiquetas */
+      --fs-sm: 12px;      /* hints, meta, texto auxiliar */
+      --fs-base: 13px;    /* texto de interfaz por defecto */
+      --fs-md: 14px;      /* nav, botones, inputs */
+      --fs-lg: 16px;      /* títulos de card */
+      --fs-xl: 20px;      /* títulos de vista */
+      --fs-2xl: 24px;     /* encabezados grandes */
+      --fw-normal: 400;
+      --fw-medium: 500;
+      --fw-semi: 600;
+      --lh-tight: 1.3;
+      --lh-base: 1.5;
+
+      /* Espaciado en base 4 */
+      --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;
+      --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
       /* Inter, no Huawei Sans: esta última estaba declarada primero pero nunca se
          cargaba (no está en Google Fonts ni hay @font-face), así que solo la veía
          quien la tuviera instalada en su máquina y la app se veía distinta según
          quién la abriera. Inter viaja con la página → todos ven lo mismo. */
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-      /* Tints del acento de marca */
-      --accent-red-hover: #cc0000;
-      --accent-red-tint: rgba(229, 0, 0, 0.07);
-      --accent-red-ring: rgba(229, 0, 0, 0.14);
+      /* Tints del acento de marca. Alias de los de arriba: antes eran una escala
+         paralela (.07/.14 contra .08/.22) porque describían otro color. Ahora que
+         el color es uno, dos escalas de tint es una sola cosa escrita dos veces. */
+      --accent-red-hover: var(--accent-hover);
+      --accent-red-tint: var(--accent-tint);
+      --accent-red-ring: var(--accent-ring);
       --accent-green-tint: rgba(22, 163, 74, 0.10);
-      /* Gradientes suaves (washes detrás de paneles, ref. teramot) */
-      --grad-panel: linear-gradient(180deg, rgba(127, 0, 1, 0.06), rgba(127, 0, 1, 0.01));
-      /* Motion */
+      /* Wash detrás del banner de infra. Va con rgba literal y no con el token
+         porque necesita alpha; si se olvida al cambiar la paleta queda como el
+         único resto del color viejo en toda la app. */
+      --grad-panel: linear-gradient(180deg, rgba(229, 0, 0, 0.06), rgba(229, 0, 0, 0.01));
+      /* Motion. Había 12 transiciones distintas (.12s, .15s, .18s, .2s, `all
+         0.15s`…) sin criterio. Estas dos: `fast` para lo que responde al cursor,
+         `base` para lo que cambia de estado. */
       --ease: cubic-bezier(0.4, 0, 0.2, 1);
+      --t-fast: 0.12s var(--ease);
+      --t-base: 0.18s var(--ease);
+      /* Anillo de foco único. Va con :focus-visible, nunca con :focus: así
+         aparece al tabular y no al clickear con el mouse. */
+      --ring: 0 0 0 3px var(--accent-ring);
       /* Shell */
       --rail-w: 252px;
       --brand-h: 64px;   /* alto del bloque de marca del rail */
@@ -112,7 +171,7 @@
       margin: 0 auto;
     }
 
-    /* Sub-pasos del rail (bajo "Crear pipeline"): stepper vertical con riel
+    /* Sub-pasos del rail (bajo "Pipeline"): stepper vertical con riel
        de progreso a la izquierda (en vez de círculos numerados). */
     .nav-substeps {
       position: relative;
@@ -136,7 +195,7 @@
       width: 100%;
       height: 25%;
       border-radius: var(--radius-pill);
-      background: linear-gradient(180deg, var(--accent), var(--accent-red));
+      background: var(--accent);
       transition: height 0.35s var(--ease);
     }
     .nav-substep {
@@ -150,29 +209,43 @@
       cursor: pointer;
       text-align: left;
       color: var(--text-muted);
-      font-size: 12.5px;
-      transition: background .12s, color .12s;
+      font-size: var(--fs-sm);
+      transition: background var(--t-base), color var(--t-base);
     }
     .nav-substep:hover { background: var(--bg-tertiary); }
     .nav-substep__label { line-height: 1.2; }
     .nav-substep.done .nav-substep__label { color: var(--text-secondary); }
     .nav-substep.active { background: var(--bg-tertiary); }
-    .nav-substep.active .nav-substep__label { color: var(--accent); font-weight: 600; }
+    /* --accent-hover y no --accent: es texto sobre --bg-tertiary, donde el rojo
+       oficial da 4.17:1 y no llega al 4.5 de WCAG AA. Misma regla en todo el
+       archivo — el acento pinta fondos y bordes, el tono oscuro pinta el texto. */
+    .nav-substep.active .nav-substep__label { color: var(--accent-hover); font-weight: 600; }
     /* Check verde en los pasos completados (además del riel de progreso). */
     .nav-substep__check { display: none; margin-left: auto; color: var(--accent-green); }
     .nav-substep__check .icon { width: 12px; height: 12px; }
     .nav-substep.done .nav-substep__check { display: inline-flex; }
 
-    /* Field-level error feedback (wizard validation) */
+    /* Field-level error feedback (wizard validation).
+       El error usa el MISMO rojo que el resto de la app: antes era un rojo
+       Tailwind suelto, un tercero que no estaba en ningún token. Como el acento
+       también es rojo, el estado de error no se distingue por tono sino por
+       GROSOR: el borde pasa a 2px, contra el 1px del input en reposo y del
+       input con foco. El mensaje de .field-error abajo termina de desambiguar. */
     .field-error {
       display: none;
-      font-size: 12.5px;
-      color: #dc2626;
+      font-size: var(--fs-sm);
+      color: var(--accent-hover);
       margin-top: 6px;
       line-height: 1.4;
     }
     .field-error.show { display: block; animation: reveal 0.15s ease-out; }
-    .input-error { border-color: #dc2626 !important; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12); }
+    /* El grosor se simula con un inset y no con `border-width: 2px`: subir el
+       borde real encogería el content-box (box-sizing: border-box) y el texto
+       saltaría 1px justo cuando aparece el error. */
+    .input-error {
+      border-color: var(--accent) !important;
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
 
     /* Card */
     .card {
@@ -185,7 +258,7 @@
     }
 
     .card-title {
-      font-size: 22px;
+      font-size: var(--fs-xl);
       font-weight: 700;
       margin-bottom: 8px;
       letter-spacing: -0.02em;
@@ -196,7 +269,7 @@
     .card-title:focus { outline: none; }
 
     .card-description {
-      font-size: 15px;
+      font-size: var(--fs-md);
       color: var(--text-secondary);
       margin-bottom: 24px;
       max-width: 68ch;
@@ -205,11 +278,11 @@
     /* Eyebrow: label corto en mayúscula espaciada, color acento (ref. teramot) */
     .eyebrow {
       display: inline-block;
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.09em;
-      color: var(--accent);
+      color: var(--accent-hover);
       margin-bottom: 10px;
     }
 
@@ -220,28 +293,28 @@
 
     .form-label {
       display: block;
-      font-size: 13px;
-      font-weight: 500;
+      font-size: var(--fs-base);
+      font-weight: var(--fw-medium);
       color: var(--text-secondary);
-      margin-bottom: 6px;
+      margin-bottom: var(--sp-1);
     }
 
     .form-input, .form-textarea, .form-select {
       width: 100%;
       padding: 11px 15px;
-      font-size: 14px;
+      font-size: var(--fs-md);
       font-family: var(--font-sans);
       border: 1px solid var(--border-default);
-      border-radius: var(--radius-md);
+      border-radius: var(--radius-sm);
       background: var(--bg-primary);
       color: var(--text-primary);
-      transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+      transition: border-color var(--t-base), box-shadow var(--t-base);
     }
 
     .form-textarea {
       font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.5;
+      font-size: var(--fs-sm);
+      line-height: var(--lh-base);
       resize: vertical;
       min-height: 200px;
     }
@@ -249,7 +322,7 @@
     .form-input:focus, .form-textarea:focus, .form-select:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-ring);
+      box-shadow: var(--ring);
     }
 
     /* Buttons */
@@ -257,23 +330,21 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: var(--sp-2);
       padding: 11px 22px;
-      font-size: 14px;
-      font-weight: 600;
+      font-size: var(--fs-md);
+      font-weight: var(--fw-semi);
       font-family: var(--font-sans);
       border: 1px solid transparent;
-      border-radius: var(--radius-pill);
+      border-radius: var(--radius-sm);
       cursor: pointer;
       white-space: nowrap;
-      transition: background 0.18s var(--ease), border-color 0.18s var(--ease),
-                  box-shadow 0.18s var(--ease), transform 0.08s var(--ease), color 0.18s var(--ease);
+      transition: background var(--t-base), border-color var(--t-base), color var(--t-base);
     }
     .btn:focus-visible {
       outline: none;
       box-shadow: 0 0 0 3px var(--accent-red-ring);
     }
-    .btn:active { transform: translateY(1px); }
 
     .btn-primary {
       background: var(--accent-red);
@@ -282,8 +353,6 @@
 
     .btn-primary:hover {
       background: var(--accent-red-hover);
-      box-shadow: var(--shadow-sm);
-      transform: translateY(-1px);
     }
 
     .btn-secondary {
@@ -293,10 +362,8 @@
     }
 
     .btn-secondary:hover {
-      background: var(--bg-primary);
+      background: var(--bg-tertiary);
       border-color: var(--text-muted);
-      box-shadow: var(--shadow-sm);
-      transform: translateY(-1px);
     }
 
     /* (.btn-ghost — botón terciario — se define más abajo, junto al wizard.) */
@@ -306,7 +373,7 @@
       background: var(--text-primary);
       color: #fff;
     }
-    .btn-dark:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+    .btn-dark:hover { filter: brightness(1.08); }
 
     .btn:disabled {
       opacity: 0.45;
@@ -335,7 +402,7 @@
       border-radius: var(--radius-sm);
       padding: 16px;
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--fs-sm);
       line-height: 1.5;
       overflow-x: auto;
       white-space: pre-wrap;
@@ -371,7 +438,7 @@
       border: 1.5px solid var(--border-subtle);
       border-radius: var(--radius-md);
       cursor: pointer;
-      transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease),
+      transition: border-color var(--t-base), box-shadow var(--t-base),
                   background 0.18s var(--ease), transform 0.08s var(--ease);
       text-align: left;
       position: relative;
@@ -379,8 +446,7 @@
 
     .plugin-option:hover {
       border-color: var(--border-default);
-      box-shadow: var(--shadow-sm);
-      transform: translateY(-1px);
+      background: var(--bg-tertiary);
     }
 
     .plugin-option.selected {
@@ -401,7 +467,7 @@
     .plugin-option__tile {
       width: 36px; height: 36px;
       flex-shrink: 0;
-      border-radius: 9px;
+      border-radius: var(--radius-md);
       background: var(--accent-tint);
       color: var(--accent);
       display: flex; align-items: center; justify-content: center;
@@ -411,13 +477,13 @@
     .plugin-option__body { min-width: 0; }
 
     .plugin-option-title {
-      font-size: 14px;
+      font-size: var(--fs-md);
       font-weight: 600;
       margin-bottom: 2px;
     }
 
     .plugin-option-desc {
-      font-size: 12px;
+      font-size: var(--fs-sm);
       color: var(--text-muted);
     }
 
@@ -425,7 +491,7 @@
     .status {
       padding: 12px 16px;
       border-radius: var(--radius-sm);
-      font-size: 13px;
+      font-size: var(--fs-base);
       margin-bottom: 16px;
     }
 
@@ -435,9 +501,12 @@
       border: 1px solid rgba(22, 163, 74, 0.2);
     }
 
+    /* Los alfa 0.1/0.2 quedan literales a propósito: son la convención que
+       comparten .status-success y .status-loading acá al lado. Mapearlos a
+       --accent-tint/--accent-ring rompería el paralelo entre los tres estados. */
     .status-error {
       background: rgba(229, 0, 0, 0.1);
-      color: var(--accent-red);
+      color: var(--accent-hover);
       border: 1px solid rgba(229, 0, 0, 0.2);
     }
 
@@ -450,7 +519,7 @@
     /* Hidden */
     .hidden { display: none !important; }
 
-    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-sm { padding: 6px 12px; font-size: var(--fs-sm); }
 
     /* ── App nav (rail izquierdo, altura completa) ───────────────── */
     .app-nav {
@@ -472,22 +541,33 @@
       padding: 0 18px;
       border-bottom: 1px solid var(--border-subtle);
     }
+    /* El compuesto de los tres logos. Acá tiene lugar para que se distingan,
+       a diferencia de la pestaña. */
     .app-nav__logo {
-      width: 34px;
-      height: 34px;
-      background: linear-gradient(135deg, var(--accent-red) 0%, var(--accent-red-hover) 100%);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-md);
       flex-shrink: 0;
-      box-shadow: var(--shadow-md);
+      display: block;
     }
-    .app-nav__logo .icon { width: 19px; height: 19px; stroke-width: 2.2; }
-    .app-nav__brand-text { display: flex; flex-direction: column; line-height: 1.25; }
-    .app-nav__brand-name { font-size: 15px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
-    .app-nav__brand-sub { font-size: 11px; color: var(--text-muted); }
+    .app-nav__brand-text { display: flex; flex-direction: column; line-height: var(--lh-tight); }
+    .app-nav__brand-name {
+      font-size: var(--fs-md); font-weight: var(--fw-semi);
+      color: var(--text-primary); letter-spacing: -0.01em;
+    }
+    .app-nav__brand-sub { font-size: var(--fs-xs); color: var(--text-muted); }
+
+    /* Etiqueta de sección del nav: chica, gris y en mayúsculas espaciadas. Es el
+       gesto que agrupa sin agregar líneas ni cajas. */
+    .nav-group__label {
+      font-size: var(--fs-xs);
+      font-weight: var(--fw-semi);
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: var(--sp-4) var(--sp-3) var(--sp-1);
+    }
+    .nav-group__label:first-child { padding-top: var(--sp-1); }
 
     .app-nav__items {
       flex: 1;
@@ -498,7 +578,7 @@
       gap: 8px;
     }
     .app-nav__section-label {
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.06em;
@@ -509,11 +589,11 @@
       position: relative;
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 11px 13px;
-      border-radius: var(--radius-md);
-      font-size: 15px;
-      font-weight: 550;
+      gap: var(--sp-3);
+      padding: var(--sp-2) var(--sp-3);
+      border-radius: var(--radius-sm);
+      font-size: var(--fs-md);
+      font-weight: var(--fw-medium);
       color: var(--text-secondary);
       cursor: pointer;
       user-select: none;
@@ -521,13 +601,14 @@
       background: none;
       width: 100%;
       text-align: left;
-      transition: background 0.15s, color 0.15s;
+      transition: background var(--t-fast), color var(--t-fast);
     }
-    .nav-item:hover { background: var(--bg-tertiary); }
+    .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .nav-item:focus-visible { outline: none; box-shadow: var(--ring); }
     .nav-item.active {
       background: var(--accent-tint);
-      color: var(--accent);
-      font-weight: 600;
+      color: var(--accent-hover);
+      font-weight: var(--fw-semi);
     }
     /* Barra de acento a la izquierda del item activo */
     .nav-item.active::before {
@@ -535,12 +616,22 @@
       position: absolute;
       left: 0; top: 7px; bottom: 7px;
       width: 3px;
-      border-radius: 0 3px 3px 0;
+      border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
       background: var(--accent);
     }
-    .nav-item__icon { font-size: 16px; line-height: 1; width: 22px; display: inline-flex; align-items: center; justify-content: center; }
+    .nav-item__icon { font-size: var(--fs-lg); line-height: 1; width: 22px; display: inline-flex; align-items: center; justify-content: center; }
     .nav-item__icon .icon { width: 18px; height: 18px; }
     .nav-item__label { flex: 1; }
+    /* Chevron del item que despliega sub-pasos. Apunta abajo en reposo y gira
+       180° cuando los sub-pasos están a la vista, igual que el de las cards
+       plegables de "Entorno desplegado" (.setup-card__chevron). `flex: none`
+       para que no se comprima cuando el label es largo. */
+    .nav-item__chevron {
+      width: 14px; height: 14px; flex: none;
+      color: var(--text-muted);
+      transition: transform var(--t-base);
+    }
+    .nav-item[aria-expanded="true"] .nav-item__chevron { transform: rotate(180deg); }
     .nav-dot {
       width: 8px;
       height: 8px;
@@ -561,7 +652,7 @@
       background: var(--bg-tertiary);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      transition: background 0.15s, border-color 0.15s;
+      transition: background var(--t-base), border-color var(--t-base);
     }
     .app-nav__env:hover { background: var(--bg-primary); border-color: var(--border-default); }
     .app-nav__env-head { display: flex; align-items: center; gap: 8px; }
@@ -570,31 +661,15 @@
       background: var(--text-muted);
     }
     .app-nav__env-dot.is-active { background: var(--accent-green); box-shadow: 0 0 0 3px var(--accent-green-tint); }
-    .app-nav__env-status { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+    .app-nav__env-status { font-size: var(--fs-sm); font-weight: 700; color: var(--text-secondary); }
     .app-nav__env-status.is-active { color: var(--accent-green); }
     .app-nav__env-detail {
       display: flex; flex-direction: column; gap: 1px;
-      margin-top: 8px; font-size: 11.5px; color: var(--text-muted); line-height: 1.4;
+      margin-top: 8px; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4;
     }
-    .app-nav__env-project { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+    .app-nav__env-project { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); }
 
     /* Footer del rail: región + cuenta */
-    .app-nav__footer {
-      flex-shrink: 0;
-      border-top: 1px solid var(--border-subtle);
-      padding: 14px 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .app-nav__footer-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--accent-green);
-      flex-shrink: 0;
-    }
-    .app-nav__footer-text { display: flex; flex-direction: column; line-height: 1.3; }
-    .app-nav__footer-region { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-    .app-nav__footer-label { font-size: 11px; color: var(--text-muted); }
     /* Usuario logueado + logout (modo hosteado) */
     .app-nav__user {
       flex-shrink: 0; display: flex; align-items: center; gap: 9px;
@@ -603,18 +678,18 @@
     }
     .app-nav__user-avatar {
       width: 26px; height: 26px; flex: none; border-radius: 50%;
-      background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+      background: var(--accent); color: #fff; font-size: var(--fs-sm); font-weight: 700;
       display: flex; align-items: center; justify-content: center; text-transform: uppercase;
     }
     .app-nav__user-email {
-      flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary);
+      flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text-secondary);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .app-nav__logout {
       flex: none; display: inline-flex; align-items: center; justify-content: center;
       width: 30px; height: 30px; border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle); background: var(--bg-primary);
-      color: var(--text-muted); cursor: pointer; transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+      color: var(--text-muted); cursor: pointer; transition: color var(--t-base), border-color var(--t-base), background var(--t-base);
     }
     .app-nav__logout:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
 
@@ -636,40 +711,40 @@
     .login-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
     .login-brand__logo {
       width: 40px; height: 40px; flex: none; border-radius: var(--radius-md); color: #fff;
-      background: linear-gradient(135deg, var(--accent-red), var(--accent-red-hover));
+      background: var(--accent);
       display: flex; align-items: center; justify-content: center;
     }
     .login-brand__logo .icon { width: 20px; height: 20px; }
     .login-brand__text { display: flex; flex-direction: column; line-height: 1.2; }
-    .login-brand__name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
-    .login-brand__sub { font-size: 11.5px; color: var(--text-muted); }
-    .login-title { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px; }
-    .login-sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 22px; }
-    .login-overlay label { display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin: 0 0 6px; }
+    .login-brand__name { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+    .login-brand__sub { font-size: var(--fs-xs); color: var(--text-muted); }
+    .login-title { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px; }
+    .login-sub { color: var(--text-secondary); font-size: var(--fs-base); margin-bottom: 22px; }
+    .login-overlay label { display: block; font-size: var(--fs-xs); font-weight: 700; color: var(--text-secondary); margin: 0 0 6px; }
     .login-overlay input {
-      width: 100%; padding: 11px 13px; margin-bottom: 16px; font-size: 14px; font-family: inherit;
+      width: 100%; padding: 11px 13px; margin-bottom: 16px; font-size: var(--fs-md); font-family: inherit;
       color: var(--text-primary); background: var(--bg-tertiary);
       border: 1px solid var(--border-default); border-radius: var(--radius-sm);
-      transition: border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
+      transition: border-color var(--t-base), box-shadow var(--t-base), background var(--t-base);
     }
     .login-overlay input:focus { outline: none; background: var(--bg-primary); border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
     .login-btn {
-      width: 100%; padding: 12px; font-size: 14px; font-weight: 700; font-family: inherit; color: #fff;
+      width: 100%; padding: 12px; font-size: var(--fs-md); font-weight: 700; font-family: inherit; color: #fff;
       cursor: pointer; border: none; border-radius: var(--radius-sm); background: var(--accent-red);
-      transition: background .15s var(--ease);
+      transition: background var(--t-base);
     }
     .login-btn:hover:not(:disabled) { background: var(--accent-red-hover); }
     .login-btn:disabled { opacity: .6; cursor: default; }
-    .login-err { color: var(--accent-red); font-size: 12.5px; margin: 0 0 14px; min-height: 16px; font-weight: 500; }
-    .login-foot { margin-top: 16px; text-align: center; font-size: 12px; }
+    .login-err { color: var(--accent-red); font-size: var(--fs-sm); margin: 0 0 14px; min-height: 16px; font-weight: 500; }
+    .login-foot { margin-top: 16px; text-align: center; font-size: var(--fs-sm); }
     .login-foot a { color: var(--accent); text-decoration: none; }
     .login-foot a:hover { text-decoration: underline; }
-    .login-forgot-note { display: block; margin-top: 8px; color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
+    .login-forgot-note { display: block; margin-top: 8px; color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.4; }
 
     /* ── Panel de control (vista de admin) ── */
     .admin-section { margin-top: 14px; }
-    .admin-section__title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 8px; }
-    .admin-empty { color: var(--text-muted); font-size: 12.5px; }
+    .admin-section__title { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 8px; }
+    .admin-empty { color: var(--text-muted); font-size: var(--fs-sm); }
     .admin-users { display: flex; flex-direction: column; gap: 6px; }
     .admin-user {
       display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap;
@@ -678,8 +753,8 @@
     /* El email empuja las acciones al borde derecho; con varias acciones + badges
        la fila envuelve en vez de desbordar. */
     .admin-user__email { flex: 1 1 200px; }
-    .admin-user__email { flex: 1; min-width: 0; font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .admin-user__badge { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-tint); padding: 2px 7px; border-radius: var(--radius-pill); }
+    .admin-user__email { flex: 1; min-width: 0; font-size: var(--fs-base); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .admin-user__badge { flex: none; font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-hover); background: var(--accent-tint); padding: 2px 7px; border-radius: var(--radius-pill); }
     /* Cuenta con la contraseña vacía: entró un reset y todavía no eligió la nueva. */
     .admin-user__badge--warn { color: var(--text-muted); background: var(--bg-tertiary); }
     /* Acciones de fila (Quitar / Resetear). Un solo estilo compartido: antes eran
@@ -690,11 +765,11 @@
     .admin-user__reset,
     .admin-allow-remove {
       flex: none; display: inline-flex; align-items: center; gap: 5px;
-      font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1;
+      font-family: inherit; font-size: var(--fs-sm); font-weight: 600; line-height: 1;
       cursor: pointer; padding: 6px 10px; white-space: nowrap;
       border: 1px solid transparent; border-radius: var(--radius-sm);
       background: transparent; color: var(--text-muted);
-      transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+      transition: color var(--t-base), border-color var(--t-base), background var(--t-base);
     }
     .admin-user__reset .icon,
     .admin-allow-remove .icon { width: 13px; height: 13px; }
@@ -703,14 +778,14 @@
     .admin-user__reset:focus-visible,
     .admin-allow-remove:focus-visible { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
     .admin-audit { max-height: 260px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-    .admin-audit__row { display: grid; grid-template-columns: 130px 150px 1fr; gap: 10px; padding: 6px 12px; font-size: 11.5px; border-bottom: 1px solid var(--border-subtle); }
+    .admin-audit__row { display: grid; grid-template-columns: 130px 150px 1fr; gap: 10px; padding: 6px 12px; font-size: var(--fs-xs); border-bottom: 1px solid var(--border-subtle); }
     .admin-audit__row:last-child { border-bottom: none; }
     .admin-audit__ts { color: var(--text-muted); font-variant-numeric: tabular-nums; }
     .admin-audit__user { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .admin-audit__act { color: var(--text-primary); }
     .admin-audit__act b { color: var(--accent); font-weight: 700; }
     .admin-allow-form { display: flex; gap: 8px; margin-bottom: 10px; }
-    .admin-allow-form input { flex: 1; padding: 8px 11px; font-size: 13px; font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
+    .admin-allow-form input { flex: 1; padding: 8px 11px; font-size: var(--fs-base); font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
     .admin-allow-form input:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
     .admin-allow-form .btn { flex: none; }
     .admin-allow-form .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -721,12 +796,12 @@
     .app-view.active { display: block; animation: reveal 0.2s ease-out; }
 
     /* Descripción corta de la sección (el título lo muestra el topbar) */
-    .view-subtitle { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; }
+    .view-subtitle { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 24px; }
 
     /* Vista "Cómo usar": círculo numerado + título de paso. */
     .guide-num {
-      flex: none; width: 24px; height: 24px; border-radius: 999px;
-      background: var(--accent); color: #fff; font-weight: 700; font-size: 12px;
+      flex: none; width: 24px; height: 24px; border-radius: var(--radius-pill);
+      background: var(--accent); color: #fff; font-weight: 700; font-size: var(--fs-sm);
       display: inline-flex; align-items: center; justify-content: center;
     }
 
@@ -749,8 +824,8 @@
       align-items: center;
       gap: 7px;
       padding: 5px 12px;
-      border-radius: 999px;
-      font-size: 12px;
+      border-radius: var(--radius-pill);
+      font-size: var(--fs-sm);
       font-weight: 600;
       background: rgba(22, 163, 74, 0.1);
       color: var(--accent-green);
@@ -764,22 +839,22 @@
     }
     .guide-block__head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .guide-block__num {
-      flex: none; width: 26px; height: 26px; border-radius: 8px;
-      background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+      flex: none; width: 26px; height: 26px; border-radius: var(--radius-md);
+      background: var(--accent); color: #fff; font-size: var(--fs-base); font-weight: 700;
       display: inline-flex; align-items: center; justify-content: center;
     }
-    .guide-block__title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0; }
+    .guide-block__title { font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary); margin: 0; }
     .guide-block__once {
-      font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+      font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
       color: var(--text-muted); background: var(--bg-tertiary); padding: 3px 8px; border-radius: var(--radius-pill);
     }
     .guide-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
-    .guide-list li { font-size: 13.5px; line-height: 1.55; color: var(--text-secondary); }
+    .guide-list li { font-size: var(--fs-base); line-height: 1.55; color: var(--text-secondary); }
     .guide-list strong { color: var(--text-primary); }
     .guide-more {
       display: flex; flex-direction: column; gap: 5px; padding: 14px 20px;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
-      background: var(--bg-subtle); font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+      background: var(--bg-subtle); font-size: var(--fs-base); color: var(--text-secondary); line-height: 1.5;
     }
     .guide-more > strong { color: var(--text-primary); }
 
@@ -790,42 +865,42 @@
       padding: 12px 14px; margin-bottom: 8px; font-family: inherit; cursor: pointer;
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md); box-shadow: var(--shadow-xs);
-      transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
+      transition: border-color var(--t-base), box-shadow var(--t-base);
     }
     .activity-row:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); }
     .activity-row__tile {
-      flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px;
+      flex: 0 0 auto; width: 30px; height: 30px; border-radius: var(--radius-md);
       background: var(--accent-tint); color: var(--accent);
       display: flex; align-items: center; justify-content: center;
     }
     .activity-row__tile .icon { width: 15px; height: 15px; }
     .activity-row__title {
-      display: block; font-size: 13px; font-weight: 600; color: var(--text-primary);
+      display: block; font-size: var(--fs-base); font-weight: 600; color: var(--text-primary);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .activity-row__meta { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+    .activity-row__meta { display: block; font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; }
     .activity-step {
       display: flex; align-items: flex-start; gap: 9px; padding: 7px 0;
-      font-size: 13px; color: var(--text-secondary);
+      font-size: var(--fs-base); color: var(--text-secondary);
       border-bottom: 1px solid var(--border-subtle);
     }
     .activity-step:last-child { border-bottom: none; }
     .activity-step__why {
-      display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px;
+      display: block; font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px;
       font-family: var(--font-mono); word-break: break-word;
     }
     .activity-log {
       margin: 10px 0 0; padding: 12px 14px; max-height: 380px; overflow: auto;
       background: var(--bg-tertiary); border-radius: var(--radius-md);
-      font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+      font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5;
       color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
     }
     .status-pill__dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--accent-green);
     }
-    .infra-card__project { font-size: 16px; font-weight: 600; }
-    .infra-card__age { font-size: 13px; color: var(--text-muted); margin-left: auto; }
+    .infra-card__project { font-size: var(--fs-lg); font-weight: 600; }
+    .infra-card__age { font-size: var(--fs-base); color: var(--text-muted); margin-left: auto; }
 
     .infra-meta {
       display: grid;
@@ -838,7 +913,7 @@
     }
     .infra-meta__item { display: flex; flex-direction: column; gap: 3px; }
     .infra-meta__label {
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -846,7 +921,7 @@
     }
     .infra-meta__value {
       font-family: var(--font-mono);
-      font-size: 13px;
+      font-size: var(--fs-base);
       color: var(--text-primary);
       word-break: break-all;
     }
@@ -877,12 +952,12 @@
     }
     .infra-empty__tile {
       width: 52px; height: 52px; margin: 0 auto 18px;
-      border-radius: 14px; background: var(--accent-tint); color: var(--accent);
+      border-radius: var(--radius-lg); background: var(--accent-tint); color: var(--accent);
       display: flex; align-items: center; justify-content: center;
     }
     .infra-empty__tile .icon { width: 26px; height: 26px; }
-    .infra-empty__title { font-size: 18px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
-    .infra-empty__text { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; }
+    .infra-empty__title { font-size: var(--fs-lg); font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
+    .infra-empty__text { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 24px; }
 
     /* Section divider */
     .section-divider {
@@ -898,10 +973,10 @@
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       background: var(--accent-tint);
-      color: var(--accent);
-      font-size: 14px;
+      color: var(--accent-hover);
+      font-size: var(--fs-md);
       font-weight: 700;
       flex-shrink: 0;
     }
@@ -922,7 +997,7 @@
       border-top: 1px dashed var(--border-subtle);
     }
     .inline-result-label {
-      font-size: 12px;
+      font-size: var(--fs-sm);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -970,20 +1045,20 @@
     }
     .wizard-head__meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
     .wizard-head__step {
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.09em;
-      color: var(--accent);
+      color: var(--accent-hover);
     }
     .wizard-head__label {
-      font-size: 20px;
+      font-size: var(--fs-xl);
       font-weight: 700;
       letter-spacing: -0.02em;
       color: var(--text-primary);
       line-height: 1.25;
     }
-    .wizard-head__next { font-size: 12.5px; color: var(--text-muted); }
+    .wizard-head__next { font-size: var(--fs-sm); color: var(--text-muted); }
     .wizard-progress {
       height: 5px;
       border-radius: var(--radius-pill);
@@ -994,7 +1069,7 @@
       height: 100%;
       width: 25%;
       border-radius: var(--radius-pill);
-      background: linear-gradient(90deg, var(--accent), var(--accent-red));
+      background: var(--accent);
       transition: width 0.35s var(--ease);
     }
 
@@ -1004,7 +1079,7 @@
       align-items: center;
       gap: 6px;
       padding: 7px 14px;
-      font-size: 12.5px;
+      font-size: var(--fs-sm);
       font-weight: 600;
       font-family: var(--font-sans);
       color: var(--text-secondary);
@@ -1013,7 +1088,7 @@
       border-radius: var(--radius-pill);
       cursor: pointer;
       white-space: nowrap;
-      transition: color 0.15s var(--ease), border-color 0.15s var(--ease), background 0.15s var(--ease);
+      transition: color var(--t-base), border-color var(--t-base), background var(--t-base);
     }
     .btn-ghost:hover {
       color: var(--text-primary);
@@ -1034,11 +1109,11 @@
       align-items: center;
       justify-content: space-between;
       padding: 16px 20px;
-      background: linear-gradient(135deg, rgba(220, 38, 38, 0.08) 0%, rgba(220, 38, 38, 0.02) 100%);
+      background: var(--accent-tint);
       border-bottom: 1px solid var(--border-subtle);
     }
     .mapping-header-title {
-      font-size: 14px;
+      font-size: var(--fs-md);
       font-weight: 600;
       color: var(--text-primary);
       display: flex;
@@ -1048,7 +1123,7 @@
     .mapping-header-title .icon { width: 16px; height: 16px; color: var(--accent); }
     .mapping-edit-btn .icon { width: 13px; height: 13px; }
     .mapping-header-count {
-      font-size: 12px;
+      font-size: var(--fs-sm);
       color: var(--text-muted);
       background: var(--bg-tertiary);
       padding: 2px 8px;
@@ -1073,17 +1148,24 @@
     #view-settings .settings-grid { gap: 56px; }
     .settings-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); padding: 16px 20px;
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
+      padding: var(--sp-4) var(--sp-5);
     }
     .settings-card__head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
     .settings-card__tile {
-      width: 30px; height: 30px; flex: none; border-radius: 9px;
+      width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
       background: var(--accent-tint); color: var(--accent);
       display: inline-flex; align-items: center; justify-content: center;
     }
     .settings-card__tile .icon { width: 17px; height: 17px; }
-    .settings-card__title { font-size: 15.5px; font-weight: 650; color: var(--text-primary); line-height: 1.25; letter-spacing: -0.01em; }
-    .settings-card__hint { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin-top: 2px; }
+    .settings-card__title {
+      font-size: var(--fs-lg); font-weight: var(--fw-semi);
+      color: var(--text-primary); line-height: var(--lh-tight); letter-spacing: -0.01em;
+    }
+    .settings-card__hint {
+      font-size: var(--fs-sm); color: var(--text-muted);
+      line-height: var(--lh-base); margin-top: 2px;
+    }
     /* Contenedor de campos: envuelve solo, sin filas fijas — así los 7 campos
        de la cuenta Huawei entran en 2 filas en vez de 3. */
     /* `stretch` (default) a propósito: hace que el separador vertical del
@@ -1091,8 +1173,8 @@
     .settings-fields { display: flex; flex-wrap: wrap; gap: 0 14px; }
     /* Campos: algo más chicos que el form del wizard, pero cómodos. */
     .settings-field { margin-bottom: 10px; }
-    .settings-field .form-label { font-size: 12px; margin-bottom: 4px; }
-    .settings-field .form-input { padding: 8px 12px; font-size: 13.5px; }
+    .settings-field .form-label { font-size: var(--fs-sm); margin-bottom: var(--sp-1); }
+    .settings-field .form-input { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-base); }
     /* Acción de la card, al pie: el botón primero y el estado a continuación. */
     .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     /* La acción que opera sobre un campo puntual se alinea con la columna de ese
@@ -1107,7 +1189,7 @@
     /* Los botones se re-escalan a esta vista: con labels de 12px e inputs de
        13.5px, el .btn base (11/22, 14px) se ve desproporcionado. */
     .settings-actions .btn,
-    .settings-field__action { padding: 8px 18px; font-size: 13px; }
+    .settings-field__action { padding: var(--sp-2) 18px; font-size: var(--fs-base); }
     /* Acción propia de un campo (ej. "Preparar" bajo el bucket): debajo de su
        input y con ancho natural — a ancho completo se confundía con un input.
        El aire sobre el botón iguala al de las otras cards (ahí lo dan los 10px
@@ -1123,7 +1205,7 @@
        "Borrar" de MaaS): ocupa el resto de la fila y envuelve ahí, en vez de
        empujar al botón fuera de la card. */
     .settings-status {
-      font-size: 12px; color: var(--text-muted); line-height: 1.4;
+      font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.4;
       flex: 1 1 200px;
       display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     }
@@ -1144,16 +1226,16 @@
       gap: 4px;
       margin-left: 8px;
       padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 11px;
+      border-radius: var(--radius-pill);
+      font-size: var(--fs-xs);
       font-weight: 600;
-      background: rgba(229, 0, 0, 0.08);
-      color: var(--accent-red);
+      background: var(--accent-tint);
+      color: var(--accent-hover);
       font-family: var(--font-mono);
     }
     .mapping-path {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--fs-sm);
       color: var(--text-secondary);
     }
 
@@ -1168,7 +1250,7 @@
     .mapping-table th {
       text-align: left;
       padding: 12px 16px;
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -1177,7 +1259,7 @@
     }
     .mapping-table td {
       padding: 12px 16px;
-      font-size: 13px;
+      font-size: var(--fs-base);
       border-bottom: 1px solid var(--border-subtle);
       vertical-align: middle;
     }
@@ -1185,7 +1267,7 @@
       border-bottom: none;
     }
     .mapping-table tr:hover {
-      background: rgba(220, 38, 38, 0.02);
+      background: rgba(229, 0, 0, 0.02);
     }
     .mapping-group-header td {
       background: var(--bg-subtle);
@@ -1203,41 +1285,42 @@
       vertical-align: middle;
       width: 14px;
     }
-    .mapping-group-toggle .icon { width: 13px; height: 13px; transition: transform 0.15s var(--ease); }
+    .mapping-group-toggle .icon { width: 13px; height: 13px; transition: transform var(--t-base); }
     .mapping-group-header.collapsed .mapping-group-toggle .icon { transform: rotate(-90deg); }
     .mapping-group-title {
-      font-size: 12px;
+      font-size: var(--fs-sm);
       font-weight: 700;
-      color: var(--accent);
+      /* En :hover la fila se pinta con --bg-tertiary y el rojo plano cae a 4.17:1. */
+      color: var(--accent-hover);
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
     .mapping-group-count {
-      font-size: 11px;
+      font-size: var(--fs-xs);
       color: var(--text-muted);
       margin-left: 8px;
       font-weight: 400;
     }
     .mapping-row-number {
-      font-size: 11px;
+      font-size: var(--fs-xs);
       color: var(--text-muted);
       font-weight: 500;
       min-width: 24px;
     }
     .mapping-raw {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--fs-sm);
       color: var(--text-secondary);
       background: var(--bg-tertiary);
       padding: 4px 10px;
       border-radius: var(--radius-sm);
       display: inline-block;
       border: 1px solid transparent;
-      transition: all 0.15s;
+      transition: all var(--t-base);
     }
     .mapping-raw-input {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--fs-sm);
       padding: 4px 10px;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
@@ -1249,12 +1332,12 @@
     .mapping-raw-input:focus {
       outline: none;
       border-color: var(--accent-red);
-      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
+      box-shadow: 0 0 0 2px var(--accent-ring);
     }
     .mapping-arrow {
       color: var(--text-muted);
       margin: 0 6px;
-      font-weight: bold;
+      font-weight: 700;
     }
     .mapping-business {
       font-weight: 600;
@@ -1271,16 +1354,16 @@
       color: var(--text-primary);
       width: 100%;
       max-width: 180px;
-      font-size: 13px;
+      font-size: var(--fs-base);
     }
     .mapping-business-input:focus {
       outline: none;
       border-color: var(--accent-red);
-      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
+      box-shadow: 0 0 0 2px var(--accent-ring);
     }
     .mapping-ecs {
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-xs);
       color: var(--text-muted);
     }
 
@@ -1293,7 +1376,7 @@
       align-items: center;
       gap: 4px;
       padding: 2px 8px;
-      font-size: 10px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       border-radius: var(--radius-sm);
       text-transform: uppercase;
@@ -1314,13 +1397,13 @@
     }
     .ecs-type-mismatch {
       color: #c2410c;
-      font-size: 10px;
+      font-size: var(--fs-xs);
       margin-left: 6px;
       font-style: italic;
     }
     .mapping-ecs-input {
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-xs);
       padding: 3px 8px;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
@@ -1332,12 +1415,12 @@
     .mapping-ecs-input:focus {
       outline: none;
       border-color: var(--accent-red);
-      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
+      box-shadow: 0 0 0 2px var(--accent-ring);
     }
     .mapping-type-badge {
       display: inline-block;
       padding: 4px 10px;
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       border-radius: var(--radius-sm);
       background: rgba(59, 130, 246, 0.12);
@@ -1358,7 +1441,7 @@
     .mapping-type-select {
       font-family: inherit;
       padding: 4px 8px;
-      font-size: 11px;
+      font-size: var(--fs-xs);
       font-weight: 600;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
@@ -1372,13 +1455,13 @@
       border-color: var(--accent-red);
     }
     .mapping-unit {
-      font-size: 11px;
+      font-size: var(--fs-xs);
       color: var(--text-muted);
       margin-left: 6px;
     }
     .mapping-unit-input {
       font-family: inherit;
-      font-size: 11px;
+      font-size: var(--fs-xs);
       padding: 2px 6px;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
@@ -1393,13 +1476,13 @@
     .mapping-edit-btn {
       font-family: inherit;
       padding: 4px 8px;
-      font-size: 11px;
+      font-size: var(--fs-xs);
       border-radius: var(--radius-sm);
       background: transparent;
       border: 1px solid var(--border-subtle);
       color: var(--text-muted);
       cursor: pointer;
-      transition: all 0.15s;
+      transition: all var(--t-base);
     }
     .mapping-edit-btn:hover {
       background: var(--bg-tertiary);
@@ -1422,10 +1505,10 @@
       gap: 6px;
     }
 
-    .step-optional { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+    .step-optional { font-size: var(--fs-sm); font-weight: 500; color: var(--text-muted); }
 
     .section-subtitle {
-      font-size: 13px; font-weight: 600; color: var(--text-secondary);
+      font-size: var(--fs-base); font-weight: 600; color: var(--text-secondary);
       text-transform: uppercase; letter-spacing: 0.04em;
       margin: 0 0 10px; padding-bottom: 6px;
       border-bottom: 1px solid var(--border-subtle);
@@ -1444,17 +1527,17 @@
     }
     .summary-row + .summary-row { border-top: 1px solid var(--border-subtle); }
     .summary-row__tile {
-      width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px;
+      width: 30px; height: 30px; flex-shrink: 0; border-radius: var(--radius-md);
       background: var(--accent-tint); color: var(--accent);
       display: flex; align-items: center; justify-content: center;
     }
     .summary-row__tile .icon { width: 16px; height: 16px; }
     .summary-row__label {
-      font-size: 12px; font-weight: 600; color: var(--text-muted);
+      font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted);
       text-transform: uppercase; letter-spacing: 0.05em; width: 110px; flex-shrink: 0;
     }
-    .summary-row__value { font-size: 14px; font-weight: 500; color: var(--text-primary); word-break: break-word; }
-    .summary-row__value code { font-family: var(--font-mono); font-size: 12.5px; }
+    .summary-row__value { font-size: var(--fs-md); font-weight: 500; color: var(--text-primary); word-break: break-word; }
+    .summary-row__value code { font-family: var(--font-mono); font-size: var(--fs-sm); }
 
     /* Paneles que agrupan las zonas del paso Desplegar (config file / review). */
     .deploy-panel {
@@ -1465,26 +1548,26 @@
       margin-top: 16px;
     }
     .deploy-panel__title {
-      font-size: 12px; font-weight: 700;
+      font-size: var(--fs-sm); font-weight: 700;
       text-transform: uppercase; letter-spacing: 0.05em;
       color: var(--text-muted);
       margin: 0 0 14px;
     }
     .deploy-conf { margin-top: 16px; }
     .deploy-conf__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .deploy-conf__label { font-size: 12px; font-weight: 650; color: var(--text-secondary); }
+    .deploy-conf__label { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); }
     #deploy-conf-view { margin: 0; }
 
     /* Disclosure avanzado (.conf) */
     .advanced-conf > summary {
-      cursor: pointer; font-size: 12px; color: var(--text-muted);
+      cursor: pointer; font-size: var(--fs-sm); color: var(--text-muted);
       padding: 8px 0; list-style: revert; user-select: none;
     }
     .advanced-conf > summary:hover { color: var(--text-secondary); }
 
     /* Disclosure avanzado (.conf) */
     .advanced-conf > summary {
-      cursor: pointer; font-size: 12px; color: var(--text-muted);
+      cursor: pointer; font-size: var(--fs-sm); color: var(--text-muted);
       padding: 8px 0; list-style: revert; user-select: none;
     }
     .advanced-conf > summary:hover { color: var(--text-secondary); }
@@ -1500,14 +1583,14 @@
          los saltos de línea los marca el <br>, así el título usa todo el ancho
          del container en vez de cortarse a media caja. */
       font-size: clamp(30px, 4.8vw, 58px);
-      line-height: 1.03; font-weight: 800;
+      line-height: 1.03; font-weight: 700;
       letter-spacing: -0.03em; color: var(--text-primary);
       margin-bottom: 14px;
     }
     .hero__title .accent { color: var(--accent-red); }
-    .hero__sub { font-size: 16.5px; color: var(--text-secondary); max-width: 72ch; margin-bottom: 22px; }
+    .hero__sub { font-size: var(--fs-lg); color: var(--text-secondary); max-width: 72ch; margin-bottom: 22px; }
     .hero__actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-    .btn-lg { padding: 14px 28px; font-size: 15px; }
+    .btn-lg { padding: 14px 28px; font-size: var(--fs-md); }
     .btn-lg .icon { width: 18px; height: 18px; }
 
     /* Eyebrow neutro: en el Home el color queda reservado para el CTA. */
@@ -1524,7 +1607,7 @@
     .example-group__head {
       display: flex; align-items: center; gap: 4px; padding-bottom: 3px;
       border-bottom: 1px solid var(--border-subtle);
-      font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+      font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
       color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .example-group__head .icon { width: 14px; height: 14px; color: var(--accent); flex: 0 0 auto; }
@@ -1545,12 +1628,12 @@
     .mode-toggle__btn {
       font-family: inherit;
       padding: 8px 22px;
-      font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em;
+      font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em;
       color: var(--text-muted);
       background: transparent; border: none;
       border-radius: var(--radius-pill);
       cursor: pointer;
-      transition: color .18s var(--ease), background .18s var(--ease), box-shadow .18s var(--ease);
+      transition: color var(--t-base), background var(--t-base), box-shadow var(--t-base);
     }
     .mode-toggle__btn:hover:not(.is-active) { color: var(--text-primary); }
     .mode-toggle__btn.is-active {
@@ -1569,24 +1652,27 @@
       padding: 12px 8px; background: var(--bg-primary);
       border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
       box-shadow: var(--shadow-xs); cursor: pointer; font-family: inherit;
-      transition: transform .16s var(--ease), box-shadow .16s var(--ease), border-color .16s var(--ease);
+      transition: transform var(--t-base), box-shadow var(--t-base), border-color var(--t-base);
     }
-    .example-card:hover:not(.is-disabled) { transform: translateY(-1px); box-shadow: var(--shadow-sm); border-color: var(--accent); }
+    /* Sin lift. Con doce cards juntas en el grid, que cada una saltara al pasar
+       el cursor hacía que la grilla entera se leyera inquieta. El hover se marca
+       con el borde de acento, que además no mueve nada de lugar. */
+    .example-card:hover:not(.is-disabled) { box-shadow: var(--shadow-sm); border-color: var(--accent); }
     .example-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint); background: var(--accent-tint); }
     .example-card__tile {
-      flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px;
+      flex: 0 0 auto; width: 26px; height: 26px; border-radius: var(--radius-sm);
       background: var(--accent-tint); color: var(--accent);
       display: flex; align-items: center; justify-content: center;
     }
     .example-card__tile .icon { width: 15px; height: 15px; }
     .example-card__label {
-      font-size: 11px; font-weight: 600; color: var(--text-primary); line-height: 1.25; min-width: 0;
+      font-size: var(--fs-xs); font-weight: 600; color: var(--text-primary); line-height: 1.25; min-width: 0;
       display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .example-card__preview {
-      font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+      font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted);
       line-height: 1.35; margin-top: 4px; padding: 5px 7px;
-      background: var(--bg-tertiary); border-radius: 5px;
+      background: var(--bg-tertiary); border-radius: var(--radius-sm);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-width: 100%; opacity: 0.85;
     }
@@ -1596,9 +1682,9 @@
     .example-card { position: relative; }
     .example-card__del {
       position: absolute; top: 3px; right: 3px; width: 17px; height: 17px;
-      border-radius: 5px; display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
       color: var(--text-muted); background: transparent; opacity: 0;
-      transition: opacity .14s var(--ease), color .14s var(--ease), background .14s var(--ease);
+      transition: opacity var(--t-base), color var(--t-base), background var(--t-base);
     }
     .example-card__del .icon { width: 11px; height: 11px; }
     .example-card:hover .example-card__del, .example-card__del:focus-visible { opacity: 1; }
@@ -1611,19 +1697,19 @@
       padding: 13px 14px; font-family: inherit; cursor: pointer;
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md); box-shadow: var(--shadow-xs);
-      transition: border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
+      transition: border-color var(--t-base), box-shadow var(--t-base), background var(--t-base);
     }
     .src-card:hover { border-color: var(--accent); }
     .src-card.is-active { border-color: var(--accent); background: var(--accent-tint); box-shadow: 0 0 0 2px var(--accent-tint); }
     .src-card__tile {
-      width: 26px; height: 26px; border-radius: 7px; margin-bottom: 2px;
+      width: 26px; height: 26px; border-radius: var(--radius-sm); margin-bottom: 2px;
       background: var(--accent-tint); color: var(--accent);
       display: inline-flex; align-items: center; justify-content: center;
     }
     .src-card.is-active .src-card__tile { background: var(--accent); color: #fff; }
     .src-card__tile .icon { width: 14px; height: 14px; }
-    .src-card__name { font-size: 13px; font-weight: 650; color: var(--text-primary); }
-    .src-card__desc { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+    .src-card__name { font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-primary); }
+    .src-card__desc { font-size: var(--fs-xs); line-height: 1.45; color: var(--text-muted); }
     @media (max-width: 720px) { .src-cards { grid-template-columns: 1fr; } }
 
     /* Fuente en vivo: chips en vez de un <select> nativo, que se veía enorme y
@@ -1631,10 +1717,10 @@
     .src-chips { display: flex; gap: 8px; flex-wrap: wrap; }
     .src-chip {
       display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-      padding: 8px 14px; font-family: inherit; font-size: 12.5px; font-weight: 600;
+      padding: 8px 14px; font-family: inherit; font-size: var(--fs-sm); font-weight: 600;
       color: var(--text-secondary); background: var(--bg-primary);
       border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
-      transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+      transition: color var(--t-base), border-color var(--t-base), background var(--t-base);
     }
     .src-chip .icon { width: 14px; height: 14px; }
     .src-chip:hover { border-color: var(--accent); color: var(--text-primary); }
@@ -1647,12 +1733,12 @@
     }
     .sample-found__head {
       display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
-      font-size: 12.5px; font-weight: 600; color: var(--accent-green);
+      font-size: var(--fs-sm); font-weight: 600; color: var(--accent-green);
     }
     .sample-found__head .icon { width: 14px; height: 14px; }
     .sample-found pre {
       margin: 0; padding: 9px 11px; background: var(--bg-tertiary); border-radius: var(--radius-sm);
-      font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+      font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5;
       white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);
       max-height: 110px; overflow: auto;
     }
@@ -1665,7 +1751,7 @@
     /* Sub-toggle del paso 1 (origen del dataset): más chico que el toggle
        principal, para que se lea como una elección dentro del paso. */
     .src-toggle { margin-bottom: 12px; }
-    .src-toggle .mode-toggle__btn { padding: 6px 16px; font-size: 12.5px; }
+    .src-toggle .mode-toggle__btn { padding: 6px 16px; font-size: var(--fs-sm); }
 
     .example-card.is-custom { background: var(--accent-red-tint); }
     .example-card.is-custom .example-card__tile { background: var(--accent-red); color: #fff; }
@@ -1686,18 +1772,18 @@
       margin-bottom: -2px;
       cursor: pointer;
       font-family: var(--font-sans);
-      font-size: 14px;
+      font-size: var(--fs-md);
       font-weight: 600;
       color: var(--text-muted);
-      transition: all 0.2s var(--ease);
-      border-radius: 8px 8px 0 0;
+      transition: all var(--t-base);
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
     }
     .case-tab:hover {
       color: var(--text-secondary);
       background: var(--bg-tertiary);
     }
     .case-tab.is-active {
-      color: var(--accent);
+      color: var(--accent-hover);
       border-bottom-color: var(--accent);
       background: var(--accent-tint);
     }
@@ -1709,7 +1795,7 @@
     .case-tab.is-active .case-tab__icon { opacity: 1; }
     .case-tab__icon .icon { width: 18px; height: 18px; }
     .example-card__soon {
-      font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+      font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
       color: var(--text-muted); background: var(--bg-tertiary);
       padding: 1px 6px; border-radius: var(--radius-pill); margin-left: 6px; vertical-align: middle;
     }
@@ -1724,14 +1810,14 @@
     .path + .path { border-left: 1px solid var(--border-subtle); padding-left: 44px; }
     .path__head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
     .path__icon {
-      width: 30px; height: 30px; border-radius: 9px; flex: 0 0 auto;
+      width: 30px; height: 30px; border-radius: var(--radius-md); flex: 0 0 auto;
       background: var(--bg-tertiary); color: var(--text-secondary);
       display: flex; align-items: center; justify-content: center;
     }
     .path__icon .icon { width: 16px; height: 16px; }
-    .path__name { font-size: 17px; font-weight: 700; letter-spacing: -0.015em; }
+    .path__name { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.015em; }
     .path__lead {
-      font-size: 14px; color: var(--text-secondary); line-height: 1.5;
+      font-size: var(--fs-md); color: var(--text-secondary); line-height: 1.5;
       max-width: 46ch; margin-bottom: 20px;
     }
     /* El CTA es un .btn-primary; acá solo su ubicación en la columna. El
@@ -1748,7 +1834,7 @@
     .home-logos img {
       height: 38px; width: auto; object-fit: contain;
       filter: grayscale(1); opacity: 0.5;
-      transition: filter .2s var(--ease), opacity .2s var(--ease);
+      transition: filter var(--t-base), opacity var(--t-base);
     }
     .home-logos:hover img { filter: grayscale(0); opacity: 1; }
 
@@ -1798,23 +1884,23 @@
     }
     .infra-dash__banner .stat-grid { margin-bottom: 0; }
     .infra-dash__head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
-    .infra-dash__title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    .infra-dash__title { font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -0.02em; }
     .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 24px; }
     .stat-card {
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow-xs);
-      transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
+      transition: transform var(--t-base), box-shadow var(--t-base);
     }
-    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .stat-card:hover { box-shadow: var(--shadow-md); }
     .stat-card__top { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
     .stat-card__tile {
-      width: 38px; height: 38px; border-radius: 9px;
+      width: 38px; height: 38px; border-radius: var(--radius-md);
       background: var(--accent-tint); color: var(--accent);
       display: flex; align-items: center; justify-content: center;
     }
     .stat-card__tile .icon { width: 19px; height: 19px; }
-    .stat-card__label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-    .stat-card__value { font-size: 14px; font-weight: 600; color: var(--text-primary); word-break: break-word; font-family: var(--font-mono); }
+    .stat-card__label { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+    .stat-card__value { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); word-break: break-word; font-family: var(--font-mono); }
 
     /* Lista de pipelines en paralelo (Entorno desplegado) */
     .pipe-list {
@@ -1828,11 +1914,11 @@
     }
     .pipe-row__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-default); }
     .pipe-row__dot.is-active { background: var(--accent-green); box-shadow: 0 0 0 3px var(--accent-green-tint); }
-    .pipe-row__idx { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-primary); }
-    .pipe-row__prefix { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-muted); }
+    .pipe-row__idx { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-primary); }
+    .pipe-row__prefix { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--text-muted); }
     .pipe-row__prefix .icon { width: 13px; height: 13px; }
     .pipe-row__state {
-      margin-left: auto; font-size: 11px; font-weight: 600; padding: 3px 10px;
+      margin-left: auto; font-size: var(--fs-xs); font-weight: 600; padding: 3px 10px;
       border-radius: var(--radius-pill); background: var(--bg-tertiary); color: var(--text-muted);
     }
     .pipe-row__state.is-active { background: var(--accent-green-tint); color: var(--accent-green); }
@@ -1858,15 +1944,15 @@
     .deploy-progress { width: 100%; max-width: 480px; margin: 16px auto 0; }
     .deploy-progress__bar {
       height: 8px; background: rgba(22,163,74,0.12);
-      border-radius: 4px; overflow: hidden;
+      border-radius: var(--radius-pill); overflow: hidden;
     }
     .deploy-progress__fill {
       height: 100%; background: linear-gradient(90deg, var(--accent-green), #34d399);
-      border-radius: 4px; transition: width 0.5s var(--ease); width: 0%;
+      border-radius: var(--radius-pill); transition: width 0.5s var(--ease); width: 0%;
     }
     .deploy-progress__row {
       display: flex; justify-content: space-between; align-items: center;
-      margin-top: 8px; font-size: 13px;
+      margin-top: 8px; font-size: var(--fs-base);
     }
     .deploy-progress__phase { color: var(--text-secondary); }
     .deploy-progress__pct { font-weight: 600; color: var(--accent-green); }
@@ -1876,8 +1962,8 @@
       margin-top: 14px; display: flex; flex-direction: column; gap: 7px; text-align: left;
     }
     .deploy-progress__item {
-      display: flex; align-items: center; gap: 9px; font-size: 12.5px;
-      color: var(--text-muted); transition: color 0.2s;
+      display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm);
+      color: var(--text-muted); transition: color var(--t-base);
     }
     .deploy-progress__ico {
       width: 15px; height: 15px; flex: none; border-radius: 50%;
@@ -1890,7 +1976,7 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .deploy-progress__item.is-done .deploy-progress__ico::after {
-      content: "✓"; color: #fff; font-size: 10px; font-weight: 700; line-height: 1;
+      content: "✓"; color: #fff; font-size: var(--fs-xs); font-weight: 700; line-height: 1;
     }
     /* Animacion de aprovisionamiento: pipeline log -> Logstash -> OpenSearch ->
        dashboards, con pulsos fluyendo entre etapas. Reemplaza el panel educativo
@@ -1906,7 +1992,7 @@
     }
     .prov-stage { display: flex; flex-direction: column; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; }
     .prov-stage__icon {
-      width: 54px; height: 54px; border-radius: 15px; position: relative;
+      width: 54px; height: 54px; border-radius: var(--radius-xl); position: relative;
       display: flex; align-items: center; justify-content: center;
       background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
       color: var(--text-muted); animation: provPulse 2.8s var(--ease, ease) infinite;
@@ -1916,8 +2002,8 @@
     .prov-stage:nth-child(3) .prov-stage__icon { animation-delay: .7s; }
     .prov-stage:nth-child(5) .prov-stage__icon { animation-delay: 1.4s; }
     .prov-stage:nth-child(7) .prov-stage__icon { animation-delay: 2.1s; }
-    .prov-stage__name { font-size: 12px; font-weight: 650; color: var(--text-secondary); white-space: nowrap; }
-    .prov-stage__sub { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+    .prov-stage__name { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); white-space: nowrap; }
+    .prov-stage__sub { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
     /* Conector: linea base + dots que viajan de izquierda a derecha. */
     .prov-flow {
       flex: 1 1 auto; min-width: 24px; max-width: 90px; height: 54px;
@@ -1936,9 +2022,9 @@
     .prov-flow .prov-dot:nth-child(3) { animation-delay: 1.26s; }
     .prov-anim__caption {
       margin: 22px auto 0; max-width: 460px;
-      font-size: 12.5px; line-height: 1.6; color: var(--text-secondary);
+      font-size: var(--fs-sm); line-height: 1.6; color: var(--text-secondary);
     }
-    .prov-anim__caption strong { color: var(--accent); font-weight: 650; }
+    .prov-anim__caption strong { color: var(--accent); font-weight: var(--fw-semi); }
     @keyframes provPulse {
       0%, 100% { border-color: var(--border-subtle); color: var(--text-muted); box-shadow: none; }
       50% { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px var(--accent-tint); }
@@ -1954,20 +2040,20 @@
       .prov-dot { animation: none; opacity: 1; left: 46%; }
     }
     .lp-q-btn {
-      font-size: 13px; font-family: var(--font-sans, inherit); cursor: pointer;
+      font-size: var(--fs-base); font-family: var(--font-sans, inherit); cursor: pointer;
       padding: 8px 14px; border-radius: var(--radius-md, 8px); border: 1px solid var(--border-subtle);
-      background: var(--bg-card, #fff); color: var(--text-secondary); transition: all .15s;
+      background: var(--bg-card, #fff); color: var(--text-secondary); transition: all var(--t-base);
       text-align: left; line-height: 1.4;
     }
-    .lp-q-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-tint, #f0f7ff); }
+    .lp-q-btn:hover { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint, #f0f7ff); }
     .lp-tab-btn {
       font-family: inherit;
-      padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+      padding: 6px 14px; font-size: var(--fs-base); font-weight: 600; cursor: pointer;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px);
-      background: transparent; color: var(--text-muted); transition: all .15s;
+      background: transparent; color: var(--text-muted); transition: all var(--t-base);
     }
     .lp-tab-btn.lp-tab-active {
-      background: var(--accent-tint, #f0f7ff); color: var(--accent); border-color: var(--accent);
+      background: var(--accent-tint, #f0f7ff); color: var(--accent-hover); border-color: var(--accent);
     }
     .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--text-secondary); border-color: var(--border-strong, #cbd5e1); }
 
@@ -1979,14 +2065,14 @@
     }
     .section-card__head { display: flex; align-items: flex-start; gap: 11px; }
     .section-card__tile {
-      width: 32px; height: 32px; flex: none; border-radius: 9px;
+      width: 32px; height: 32px; flex: none; border-radius: var(--radius-md);
       background: var(--accent-tint); color: var(--accent);
       display: inline-flex; align-items: center; justify-content: center;
     }
     .section-card__tile .icon { width: 17px; height: 17px; }
     .section-card__titlewrap { display: flex; flex-direction: column; min-width: 0; }
-    .section-card__title { font-size: 15.5px; font-weight: 650; color: var(--text-primary); line-height: 1.25; letter-spacing: -0.01em; }
-    .section-card__hint { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin-top: 2px; }
+    .section-card__title { font-size: var(--fs-lg); font-weight: var(--fw-semi); color: var(--text-primary); line-height: 1.25; letter-spacing: -0.01em; }
+    .section-card__hint { font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.45; margin-top: 2px; }
 
     /* ── Puesta en marcha colapsable (<details>) ── */
     .setup-card { padding: 0; }
@@ -1996,21 +2082,20 @@
     }
     .setup-card__summary::-webkit-details-marker { display: none; }
     .setup-card__count {
-      margin-left: auto; font-size: 11.5px; font-weight: 700; color: var(--accent);
-      background: var(--accent-tint); padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+      margin-left: auto; font-size: var(--fs-xs); font-weight: 700; color: var(--accent-hover);
+      background: var(--accent-tint); padding: 3px 10px; border-radius: var(--radius-pill); white-space: nowrap;
     }
-    .setup-card__chevron { width: 16px; height: 16px; flex: none; color: var(--text-muted); transition: transform .2s var(--ease); }
+    .setup-card__chevron { width: 16px; height: 16px; flex: none; color: var(--text-muted); transition: transform var(--t-base); }
     .setup-card[open] .setup-card__chevron { transform: rotate(180deg); }
     .setup-card__body { padding: 0 18px 14px; }
 
     /* ── Asistente de datos (chat NL→PPL) — wow ── */
-    .cap-assistant__tile { background: var(--accent); color: #fff; box-shadow: 0 4px 14px -5px var(--accent); }
     .cap-assistant__chips-row { display: flex; flex-wrap: wrap; margin-top: 12px; }
-    .cap-assistant__notes { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 8px 0 0; padding-left: 18px; }
-    .cap-assistant__adv { margin-top: 12px; font-size: 12px; }
+    .cap-assistant__notes { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.6; margin: 8px 0 0; padding-left: 18px; }
+    .cap-assistant__adv { margin-top: 12px; font-size: var(--fs-sm); }
     .cap-assistant__adv > summary { cursor: pointer; color: var(--text-muted); }
     .cap-assistant__adv-body { margin-top: 6px; color: var(--text-secondary); line-height: 1.6; }
-    .cap-assistant__code { display: block; margin-top: 6px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+    .cap-assistant__code { display: block; margin-top: 6px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-all; }
 
     .cap-chat { margin-top: 14px; }
     /* Selector de caso: banda propia, centrada y distintiva, bajo el header. */
@@ -2019,7 +2104,7 @@
       padding: 14px 22px 12px;
     }
     .cap-assistant__cases-lbl {
-      font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+      font-size: var(--fs-xs); font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
       color: var(--text-muted);
     }
     .cap-chat__tabs {
@@ -2029,24 +2114,24 @@
     }
     .cap-chat__tabs .lp-tab-btn { border: none; background: transparent; border-radius: var(--radius-pill); padding: 7px 16px; font-weight: 600; }
     .cap-chat__tabs .lp-tab-btn.lp-tab-active {
-      background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent)));
+      background: var(--accent);
       color: #fff; box-shadow: 0 4px 12px -5px var(--accent);
     }
-    .cap-chat__tabs .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--accent); }
-    .cap-chat__empty-title { font-size: 13px; font-weight: 650; color: var(--text-secondary); }
+    .cap-chat__tabs .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--accent-hover); }
+    .cap-chat__empty-title { font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-secondary); }
     /* Sugerencias persistentes (arriba del input): card-chips compactas que wrappean. */
     .cap-chat__suggest-row { margin-top: 10px; }
     .cap-chat__suggest .lp-tab-panel { display: flex; flex-wrap: wrap; gap: 6px; }
     .cap-chat__suggest .lp-q-btn {
       display: inline-flex; align-items: center; gap: 5px; text-align: left;
-      padding: 5px 10px; font-size: 11px; line-height: 1.25; cursor: pointer;
+      padding: 5px 10px; font-size: var(--fs-xs); line-height: 1.25; cursor: pointer;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
-      background: var(--bg-primary); color: var(--text-secondary); transition: all .15s var(--ease);
+      background: var(--bg-primary); color: var(--text-secondary); transition: all var(--t-base);
     }
     .cap-chat__suggest .lp-q-btn .icon { width: 12px; height: 12px; flex: none; color: var(--accent); opacity: .85; }
     .cap-chat__suggest .lp-q-btn:hover {
       border-color: var(--accent); color: var(--text-primary);
-      background: var(--accent-tint); transform: translateY(-1px);
+      background: var(--accent-tint);
     }
 
     .cap-chat__log {
@@ -2055,7 +2140,7 @@
     }
     .cap-chat__empty {
       display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
-      color: var(--text-muted); font-size: 12.5px; padding: 16px 12px;
+      color: var(--text-muted); font-size: var(--fs-sm); padding: 16px 12px;
     }
     .cap-chat__empty-ic {
       width: 34px; height: 34px; border-radius: 50%; background: var(--accent-tint); color: var(--accent);
@@ -2071,47 +2156,50 @@
     }
     .cap-chat__avatar .icon { width: 14px; height: 14px; }
     .cap-chat__msg {
-      max-width: 82%; padding: 9px 13px; border-radius: 14px;
-      font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+      max-width: 82%; padding: 9px 13px; border-radius: var(--radius-lg);
+      font-size: var(--fs-base); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
     }
-    .cap-chat__msg--user { background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent))); color: #fff; border-bottom-right-radius: 5px; }
+    .cap-chat__msg--user { background: var(--accent); color: #fff; border-bottom-right-radius: 5px; }
     .cap-chat__msg--bot { background: var(--bg-tertiary); color: var(--text-primary); border-bottom-left-radius: 5px; }
     .cap-chat__msg--rich { width: min(540px, 100%); }
-    .cap-chat__msg--err { background: var(--accent-red-tint, #fee2e2); color: var(--accent-red, #dc2626); }
+    .cap-chat__msg--err { background: var(--accent-tint); color: var(--accent-hover); }
     .cap-chat__dots { letter-spacing: 3px; animation: capChatBlink 1s ease-in-out infinite; }
     @keyframes capChatBlink { 0%,100%{opacity:.3} 50%{opacity:.9} }
-    .cap-chat__det { margin-top: 7px; font-size: 11.5px; }
+    .cap-chat__det { margin-top: 7px; font-size: var(--fs-xs); }
     .cap-chat__det summary { cursor: pointer; color: var(--text-muted); }
     .cap-chat__ppl { margin: 5px 0; }
-    .cap-chat__ppl code { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
-    .cap-chat__table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; }
+    .cap-chat__ppl code { font-family: var(--font-mono, monospace); font-size: var(--fs-xs); color: var(--text-secondary); overflow-wrap: anywhere; }
+    .cap-chat__table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: var(--fs-xs); }
     .cap-chat__table th, .cap-chat__table td { border: 1px solid var(--border-subtle); padding: 3px 6px; text-align: left; }
     .cap-chat__form { display: flex; gap: 8px; margin-top: 12px; }
     .cap-chat__input {
-      flex: 1; padding: 11px 15px; font-size: 13.5px; font-family: inherit;
+      flex: 1; padding: 11px 15px; font-size: var(--fs-base); font-family: inherit;
       border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
       background: var(--bg-primary); color: var(--text-primary);
     }
     .cap-chat__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
     .cap-chat__send {
       flex: 0 0 auto; width: 44px; height: 44px; border: none; border-radius: 50%;
-      background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent))); color: #fff; cursor: pointer;
+      background: var(--accent); color: #fff; cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px -5px var(--accent);
-      transition: transform .15s var(--ease), filter .15s var(--ease);
+      transition: transform var(--t-base), filter var(--t-base);
     }
     .cap-chat__send .icon { width: 17px; height: 17px; }
     .cap-chat__clear {
       flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%;
       border: 1px solid var(--border-default); background: var(--bg-primary); color: var(--text-muted); cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center;
-      transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+      transition: color var(--t-base), border-color var(--t-base), background var(--t-base);
     }
     .cap-chat__clear .icon { width: 16px; height: 16px; }
     .cap-chat__clear:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
-    .cap-chat__send:hover { filter: brightness(1.06); transform: translateY(-1px); }
+    .cap-chat__send:hover { filter: brightness(1.06); }
     @media (prefers-reduced-motion: reduce) {
       .cap-chat__row { animation: none; }
-      .cap-chat__send:hover { transform: none; }
+      /* El `.cap-chat__send:hover { transform: none }` que estaba acá quedó sin
+         objeto: el hover dejó de levantar el botón, así que no hay nada que
+         desactivar. Tres cards más del grid tenían el mismo lift y NINGUNA estaba
+         contemplada en un bloque como este — se fueron todas. */
     }
 
     /* ── Visualizaciones en las respuestas (Vega-Lite, motor de OpenSearch) ── */
@@ -2121,8 +2209,12 @@
     .cap-chart--vega .marks { width: 100% !important; height: auto; }
     .cap-chart--vega svg { max-width: 100%; }
     .cap-chart--kpi { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 6px; }
-    .cap-chart__kpi { font-size: 34px; font-weight: 750; letter-spacing: -0.02em; line-height: 1; background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent))); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .cap-chart__kpi-lbl { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+    /* Color plano, sin el truco de recortar el fondo contra el texto: ese exige
+       `color: transparent`, y si el fondo no se pinta (forced-colors, alto
+       contraste) el número queda invisible en vez de degradado. A 34px es texto
+       grande — umbral AA 3:1 — así que acá el rojo pleno va sin el tono oscuro. */
+    .cap-chart__kpi { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; color: var(--accent); }
+    .cap-chart__kpi-lbl { font-size: var(--fs-xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
     .cap-chat__typing::after { content: '▋'; margin-left: 1px; color: var(--accent); animation: capBlink .8s steps(1) infinite; }
     @keyframes capBlink { 50% { opacity: 0; } }
 
@@ -2132,8 +2224,8 @@
       padding: 18px 22px; background: linear-gradient(135deg, var(--accent-tint), transparent 72%);
       border-bottom: 1px solid var(--border-subtle);
     }
-    .cap-assistant .section-card__title { font-size: 16.5px; }
-    .cap-assistant__tile { background: linear-gradient(135deg, var(--accent), var(--accent-red, var(--accent))); color: #fff; box-shadow: 0 6px 18px -6px var(--accent); }
+    .cap-assistant .section-card__title { font-size: var(--fs-lg); }
+    .cap-assistant__tile { background: var(--accent); color: #fff; box-shadow: 0 6px 18px -6px var(--accent); }
     .cap-assistant > .cap-chat { margin-top: 0; padding: 14px 22px 6px; }
     .cap-assistant > .cap-assistant__adv { padding: 0 22px 16px; margin-top: 8px; }
     @media (prefers-reduced-motion: reduce) {
@@ -2183,7 +2275,7 @@
         max-height: var(--brand-h);
         border-right: none;
         border-bottom: 1px solid var(--border-subtle);
-        transition: max-height .2s ease;
+        transition: max-height var(--t-base);
         overflow: hidden;
       }
       .app-nav.expanded { max-height: 100vh; overflow-y: auto; }
@@ -2214,11 +2306,11 @@
     }
 
     @media (max-width: 480px) {
-      .step-nav .btn { min-width: 100%; font-size: 14px; padding: 10px 16px; }
-      .step-badge { width: 28px; height: 28px; font-size: 13px; }
-      .card-title { font-size: 17px; }
+      .step-nav .btn { min-width: 100%; font-size: var(--fs-md); padding: 10px 16px; }
+      .step-badge { width: 28px; height: 28px; font-size: var(--fs-base); }
+      .card-title { font-size: var(--fs-lg); }
       /* .hero__title no necesita regla acá: la resuelve el clamp(). */
-      .mode-toggle__btn { font-size: 12px; padding: 7px 10px; }
+      .mode-toggle__btn { font-size: var(--fs-sm); padding: 7px 10px; }
       .home-logos { gap: 18px; }
       .home-logos img { height: 24px; }
     }
@@ -2299,16 +2391,20 @@
     <!-- Rail de navegación: marca arriba, secciones, footer con región -->
     <nav class="app-nav" id="app-nav">
       <div class="app-nav__brand">
-        <div class="app-nav__logo"><svg class="icon"><use href="#ic-layers"/></svg></div>
+        <img class="app-nav__logo" src="/static/favicon.png" alt="" aria-hidden="true">
         <div class="app-nav__brand-text">
-          <span class="app-nav__brand-name">Blueprint</span>
-          <span class="app-nav__brand-sub">Huawei Cloud CSS</span>
+          <span class="app-nav__brand-name">CSS Blueprint</span>
+          <span class="app-nav__brand-sub">Huawei Cloud</span>
         </div>
         <button class="nav-hamburger" id="nav-hamburger" aria-label="Menú de navegación" aria-expanded="false">
           <svg class="icon" style="width:18px;height:18px;"><use href="#ic-layers"/></svg>
         </button>
       </div>
 
+      <!-- Agrupado por lo que hacés, no por orden de aparición: los dos primeros
+           items no llevan etiqueta (son el punto de entrada), el resto sí. Los
+           `data-view` y los ids son los mismos de antes — el JS los busca por ahí
+           y el agrupado es solo el envoltorio. -->
       <div class="app-nav__items">
         <button class="nav-item active" data-view="home">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-home"/></svg></span>
@@ -2318,11 +2414,14 @@
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-info"/></svg></span>
           <span class="nav-item__label">Cómo usar</span>
         </button>
-        <button class="nav-item" data-view="pipeline">
+
+        <div class="nav-group__label">Construir</div>
+        <button class="nav-item" data-view="pipeline" id="nav-pipeline" aria-expanded="false" aria-controls="pipeline-substeps">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-spark"/></svg></span>
-          <span class="nav-item__label">Crear pipeline</span>
+          <span class="nav-item__label">Pipeline</span>
+          <svg class="icon nav-item__chevron"><use href="#ic-chevron"/></svg>
         </button>
-        <!-- Sub-pasos del flujo "Crear pipeline": solo visibles dentro de la vista
+        <!-- Sub-pasos del flujo "Pipeline": solo visibles dentro de la vista
              pipeline (showView los togglea). Reemplazan al stepper horizontal para
              liberar ancho de contenido. Clickeables → goToStep. -->
         <div class="nav-substeps hidden" id="pipeline-substeps" role="list" aria-label="Pasos del wizard">
@@ -2336,6 +2435,7 @@
           <button class="nav-substep" data-step="3" role="listitem"><span class="nav-substep__label">Fuente y destino</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
           <button class="nav-substep" data-step="4" role="listitem"><span class="nav-substep__label">Desplegar</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
         </div>
+        <div class="nav-group__label">Operar</div>
         <button class="nav-item" data-view="infra">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-infra"/></svg></span>
           <span class="nav-item__label">Entorno desplegado</span>
@@ -2347,6 +2447,7 @@
           <span class="nav-item__label">Actividad</span>
         </button>
 
+        <div class="nav-group__label">Cuenta</div>
         <button class="nav-item" data-view="settings" type="button">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-settings"/></svg></span>
           <span class="nav-item__label" id="nav-settings-label">Configuración</span>
@@ -2382,13 +2483,6 @@
         </button>
       </div>
 
-      <div class="app-nav__footer">
-        <span class="app-nav__footer-dot"></span>
-        <div class="app-nav__footer-text">
-          <span class="app-nav__footer-region">la-south-2</span>
-          <span class="app-nav__footer-label">Huawei Cloud</span>
-        </div>
-      </div>
     </nav>
 
     <!-- Columna de contenido (sin barra superior: la sección activa y el
@@ -2422,7 +2516,7 @@
                 <span class="path__icon"><svg class="icon"><use href="#ic-rocket"/></svg></span>
                 <h2 class="path__name">Datasets de ejemplo</h2>
               </div>
-              <p class="path__lead">Un vertical completo, con datos reales, corriendo en tu cuenta Huawei.</p>
+              <p class="path__lead">Casos ya armados, listos para desplegar en tu cuenta con sus dashboards y su asistente.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="demo">Ver los datasets <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
 
@@ -2431,7 +2525,7 @@
                 <span class="path__icon"><svg class="icon"><use href="#ic-code"/></svg></span>
                 <h2 class="path__name">Dataset nuevo</h2>
               </div>
-              <p class="path__lead">Tu archivo de log convertido en un dataset propio, listo para desplegar.</p>
+              <p class="path__lead">Traés un log y la IA arma el caso desde cero, con lo mismo que los de ejemplo.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un dataset <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
           </section>
@@ -2456,7 +2550,7 @@
               </div>
               <ol class="guide-list">
                 <li><strong>⚙ Configuración</strong> → cargá tus credenciales (AK/SK de OBS, MaaS API key, bucket) y tu infraestructura (project ID, región, AZ, VPC/subnet/SG). Cada card valida al guardar.</li>
-                <li><strong>Preparar bucket</strong> → sube los datos de las demos a tu bucket. Sin esto el primer deploy falla.</li>
+                <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros. Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
               </ol>
             </section>
 
@@ -2464,10 +2558,10 @@
               <div class="guide-block__head">
                 <span class="guide-block__num">2</span>
                 <h2 class="guide-block__title">Desplegar</h2>
-                <span class="guide-block__once">~20 min la primera vez</span>
+                <span class="guide-block__once">~10 min la primera vez</span>
               </div>
               <ol class="guide-list">
-                <li><strong>Crear pipeline</strong> → elegí uno o más datasets → <strong>Desplegar</strong>. Podés cerrar el browser: sigue solo y se reengancha.</li>
+                <li><strong>Pipeline</strong> → elegí uno o más datasets → <strong>Desplegar</strong>. Podés cerrar el browser: sigue solo y se reengancha.</li>
                 <li>En <strong>Entorno desplegado</strong>, la puesta en marcha: index template + dashboards → ingesta → capabilities.</li>
                 <li>Al terminar, <strong>Destruir entorno</strong>. Los clusters CSS cuestan mientras corren.</li>
               </ol>
@@ -2487,7 +2581,7 @@
 
             <div class="guide-more">
               <strong>¿Y además?</strong>
-              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo, un bucket o una fuente en vivo) y queda como una card más del grid.</span>
+              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo, un bucket o una fuente en vivo) y queda como una card más del grid, con sus dashboards y su asistente, para vos y para el resto del equipo.</span>
               <span><strong>Actividad</strong>: qué se ejecutó y por qué falló, con la salida de Terraform.</span>
               <span><strong>Panel de control</strong> (admins): quién entra, quién administra.</span>
             </div>
@@ -2575,14 +2669,14 @@
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
                   <div class="settings-card__title">Credenciales de la cuenta</div>
-                  <div class="settings-card__hint">AK/SK de OBS + API key de MaaS (se guardan cifradas) y el bucket de demos. <strong>Preparar bucket</strong> sube ahí los datasets de demo.</div>
+                  <div class="settings-card__hint">Las claves de OBS y de MaaS se guardan cifradas. El bucket es el de tu cuenta: ahí viven los datasets de demo y el estado de Terraform. <strong>Preparar bucket</strong> sube los datasets.</div>
                 </div>
               </div>
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="mis-demos-css"><p class="form-hint">Guarda los datasets y, en <code>tfstate/</code>, el estado de Terraform.</p></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss"></div>
               </div>
               <!-- Las dos acciones en la misma fila: metido dentro del campo del
                    bucket, el botón estiraba esa celda del grid y empujaba Guardar
@@ -2592,7 +2686,7 @@
                 <span id="settings-obs-status" class="settings-status"></span>
                 <button class="btn btn-secondary settings-actions__aside" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
               </div>
-              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:12px; color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
+              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
             <!-- Card 2: Infraestructura General — infra de la cuenta (pisa el
@@ -2662,7 +2756,7 @@
             <div class="form-group" id="example-section-demo">
               <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
                 <label class="form-label" style="margin:0;">Elegí uno o varios casos de demo</label>
-                <button type="button" class="btn btn-secondary" id="load-all-demos-btn" style="padding:5px 12px; font-size:12px;">
+                <button type="button" class="btn btn-secondary" id="load-all-demos-btn" style="padding:5px 12px; font-size:var(--fs-sm);">
                   Cargar todos
                 </button>
               </div>
@@ -2699,8 +2793,8 @@
                 <div id="log-file-drop" tabindex="0" role="button"
                      style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
                   <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
-                  <div style="font-size:13.5px; font-weight:600; color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
-                  <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
+                  <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
+                  <div style="font-size:var(--fs-sm); color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
                 </div>
                 <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
               </div>
@@ -2708,23 +2802,23 @@
               <div id="source-pane-obs" class="hidden">
                 <div style="display:flex; gap:12px; flex-wrap:wrap;">
                   <div class="form-group" style="flex:1; min-width:190px;">
-                    <label class="form-label" style="font-size:11px;">Bucket</label>
-                    <input type="text" class="form-input" id="productive-bucket" placeholder="mi-bucket-logs" style="font-size:12px;">
+                    <label class="form-label" style="font-size:var(--fs-xs);">Bucket</label>
+                    <input type="text" class="form-input" id="productive-bucket" placeholder="mi-bucket-logs" style="font-size:var(--fs-sm);">
                   </div>
                   <div class="form-group" style="flex:1; min-width:190px;">
-                    <label class="form-label" style="font-size:11px;">Prefijo</label>
-                    <input type="text" class="form-input" id="productive-prefix" placeholder="logs/" style="font-size:12px;">
+                    <label class="form-label" style="font-size:var(--fs-xs);">Prefijo</label>
+                    <input type="text" class="form-input" id="productive-prefix" placeholder="logs/" style="font-size:var(--fs-sm);">
                   </div>
                   <div class="form-group" style="flex:1; min-width:150px;">
-                    <label class="form-label" style="font-size:11px;">Región</label>
-                    <input type="text" class="form-input" id="productive-region" value="la-south-2" style="font-size:12px;">
+                    <label class="form-label" style="font-size:var(--fs-xs);">Región</label>
+                    <input type="text" class="form-input" id="productive-region" value="la-south-2" style="font-size:var(--fs-sm);">
                   </div>
                   <div class="form-group" style="flex:2; min-width:220px;">
-                    <label class="form-label" style="font-size:11px;">Endpoint</label>
-                    <input type="text" class="form-input" id="productive-endpoint" value="https://obs.la-south-2.myhuaweicloud.com" style="font-size:12px;">
+                    <label class="form-label" style="font-size:var(--fs-xs);">Endpoint</label>
+                    <input type="text" class="form-input" id="productive-endpoint" value="https://obs.la-south-2.myhuaweicloud.com" style="font-size:var(--fs-sm);">
                   </div>
                 </div>
-                <div id="productive-creds-status" style="font-size:11px; margin-bottom:8px;"></div>
+                <div id="productive-creds-status" style="font-size:var(--fs-xs); margin-bottom:8px;"></div>
                 <button class="btn btn-secondary btn-sm" type="button" id="obs-read-sample"><svg class="icon"><use href="#ic-search"/></svg> Leer una muestra</button>
               </div>
 
@@ -2746,7 +2840,7 @@
                 <label class="form-label">Pegá 2-3 líneas de muestra</label>
                 <textarea id="builder-paste" class="form-input" rows="5"
                   placeholder="Pegá 2-3 líneas representativas de tu log."
-                  style="font-family:var(--font-mono); font-size:12px; resize:vertical; line-height:1.5;"></textarea>
+                  style="font-family:var(--font-mono); font-size:var(--fs-sm); resize:vertical; line-height:1.5;"></textarea>
                 <p class="form-hint" id="live-hint" style="margin:8px 0 0;"></p>
               </div>
 
@@ -2760,10 +2854,10 @@
                 <pre id="rawlog-sample-preview"></pre>
               </div>
 
-              <div id="productive-analyze-status" class="hidden" style="font-size:13px; color:var(--text-secondary); margin-top:12px;"></div>
+              <div id="productive-analyze-status" class="hidden" style="font-size:var(--fs-base); color:var(--text-secondary); margin-top:12px;"></div>
               <div id="industry-match-panel" class="hidden" style="margin-top:12px; padding:14px 16px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-                <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:8px;">Industry matching</div>
-                <div id="industry-match-suggestion" style="font-size:13.5px; color:var(--text-secondary); margin-bottom:10px;"></div>
+                <div style="font-size:var(--fs-sm); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:8px;">Industry matching</div>
+                <div id="industry-match-suggestion" style="font-size:var(--fs-base); color:var(--text-secondary); margin-bottom:10px;"></div>
                 <div class="form-group" style="margin:0;">
                   <label class="form-label">Confirmá o cambiá la industria</label>
                   <select class="form-select" id="industry-match-select">
@@ -2806,7 +2900,7 @@
             <div id="mapping-error" class="hidden"></div>
             <div id="mapping-table"></div>
             <!-- Modo productivo sin sample analizado: la fuente y el Analizar viven en el PASO 1. -->
-            <div id="productive-step2-placeholder" class="hidden" style="padding:24px; text-align:center; color:var(--text-muted); font-size:14px; line-height:1.6;">
+            <div id="productive-step2-placeholder" class="hidden" style="padding:24px; text-align:center; color:var(--text-muted); font-size:var(--fs-md); line-height:1.6;">
               <p style="margin:0 0 14px;">Todavía no analizaste tu bucket. Volvé al <strong>paso 1</strong>, configurá la fuente OBS y tocá <strong>Siguiente</strong> — la estructura se detecta desde una muestra de tus logs.</p>
               <button type="button" class="btn btn-secondary" id="productive-step2-goto1"><svg class="icon"><use href="#ic-arrow-left"/></svg> Ir al paso 1</button>
             </div>
@@ -2963,7 +3057,7 @@
   <div id="conf-modal" class="hidden" style="position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
     <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:900px; width:90%; max-height:85vh; display:flex; flex-direction:column; box-shadow:var(--shadow-lg);">
       <div style="padding:20px; border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
-        <h3 style="font-size:16px; font-weight:600; margin:0;">Configuration file</h3>
+        <h3 style="font-size:var(--fs-lg); font-weight:var(--fw-semi); margin:0;">Configuration file</h3>
         <button id="conf-modal-close" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-x"/></svg> Cerrar</button>
       </div>
       <div style="padding:20px; overflow-y:auto; flex:1;">
@@ -2982,7 +3076,7 @@
   <div id="save-case-modal" class="hidden" style="position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
     <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:560px; width:92%; max-height:88vh; display:flex; flex-direction:column; box-shadow:var(--shadow-lg);">
       <div style="padding:20px 24px; border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
-        <h3 style="font-size:16px; font-weight:600; margin:0;">Guardar dataset nuevo</h3>
+        <h3 style="font-size:var(--fs-lg); font-weight:var(--fw-semi); margin:0;">Guardar dataset nuevo</h3>
         <button id="save-case-close" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-x"/></svg> Cerrar</button>
       </div>
       <div style="padding:20px 24px; overflow-y:auto; flex:1;">
@@ -3007,7 +3101,7 @@
         <div id="save-case-summary" class="form-hint" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border-subtle);"></div>
       </div>
       <div style="padding:16px 24px; border-top:1px solid var(--border-subtle); display:flex; gap:8px; align-items:center;">
-        <div id="save-case-status" style="flex:1; font-size:12.5px;"></div>
+        <div id="save-case-status" style="flex:1; font-size:var(--fs-sm);"></div>
         <button id="save-case-only" class="btn btn-secondary">Solo guardar</button>
         <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-rocket"/></svg> Guardar y desplegar</button>
       </div>
@@ -3018,8 +3112,8 @@
   <div id="confirm-modal" class="hidden" style="position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
     <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:440px; width:90%; box-shadow:var(--shadow-lg); overflow:hidden;">
       <div style="padding:22px 24px 6px;">
-        <h3 id="confirm-modal-title" style="font-size:17px; font-weight:650; margin:0 0 10px;">¿Confirmás?</h3>
-        <p id="confirm-modal-message" style="font-size:14px; line-height:1.55; color:var(--text-secondary); margin:0; white-space:pre-line;"></p>
+        <h3 id="confirm-modal-title" style="font-size:var(--fs-lg); font-weight: var(--fw-semi); margin:0 0 10px;">¿Confirmás?</h3>
+        <p id="confirm-modal-message" style="font-size:var(--fs-md); line-height:1.55; color:var(--text-secondary); margin:0; white-space:pre-line;"></p>
       </div>
       <div style="padding:18px 24px 22px; display:flex; gap:10px; justify-content:flex-end;">
         <button id="confirm-modal-cancel" class="btn btn-secondary">Cancelar</button>
@@ -3032,8 +3126,8 @@
   <div id="creds-modal" class="hidden" style="position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
     <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:440px; width:90%; box-shadow:var(--shadow-lg); overflow:hidden;">
       <div style="padding:22px 24px 6px;">
-        <h3 style="font-size:17px; font-weight:650; margin:0 0 6px;">Credenciales del entorno</h3>
-        <p style="font-size:13.5px; line-height:1.5; color:var(--text-secondary); margin:0 0 14px;">Para destruir este entorno necesito las credenciales con las que fue creado.</p>
+        <h3 style="font-size:var(--fs-lg); font-weight: var(--fw-semi); margin:0 0 6px;">Credenciales del entorno</h3>
+        <p style="font-size:var(--fs-base); line-height:1.5; color:var(--text-secondary); margin:0 0 14px;">Para destruir este entorno necesito las credenciales con las que fue creado.</p>
         <div class="form-group"><label class="form-label" for="creds-modal-ak">Access Key (AK)</label><input class="form-input" id="creds-modal-ak" autocomplete="off"></div>
         <div class="form-group"><label class="form-label" for="creds-modal-sk">Secret Key (SK)</label><input type="password" class="form-input" id="creds-modal-sk" autocomplete="off"></div>
         <div class="form-group"><label class="form-label" for="creds-modal-pw">Password de OpenSearch</label><input type="password" class="form-input" id="creds-modal-pw" autocomplete="off"></div>
@@ -3062,7 +3156,6 @@
       generatedFromLog: '',
       inputPlugin: 'obs',
       inputConfig: {},
-      ctsMode: false,
       readExistingMode: false,
       dedupId: '',
       outputPlugins: ['opensearch'],
@@ -3223,7 +3316,7 @@
         return;
       }
 
-      if (isPredefinedDemo || state.ctsMode) {
+      if (isPredefinedDemo) {
         renderMappingTable(state.fields);
         const confirmBtn = document.getElementById('mapping-confirm-btn');
         const regenBtn = document.getElementById('mapping-regenerate-btn');
@@ -3395,7 +3488,7 @@
               <span class="mapping-header-count">${fields.length} campos</span>
             </div>
             <div class="mapping-actions">
-              <button class="btn btn-secondary" id="mapping-edit-all-btn" style="padding:6px 12px;font-size:12px;">
+              <button class="btn btn-secondary" id="mapping-edit-all-btn" style="padding:6px 12px;font-size:var(--fs-sm);">
                 ${icon('edit')} Editar todos
               </button>
             </div>
@@ -3590,9 +3683,9 @@
     // Tabs por tipo en el paso 3 (Fuente y destino). Al cambiar de tab, el
     // bucket, prefijo OBS (`#input-prefix`) e índice (`#output-index`) se
     // actualizan al tipo seleccionado vía `_applyCaseSourceDest`, que respeta la
-    // fuente propia de cada tipo (ej. huawei-cts → bucket mi-tracker-cts,
-    // prefijo CloudTraces/) o deriva el genérico `logs/<tipo>/`. Las
-    // credenciales y el plugin se comparten entre todos.
+    // fuente propia de cada tipo (ej. cts → bucket mi-tracker-cts, prefijo
+    // CloudTraces/) o deriva el genérico `<tipo>-logs/` sobre el bucket de
+    // demos. Las credenciales y el plugin se comparten entre todos.
     function renderStep3CaseTabs() {
       const container = document.getElementById('step3-case-tabs');
       if (!container) return;
@@ -3680,8 +3773,8 @@
       const skConfigured = !!(state.obsCreds || {}).skConfigured;
       const credsNote = isProductive
         ? (obsAk
-           ? '<span style="font-size:12px;color:var(--accent-green,#16a34a);font-weight:600;">Cargado desde configuración global</span>'
-           : '<span style="font-size:12px;color:var(--accent-red,#dc2626);font-weight:600;">No configurado — abrí Configuración en la barra lateral</span>')
+           ? '<span style="font-size:var(--fs-sm);color:var(--accent-green,var(--accent-green));font-weight:var(--fw-semi);">Cargado desde configuración global</span>'
+           : '<span style="font-size:var(--fs-sm);color:var(--accent-hover);font-weight:var(--fw-semi);">No configurado — abrí Configuración en la barra lateral</span>')
         : '';
       const credsReadonly = isProductive ? 'readonly' : '';
 
@@ -3727,7 +3820,7 @@
             <label class="form-label">Topics</label>
             <input type="text" class="form-input" id="input-kafka-topics" placeholder="logs">
           </div>
-          <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-secondary); cursor:pointer; margin:2px 0 6px;">
+          <label style="display:flex; align-items:center; gap:8px; font-size:var(--fs-base); color:var(--text-secondary); cursor:pointer; margin:2px 0 6px;">
             <input type="checkbox" id="input-kafka-sasl-toggle" onchange="document.getElementById('input-kafka-sasl').style.display=this.checked?'block':'none'">
             SASL_SSL (Kafka con autenticación)
           </label>
@@ -3805,7 +3898,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Consulta SQL</label>
-            <textarea class="form-input" id="input-jdbc-query" rows="2" placeholder="SELECT * FROM logs" style="font-family:var(--font-mono);font-size:12px;resize:vertical;line-height:1.5;"></textarea>
+            <textarea class="form-input" id="input-jdbc-query" rows="2" placeholder="SELECT * FROM logs" style="font-family:var(--font-mono);font-size:var(--fs-sm);resize:vertical;line-height:1.5;"></textarea>
             <p class="form-hint">La consulta determina qué columnas llegan a Logstash. Pegá una fila de resultado como sample en el paso 1.</p>
           </div>
           <div class="form-hint" style="color:var(--accent-red);">⚠ El input JDBC necesita el <strong>.jar del driver</strong> en el nodo de Logstash. La Logstash de CSS no da acceso al filesystem ni tiene salida a internet para instalarlo, así que este deploy va a fallar salvo que el driver ya esté en esa ruta.</div>`
@@ -3836,7 +3929,8 @@
             </div>
             <div class="form-group" style="flex:1;min-width:200px;">
               <label class="form-label">Contraseña</label>
-              <input type="password" class="form-input" id="output-password" value="Huawei1234">
+              <input type="password" class="form-input" id="output-password"
+                     autocomplete="new-password" placeholder="8-32, con mayúscula, número y símbolo">
             </div>
           </div>
           <input type="hidden" id="output-protocol" value="http">
@@ -4110,25 +4204,24 @@
       if (prefix) prefix.value = `${indexBase}-logs/`;
     }
 
-    // Aplica el prefijo/índice propios de un tipo al form (usado por las tabs
-    // del paso 3). El bucket es universal (`mi-tracker-cts`) y NO cambia entre
-    // tipos — solo varía el prefijo: huawei-cts lee de `CloudTraces/`, el resto
-    // usa `logs/<tipo>/`. El índice también se ajusta por tipo.
+    // Aplica al form el origen y el destino propios de un tipo (usado por las
+    // tabs del paso 3). Todo sale de `caseMeta`, que es el único lugar que lo
+    // resuelve: el bucket ya NO es universal —un vertical puede traer el suyo—
+    // y el prefijo es TOP-LEVEL por tipo. No anidar bajo un padre compartido
+    // como `logs/`: el input OBS de Huawei no aísla sub-prefijos bajo un padre
+    // común, y firewall y web-access terminaban leyendo lo mismo.
     function _applyCaseSourceDest(id) {
       const meta = LOG_EXAMPLES.find(e => e.id === id);
       if (!meta) return;
-      const idxEl = document.getElementById('output-index');
+      const cm = caseMeta(id);
+      const bucketEl = document.getElementById('input-bucket');
       const prefixEl = document.getElementById('input-prefix');
-      const p = meta.prefill;
-      // Prefijo: del prefill si lo trae (CTS → CloudTraces/), si no uno TOP-LEVEL
-      // propio por tipo (`<tipo>-logs/`). NO anidar bajo un padre compartido como
-      // `logs/`: el input OBS de Huawei NO aísla sub-prefijos bajo un padre común
-      // (firewall y web-access terminaban leyendo lo mismo). Un prefijo top-level
-      // distinto por pipeline sí aísla (como `CloudTraces/`).
-      const casePrefix = p?.input?.['input-prefix'] || `${meta.indexBase}-logs/`;
-      const caseIndex = p?.index || `${meta.indexBase}-%{+YYYY.MM}`;
-      if (prefixEl) prefixEl.value = casePrefix;
-      if (idxEl) idxEl.value = caseIndex;
+      const idxEl = document.getElementById('output-index');
+      // Solo se pisa el bucket si el caso trae uno propio: si no, se respeta lo
+      // que el operador haya escrito.
+      if (bucketEl && cm.ownBucket) bucketEl.value = cm.ownBucket;
+      if (prefixEl) prefixEl.value = cm.prefix;
+      if (idxEl) idxEl.value = cm.index;
     }
 
     // Selecciona el plugin de input (visual + state + re-render de sus campos).
@@ -4354,20 +4447,31 @@
     }
 
     // Metadata de fuente/destino/campos por tipo (para el resumen y el .conf).
+    // Dónde vive el dato de un caso y con qué índice sale. Único lugar que lo
+    // resuelve: lo usan el preview del paso 4 y el body del deploy, y si
+    // divergieran mostraríamos una cosa y desplegaríamos otra.
     function caseMeta(id) {
       const meta = LOG_EXAMPLES.find(e => e.id === id);
       const data = EXAMPLE_DATA[id];
-      const p = meta?.prefill;
       const isCustom = !meta || id === 'custom';
-      const bucket = document.getElementById('input-bucket')?.value || demoBucket();
+      // Un vertical puede declarar su propio bucket cuando su dato NO es un
+      // dataset que la plataforma sube (CTS: trazas reales en mi-tracker-cts).
+      // El resto lee del bucket de demos del SA.
+      const ownBucket = (!isCustom && meta.obsBucket) || '';
+      const bucket = ownBucket
+        || document.getElementById('input-bucket')?.value || demoBucket();
       const prefix = isCustom
         ? (document.getElementById('input-prefix')?.value || 'logs/')
-        : (p?.input?.['input-prefix'] || `${meta.indexBase}-logs/`);
+        // Prefijo TOP-LEVEL por tipo. NO anidar bajo un padre compartido como
+        // `logs/`: el input OBS de Huawei no aísla sub-prefijos bajo un padre
+        // común, así que cada pipeline leería también lo de los otros.
+        : (meta.obsPrefix || `${meta.indexBase}-logs/`);
       const index = isCustom
         ? (document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}')
-        : (p?.index || `${meta.indexBase}-%{+YYYY.MM}`);
+        : `${meta.indexBase}-%{+YYYY.MM}`;
       const fieldsCount = isCustom ? (state.fields || []).length : (data?.fields || []).length;
-      return { bucket, prefix, index, fieldsCount, label: meta?.label || 'Tu log', isCustom };
+      return { bucket, prefix, index, fieldsCount, ownBucket,
+               label: meta?.label || 'Tu log', isCustom };
     }
 
     // Configuration file REAL de un tipo: lo arma el backend (/generate-pipeline),
@@ -4514,7 +4618,7 @@
       if (closureEl) {
         const labels = types.map(id => (LOG_EXAMPLES.find(e => e.id === id)?.label) || id);
         const hasCaps = types.some(t => CAPABILITY_SLUGS.has(t)) || state.deployMode === 'custom';
-        const li = (ic, txt) => `<li style="display:flex; align-items:center; gap:9px; font-size:13px; color:var(--text-secondary); padding:4px 0;">
+        const li = (ic, txt) => `<li style="display:flex; align-items:center; gap:9px; font-size:var(--fs-base); color:var(--text-secondary); padding:4px 0;">
           <span style="width:26px;height:26px;border-radius:7px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none;">${icon(ic)}</span>
           <span>${txt}</span></li>`;
         const items = isBuilder ? [
@@ -4585,12 +4689,18 @@
 
     // ── Modal para ver .conf ─────────────────────────────────────────────
     // Toast in-app no bloqueante (reemplaza alert()). type: success | error | info.
-    function toast(message, type = 'info', duration = 4500) {
+    // `action` = { label, onClick } agrega un botón al toast. Un toast con acción
+    // NO se autodescarta ni se cierra al hacer click en el cuerpo: si el usuario
+    // tiene algo para hacer, la notificación no se le puede escapar de las manos.
+    function toast(message, type = 'info', duration = 4500, action = null) {
       const container = document.getElementById('toast-container');
       if (!container) { console.log('[toast]', message); return; }
+      // El rojo queda reservado al error. `info` pasa a gris neutro: antes usaba
+      // un rosa-rojo suelto, un cuarto rojo fuera de los tokens, que además hacía
+      // que un aviso inocuo se leyera como un problema.
       const accent = type === 'success' ? 'var(--accent-green, #16a34a)'
-                   : type === 'error'   ? '#dc2626'
-                   : 'var(--accent, #e11d48)';
+                   : type === 'error'   ? 'var(--accent, #e50000)'
+                   : 'var(--text-muted, #8a8b94)';
       const el = document.createElement('div');
       el.style.cssText = 'pointer-events:auto; cursor:pointer; background:var(--bg-primary);'
         + ' color:var(--text-primary); border:1px solid var(--border-subtle); border-left:4px solid '
@@ -4604,6 +4714,21 @@
         el.style.opacity = '0'; el.style.transform = 'translateX(12px)';
         setTimeout(() => el.remove(), 200);
       };
+      if (action && action.label) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary btn-sm';
+        btn.textContent = action.label;
+        btn.style.cssText = 'margin-top:10px; display:block;';
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();        // el click del cuerpo cierra el toast
+          btn.disabled = true;
+          Promise.resolve(action.onClick?.(el, btn)).finally(remove);
+        });
+        el.appendChild(btn);
+        el.style.cursor = 'default';
+        return;                        // sin auto-dismiss ni click-para-cerrar
+      }
       if (duration > 0) setTimeout(remove, duration);
       el.addEventListener('click', remove);
     }
@@ -4911,21 +5036,23 @@
       state.httpsEnabled = body.https_enabled;
 
       if (state.selectedExamples.length > 1) {
-        // Bucket universal (el `obs_bucket` del body); por caso solo varía el
-        // prefijo y el índice. Los predefinidos leen su dataset YA presente en OBS
-        // (read_existing) → no se sube nada; solo custom sube su archivo. El dedup
-        // (document_id) es por tipo (cts/fintech), el resto sin.
+        // Cada caso lleva su prefijo e índice; el bucket es el del body salvo que
+        // el vertical declare uno propio (CTS lee trazas reales de otro bucket).
+        // Los predefinidos leen su dataset YA presente en OBS (read_existing) →
+        // no se sube nada; solo custom sube su archivo. El dedup (document_id)
+        // sale del vertical.
         body.cases = state.selectedExamples.map(id => {
           const meta = LOG_EXAMPLES.find(e => e.id === id);
           const data = EXAMPLE_DATA[id];
-          const p = meta?.prefill;
+          const cm = caseMeta(id);
           return {
             slug: id,
             raw_log: data?.sample || '',
             filter_code: data?.filterCode || '',
             fields: data?.fields || [],
-            index_name: p?.index || `${id}-%{+YYYY.MM}`,
-            obs_prefix: p?.input?.['input-prefix'] || `${id}-logs/`,
+            index_name: cm.index,
+            obs_prefix: cm.prefix,
+            obs_bucket: cm.ownBucket,
             read_existing_bucket: id !== 'custom',
             document_id: meta?.dedupId || '',
             // Solo el caso custom trae archivo importado; los predefinidos leen su
@@ -4968,7 +5095,7 @@
           const results = await Promise.all(types.map(id => {
             const meta = LOG_EXAMPLES.find(e => e.id === id);
             const data = EXAMPLE_DATA[id];
-            const idx = meta?.prefill?.index || `${id}-%{+YYYY.MM}`;
+            const idx = caseMeta(id).index;
             return fetchTpl(data?.fields || [], idx, '', `${projectName}-${id}`, id);
           }));
           if (snippetEl) snippetEl.textContent = results.map(r => r.put_snippet).join('\n\n');
@@ -4990,6 +5117,16 @@
       if (detail && typeof detail === 'object') return detail.message || JSON.stringify(detail);
       if (typeof detail === 'string') return detail;
       return 'Error desconocido';
+    }
+
+    // Igual que `new Error(detailMsg(data))` pero conservando el `stage` del
+    // backend. Sin esto el error llega al catch como un string y no se puede
+    // distinguir "falta el dataset" (que tiene arreglo de un click) de un fallo
+    // cualquiera de Terraform.
+    function detailError(data) {
+      const err = new Error(detailMsg(data));
+      err.stage = data?.detail?.stage || '';
+      return err;
     }
 
     // Actualiza la barra + la lista vertical de recursos del deploy (stream SSE).
@@ -5162,7 +5299,7 @@
         const res = await _openDeployStream(body);
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(detailMsg(errData));
+          throw detailError(errData);
         }
         // Leer el stream SSE línea por línea y actualizar la barra de progreso.
         const reader = res.body.getReader();
@@ -5206,6 +5343,30 @@
       } catch (err) {
         state.provisioning = false;
         renderInfraView(state.lastStatus);   // vuelve al estado previo (empty/activo)
+        // El dataset que falta en el bucket es el único error del deploy con
+        // arreglo de un click, y el arreglo estaba a tres pantallas de distancia
+        // (⚙ Configuración → Preparar bucket). Pasa seguido: los casos se crean
+        // una vez y se comparten, pero cada SA tiene su propio bucket, así que el
+        // segundo que quiere demostrarlo se choca con esto.
+        if (err.stage === 'datasets_missing') {
+          toast(`${err.message}`, 'error', 0, {
+            label: 'Subirlo ahora',
+            onClick: async () => {
+              try {
+                const ev = await preloadDatasets({
+                  ak: (state.obsCreds || {}).ak || '',
+                  sk: '',                      // el servidor completa con el guardado
+                  bucket: demoBucket(),
+                  region: hwRegion(),
+                });
+                toast(`Datasets subidos (${ev?.uploaded ?? 0}). Volvé a desplegar.`, 'success');
+              } catch (e) {
+                toast(`No se pudo subir: ${e.message}`, 'error');
+              }
+            },
+          });
+          return;
+        }
         toast(`Error al desplegar: ${err.message}`, 'error');
       } finally {
         if (btn) btn.disabled = false;
@@ -5236,12 +5397,17 @@
       const notes = Object.entries(caps0 || {}).filter(([k, v]) => CAP_LABELS[k] && v && v.ok && v.note)
         .map(([k, v]) => `<li><strong>${CAP_LABELS[k]}:</strong> ${escapeHtml(v.note)}</li>`).join('');
       // SUGGESTED_BY_SLUG: preguntas del chatbot por vertical, del registro
-      // (window.__VERTICALS__). Los slugs productivos (sin questions) caen a
-      // _genericQuestions más abajo.
+      // (window.__VERTICALS__). Los slugs sin questions caen a _genericQuestions.
       const SUGGESTED_BY_SLUG = Object.fromEntries(_VVIS.map(v => [v.slug, v.questions]));
       // SLUG_LABELS es global (definido junto a CAPABILITY_SLUGS).
-      const agentReady = !!(caps0 && caps0.conversational && caps0.conversational.ok && caps0.conversational.agent_id);
-      const agentId = caps0?.conversational?.agent_id || '';
+      // El agente se busca en CUALQUIER caso, no solo en el primero: es uno solo
+      // para todo el cluster (un PPLTool por fuente), así que mirando `entries[0]`
+      // alcanzaba con que el primer caso del registro no lo tuviera para que el
+      // chat desapareciera aunque los demás sí estuvieran provisionados.
+      const conAgente = entries.find(([, c]) =>
+        c && c.conversational && c.conversational.ok && c.conversational.agent_id);
+      const agentReady = !!conAgente;
+      const agentId = conAgente ? conAgente[1].conversational.agent_id : '';
       // Preguntas genéricas para slugs productivos (sin SUGGESTED_BY_SLUG).
       const _genericQuestions = (slug) => {
         const qs = [
@@ -5267,6 +5433,20 @@
         }
         return qs;
       };
+      // Preguntas de un slug: las curadas si TIENE, si no las derivadas.
+      //
+      // Esto era `SUGGESTED_BY_SLUG[s] || _genericQuestions(s)` y ahí estaba el
+      // bug que dejaba sin chatbot a los casos creados desde el Builder: un array
+      // vacío es truthy en JS, así que el `||` nunca caía al fallback. Un slug
+      // productivo no está en el registro → `undefined` → falsy → funcionaba; un
+      // caso del Builder SÍ está en el registro pero con `questions: []` → se
+      // quedaba con cero preguntas, y abajo todo slug sin preguntas se descarta.
+      // Resultado: la card del asistente se pintaba sin el chat, con el agente ya
+      // creado en el cluster. Era el único de los tres casos que caía en el hueco.
+      const _questionsFor = (slug) => {
+        const curadas = SUGGESTED_BY_SLUG[slug];
+        return (curadas && curadas.length) ? curadas : _genericQuestions(slug);
+      };
       let activeSlugs = [];
       let tabsBar = '';
       let chipPanels = '';
@@ -5275,8 +5455,7 @@
         for (const [s, c] of entries) {
           const ready = !!(c && c.conversational && c.conversational.ok);
           if (!ready) continue;
-          const qs = SUGGESTED_BY_SLUG[s] || _genericQuestions(s);
-          if (!qs.length) continue;
+          if (!_questionsFor(s).length) continue;
           activeSlugs.push(s);
         }
         if (activeSlugs.length) {
@@ -5286,7 +5465,7 @@
             return `<button type="button" role="tab" class="lp-tab-btn${i === 0 ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
           }).join('');
           const panelsHtml = activeSlugs.map((s, i) => {
-            const qs = (SUGGESTED_BY_SLUG[s] || _genericQuestions(s)).slice(0, 10);
+            const qs = _questionsFor(s).slice(0, 10);
             return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
           }).join('');
           // Selector de caso: banda propia, centrada y distintiva (arriba del chat).
@@ -5391,15 +5570,20 @@
       function _vegaTheme() {
         const cs = getComputedStyle(document.documentElement);
         const g = (n, f) => ((cs.getPropertyValue(n) || '').trim() || f);
-        const accent = g('--accent', '#0268BC');
-        const accent2 = g('--accent-red', accent);
+        // El fallback era '#0268BC', un azul de una paleta anterior que ya no
+        // existe: si el token faltara, los gráficos salían de otro color que la app.
+        const accent = g('--accent', '#e50000');
         return {
-          accent, accent2,
+          accent,
           text: g('--text-secondary', '#69707d'),
           grid: g('--border-subtle', 'rgba(120,120,120,.18)'),
           bg: g('--bg-primary', '#ffffff'),
           // Paleta categórica (marca + acentos tipo OUI) para multi-serie/dona/heatmap.
-          palette: [accent, accent2, '#54B399', '#D36086', '#9170B8', '#D6BF57', '#5BC0EB', '#B9A888'],
+          // Las dos primeras entradas eran --accent y --accent-red. Cuando los dos
+          // tokens pasaron a ser el mismo rojo, las series 1 y 2 quedaban idénticas
+          // y una barra apilada o una dona de dos categorías se volvía ilegible.
+          // Ahora la marca aparece una sola vez y el resto son hues distintos.
+          palette: [accent, '#54B399', '#D36086', '#9170B8', '#D6BF57', '#5BC0EB', '#B9A888', '#6F8FAF'],
           font: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         };
       }
@@ -5724,7 +5908,11 @@
           filter_code: ex.filterCode || '',
           fields: ex.fields || [],
           index_name: p.index || `${p.slug}-%{+YYYY.MM}`,
-          obs_prefix: p.obs_prefix || `${p.slug}-logs/`,
+          obs_prefix: p.obs_prefix || meta?.obsPrefix || `${p.slug}-logs/`,
+          // Vacío = el bucket del request. Solo lo declara un caso con origen
+          // propio (CTS), y sin esto un redeploy tras un refresh lo mandaría a
+          // buscar sus trazas al bucket de demos.
+          obs_bucket: meta?.obsBucket || '',
           read_existing_bucket: p.slug !== 'custom',
           document_id: meta?.dedupId || '',
           log_file_content: '',
@@ -5734,7 +5922,14 @@
         project_name: data.project_name || 'log-analytics',
         pipeline_conf: data.pipeline_conf || '',
         pipeline_slug: primary.slug || '',
-        opensearch_password: state.osPassword || 'Huawei1234',
+        // Vacío y no un default conocido: este body se arma tras un reload, cuando
+        // `state.osPassword` se perdió. Caer a una contraseña fija significaba que
+        // una operación sobre el cluster se hacía en silencio con una clave que
+        // cualquiera que haya visto el repo conoce — y si el cluster tenía otra,
+        // fallaba con un 401 que no explicaba nada. Vacío, el backend resuelve
+        // contra las creds persistidas (`_cluster_admin_password`) y, si tampoco
+        // las hay, el error dice que falta la contraseña.
+        opensearch_password: state.osPassword || '',
         opensearch_user: state.osUser || 'admin',
         opensearch_index: primary.index || 'logs-%{+YYYY.MM}',
         https_enabled: data.https_enabled === true,
@@ -5762,7 +5957,7 @@
     async function infraApplySchema(btn) {
       const body = resolveDeployBody();
       const statusEl = document.getElementById('infra-setup-status');
-      if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Crear pipeline”.', 'error'); return; }
+      if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Pipeline”.', 'error'); return; }
       btn.disabled = true;
       if (statusEl) showStatus(statusEl, 'Aplicando index template e importando dashboards…', 'loading');
       try {
@@ -5792,7 +5987,7 @@
     async function infraStartIngestion(btn) {
       const body = resolveDeployBody();
       const statusEl = document.getElementById('infra-setup-status');
-      if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Crear pipeline”.', 'error'); return; }
+      if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Pipeline”.', 'error'); return; }
       btn.disabled = true;
       if (statusEl) showStatus(statusEl, 'Iniciando ingesta con Logstash…', 'loading');
       try {
@@ -6017,8 +6212,12 @@
       document.querySelectorAll('.nav-item[data-view]').forEach(item => {
         item.classList.toggle('active', item.dataset.view === name);
       });
-      // Los sub-pasos del rail solo se muestran dentro del flujo "Crear pipeline".
-      document.getElementById('pipeline-substeps')?.classList.toggle('hidden', name !== 'pipeline');
+      // Los sub-pasos del rail solo se muestran dentro del flujo "Pipeline". El
+      // `aria-expanded` del item va con ellos: es lo que gira el chevron (CSS) y
+      // lo que le dice a un lector de pantalla que ese item despliega algo.
+      const abierto = name === 'pipeline';
+      document.getElementById('pipeline-substeps')?.classList.toggle('hidden', !abierto);
+      document.getElementById('nav-pipeline')?.setAttribute('aria-expanded', String(abierto));
       // Configuración: precargar creds + estado de la key + mapa de modelos.
       if (name === 'settings' && typeof renderSettingsView === 'function') renderSettingsView();
       if (name === 'activity' && typeof renderActivityView === 'function') renderActivityView();
@@ -6179,7 +6378,7 @@
         <div class="activity-step">
           <span style="color:${s.ok ? 'var(--accent-green)' : 'var(--accent-red)'}; flex:none; font-weight:700;">${s.ok ? '✓' : '✗'}</span>
           <span style="flex:1; min-width:0;">${escapeHtml(s.name)}${s.reason ? `<span class="activity-step__why">${escapeHtml(s.reason)}</span>` : ''}</span>
-          <span style="color:var(--text-muted); font-size:11px; flex:none;">${_fmtRunTs(s.ts)}</span>
+          <span style="color:var(--text-muted); font-size:var(--fs-xs); flex:none;">${_fmtRunTs(s.ts)}</span>
         </div>`).join('')
         : '<p class="form-hint" style="margin:0;">Esta ejecución no registró sub-pasos.</p>';
 
@@ -6200,7 +6399,7 @@
           ${stepsHtml}
           ${logs.length ? `
             <details style="margin-top:14px;">
-              <summary style="cursor:pointer; font-size:12.5px; color:var(--accent); font-weight:600;">
+              <summary style="cursor:pointer; font-size:var(--fs-sm); color:var(--accent); font-weight:var(--fw-semi);">
                 Salida cruda (${logs.length} línea${logs.length === 1 ? '' : 's'}${run.log_truncated ? ', truncada' : ''})
               </summary>
               <pre class="activity-log">${escapeHtml(logs.map(l => l.message).join('\n'))}</pre>
@@ -6310,7 +6509,7 @@
               <span class="pipe-row__dot ${p.active ? 'is-active' : ''}"></span>
               <code class="pipe-row__idx">${escapeHtml(p.index || p.slug || '—')}</code>
               ${p.obs_prefix ? `<span class="pipe-row__prefix">${icon('cloud')} ${escapeHtml(p.obs_prefix)}</span>` : ''}
-              ${p.dashboards_imported ? `<span class="status-pill" style="font-size:10px;padding:2px 8px;"><span class="status-pill__dot"></span>Dashboards</span>` : ''}
+              ${p.dashboards_imported ? `<span class="status-pill" style="font-size:var(--fs-xs);padding:2px 8px;"><span class="status-pill__dot"></span>Dashboards</span>` : ''}
               <span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>
             </div>`).join('')
         : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;
@@ -6318,11 +6517,11 @@
       // Un paso de la secuencia de puesta en marcha (número/check + label + botón).
       const setupStep = (n, done, enabled, label, hint, btnId, btnLabel) => `
         <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; ${n > 1 ? 'border-top:1px solid var(--border-subtle);' : ''}">
-          <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;
+          <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:var(--fs-sm); font-weight:700;
             background:${done ? 'var(--accent-green)' : (enabled ? 'var(--accent)' : 'var(--bg-tertiary)')};
             color:${done || enabled ? '#fff' : 'var(--text-muted)'};">${done ? '✓' : n}</span>
           <div style="flex:1; min-width:0;">
-            <div style="font-size:13px; font-weight:600; color:var(--text-primary);">${label}</div>
+            <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary);">${label}</div>
             <div class="form-hint" style="margin:2px 0 8px;">${hint}</div>
             ${done
               ? '<span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>'
@@ -6349,11 +6548,11 @@
             'infra-ingest-btn', icon('play') + ' Iniciar ingesta con Logstash')}
           ${hasCapabilitySlug ? `
           <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border-subtle);">
-            <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;
+            <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:var(--fs-sm); font-weight:700;
               background:${capsDone ? 'var(--accent-green)' : (ingestDone ? 'var(--accent)' : 'var(--bg-tertiary)')};
               color:${capsDone || ingestDone ? '#fff' : 'var(--text-muted)'};">${capsDone ? '✓' : '3'}</span>
             <div style="flex:1; min-width:0;">
-              <div style="font-size:13px; font-weight:600; color:var(--text-primary);">Capabilities de OpenSearch</div>
+              <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary);">Capabilities de OpenSearch</div>
               <div class="form-hint" style="margin:2px 0 8px;">${ingestDone ? 'Agente conversacional (NL→PPL) y forecast. Esperá ~1-2 min a que carguen datos.' : 'Iniciá la ingesta y esperá que entren documentos.'}</div>
               <div style="display:flex; align-items:center; gap:8px;">
                 ${capsDone ? '<span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>' : ''}
@@ -6370,7 +6569,7 @@
       const donePanel = allDone ? `
         <div style="margin:6px 0 16px; padding:16px 18px; border:1px solid rgba(22,163,74,.35); border-radius:var(--radius-lg); background:var(--accent-green-tint); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
           <span class="status-pill"><span class="status-pill__dot"></span>Entorno operativo</span>
-          <span style="font-size:13px; color:var(--text-secondary);">Datos ingestados, dashboards listos${hasCapabilitySlug ? ' y capabilities provisionadas' : ''}. Todo quedó operativo.</span>
+          <span style="font-size:var(--fs-base); color:var(--text-secondary);">Datos ingestados, dashboards listos${hasCapabilitySlug ? ' y capabilities provisionadas' : ''}. Todo quedó operativo.</span>
           ${dashUrl ? `<a class="btn btn-primary btn-sm" style="margin-left:auto;" href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>` : ''}
         </div>` : '';
 
@@ -6651,7 +6850,6 @@
 
       const primaryId = state.selectedExamples[0];
       const primaryMeta = LOG_EXAMPLES.find(e => e.id === primaryId);
-      state.ctsMode = !!primaryMeta?.cts;
       // AMBOS caminos leen datos que YA están en OBS: los demos su dataset
       // pre-cargado, y el productivo los logs reales del cliente. En los dos el
       // input es read-only one-shot (delete=false, watch=false) y no se sube nada.
@@ -6699,19 +6897,19 @@
             const srcHtml = sources.map((src, i) => {
               const prev = src.length > 140 ? src.slice(0, 140) + '…' : src;
               return `<div style="margin-bottom:${i < sources.length - 1 ? 8 : 0}px;">
-                <span style="font-size:11px;font-weight:600;color:var(--accent);">${labels[i] || 'Fuente ' + (i + 1)}</span>
-                <pre style="font-family:var(--font-mono);font-size:10.5px;line-height:1.45;white-space:pre-wrap;word-break:break-all;margin:2px 0 0;color:var(--text-muted);">${escapeHtml(prev)}</pre>
+                <span style="font-size:var(--fs-xs);font-weight:var(--fw-semi);color:var(--accent);">${labels[i] || 'Fuente ' + (i + 1)}</span>
+                <pre style="font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.45;white-space:pre-wrap;word-break:break-all;margin:2px 0 0;color:var(--text-muted);">${escapeHtml(prev)}</pre>
               </div>`;
             }).join('');
             return `<div style="margin-bottom:${multi ? 10 : 0}px;padding:12px 14px;background:var(--bg-subtle);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
-              ${multi ? `<div style="font-size:12px;font-weight:650;color:var(--accent);margin-bottom:8px;">SIEM</div>` : ''}
+              ${multi ? `<div style="font-size:var(--fs-sm);font-weight: var(--fw-semi);color:var(--accent);margin-bottom:8px;">SIEM</div>` : ''}
               ${srcHtml}
             </div>`;
           }
           return `
             <div style="margin-bottom:${multi ? 10 : 0}px;padding:12px 14px;background:var(--bg-subtle);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
-              ${multi ? `<div style="font-size:12px;font-weight:650;color:var(--accent);margin-bottom:6px;">${escapeHtml(m ? m.label : selId)}</div>` : ''}
-              <pre style="font-family:var(--font-mono);font-size:11.5px;line-height:1.5;white-space:normal;word-break:break-all;margin:0;color:var(--text-secondary);height:70px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;">${escapeHtml(sample)}</pre>
+              ${multi ? `<div style="font-size:var(--fs-sm);font-weight: var(--fw-semi);color:var(--accent);margin-bottom:6px;">${escapeHtml(m ? m.label : selId)}</div>` : ''}
+              <pre style="font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.5;white-space:normal;word-break:break-all;margin:0;color:var(--text-secondary);height:70px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;">${escapeHtml(sample)}</pre>
             </div>`;
         }).join('');
       }
@@ -6734,19 +6932,12 @@
         state.generatedFromLog = primaryData.sample || '';
       }
 
-      if (primaryMeta?.prefill) {
-        const p = primaryMeta.prefill;
-        _selectInputPlugin(p.inputPlugin || 'obs');
-        Object.entries(p.input || {}).forEach(([fid, val]) => {
-          const el = document.getElementById(fid);
-          if (el) el.value = val;
-        });
-        const idxEl = document.getElementById('output-index');
-        if (idxEl && p.index) idxEl.value = p.index;
-      } else {
-        _selectInputPlugin('obs');
-        _setExampleIndex(primaryMeta?.indexBase || 'logs');
-      }
+      // Todos los casos de demo leen de OBS. El bucket, prefijo e índice salen
+      // de `caseMeta` — antes había una rama que leía un `meta.prefill` que el
+      // backend NUNCA emitió, así que estaba muerta y siempre caía al else.
+      _selectInputPlugin('obs');
+      if (primaryMeta) _applyCaseSourceDest(primaryId);
+      else _setExampleIndex('logs');
 
       const step2 = document.getElementById('step-2');
       if (step2 && step2.classList.contains('active')) {
@@ -6819,7 +7010,7 @@
       if (hasCreds) {
         el.innerHTML = '';
       } else {
-        el.innerHTML = '<span style="color:#dc2626;">⚠ Faltan AK/SK. Abrí Configuración (⚙) en el nav bar para cargarlos.</span>';
+        el.innerHTML = '<span style="color:var(--accent-hover);">⚠ Faltan AK/SK. Abrí Configuración (⚙) en el nav bar para cargarlos.</span>';
       }
     }
 
@@ -7061,7 +7252,19 @@
               test: v => !!v && /^[a-z0-9+._\-]*$/.test(v.replace(/%\{[^}]*\}/g, '')),
               msg: 'Índice inválido: usá minúsculas, números y guiones (el date-math %{+YYYY.MM} está OK).' },
             { id: 'output-user', label: 'el usuario de OpenSearch' },
-            { id: 'output-password', label: 'la contraseña de OpenSearch' },
+            // La política de Huawei CSS, validada acá y no descubierta a los diez
+            // minutos: el cluster se crea al final del `terraform apply`, así que
+            // una contraseña que Huawei rechaza aborta un despliegue ya empezado.
+            // El mismo criterio está duplicado como `validation` en terraform/main.tf
+            // — ahí ataja el caso de un deploy que no pasa por este formulario.
+            //
+            // 3 de las 4 clases, no las 4: exigir símbolo rechazaría "Huawei1234"
+            // (minúscula + mayúscula + dígito), que Huawei acepta.
+            { id: 'output-password', label: 'la contraseña de OpenSearch',
+              test: v => v.length >= 8 && v.length <= 32 &&
+                         [/[a-z]/, /[A-Z]/, /[0-9]/, /[~!@#$%^&*()\-_=+\\|[\]{};:,<.>/?]/]
+                           .filter(re => re.test(v)).length >= 3,
+              msg: 'Huawei CSS pide 8-32 caracteres y al menos 3 de: minúscula, mayúscula, número, símbolo.' },
           );
         } else if (state.outputPlugins.includes('obs')) {
           checks.push({ id: 'output-obs-bucket', label: 'el bucket OBS de destino' });
@@ -7197,7 +7400,7 @@
       if (!ok) return;
       state = {
         rawLog: '', filterCode: '', fields: [], generatedFromLog: '',
-        inputPlugin: 'obs', inputConfig: {}, ctsMode: false, readExistingMode: false,
+        inputPlugin: 'obs', inputConfig: {}, readExistingMode: false,
         dedupId: '', outputPlugins: ['opensearch'], outputConfig: {},
         pipelineCode: '', pipelineCodeEdited: '', pipelineCodeDirty: false,
         businessRulesApplied: false, selectedExamples: [], deployMode: 'demo',
@@ -7364,10 +7567,9 @@
         const d = await (await fetch('/api/v1/settings/huawei')).json();
         state.hwSettings = { ...(d.values || {}), effective_region: d.effective_region || '' };
       } catch (_e) { state.hwSettings = null; }
-      // Reflejar la región efectiva en los lugares estáticos del HTML (pie del
-      // nav y defaults de los forms que se renderizan antes del fetch).
+      // Reflejar la región efectiva en los defaults de los forms que se
+      // renderizan antes de este fetch.
       const region = hwRegion();
-      document.querySelectorAll('.app-nav__footer-region').forEach(el => { el.textContent = region; });
       const prodRegion = document.getElementById('productive-region');
       if (prodRegion && prodRegion.value === 'la-south-2') prodRegion.value = region;
       const prodEp = document.getElementById('productive-endpoint');
@@ -7397,7 +7599,7 @@
           if (input) input.value = (d.values || {})[field] || '';
         });
         if (srcEl) srcEl.innerHTML = d.source === 'settings'
-          ? '<span style="color:#16a34a;">✓ Los deploys usan esta cuenta.</span>'
+          ? '<span style="color:var(--accent-green);">✓ Los deploys usan esta cuenta.</span>'
           : '';
       } catch (_e) { if (srcEl) srcEl.textContent = ''; }
     }
@@ -7427,7 +7629,7 @@
       // del tfvars estático no puede funcionar.
       const infra = [body.vpc_id, body.subnet_id, body.security_group_id];
       if (infra.some(Boolean) && !infra.every(Boolean)) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626;">⚠ VPC, Subnet y Security Group van juntos: completá los tres (o ninguno).</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent-hover);">⚠ VPC, Subnet y Security Group van juntos: completá los tres (o ninguno).</span>';
         return false;
       }
       try {
@@ -7459,6 +7661,45 @@
       if (await saveHuaweiSettings(st) && st) st.textContent = '✓ Guardado en el servidor.';
     });
 
+    // Sube los datasets de demo que falten al bucket del SA y consume el SSE.
+    // Vive suelta —y no dentro del handler del botón— porque hay dos entradas al
+    // mismo flujo: el botón de ⚙ Configuración y el atajo que aparece cuando un
+    // deploy se corta porque el dataset no está en el bucket.
+    //
+    // `onFile(key, evento)` se llama por cada archivo; devuelve el evento
+    // `complete` con el resumen {uploaded, skipped, errors}.
+    async function preloadDatasets({ ak, sk, bucket, region, onFile }) {
+      const res = await fetch('/api/v1/datasets/preload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_key: ak, secret_key: sk, bucket, region, only_missing: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail?.message || err.detail || `HTTP ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let resumen = null;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data:')) continue;
+          let ev; try { ev = JSON.parse(line.slice(5)); } catch (_) { continue; }
+          if (ev.type === 'file') onFile?.(ev.key, ev);
+          else if (ev.type === 'bucket') onFile?.('(bucket)', { state: 'done', detail: ev.message });
+          else if (ev.type === 'error') throw new Error(ev.message);
+          else if (ev.type === 'complete') resumen = ev;
+        }
+      }
+      return resumen;
+    }
+
     // Preparar bucket: sube los datasets de demo que falten (SSE con progreso).
     document.getElementById('settings-hw-preload')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -7483,40 +7724,18 @@
         if (!progressEl) return;
         progressEl.innerHTML = Object.entries(lines).map(([key, s]) => {
           const mark = s.state === 'done' ? '✓' : s.state === 'skipped' ? '·' : s.state === 'error' ? '✗' : '↑';
-          const color = s.state === 'error' ? '#dc2626' : s.state === 'done' ? '#16a34a' : 'inherit';
+          const color = s.state === 'error' ? 'var(--accent-hover)' : s.state === 'done' ? 'var(--accent-green)' : 'inherit';
           const extra = s.state === 'uploading' ? ` (${s.size_mb} MB…)` : s.detail ? ` — ${escapeHtml(s.detail)}` : '';
           return `<div style="color:${color};">${mark} ${escapeHtml(key)}${extra}</div>`;
         }).join('');
       };
       try {
-        const res = await fetch('/api/v1/datasets/preload', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_key: ak, secret_key: sk, bucket, region, only_missing: true }),
+        const ev = await preloadDatasets({
+          ak, sk, bucket, region,
+          onFile: (key, s) => { lines[key] = s; paint(); },
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail?.message || err.detail || `HTTP ${res.status}`);
-        }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const parts = buf.split('\n\n');
-          buf = parts.pop();
-          for (const part of parts) {
-            const line = part.trim();
-            if (!line.startsWith('data:')) continue;
-            let ev; try { ev = JSON.parse(line.slice(5)); } catch (_) { continue; }
-            if (ev.type === 'file') { lines[ev.key] = ev; paint(); }
-            else if (ev.type === 'bucket' && progressEl) { lines['(bucket)'] = { state: 'done', detail: ev.message }; paint(); }
-            else if (ev.type === 'error') throw new Error(ev.message);
-            else if (ev.type === 'complete') {
-              toast(`Bucket listo: ${ev.uploaded} subidos, ${ev.skipped} ya estaban${ev.errors ? `, ${ev.errors} con error` : ''}.`, ev.errors ? 'error' : 'success');
-            }
-          }
+        if (ev) {
+          toast(`Bucket listo: ${ev.uploaded} subidos, ${ev.skipped} ya estaban${ev.errors ? `, ${ev.errors} con error` : ''}.`, ev.errors ? 'error' : 'success');
         }
       } catch (err) {
         toast(`No se pudo preparar el bucket: ${err.message}`, 'error');
@@ -7534,7 +7753,7 @@
         { id: 'settings-obs-ak', label: 'el Access Key (AK)' },
         { id: 'settings-obs-sk', label: 'el Secret Access Key (SK)' },
         { id: 'settings-maas-key', label: 'la MaaS API key', test: () => !!maasKeyInput() || !!state._maasConfigured, msg: 'Ingresá la MaaS API key.' },
-        { id: 'settings-hw-bucket', label: 'el Bucket de demos' },
+        { id: 'settings-hw-bucket', label: 'el Bucket de demos y tfstate' },
       ]);
       if (!okReq) return;
       const ak = document.getElementById('settings-obs-ak').value.trim();
@@ -7740,7 +7959,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(detailMsg(data));
 
-        statusEl.innerHTML = `<div style="padding:10px 14px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);"><strong>Muestra leída:</strong> ${escapeHtml(data.sample_line.slice(0, 120))}${data.sample_line.length > 120 ? '…' : ''}<br><span style="font-size:12px;color:var(--text-muted);">${data.total_objects} objetos bajo el prefijo.</span></div>`;
+        statusEl.innerHTML = `<div style="padding:10px 14px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:var(--radius-md);"><strong>Muestra leída:</strong> ${escapeHtml(data.sample_line.slice(0, 120))}${data.sample_line.length > 120 ? '…' : ''}<br><span style="font-size:var(--fs-sm);color:var(--text-muted);">${data.total_objects} objetos bajo el prefijo.</span></div>`;
 
         // Guardar el sample para que el pipeline generation lo use.
         const rawLogEl = document.getElementById('raw-log');
