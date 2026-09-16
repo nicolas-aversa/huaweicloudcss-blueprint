@@ -2319,7 +2319,7 @@
                 <span class="guide-block__once">una sola vez</span>
               </div>
               <ol class="guide-list">
-                <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS, MaaS API key, bucket) e <strong>Infraestructura General</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
+                <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS, MaaS API key, bucket) e <strong>Infraestructura general</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
                 <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros. Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
               </ol>
             </section>
@@ -2463,13 +2463,13 @@
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
-            <!-- Card 2: Infraestructura General — infra de la cuenta (pisa el
+            <!-- Card 2: Infraestructura general — infra de la cuenta (pisa el
                  terraform.tfvars del repo al armar cada deploy). -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-infra"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Infraestructura General</div>
+                  <div class="settings-card__title">Infraestructura general</div>
                   <div class="settings-card__hint">VPC, subnet, security group, project id, región y AZ de tu cuenta — los usan los deploys. <span id="settings-hw-source"></span></div>
                 </div>
               </div>

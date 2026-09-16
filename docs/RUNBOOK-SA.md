@@ -29,7 +29,7 @@ estén todos los campos):
    tu **MaaS API key** (ModelArts MaaS; sin ella no andan el análisis con LLM ni el chatbot), y el
    **Bucket de demos**. Tocá **Preparar bucket** para subir los datasets de demo a ese bucket
    (necesario antes de la primera demo). Guardar.
-2. **Infraestructura General** — Project ID (32 hex), Región, Availability Zone, y VPC / Subnet /
+2. **Infraestructura general** — Project ID (32 hex), Región, Availability Zone, y VPC / Subnet /
    Security Group (existentes en esa región). Guardar.
 
 Con eso estás listo para desplegar.
