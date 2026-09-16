@@ -120,7 +120,7 @@ Logstash. Antes había que hacerlo a mano y no estaba documentado que faltaba.
 
 ## Correr el Builder
 
-**Crear pipeline** → toggle **"Dataset nuevo"**. Una corrida por fuente:
+**Pipeline** → toggle **"Dataset nuevo"**. Una corrida por fuente:
 
 1. **Paso 1** — elegí **Llegan en vivo**, marcá la fuente (Kafka / Beats / JDBC) y pegá las 3
    líneas → **Siguiente** (el LLM arma el `filter{}` y detecta campos).

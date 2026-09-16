@@ -27,7 +27,7 @@ Alternativa manual (consola web de OBS u `obsutil cp`), al MISMO esquema de pref
 | `media-streaming`      | `streaming-ott-logs/`           | `datasets/streaming-ott.log`            |
 | `oil-gas`              | `oil-gas-logs/`             | `datasets/produccion-pozos.log`              |
 | `media-retail-ecommerce` | `ventas-ecommerce-logs/`          | `datasets/ventas-ecommerce.log`            |
-| `health`               | `encuentros-clinicos-logs/`              | `datasets/encuentros-clinicos.log`               |
+| `encuentros-clinicos`               | `encuentros-clinicos-logs/`              | `datasets/encuentros-clinicos.log`               |
 | `cts`                  | `CloudTraces/`              | (traces reales de la cuenta, si existen) |
 
 ```
@@ -49,14 +49,14 @@ El dataset se lee por el prefijo del tipo. Formato esperado (un evento por líne
 | `fintech-transactions` | `<raw_ts> - <thread> <kv>` por línea; kv `|`/`=` (target `transaction`) con `steps` JSON y `detail` `~`/`=` (device). El filtro deriva `transaction.funnel.*` y `transaction.geo_location`. |
 | `oil-gas`          | kv espacio/`=` por línea (telemetría SCADA por pozo, Volve/Equinor). `downtime` solo en lecturas de pozo caído. |
 | `media-retail-ecommerce` | JSON por línea (órdenes del sample e-commerce de OpenSearch, con `status`/`cancel_reason` agregados). |
-| `health`           | CSV por línea (Synthea encounters): `ts,class,code,desc,patient,city,cost,claim,covered,reason,triage`. `triage` solo en emergencia/urgencia. |
+| `encuentros-clinicos`           | CSV por línea (Synthea encounters): `ts,class,code,desc,patient,city,cost,claim,covered,reason,triage`. `triage` solo en emergencia/urgencia. |
 | `alyc`             | `<ts yyyyMMdd-HH:mm:ss.SSS> <mercado> <kv espacio/=>` por línea (órdenes/ejecuciones/liquidación ALyC, BYMA/MAE). `reject_reason` solo en ORDER_REJECT; `fail_reason` solo en SETTLEMENT_FAIL. Solo días hábiles AR, rueda 11-17h. |
 | `fortianalyzer`    | kv espacio/`=` FortiGate **nativo** (mismo formato crudo que `siem-fortigate.log`, pero el filtro NO normaliza a ECS: conserva srcip/dstip/app/sentbyte…). `attack` solo en subtype ips. |
 | `media-streaming`  | JSON por línea (sesiones de reproducción OTT): PLAY_START/PLAY_END/REBUFFER/BITRATE_SWITCH/PLAYBACK_ERROR. `watch_seconds` solo en PLAY_END, `buffering_ms` solo en REBUFFER, `error_code` solo en PLAYBACK_ERROR. |
 
 ## Regenerar los datasets de los verticales nuevos
 
-`oil-gas`, `media-retail-ecommerce` y `health` (~100k líneas cada uno,
+`oil-gas`, `media-retail-ecommerce` y `encuentros-clinicos` (~100k líneas cada uno,
 re-fechados a **2025-07-01 → 2026-07-01**, la misma ventana que fintech) se generan con:
 
 ```

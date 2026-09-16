@@ -7618,7 +7618,7 @@
     });
 
     // ── Auto-cargar ejemplo para pruebas rápidas ───────────────────────────────
-    // ?sample=<id> (o ?sample=1 / ?dev=1 → firewall) pre-carga un caso de uso.
+    // ?sample=<slug> (o ?sample=1 / ?dev=1 → siem) pre-carga un caso de uso.
     (function autoLoadSample() {
       const params = new URLSearchParams(window.location.search);
       const raw = params.get('sample') || (params.get('dev') === '1' ? '1' : null);

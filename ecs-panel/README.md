@@ -28,11 +28,11 @@ Huawei, en la agency.
 
 | | |
 |---|---|
-| `index.py` | La función de FunctionGraph: ECS y reglas de security group. ~290 líneas, sin dependencias fuera de la stdlib. Reemplaza a la función de start/stop que ya tenías. |
+| `index.py` | La función de FunctionGraph: ECS y reglas de security group. ~256 líneas, sin dependencias fuera de la stdlib. Reemplaza a la función de start/stop que ya tenías. |
 | `worker.js` | El frente en Cloudflare: sirve la página, valida la password, invoca la función. |
 | `wrangler.toml` | Config del Worker. **Los secretos no van acá.** |
-| `test_panel.py` | 31 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
-| `worker.test.mjs` | 28 checks del Worker con Web Crypto real y `fetch` interceptado. `node ecs-panel/worker.test.mjs`. |
+| `test_panel.py` | 39 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
+| `worker.test.mjs` | 31 checks del Worker con Web Crypto real y `fetch` interceptado. `node ecs-panel/worker.test.mjs`. |
 
 ## Despliegue
 

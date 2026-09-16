@@ -16,9 +16,9 @@ Flujo orquestado por dos endpoints:
        generado más los configs de Input/Output y devuelve el `.conf`
        completo, listo para pegar en Logstash de CSS.
 
-La validación sintáctica con Logstash efímero quedó deprecada (la del
-sandbox de OpenSearch sigue activa en `/validate-mapping` para validación
-SEMÁNTICA).
+La validación sintáctica con Logstash efímero quedó deprecada. El comentario que
+estaba acá decía que `/validate-mapping` seguía activa para la validación
+semántica: esa ruta no existe entre las que registra este módulo.
 
 Ejecución local:
 

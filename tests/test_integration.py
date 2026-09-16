@@ -6,8 +6,8 @@ Arquitectura del flujo:
     1. /api/v1/onboarding/generate-filter  -> LLM glm-5.2 (raw_log -> filter)
     2. /api/v1/onboarding/generate-pipeline -> arma .conf (input + filter + output)
 
-El paso de validación con Logstash efímero quedó deprecado. La validación
-SEMÁNTICA del filter sigue activa en /validate-mapping (sandbox de OpenSearch).
+El paso de validación con Logstash efímero quedó deprecado. (El comentario que
+estaba acá mandaba a /validate-mapping; esa ruta no existe.)
 """
 
 import pathlib

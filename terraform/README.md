@@ -2,9 +2,25 @@
 
 Deploy de OpenSearch + Logstash usando Huawei Cloud CSS (Cloud Search Service).
 
-**El deploy lo corre el backend** (`POST /api/v1/terraform/deploy-stream`): arma el
+**El deploy lo corre el backend** (`POST /api/v1/terraform/deploy-job`): arma el
 `deploy.auto.tfvars.json` con lo del wizard + ⚙ Configuración y ejecuta
 `terraform init/apply` en esta carpeta. No hay pasos manuales en el flujo normal.
+
+## El estado no vive acá
+
+El `terraform.tfstate` **no** es local: va a OBS, al mismo bucket de demos, bajo el
+prefijo `tfstate/`. Lo configura `tfstate.py`, que escribe un `backend.tf` por
+workspace antes del `init` — una clave de estado distinta por usuario, para que dos
+SAs de la misma instancia no se pisen el entorno.
+
+Consecuencias prácticas:
+
+- `backend.tf` **está gitignoreado**: se genera en cada request y lleva las AK/SK
+  del bucket en claro.
+- Si vaciás el bucket a mano, Terraform deja de saber qué destruir y los clusters
+  quedan corriendo y facturando.
+- Para un `terraform` manual en esta carpeta hace falta que exista ese `backend.tf`
+  (lo deja el último deploy) o vas a estar mirando un estado vacío.
 
 ## Flujo
 
@@ -60,6 +76,8 @@ terraform/
 ├── main.tf                    # Recursos CSS + NAT/DNAT + variables
 ├── terraform.tfvars.example   # Template del fallback
 ├── terraform.tfvars           # (gitignoreado) fallback de infra
+├── backend.tf                 # (gitignoreado) backend S3 → OBS; lo genera tfstate.py
 ├── deploy.auto.tfvars.json    # (efímero, gitignoreado) lo escribe el backend
+├── destroy.auto.tfvars.json   # (gitignoreado) creds del provider, sobreviven al deploy
 └── .pipelines.json            # (gitignoreado) registro de pipelines activas
 ```

@@ -116,12 +116,20 @@ persisten en volúmenes. El puerto es host **8088** → contenedor 8000 (cambial
 Config opcional por entorno: copiá `.env.example` a `.env`. No hace falta Docker para OpenSearch/
 Logstash — eso lo provee CSS en la nube.
 
+**Otros modos de correrla:**
+
+| Documento | Para quién |
+|---|---|
+| [`HOSTING.md`](HOSTING.md) | Hostearla para varios SAs, con login, HTTPS automático y workspace por usuario |
+| [`docs/RUNBOOK-SA.md`](docs/RUNBOOK-SA.md) | El SA que **recibe** la app ya hosteada: arrancar, configurar y dar una demo de punta a punta |
+| [`ecs-panel/README.md`](ecs-panel/README.md) | Prender y apagar la ECS desde el celular, sin entrar a la consola de Huawei (proyecto aparte: FunctionGraph + Cloudflare Worker) |
+
 ---
 
 ## Los dos flujos
 
 ### Demo
-**Crear pipeline → elegir uno o varios verticales → Desplegar.** El primer deploy tarda ~20 min
+**Pipeline → elegir uno o varios verticales → Desplegar.** El primer deploy tarda ~10 min
 (clusters CSS); los siguientes reusan el entorno. Cada vertical trae dataset, pipeline, template,
 dashboards, forecasts y chatbot.
 
@@ -191,20 +199,31 @@ valores y `terraform init && terraform apply`. Ver [`terraform/README.md`](terra
 
 ```
 main.py                 Backend FastAPI (onboarding, casos, capabilities, deploy, settings)
+auth.py                 Sesiones, allowlist y admins del modo hosteado (multi-SA)
+audit.py                Registro de quién hizo qué (vista Panel de control)
 runs.py                 Historial persistido de ejecuciones (vista Actividad)
 maas_integrator.py      Integración con MaaS/LLM (análisis de log, generación de filter)
+                        y el settings file por usuario, cifrado con Fernet
 capabilities.py         Builders del chatbot (connectors, modelos, agente) y forecasts
 dashboards.py           Motor de dashboards (ndjson) desde el registro de verticales
 index_template.py       Generación del _index_template
-plugin_rag.py           Catálogo/RAG de plugins de Logstash para el LLM
+ecs_validator.py        Clasifica cada campo contra el ECS field reference (docs/fields.csv)
+log_format_catalog.py   Formatos de log conocidos (Apache, syslog…) para acelerar el LLM
+plugin_rag.py           Catálogo de plugins de Logstash que se le pasa al LLM
+obs_client.py           Cliente OBS (subida de datasets, lectura de muestras)
+tfstate.py              Estado de Terraform en OBS: backend remoto y workspace por usuario
+custom_cases.py         Casos de demo creados desde la UI (store en el volumen de datos)
 verticals/              Registro declarativo: un módulo por vertical (card, filter, campos,
                         capability spec, dashboard, preguntas, datasets)
-custom_cases.py         Casos de demo creados desde la UI (store en el volumen de datos)
 static/index.html       Frontend completo (SPA)
 terraform/              HCL de los clusters CSS + NAT/DNAT
 docs/                   Contexto para el LLM, dashboards de referencia, guías (docs/guides/)
 datasets/               README de regeneración (la data no se versiona)
-tests/                  Suite de integración
+tests/                  Suite completa (ver la sección Tests)
+build_*.py              Scripts de generación de datasets y del favicon. No corren en
+                        producción; sus dependencias están en requirements-dev.txt
+ecs-panel/              Proyecto aparte: prende/apaga la ECS desde el celular
+                        (Huawei FunctionGraph + Cloudflare Worker). Ver ecs-panel/README.md
 ```
 
 ---
@@ -228,10 +247,38 @@ datasets). Backend y frontend lo consumen del registro `verticals/__init__.py` �
 ## Tests
 
 ```bash
-python -m pytest tests/test_integration.py -q
+python -m pytest -q          # la suite entera: 383 tests
 ```
 
-Ver [`TESTING.md`](TESTING.md) para el detalle.
+Los 5 `skipped` son esperables en un checkout limpio: 5 tests marcados
+`requires_datasets` necesitan los `.log` de `datasets/`, que no se versionan
+(pesan ~350 MB y se bajan del Release).
+
+La suite está repartida por área, no toda en un archivo:
+
+| Archivo | Qué cubre |
+|---|---|
+| `tests/test_integration.py` | endpoints, deploy, capabilities, OBS, dashboards |
+| `tests/test_custom_cases.py` | casos creados desde el Builder y su merge al catálogo |
+| `tests/test_tfstate.py` | estado remoto en OBS, workspaces, backend |
+| `tests/test_auth_admin.py` | login, allowlist, admins |
+| `tests/test_runs.py` | historial de ejecuciones |
+| `tests/test_front_*.py` | audits del SPA: escala tipográfica, contraste WCAG, política de contraseña, render del chat |
+
+Los `test_front_*` extraen funciones reales de `static/index.html` y las corren
+en **node**; si node no está instalado se saltean en silencio, así que conviene
+tenerlo para que corran de verdad.
+
+### Atajo para probar la UI
+
+`?sample=<slug>` pre-carga un caso y salta la selección del paso 1 —
+`?sample=1` y `?dev=1` cargan `siem`:
+
+```
+http://127.0.0.1:8088/?sample=cts
+```
+
+Y `?preview=deploy` pinta la vista de "provisionando" sin desplegar nada.
 
 ---
 

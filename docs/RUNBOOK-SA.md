@@ -6,18 +6,19 @@ despliega en **tu** cuenta Huawei. Todo se configura desde la UI; no toques arch
 
 ---
 
-## 1. Arrancar (HTTPS automático, zero-config)
-En la VM (con puertos **80 y 443** abiertos en el security group):
+## 1. Arrancar
+En la VM, con los puertos **80 y 443** abiertos en el security group:
+
 ```bash
-cd ~/huaweicloudcss-blueprint
 ./hosted-up.sh
 ```
-- Detecta la **EIP** de la VM y sirve por **HTTPS** en `https://<EIP>.sslip.io/` (cert real de
-  Let's Encrypt, sin dominio propio). El script te imprime la URL.
-- La auth se activa sola (clave de sesión autogenerada). **El primer usuario que se registra
-  queda como ADMIN.**
-- ¿Tenés dominio propio? `export APP_DOMAIN=tudominio` (DNS → la IP) y corré `./hosted-up.sh`.
-- Fallback: si no se detecta la EIP, arranca por HTTP en `:80` (`http://<EIP>/`).
+
+El script imprime la URL (`https://<EIP>.sslip.io/`, con certificado real de Let's Encrypt y sin
+dominio propio) y activa la auth solo. **El primer usuario que se registra queda como ADMIN.**
+
+El detalle —dominio propio, fallback a HTTP, qué queda aislado por usuario— está en
+[`HOSTING.md`](../HOSTING.md#pasos), que es la fuente de verdad del hosting. Acá no se repite
+para que no se separen.
 
 ## 2. Entrar y configurar (⚙ Configuración)
 Registrate con tu email + una contraseña (tu primer ingreso crea la cuenta). Andá a
@@ -34,8 +35,8 @@ estén todos los campos):
 Con eso estás listo para desplegar.
 
 ## 3. Presentar una demo
-1. **Crear pipeline** → elegí uno o varios casos (SIEM, e-commerce, streaming, salud, ALyC,
-   billetera, pozos, FortiAnalyzer…) → **Desplegar**. El primer deploy tarda ~20 min (crea los
+1. **Pipeline** → elegí uno o varios casos (SIEM, e-commerce, streaming, salud, ALyC,
+   billetera, pozos, FortiAnalyzer…) → **Desplegar**. El primer deploy tarda ~10 min (crea los
    clusters CSS); podés cerrar/refrescar el browser, el deploy sigue y se reengancha.
 2. En **Entorno desplegado**, completá la "puesta en marcha": *Aplicar index template + dashboards*
    → *Iniciar ingesta* → *Provisionar capabilities*.
@@ -47,7 +48,7 @@ Con eso estás listo para desplegar.
 Si tenés un log (tuyo o que te pasó un cliente), podés convertirlo en un dataset propio — con su
 card, sus dashboards y su chatbot — sin tocar código:
 
-1. **Crear pipeline** → toggle **"Dataset nuevo"**.
+1. **Pipeline** → toggle **"Dataset nuevo"**.
 2. Elegí **de dónde salen los datos**:
    - **Tengo el archivo** — subís el `.log` (un evento por línea, hasta 50 MB). Queda guardado y lo
      desplegás las veces que quieras.
