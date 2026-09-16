@@ -129,6 +129,11 @@ def front_payload() -> dict:
             "group": v.get("group", ""),
             "icon": v.get("icon", ""),
             "indexBase": v.get("index_base", ""),
+            # Origen propio del vertical. Vacíos = el default de siempre: el
+            # bucket de demos del SA y el prefijo `<indexBase>-logs/`. Solo los
+            # declara un caso cuyo dato NO es un dataset que la plataforma sube.
+            "obsBucket": v.get("obs_bucket", ""),
+            "obsPrefix": v.get("obs_prefix", ""),
             "description": v.get("description", ""),
             "dedupId": v.get("dedup_id", ""),
             "hidden": bool(v.get("hidden")),

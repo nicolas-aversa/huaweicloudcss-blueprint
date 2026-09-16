@@ -188,5 +188,110 @@ Audit trail: acciones, ratings, servicios, usuarios y recursos.""",
             }
         ],
     },
-    'hidden': True,
+
+    # ── Card en el grid ──────────────────────────────────────────────────────
+    'label': 'Traces de CTS',
+    'full_label': 'Traces de CTS',
+    'group': 'seguridad',
+    'icon': 'cloud',
+    'index_base': 'cts',
+    'description': 'Quién hizo qué en la cuenta: cada acción de consola y de API '
+                   'auditada por Cloud Trace Service, con usuario, servicio, IP de '
+                   'origen y resultado.',
+
+    # ── Origen propio ────────────────────────────────────────────────────────
+    # El ÚNICO caso que no lee un dataset que la plataforma sube. Son las trazas
+    # de auditoría reales de la cuenta, que ya viven en su propio bucket. Por eso
+    # este vertical NO declara `dataset_files`: eso es lo que hace que "Preparar
+    # bucket" (`demo_dataset_files`) y el guard de datasets del deploy
+    # (`_check_demo_datasets_present`) lo ignoren solos, sin código especial.
+    #
+    # Contrapartida: el bucket es de UNA cuenta. Otro SA corriendo su propia
+    # instancia ve la card y el deploy le falla al leer. Está declarado acá —y no
+    # enterrado en el código— justamente para que cambiarlo sea una línea.
+    'obs_bucket': 'mi-tracker-cts',
+    'obs_prefix': 'CloudTraces/',
+
+    # Dedup: CTS puede entregar la misma traza más de una vez entre corridas, y
+    # `trace_id` es único por evento. Sin esto, re-ingerir duplica todo.
+    'dedup_id': '%{trace_id}',
+
+    'suggested_questions': [
+        '¿Cuántas trazas hay en total?',
+        '¿Cuáles son las 10 acciones más frecuentes?',
+        '¿Qué usuarios generaron más actividad?',
+        '¿Qué servicios se usaron más?',
+        '¿Cuántas trazas hay por calificación (normal, warning, incident)?',
+        '¿Cuáles son las IPs de origen más frecuentes?',
+        '¿Hubo alguna acción con código de error?',
+        '¿Qué acciones hizo cada usuario sobre recursos de ECS?',
+    ],
+
+    # Vocabulario para el matcher de industria (paso 1 del modo productivo).
+    'industry_fields': {
+        'trace_id', 'trace_name', 'trace_type', 'trace_rating', 'service_type',
+        'resource_type', 'resource_name', 'event_type', 'source_ip',
+        'tracker_name', 'domain_id', 'project_id', 'record_time',
+    },
+
+    # ── Chatbot / PPL ────────────────────────────────────────────────────────
+    # Las descripciones las lee el LLM para armar la consulta PPL: dicen qué
+    # significa cada campo y qué valores toma, no cómo se llama.
+    'capability': {
+        'label': 'Cloud Trace Service',
+        'index_pattern': 'cts*',
+        'operations': ['ConsoleAction', 'ApiCall', 'SystemAction'],
+        'success_code': '200',
+        'volume_field': 'trace_name',
+        'forecast_horizon': 8,
+        'forecast_interval_minutes': 240,
+        # Las tres preguntas que un auditor se hace mirando actividad: ¿está
+        # pasando más de lo normal?, ¿hay más gente operando?, ¿desde más lados?
+        # Los campos son los declarados en `fields` (van al index template); usar
+        # uno de mapeo dinámico haría que el forecaster quede en INIT sin datos.
+        'forecasts': [
+            {
+                'name': 'cts-traces-forecast',
+                'feature_name': 'traces_volume',
+                'aggregation_query': {
+                    'traces_volume': {'value_count': {'field': 'trace_name'}}
+                },
+                'description': 'Forecast de trazas de auditoría por intervalo',
+            },
+            {
+                'name': 'cts-users-forecast',
+                'feature_name': 'unique_users',
+                'aggregation_query': {
+                    'unique_users': {'cardinality': {'field': 'user.user_name'}}
+                },
+                'description': 'Forecast de usuarios únicos activos por intervalo',
+            },
+            {
+                'name': 'cts-sourceips-forecast',
+                'feature_name': 'unique_sources',
+                'aggregation_query': {
+                    'unique_sources': {'cardinality': {'field': 'source_ip'}}
+                },
+                'description': 'Forecast de IPs de origen únicas por intervalo',
+            },
+        ],
+        'fields': {
+            'trace_name': 'name of the audited action (getClusterSnapshotsStatistics, '
+                          'createServer, loginUser, deleteBucket, ...)',
+            'trace_type': 'how the action was issued: ConsoleAction (web console), '
+                          'ApiCall (SDK/API) or SystemAction (platform itself)',
+            'trace_rating': 'outcome rating of the trace: normal, warning or incident',
+            'service_type': 'Huawei Cloud service the action targeted (ECS, OBS, CSS, '
+                            'DWS, VPC, IAM, ...)',
+            'code': 'HTTP status code the action returned; 200 is success, 4xx/5xx are '
+                    'failures',
+            'source_ip': 'IP address the action came from',
+            'resource_type': 'kind of resource acted upon (cloudservers, buckets, '
+                             'clusters, ...)',
+            'resource_name': 'name of the specific resource acted upon',
+            'event_type': 'category of the event: system, global or resource',
+            'user.user_name': 'user that performed the action',
+            'user.domain.name': 'Huawei Cloud account (domain) the user belongs to',
+        },
+    },
 }
