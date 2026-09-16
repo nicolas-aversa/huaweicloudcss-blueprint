@@ -1041,11 +1041,29 @@
     .settings-field { margin-bottom: 10px; }
     .settings-field .form-label { font-size: var(--fs-sm); margin-bottom: var(--sp-1); }
     .settings-field .form-input { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-base); }
+    /* Campo con su propia acción al lado ("Probar", "Preparar bucket"): comparten
+       el ancho de la celda y `stretch` le da al botón la altura del input, así la
+       fila se lee como un solo control.
+       El estado de esas acciones va FUERA de la celda, debajo de la grilla: metido
+       adentro estiraba la celda a lo alto y, como las filas de un grid comparten
+       altura, arrastraba al campo de al lado y empujaba Guardar. */
+    .settings-field__row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+    .settings-field__row .form-input { flex: 1 1 150px; min-width: 0; }
+    .settings-field__row .btn { flex: 0 0 auto; white-space: nowrap; }
+    /* `setFieldError` inserta el mensaje como hermano inmediato del input, o sea
+       ENTRE el input y el botón. Acá eso sería un item más de la fila: `order`
+       lo manda al final y el 100% de base lo baja a su propio renglón, debajo de
+       los dos. Oculto no molesta (`display:none` lo saca del flex). */
+    .settings-field__row .field-error { order: 1; flex: 1 0 100%; margin-top: 0; }
+    /* Vacío no separa: el resultado de "Probar" vive entre la grilla y Guardar, y
+       con un margen fijo metía 8px de aire permanente aunque no hubiera nada. */
+    #settings-maas-test-status:not(:empty) { margin-top: 8px; }
     /* Acción de la card, al pie: el botón primero y el estado a continuación. */
     .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     /* Los botones se re-escalan a esta vista: con labels de 12px e inputs de
        13.5px, el .btn base (11/22, 14px) se ve desproporcionado. */
-    .settings-actions .btn{ padding: var(--sp-2) 18px; font-size: var(--fs-base); }
+    .settings-actions .btn,
+    .settings-field__row .btn { padding: var(--sp-2) 18px; font-size: var(--fs-base); }
     /* El estado puede ser largo (y a veces trae su propio botón, como el
        "Borrar" de MaaS): ocupa el resto de la fila y envuelve ahí, en vez de
        empujar al botón fuera de la card. */
@@ -2445,22 +2463,37 @@
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss"></div>
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-maas-key">MaaS API Key</label>
+                  <div class="settings-field__row">
+                    <input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••">
+                    <!-- Sin esto, la única forma de saber si la key servía era subir
+                         un log y esperar: si estaba mal, el error llegaba como un
+                         volcado del JSON de ModelArts en medio del wizard. -->
+                    <button class="btn btn-secondary" type="button" id="settings-maas-test"
+                            title="Llama a MaaS con esta API key y te dice si funciona">Probar</button>
+                  </div>
+                </div>
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label>
+                  <div class="settings-field__row">
+                    <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss">
+                    <button class="btn btn-secondary" type="button" id="settings-hw-preload" title="Sube los datasets de demo a este bucket">Preparar bucket</button>
+                  </div>
+                </div>
               </div>
-              <!-- Las tres acciones juntas y en orden de uso, con el estado al final
-                   de la fila. El botón "Probar" estuvo un rato metido DENTRO de la
-                   celda de la MaaS key: le comía ancho al input y ese campo quedaba
-                   más angosto que el del bucket, rompiendo la grilla de dos columnas. -->
+              <!-- El resultado de las dos acciones de campo va acá y no adentro de
+                   su celda: las filas de un grid comparten altura, así que un
+                   estado de dos líneas estiraba también al campo de al lado. -->
+              <div id="settings-maas-test-status" style="font-size:var(--fs-sm);"></div>
+              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
+              <!-- Al pie queda sola la acción de la card. Guardar no es de la AK/SK:
+                   postea los cuatro campos (OBS, MaaS y el bucket) y los cuatro son
+                   obligatorios. -->
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
-                <button class="btn btn-secondary" type="button" id="settings-maas-test"
-                        title="Llama a MaaS con la API key y te dice si funciona">Probar la MaaS key</button>
-                <button class="btn btn-secondary" id="settings-hw-preload" title="Sube los datasets de demo al bucket indicado arriba">Preparar bucket</button>
                 <span id="settings-obs-status" class="settings-status"></span>
               </div>
-              <div id="settings-maas-test-status" style="font-size:var(--fs-sm); margin-top:8px;"></div>
-              <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
             </div>
 
             <!-- Card 2: Infraestructura general — infra de la cuenta (pisa el
