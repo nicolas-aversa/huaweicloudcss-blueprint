@@ -318,13 +318,28 @@ function paginaPanel() {
 <p class=url id=url></p>
 <script>
 const $ = id => document.getElementById(id);
-// Cualquier estado que no sea ACTIVE ni SHUTOFF es una transición: se sigue poleando.
-const ON = 'ACTIVE', OFF = 'SHUTOFF';
+const ON = 'ACTIVE', OFF = 'SHUTOFF', TRANSICION = 'TRANSICION';
 let polling = null;
+// A dónde queremos llegar tras apretar un botón, o null si no hay nada pedido.
+// Es la SEGUNDA red: aunque la API todavía no reporte la transición, un ON que
+// llega mientras pedimos apagar no se toma por bueno.
+let esperando = null;
+// Nº de la última consulta pedida: las respuestas viejas se descartan. El
+// intervalo es de 5 s y un status encadena dos llamadas con 15 s de timeout,
+// así que pueden llegar fuera de orden y hacer RETROCEDER el estado.
+let pedido = 0;
 
 function pintar(d) {
-  const t = d.ecs, quieto = (t === ON || t === OFF);
-  $('estado').textContent = t === ON ? 'Encendida' : t === OFF ? 'Apagada' : t;
+  let t = d.ecs;
+  // Todavía no llegó a donde pedimos → seguimos en transición.
+  if (esperando && t === esperando) esperando = null;
+  else if (esperando) t = TRANSICION;
+
+  const quieto = (t === ON || t === OFF);
+  $('estado').textContent = t === ON ? 'Encendida'
+                          : t === OFF ? 'Apagada'
+                          : esperando === ON ? 'Encendiendo…'
+                          : esperando === OFF ? 'Apagando…' : 'Cambiando…';
   $('puertos').textContent = d.ports ? 'Puertos 80/443 abiertos' : 'Puertos cerrados';
   $('dot').className = 'dot' + (t === ON ? ' on' : quieto ? '' : ' busy');
   $('on').disabled = !quieto || t === ON;
@@ -333,43 +348,70 @@ function pintar(d) {
   // Worker, no en el de la ECS, así que no se puede derivar de location.
   $('url').innerHTML = (t === ON && d.app_url)
     ? '<a href="' + d.app_url + '" target=_blank rel=noopener>Abrir la plataforma</a>' : '';
-  if (!quieto && !polling) polling = setInterval(estado, 5000);
-  if (quieto && polling) { clearInterval(polling); polling = null; }
+
+  // El polling sigue mientras NO esté quieto. Antes esto cortaba apenas veía un
+  // estado estable, y como la API devuelve el estado viejo durante el
+  // powering-on, mataba el intervalo 1,5 s después de apretar el botón: el panel
+  // se quedaba mostrando "Apagada" para siempre.
+  if (!quieto) arrancarPolling(); else pararPolling();
+}
+
+function arrancarPolling() { if (!polling) polling = setInterval(estado, 5000); }
+function pararPolling() { if (polling) { clearInterval(polling); polling = null; } }
+
+function mensaje(texto, malo) {
+  $('msg').textContent = texto;
+  $('msg').className = 'msg' + (malo ? ' bad' : '');
 }
 
 function fallo(e) {
-  $('msg').textContent = e.message || e;
-  $('msg').className = 'msg bad';
+  mensaje(e.message || e, true);
+  // Que un error no deje el panel muerto: si la carga inicial fallaba, los
+  // botones quedaban deshabilitados y NO había polling (el intervalo solo nacía
+  // dentro de pintar o accion), así que no se recuperaba nunca sin recargar.
+  arrancarPolling();
 }
 
 async function estado() {
+  const mio = ++pedido;
   try {
     const r = await fetch('?a=status', { credentials: 'same-origin' });
     if (r.status === 401) { location.reload(); return; }
     const d = await r.json();
+    if (mio !== pedido) return;              // llegó tarde: ya hay una más nueva
     if (d.error) throw new Error(d.error);
     pintar(d);
-  } catch (e) { fallo(e); }
+  } catch (e) { if (mio === pedido) fallo(e); }
 }
 
 async function accion(cual) {
   $('on').disabled = $('off').disabled = true;
-  $('msg').className = 'msg';
-  $('msg').textContent = cual === 'start' ? 'Encendiendo…' : 'Apagando…';
+  esperando = cual === 'start' ? ON : OFF;
+  mensaje(cual === 'start' ? 'Encendiendo…' : 'Apagando…', false);
+  arrancarPolling();
   try {
     const r = await fetch('?a=' + cual, { method: 'POST', credentials: 'same-origin' });
     if (r.status === 401) { location.reload(); return; }
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    $('msg').textContent = d.message;
-    // El start/stop de Huawei es asíncrono: el estado real llega poleando.
-    if (!polling) polling = setInterval(estado, 5000);
-    setTimeout(estado, 1500);
-  } catch (e) { fallo(e); }
+    mensaje(d.message, false);
+    // Si la acción fue un no-op ("ya estaba encendida"), no hay transición que
+    // esperar: el estado que reporte la API ya es el bueno.
+    if (/Ya estaba/i.test(d.message || '')) esperando = null;
+    estado();
+  } catch (e) {
+    esperando = null;
+    fallo(e);
+  }
 }
 
 $('on').onclick = () => accion('start');
 $('off').onclick = () => accion('stop');
+// Al volver a la pestaña, refrescar: en el celular los timers se estrangulan o
+// se congelan en background y el panel mostraba lo de hace veinte minutos.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) estado();
+});
 estado();
 </script>`);
 }

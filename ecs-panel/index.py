@@ -47,9 +47,16 @@ import urllib.request
 # cuatro llamadas y el timeout de la función es de 60 s.
 HTTP_TIMEOUT = 15
 
-# Estados de la ECS que cuentan como "prendida" / "apagada". El resto (BUILD,
-# REBOOT, HARD_REBOOT…) son transiciones: el frente los muestra y sigue poleando.
-ON, OFF = "ACTIVE", "SHUTOFF"
+# Estados que cuentan como "prendida" / "apagada".
+#
+# Ojo con `status` a secas: en la API de ECS **no cambia durante la transición**.
+# Un `os-start` deja la instancia reportando SHUTOFF con
+# `OS-EXT-STS:task_state: "powering-on"` hasta que termina, y un `os-stop` la deja
+# en ACTIVE con `powering-off`. El panel leía solo `status`, así que 1,5 s después
+# de apretar el botón veía el estado viejo, lo daba por definitivo y **cortaba el
+# polling** — se quedaba mostrando "Apagada" para siempre. `task_state` es el único
+# campo que distingue "apagada" de "arrancando".
+ON, OFF, TRANSICION = "ACTIVE", "SHUTOFF", "TRANSICION"
 
 
 class PanelError(Exception):
@@ -107,9 +114,23 @@ def _vpc_url(cfg, sufijo=""):
 
 
 def ecs_status(cfg, token):
-    """Estado de la instancia: ACTIVE, SHUTOFF, BUILD, REBOOT…"""
-    res = _api("GET", _ecs_url(cfg, "/" + cfg["ecs_id"]), token)
-    return (res.get("server") or {}).get("status", "UNKNOWN")
+    """Estado efectivo de la instancia: ON, OFF, TRANSICION o el crudo de la API.
+
+    Combina `status` con `OS-EXT-STS:task_state`. Si hay task_state, hay una
+    operación en curso y eso gana sobre el `status`, que todavía informa el estado
+    de partida — que es exactamente lo que hacía que el panel se congelara.
+    """
+    servidor = (_api("GET", _ecs_url(cfg, "/" + cfg["ecs_id"]), token)
+                .get("server") or {})
+    tarea = (servidor.get("OS-EXT-STS:task_state") or "").strip()
+    if tarea:
+        return TRANSICION
+    estado = servidor.get("status", "UNKNOWN")
+    # BUILD/REBOOT/HARD_REBOOT tampoco son estados estables: el frente tiene que
+    # seguir poleando igual que con un task_state.
+    if estado in ("BUILD", "REBOOT", "HARD_REBOOT", "RESIZE", "MIGRATING"):
+        return TRANSICION
+    return estado
 
 
 def ecs_action(cfg, token, arrancar, ecs_ids=None):
@@ -202,16 +223,37 @@ def run_action(accion, cfg, token, logger):
         return {"ecs": ecs_status(cfg, token), "ports": ports_open(cfg, token),
                 "app_url": cfg["app_url"]}
 
-    # Guarda contra el doble toque: no arrancar lo ya encendido ni al revés.
     estado = ecs_status(cfg, token)
+
+    # Mientras hay una operación en curso no se manda otra: un segundo os-start
+    # sobre una instancia que ya está arrancando devuelve error de la API.
+    if estado == TRANSICION:
+        return {"ok": True, "message": "Hay una operación en curso, esperá.",
+                "ecs": estado}
+
+    # Guarda contra el doble toque, pero SIN saltarse los puertos.
+    #
+    # Antes esto devolvía temprano y no tocaba el security group. El agujero: si
+    # `do_start` abría los puertos y después fallaba el arranque, quedabas en
+    # "apagada + puertos abiertos" y **no había forma de cerrarlos desde el panel**
+    # — apretar Apagar respondía "ya estaba apagada" y no hacía nada. Lo mismo si
+    # alguien apagaba la ECS desde la consola de Huawei. Ahora la acción siempre
+    # reconcilia el SG con el estado deseado, aunque la ECS ya esté donde toca.
     if accion == "start" and estado == ON:
-        return {"ok": True, "message": "Ya estaba encendida.", "ecs": estado}
+        abrio = open_ports(cfg, token)
+        return {"ok": True, "ecs": estado, "message": (
+            "Ya estaba encendida; abrí los puertos." if abrio else "Ya estaba encendida.")}
     if accion == "stop" and estado == OFF:
-        return {"ok": True, "message": "Ya estaba apagada.", "ecs": estado}
+        cerradas = close_ports(cfg, token)
+        return {"ok": True, "ecs": estado, "message": (
+            "Ya estaba apagada; cerré los puertos." if cerradas else "Ya estaba apagada.")}
 
     logger.info("acción %s (estado actual %s)", accion, estado)
     mensaje = do_start(cfg, token) if accion == "start" else do_stop(cfg, token)
-    return {"ok": True, "message": mensaje, "ecs": estado}
+    # `ecs` va como TRANSICION, no como el estado previo: la acción ya se disparó,
+    # así que informar el estado de partida es decirle al frente algo que dejó de
+    # ser cierto en el momento mismo de responder.
+    return {"ok": True, "message": mensaje, "ecs": TRANSICION}
 
 
 def _as_dict(event):

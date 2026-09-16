@@ -4,6 +4,31 @@ Webapp mínima para **prender y apagar desde el celular** la ECS que hostea la p
 a la consola de Huawei Cloud. Al encender **abre los puertos 80 y 443** en el security group; al
 apagar **los cierra**.
 
+## El estado en vivo
+
+El panel poletea cada 5 s mientras hay una transición en curso, y para cuando el estado se estabiliza.
+
+Lo que lo hace menos obvio de lo que parece: **la API de ECS no cambia `status` durante la
+transición**. Un `os-start` deja la instancia reportando `SHUTOFF` con
+`OS-EXT-STS:task_state: "powering-on"` hasta que termina (y un `os-stop`, `ACTIVE` con
+`powering-off`). Leyendo solo `status`, el panel veía el estado viejo 1,5 s después de apretar el
+botón, lo daba por definitivo y **cortaba el polling** — se quedaba mostrando "Apagada" para
+siempre, mientras la máquina arrancaba.
+
+Hay dos redes, a propósito:
+
+1. **`ecs_status` combina `status` con `task_state`** y devuelve `TRANSICION` si hay una operación
+   en curso.
+2. **El frente recuerda qué acción pediste**: un `SHUTOFF` que llega justo después de un `start` se
+   trata como transición aunque el backend todavía no lo sepa.
+
+La segunda no es redundante: **el Worker y la función se despliegan por separado**, así que el panel
+tiene que aguantar hablando con una función vieja que todavía miente. Hay un test de eso.
+
+Las acciones además **reconcilian el security group**: apretar Apagar sobre una máquina ya apagada
+cierra los puertos igual. Sin eso, si el arranque fallaba después de abrirlos quedabas en
+"apagada + puertos abiertos" sin forma de salir desde el panel.
+
 ## Por qué son dos piezas
 
 FunctionGraph **no ofrece ninguna puerta HTTP gratis**. Las HTTP functions solo aceptan triggers de
@@ -28,11 +53,11 @@ Huawei, en la agency.
 
 | | |
 |---|---|
-| `index.py` | La función de FunctionGraph: ECS y reglas de security group. ~256 líneas, sin dependencias fuera de la stdlib. Reemplaza a la función de start/stop que ya tenías. |
+| `index.py` | La función de FunctionGraph: ECS y reglas de security group. ~295 líneas, sin dependencias fuera de la stdlib. Reemplaza a la función de start/stop que ya tenías. |
 | `worker.js` | El frente en Cloudflare: sirve la página, valida la password, invoca la función. |
 | `wrangler.toml` | Config del Worker. **Los secretos no van acá.** |
-| `test_panel.py` | 39 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
-| `worker.test.mjs` | 31 checks del Worker con Web Crypto real y `fetch` interceptado. `node ecs-panel/worker.test.mjs`. |
+| `test_panel.py` | 46 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
+| `worker.test.mjs` | 41 checks: el Worker con Web Crypto real y `fetch` interceptado, **más el JS del panel** corrido en un sandbox con timers controlados y una ECS que tarda en arrancar. Ese último bloque es el que hacía falta: el script del panel vive dentro de un template string y hasta ahora no lo ejecutaba ningún test. `node ecs-panel/worker.test.mjs` (desde esta carpeta). |
 
 ## Despliegue
 

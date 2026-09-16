@@ -39,6 +39,14 @@ class FakeAPI:
     def __init__(self, rules=None, status="SHUTOFF"):
         self.rules = list(rules or [])
         self.status = status
+        # `OS-EXT-STS:task_state`. Es el campo que distingue "apagada" de
+        # "arrancando": durante un os-start el `status` sigue diciendo SHUTOFF.
+        # El doble no lo tenía, así que la transición era intesteable y el bug de
+        # "el panel se congela" no lo podía atrapar ningún test.
+        self.task_state = ""
+        # Estados sucesivos que devuelve el GET, para simular una ECS que tarda:
+        # cada llamada consume uno; cuando se acaban, queda el último.
+        self.secuencia = None
         self.calls = []          # [(method, url, body), ...]
 
     def __call__(self, method, url, token, body=None):
@@ -56,7 +64,11 @@ class FakeAPI:
                 return {}
         if url.endswith("/action"):
             return {"job_id": "job-1"}
-        return {"server": {"status": self.status}}
+        if self.secuencia:
+            self.status, self.task_state = (self.secuencia.pop(0) if len(self.secuencia) > 1
+                                            else self.secuencia[0])
+        return {"server": {"status": self.status,
+                           "OS-EXT-STS:task_state": self.task_state}}
 
     @property
     def verbos(self):
@@ -261,6 +273,55 @@ def test_directa_status(api):
         "ecs": "ACTIVE", "ports": True, "app_url": ""}
 
 
+# ── El estado en vivo ────────────────────────────────────────────────────────
+# Estos tests no existían, y por eso el panel se podía congelar sin que nada se
+# pusiera rojo: el doble tenía un `status` fijo, así que era estructuralmente
+# imposible representar una ECS que tarda en arrancar.
+def test_arrancando_no_se_reporta_como_apagada(api):
+    """El bug exacto: durante el `powering-on` la API sigue diciendo SHUTOFF.
+    Si eso llega al frente como "apagada", el frente lo toma por definitivo y
+    corta el polling — se queda mostrando "Apagada" para siempre."""
+    api.status = "SHUTOFF"
+    api.task_state = "powering-on"
+
+    assert panel.handler({"action": "status"}, FakeContext())["ecs"] == panel.TRANSICION
+
+
+def test_apagando_no_se_reporta_como_encendida(api):
+    """Simétrico: el os-stop es SOFT (ACPI) y tarda; el status sigue en ACTIVE."""
+    api.status = "ACTIVE"
+    api.task_state = "powering-off"
+
+    assert panel.handler({"action": "status"}, FakeContext())["ecs"] == panel.TRANSICION
+
+
+def test_los_estados_inestables_tambien_son_transicion(api):
+    for estado in ("BUILD", "REBOOT", "HARD_REBOOT"):
+        api.status, api.task_state = estado, ""
+        assert panel.handler({"action": "status"}, FakeContext())["ecs"] == panel.TRANSICION
+
+
+def test_start_reporta_transicion_no_el_estado_previo(api):
+    """`start` devolvía el estado leído ANTES de disparar la acción — o sea que
+    nacía mentiroso: para cuando el frente lo recibía, ya no era cierto."""
+    api.status = "SHUTOFF"
+
+    r = panel.handler({"action": "start"}, FakeContext())
+
+    assert r["ecs"] == panel.TRANSICION, "no puede decir SHUTOFF justo después de arrancar"
+
+
+def test_el_arranque_se_ve_completo_recien_cuando_lo_esta(api):
+    """Recorrido real: apagada → arrancando → encendida. El estado solo se
+    estabiliza en el último paso."""
+    api.secuencia = [("SHUTOFF", ""), ("SHUTOFF", "powering-on"),
+                     ("ACTIVE", "powering-on"), ("ACTIVE", "")]
+
+    vistos = [panel.handler({"action": "status"}, FakeContext())["ecs"] for _ in range(4)]
+
+    assert vistos == [panel.OFF, panel.TRANSICION, panel.TRANSICION, panel.ON]
+
+
 def test_directa_expone_el_app_url_configurado(api):
     """El link a la plataforma no se puede derivar de `location` en el frente:
     ese vive en otro dominio."""
@@ -289,7 +350,7 @@ def test_directa_stop(api):
     assert ("DELETE", "sg") in api.verbos
 
 
-def test_start_sobre_una_maquina_encendida_es_noop(api):
+def test_start_sobre_una_maquina_encendida_no_la_rearranca(api):
     api.status = "ACTIVE"
 
     r = panel.handler({"action": "start"}, FakeContext())
@@ -298,14 +359,45 @@ def test_start_sobre_una_maquina_encendida_es_noop(api):
     assert not [c for c in api.calls if c[1].endswith("/action")]
 
 
-def test_stop_sobre_una_maquina_apagada_es_noop(api):
+def test_start_sobre_una_maquina_encendida_igual_abre_los_puertos(api):
+    """Encendida pero inalcanzable (alguien la prendió por consola, o el cierre
+    quedó a medias): el botón tiene que servir para eso."""
+    api.status = "ACTIVE"
+    api.rules = []
+
+    r = panel.handler({"action": "start"}, FakeContext())
+
+    assert not [c for c in api.calls if c[1].endswith("/action")]
+    assert len(api.rules) == 1 and "abrí los puertos" in r["message"]
+
+
+def test_stop_sobre_una_maquina_apagada_cierra_los_puertos(api):
+    """**La expectativa cambió a propósito.** Este test afirmaba que un `stop`
+    sobre una máquina ya apagada tampoco tocaba el SG, y eso dejaba un estado del
+    que no se podía salir: si `do_start` abría los puertos y después fallaba el
+    arranque, quedaba "apagada + puertos abiertos" y el botón Apagar respondía "ya
+    estaba apagada" sin cerrar nada. La acción ahora reconcilia el SG siempre."""
     api.status = "SHUTOFF"
     api.rules = [PROPIA]
 
-    panel.handler({"action": "stop"}, FakeContext())
+    r = panel.handler({"action": "stop"}, FakeContext())
 
+    assert not [c for c in api.calls if c[1].endswith("/action")], "no re-apaga"
+    assert api.rules == [], "los puertos SÍ se cierran"
+    assert "cerré los puertos" in r["message"]
+
+
+def test_no_se_dispara_una_accion_con_otra_en_curso(api):
+    """Un segundo os-start sobre una instancia que ya está arrancando es un error
+    de la API. El panel rebotaba el botón durante el powering-on, así que pasaba."""
+    api.status = "SHUTOFF"
+    api.task_state = "powering-on"
+
+    r = panel.handler({"action": "start"}, FakeContext())
+
+    assert r["ecs"] == panel.TRANSICION
+    assert "en curso" in r["message"]
     assert not [c for c in api.calls if c[1].endswith("/action")]
-    assert api.rules == [PROPIA]   # tampoco cierra puertos
 
 
 def test_directa_devuelve_json_pelado(api):

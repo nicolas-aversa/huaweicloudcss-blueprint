@@ -131,5 +131,127 @@ for (const [k, v] of Object.entries(ENV)) {
   check(`${k} no aparece en el HTML`, !panelHtml.includes(v) && !loginHtml.includes(v));
 }
 
+console.log("── el JS del panel, contra una ECS que TARDA ──");
+// Hasta acá nada ejecutaba el script del panel: vive dentro de un template
+// string y los tests solo miraban la capa HTTP. Por eso sobrevivió el bug de
+// "el panel se congela": el doble de fetch de arriba hace la transición
+// INSTANTÁNEA, que es justo lo contrario de la realidad, y encima la afirma como
+// correcta. Acá se extrae el script y se corre con un DOM mínimo, timers
+// controlados y un backend que tarda tres consultas en encender.
+{
+  const js = panelHtml.split("<script>")[1].split("</script>")[0];
+
+  const nodos = {};
+  const nodo = () => ({ textContent: "", className: "", innerHTML: "", disabled: false });
+  for (const id of ["estado", "puertos", "dot", "on", "off", "url", "msg"]) nodos[id] = nodo();
+
+  let ahora = 0;
+  const timers = [];        // {id, cuando, cada, fn}
+  let sigId = 1;
+  const avanzar = async (ms) => {
+    const hasta = ahora + ms;
+    for (;;) {
+      const t = timers.filter(t => t.cuando <= hasta).sort((a, b) => a.cuando - b.cuando)[0];
+      if (!t) break;
+      ahora = t.cuando;
+      if (t.cada) t.cuando += t.cada; else timers.splice(timers.indexOf(t), 1);
+      t.fn();
+      await new Promise(r => setImmediate(r));   // dejar correr los await del fetch
+    }
+    ahora = hasta;
+  };
+
+  // La ECS tarda: durante el powering-on la API sigue diciendo SHUTOFF, y el
+  // backend lo traduce a TRANSICION (que es el arreglo de index.py).
+  let consultas = 0, encendiendo = false;
+  const backend = {
+    status: () => {
+      if (!encendiendo) return { ecs: "SHUTOFF", ports: false, app_url: "https://x" };
+      consultas++;
+      return consultas < 3
+        ? { ecs: "TRANSICION", ports: true, app_url: "https://x" }
+        : { ecs: "ACTIVE", ports: true, app_url: "https://x" };
+    },
+    start: () => { encendiendo = true; return { ok: true, message: "Encendiendo.", ecs: "TRANSICION" }; },
+  };
+
+  const sandbox = {
+    document: {
+      getElementById: id => nodos[id] || nodo(),
+      addEventListener: () => {},
+      hidden: false,
+    },
+    location: { reload: () => {} },
+    setInterval: (fn, cada) => { const id = sigId++; timers.push({ id, cuando: ahora + cada, cada, fn }); return id; },
+    clearInterval: id => { const i = timers.findIndex(t => t.id === id); if (i >= 0) timers.splice(i, 1); },
+    setTimeout: (fn, ms) => { const id = sigId++; timers.push({ id, cuando: ahora + (ms || 0), fn }); return id; },
+    fetch: async (url) => new Response(JSON.stringify(
+      String(url).includes("a=start") ? backend.start() : backend.status())),
+    Response,
+  };
+  const { runInNewContext } = await import("node:vm");
+  runInNewContext(js, sandbox);
+  await new Promise(r => setImmediate(r));       // el estado() inicial
+
+  check("arranca mostrando el estado real", nodos.estado.textContent === "Apagada",
+        nodos.estado.textContent);
+
+  nodos.on.onclick();                            // apretar "Encender"
+  await new Promise(r => setImmediate(r));
+  check("al apretar dice que está encendiendo", /Encendiendo/.test(nodos.estado.textContent),
+        nodos.estado.textContent);
+
+  // EL BUG: a los 1,5 s la API todavía reporta el estado viejo. Antes, eso
+  // alcanzaba para que el panel lo diera por definitivo y matara el polling.
+  await avanzar(1500);
+  check("no se da por encendida antes de tiempo", nodos.estado.textContent !== "Encendida",
+        nodos.estado.textContent);
+  check("el polling sigue vivo tras el primer chequeo", timers.some(t => t.cada),
+        "no quedó ningún intervalo: el panel se congeló");
+
+  await avanzar(20000);                          // dejar que termine de arrancar
+  check("termina reflejando que está encendida", nodos.estado.textContent === "Encendida",
+        nodos.estado.textContent);
+  check("y ahí sí corta el polling", !timers.some(t => t.cada));
+  check("habilita el botón de apagar", nodos.off.disabled === false);
+
+  // ── Contra el backend VIEJO, que miente ──────────────────────────────────
+  // El Worker y la función de FunctionGraph se despliegan por separado: hasta
+  // que no se actualice la función, el panel va a hablar con una que reporta
+  // SHUTOFF durante todo el powering-on. El frente tiene que aguantar eso solo,
+  // sin ayuda del backend. Es el escenario exacto del bug original.
+  for (const id of Object.keys(nodos)) Object.assign(nodos[id], nodo());
+  timers.length = 0;
+  ahora = 0;
+  let arrancado = false, vistas = 0;
+  // Contexto nuevo: el script declara `const $`, y reusar el sandbox anterior
+  // choca con la declaración del primer run.
+  const sandbox2 = { ...sandbox };
+  sandbox2.fetch = async (url) => {
+    if (String(url).includes("a=start")) {
+      arrancado = true;
+      return new Response(JSON.stringify({ ok: true, message: "Encendiendo.", ecs: "SHUTOFF" }));
+    }
+    // El contrato viejo: NUNCA dice TRANSICION. Miente con SHUTOFF hasta el final.
+    vistas++;
+    return new Response(JSON.stringify(
+      { ecs: arrancado && vistas > 3 ? "ACTIVE" : "SHUTOFF", ports: arrancado, app_url: "https://x" }));
+  };
+  runInNewContext(js, sandbox2);
+  await new Promise(r => setImmediate(r));
+
+  nodos.on.onclick();
+  await new Promise(r => setImmediate(r));
+  await avanzar(1500);
+  check("con el backend viejo tampoco se da por apagada", nodos.estado.textContent !== "Apagada",
+        nodos.estado.textContent);
+  check("con el backend viejo el polling sigue vivo", timers.some(t => t.cada),
+        "se congeló: es el bug original");
+
+  await avanzar(30000);
+  check("con el backend viejo igual llega a Encendida", nodos.estado.textContent === "Encendida",
+        nodos.estado.textContent);
+}
+
 console.log(fallos ? `\n${fallos} FALLAS` : "\ntodo ok");
 process.exit(fallos ? 1 : 0);
