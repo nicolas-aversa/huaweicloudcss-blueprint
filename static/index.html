@@ -90,7 +90,7 @@
 
       /* Espaciado en base 4 */
       --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;
-      --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+      --sp-4: 16px; --sp-5: 24px;
       /* Inter, no Huawei Sans: esta última estaba declarada primero pero nunca se
          cargaba (no está en Google Fonts ni hay @font-face), así que solo la veía
          quien la tuviera instalada en su máquina y la app se veía distinta según
@@ -299,7 +299,7 @@
       margin-bottom: var(--sp-1);
     }
 
-    .form-input, .form-textarea, .form-select {
+    .form-input, .form-select {
       width: 100%;
       padding: 11px 15px;
       font-size: var(--fs-md);
@@ -310,16 +310,7 @@
       color: var(--text-primary);
       transition: border-color var(--t-base), box-shadow var(--t-base);
     }
-
-    .form-textarea {
-      font-family: var(--font-mono);
-      font-size: var(--fs-sm);
-      line-height: var(--lh-base);
-      resize: vertical;
-      min-height: 200px;
-    }
-
-    .form-input:focus, .form-textarea:focus, .form-select:focus {
+    .form-input:focus, .form-select:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: var(--ring);
@@ -366,24 +357,15 @@
       border-color: var(--text-muted);
     }
 
-    /* (.btn-ghost — botón terciario — se define más abajo, junto al wizard.) */
-
-    /* Variante oscura tipo teramot (acciones neutras de alto contraste) */
-    .btn-dark {
+    /* (.btn-ghost — botón terciario — se define más abajo{
       background: var(--text-primary);
       color: #fff;
     }
-    .btn-dark:hover { filter: brightness(1.08); }
-
     .btn:disabled {
       opacity: 0.45;
       cursor: not-allowed;
       transform: none !important;
       box-shadow: none;
-    }
-
-    .btn-block {
-      width: 100%;
     }
     .icon {
       width: 16px; height: 16px;
@@ -577,14 +559,6 @@
       flex-direction: column;
       gap: 8px;
     }
-    .app-nav__section-label {
-      font-size: var(--fs-xs);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      padding: 8px 12px 8px;
-    }
     .nav-item {
       position: relative;
       display: flex;
@@ -743,7 +717,6 @@
 
     /* ── Panel de control (vista de admin) ── */
     .admin-section { margin-top: 14px; }
-    .admin-section__title { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 8px; }
     .admin-empty { color: var(--text-muted); font-size: var(--fs-sm); }
     .admin-users { display: flex; flex-direction: column; gap: 6px; }
     .admin-user {
@@ -762,8 +735,7 @@
        `font-family: inherit`, así que el browser les metía SU fuente por defecto
        en vez de la de la app. Discretas hasta el hover, para que una lista larga
        no se llene de bordes. */
-    .admin-user__reset,
-    .admin-allow-remove {
+    .admin-user__reset{
       flex: none; display: inline-flex; align-items: center; gap: 5px;
       font-family: inherit; font-size: var(--fs-sm); font-weight: 600; line-height: 1;
       cursor: pointer; padding: 6px 10px; white-space: nowrap;
@@ -771,12 +743,9 @@
       background: transparent; color: var(--text-muted);
       transition: color var(--t-base), border-color var(--t-base), background var(--t-base);
     }
-    .admin-user__reset .icon,
-    .admin-allow-remove .icon { width: 13px; height: 13px; }
-    .admin-user__reset:hover,
-    .admin-allow-remove:hover { color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
-    .admin-user__reset:focus-visible,
-    .admin-allow-remove:focus-visible { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
+    .admin-user__reset .icon{ width: 13px; height: 13px; }
+    .admin-user__reset:hover{ color: var(--accent-red); border-color: var(--accent-red); background: var(--accent-red-tint); }
+    .admin-user__reset:focus-visible{ outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
     .admin-audit { max-height: 260px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
     .admin-audit__row { display: grid; grid-template-columns: 130px 150px 1fr; gap: 10px; padding: 6px 12px; font-size: var(--fs-xs); border-bottom: 1px solid var(--border-subtle); }
     .admin-audit__row:last-child { border-bottom: none; }
@@ -788,8 +757,7 @@
     .admin-allow-form input { flex: 1; padding: 8px 11px; font-size: var(--fs-base); font-family: inherit; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm); }
     .admin-allow-form input:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px var(--accent-red-tint); }
     .admin-allow-form .btn { flex: none; }
-    .admin-allow-form .btn:disabled { opacity: .5; cursor: not-allowed; }
-    /* (.admin-allow-remove comparte el estilo de .admin-user__reset, más arriba.) */
+    .admin-allow-form .btn:disabled { opacity: .5; cursor: not-allowed; } más arriba.) */
 
     /* ── App views (router de secciones, mismo patrón que step-pane) ─ */
     .app-view { display: none; }
@@ -797,28 +765,6 @@
 
     /* Descripción corta de la sección (el título lo muestra el topbar) */
     .view-subtitle { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 24px; }
-
-    /* Vista "Cómo usar": círculo numerado + título de paso. */
-    .guide-num {
-      flex: none; width: 24px; height: 24px; border-radius: var(--radius-pill);
-      background: var(--accent); color: #fff; font-weight: 700; font-size: var(--fs-sm);
-      display: inline-flex; align-items: center; justify-content: center;
-    }
-
-    .infra-card {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-sm);
-      padding: 24px;
-    }
-    .infra-card__head {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 20px;
-    }
     .status-pill {
       display: inline-flex;
       align-items: center;
@@ -899,47 +845,8 @@
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--accent-green);
     }
-    .infra-card__project { font-size: var(--fs-lg); font-weight: 600; }
     .infra-card__age { font-size: var(--fs-base); color: var(--text-muted); margin-left: auto; }
-
-    .infra-meta {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px 24px;
-      padding: 18px 0;
-      margin-bottom: 20px;
-      border-top: 1px solid var(--border-subtle);
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .infra-meta__item { display: flex; flex-direction: column; gap: 3px; }
-    .infra-meta__label {
-      font-size: var(--fs-xs);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-    }
-    .infra-meta__value {
-      font-family: var(--font-mono);
-      font-size: var(--fs-base);
-      color: var(--text-primary);
-      word-break: break-all;
-    }
     .infra-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-
-    .infra-template {
-      padding: 14px 0 18px;
-      margin-bottom: 18px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .infra-template__head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 10px;
-    }
-
     /* Empty state de vista completa: una sola card centrada. Lo comparten
        Entorno desplegado y Actividad, para que se lean igual. */
     .infra-empty {
@@ -958,14 +865,6 @@
     .infra-empty__tile .icon { width: 26px; height: 26px; }
     .infra-empty__title { font-size: var(--fs-lg); font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
     .infra-empty__text { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 24px; }
-
-    /* Section divider */
-    .section-divider {
-      border: none;
-      border-top: 1px solid var(--border-subtle);
-      margin: 32px 0;
-    }
-
     /* Step badge dentro de cada card del flujo */
     .step-badge {
       display: inline-flex;
@@ -980,41 +879,10 @@
       font-weight: 700;
       flex-shrink: 0;
     }
-
-    /* Reveal animation para resultados inline */
-    .reveal {
-      animation: reveal 0.25s ease-out;
-    }
     @keyframes reveal {
       from { opacity: 0; transform: translateY(-6px); }
       to   { opacity: 1; transform: translateY(0); }
     }
-
-    /* Sub-resultado dentro de una card (filter / pipeline preview) */
-    .inline-result {
-      margin-top: 20px;
-      padding-top: 20px;
-      border-top: 1px dashed var(--border-subtle);
-    }
-    .inline-result-label {
-      font-size: var(--fs-sm);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-    }
-
-    /* Action row para botones secundarios + primario */
-    .action-row {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    .action-row .btn { flex: 0 0 auto; }
-    .action-row .spacer { flex: 1; }
-
     /* ── Wizard de steps ───────────────────────────────────────── */
     /* Cada step es una card envuelta en .step-pane; solo la activa se ve. */
     .step-pane { display: none; }
@@ -1181,26 +1049,10 @@
        campo (el bucket, en la derecha del grid de dos columnas). */
     .settings-actions__aside { margin-left: auto; }
     /* Cuando un campo del renglón lleva su propia acción debajo (el bucket con
-       "Preparar"), ese campo es más alto y empuja esta fila al fondo, dejando
-       un hueco bajo el resto. Se sube para que ambos botones queden a la misma
-       altura. El valor NO depende del aire sobre los botones: es el alto del
-       botón (39px) + el margen inferior del campo (10px). */
-    .settings-actions--raised { margin-top: -49px; }
+       "Preparar"), ese campo es más alto y empuja esta fila al fondo{ margin-top: -49px; }
     /* Los botones se re-escalan a esta vista: con labels de 12px e inputs de
        13.5px, el .btn base (11/22, 14px) se ve desproporcionado. */
-    .settings-actions .btn,
-    .settings-field__action { padding: var(--sp-2) 18px; font-size: var(--fs-base); }
-    /* Acción propia de un campo (ej. "Preparar" bajo el bucket): debajo de su
-       input y con ancho natural — a ancho completo se confundía con un input.
-       El aire sobre el botón iguala al de las otras cards (ahí lo dan los 10px
-       de margen del campo) y le suma un poco más. */
-    .settings-field__action { margin-top: 14px; white-space: nowrap; }
-    /* Separador vertical: divide las claves (que quedan en el navegador) del
-       bucket (que se guarda en el servidor). */
-    .settings-field--divided {
-      border-left: 1px solid var(--border-subtle);
-      padding-left: 22px; margin-left: 8px;
-    }
+    .settings-actions .btn{ padding: var(--sp-2) 18px; font-size: var(--fs-base); }
     /* El estado puede ser largo (y a veces trae su propio botón, como el
        "Borrar" de MaaS): ocupa el resto de la fila y envuelve ahí, en vez de
        empujar al botón fuera de la card. */
@@ -1209,16 +1061,6 @@
       flex: 1 1 200px;
       display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     }
-
-    /* Panel del index template (deploy en dos fases) */
-    .index-template-panel {
-      margin-top: 16px;
-      padding: 16px;
-      background: rgba(245, 166, 35, 0.08);
-      border: 1px solid rgba(245, 166, 35, 0.45);
-      border-radius: var(--radius-md);
-    }
-
     /* Chip de overlay ECS por campo */
     .overlay-chip {
       display: inline-flex;
@@ -1299,7 +1141,7 @@
       font-size: var(--fs-xs);
       color: var(--text-muted);
       margin-left: 8px;
-      font-weight: 400;
+      font-weight: var(--fw-normal);
     }
     .mapping-row-number {
       font-size: var(--fs-xs);
@@ -1334,11 +1176,6 @@
       border-color: var(--accent-red);
       box-shadow: 0 0 0 2px var(--accent-ring);
     }
-    .mapping-arrow {
-      color: var(--text-muted);
-      margin: 0 6px;
-      font-weight: 700;
-    }
     .mapping-business {
       font-weight: 600;
       color: var(--text-primary);
@@ -1361,17 +1198,9 @@
       border-color: var(--accent-red);
       box-shadow: 0 0 0 2px var(--accent-ring);
     }
-    .mapping-ecs {
-      font-family: var(--font-mono);
-      font-size: var(--fs-xs);
-      color: var(--text-muted);
-    }
-
     /* Badge ECS oficial vs custom (step 2 Mapping).
        - ECS oficial → verde, indica que el path existe en la spec 8.11
-       - Custom      → naranja, indica que es una extensión nuestra que
-         el cliente debería revisar antes de aceptar como definitiva. */
-    .ecs-badge {
+       - Custom      → naranja{
       display: inline-flex;
       align-items: center;
       gap: 4px;
@@ -1384,22 +1213,6 @@
       margin-left: 8px;
       vertical-align: middle;
       cursor: default;
-    }
-    .ecs-badge[data-ecs="true"] {
-      background: rgba(34, 197, 94, 0.12);
-      color: #15803d;
-      border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-    .ecs-badge[data-ecs="false"] {
-      background: rgba(249, 115, 22, 0.12);
-      color: #c2410c;
-      border: 1px solid rgba(249, 115, 22, 0.3);
-    }
-    .ecs-type-mismatch {
-      color: #c2410c;
-      font-size: var(--fs-xs);
-      margin-left: 6px;
-      font-style: italic;
     }
     .mapping-ecs-input {
       font-family: var(--font-mono);
@@ -1557,21 +1370,6 @@
     .deploy-conf__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
     .deploy-conf__label { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); }
     #deploy-conf-view { margin: 0; }
-
-    /* Disclosure avanzado (.conf) */
-    .advanced-conf > summary {
-      cursor: pointer; font-size: var(--fs-sm); color: var(--text-muted);
-      padding: 8px 0; list-style: revert; user-select: none;
-    }
-    .advanced-conf > summary:hover { color: var(--text-secondary); }
-
-    /* Disclosure avanzado (.conf) */
-    .advanced-conf > summary {
-      cursor: pointer; font-size: var(--fs-sm); color: var(--text-muted);
-      padding: 8px 0; list-style: revert; user-select: none;
-    }
-    .advanced-conf > summary:hover { color: var(--text-secondary); }
-
     /* ── Overhaul visual app-driven (ref. teramot) ────────────────────── */
 
     /* HERO del HOME — contenido plano sobre el canvas (sin card/borde/sombra
@@ -1595,9 +1393,6 @@
 
     /* Eyebrow neutro: en el Home el color queda reservado para el CTA. */
     .eyebrow--muted { color: var(--text-muted); }
-
-    /* Selector de casos de uso (Step 1): tarjetas pre-horneadas */
-    .example-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 6px 0 2px; }
     /* Verticales a lo ancho: cada grupo es una columna (header arriba, cards
        apiladas abajo). Todos los grupos en una sola línea, sin wrap. */
     .example-verticals {
@@ -1749,14 +1544,7 @@
     }
     #log-file-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
     /* Sub-toggle del paso 1 (origen del dataset): más chico que el toggle
-       principal, para que se lea como una elección dentro del paso. */
-    .src-toggle { margin-bottom: 12px; }
-    .src-toggle .mode-toggle__btn { padding: 6px 16px; font-size: var(--fs-sm); }
-
-    .example-card.is-custom { background: var(--accent-red-tint); }
-    .example-card.is-custom .example-card__tile { background: var(--accent-red); color: #fff; }
-    .example-card.is-custom .example-card__label { color: var(--accent-red); }
-
+       principal{ margin-bottom: 12px; }
     .case-tabs {
       display: flex; gap: 4px; margin-bottom: 20px;
       border-bottom: 2px solid var(--border-subtle);
@@ -2088,10 +1876,6 @@
     .setup-card__chevron { width: 16px; height: 16px; flex: none; color: var(--text-muted); transition: transform var(--t-base); }
     .setup-card[open] .setup-card__chevron { transform: rotate(180deg); }
     .setup-card__body { padding: 0 18px 14px; }
-
-    /* ── Asistente de datos (chat NL→PPL) — wow ── */
-    .cap-assistant__chips-row { display: flex; flex-wrap: wrap; margin-top: 12px; }
-    .cap-assistant__notes { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.6; margin: 8px 0 0; padding-left: 18px; }
     .cap-assistant__adv { margin-top: 12px; font-size: var(--fs-sm); }
     .cap-assistant__adv > summary { cursor: pointer; color: var(--text-muted); }
     .cap-assistant__adv-body { margin-top: 6px; color: var(--text-secondary); line-height: 1.6; }
@@ -2293,10 +2077,7 @@
       .app-nav__brand { width: 100%; }
       .app-nav__items { padding: 12px; }
       .main-content { padding: 36px 16px 36px; }
-      /* Apilados, el separador vertical del bucket no separa nada, y la fila
-         de acción ya no tiene hueco que recuperar. */
-      .settings-field--divided { border-left: none; padding-left: 0; margin-left: 0; }
-      .settings-actions--raised { margin-top: 0; }
+      /* Apilados, el separador vertical del bucket no separa nada{ border-left: none; padding-left: 0; margin-left: 0; }
       .container { max-width: 100%; }
       .step-nav { flex-wrap: wrap; gap: 8px; }
       .step-nav .spacer { display: none; }
@@ -2866,8 +2647,7 @@
                 </div>
               </div>
               <div class="field-error" id="step1-custom-error"></div>
-              <div id="log-file-meta" class="hidden"></div>
-              <textarea id="raw-log" style="display:none;"></textarea>
+                  <textarea id="raw-log" style="display:none;"></textarea>
             </div>
 
             <div class="form-group hidden" id="example-preview-group">
@@ -3053,23 +2833,6 @@
     </div><!-- /.app-main -->
   </div><!-- /.app-shell -->
 
-  <!-- Modal para ver .conf -->
-  <div id="conf-modal" class="hidden" style="position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;">
-    <div style="background:var(--bg-primary); border-radius:var(--radius-lg); max-width:900px; width:90%; max-height:85vh; display:flex; flex-direction:column; box-shadow:var(--shadow-lg);">
-      <div style="padding:20px; border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
-        <h3 style="font-size:var(--fs-lg); font-weight:var(--fw-semi); margin:0;">Configuration file</h3>
-        <button id="conf-modal-close" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-x"/></svg> Cerrar</button>
-      </div>
-      <div style="padding:20px; overflow-y:auto; flex:1;">
-        <pre id="conf-modal-content" class="code-preview" style="margin:0; max-height:none;"></pre>
-      </div>
-      <div style="padding:16px 20px; border-top:1px solid var(--border-subtle); display:flex; gap:8px;">
-        <button id="conf-modal-copy" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-copy"/></svg> Copiar</button>
-        <button id="conf-modal-download" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-download"/></svg> Descargar</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Modal "Guardar dataset": cierre del Builder. Lo que se analizó (filter,
        campos, muestra, datos) se persiste como un dataset y aparece como
        una card más del grid del paso 1. Ver custom_cases.py. -->
@@ -3084,7 +2847,6 @@
         <div class="form-group">
           <label class="form-label" for="save-case-label">Nombre del dataset</label>
           <input type="text" class="form-input settings-field" id="save-case-label" maxlength="60" placeholder="Ej: Firewall de ACME">
-          <div class="field-error" id="save-case-label-error"></div>
         </div>
         <div class="form-group">
           <label class="form-label" for="save-case-desc">Descripción</label>
@@ -3155,15 +2917,10 @@
       fields: [],
       generatedFromLog: '',
       inputPlugin: 'obs',
-      inputConfig: {},
       readExistingMode: false,
       dedupId: '',
       outputPlugins: ['opensearch'],
-      outputConfig: {},
       pipelineCode: '',
-      pipelineCodeEdited: '',
-      pipelineCodeDirty: false,
-      businessRulesApplied: false,
       selectedExamples: [],
       // 'demo' (grid de casos) | 'custom' (Builder). Inicializado acá porque el
       // markup arranca con el toggle en "demo" y varios chequeos comparan contra
@@ -3267,7 +3024,10 @@
         return { ok: false, error: 'Ingresá un log de ejemplo en el paso 1' };
       }
       state.rawLog = rawLog;
-      const namespace = (document.getElementById('ns-input')?.value || 'data').trim() || 'data';
+      // Fijo, no configurable: el campo que lo elegía se sacó del wizard y la
+      // lectura quedó devolviendo siempre el default. Si vuelve a hacer falta
+      // elegirlo, hay que reponer el input, no solo esta constante.
+      const namespace = 'data';
       state.namespace = namespace;
       try {
         const res = await fetch('/api/v1/onboarding/generate-filter', {
@@ -4336,14 +4096,6 @@
 
     document.getElementById('mapping-regenerate-btn')?.addEventListener('click', forceFilterRegen);
 
-    // Cambiar el namespace → re-generar el filter con los nuevos params
-    // (el .conf y la tabla reflejan el esquema elegido).
-    let nsDebounce = null;
-    document.getElementById('ns-input')?.addEventListener('input', () => {
-      clearTimeout(nsDebounce);
-      nsDebounce = setTimeout(forceFilterRegen, 500);
-    });
-
     // ── Step 5: arma el .conf con el filter (ya generado) + input + output ─
     async function runPipelineGeneration() {
       if (generating) return;
@@ -4352,8 +4104,6 @@
       if (!validateStep(3)) return;
       generating = true;
       elements.generatePipelineBtn.disabled = true;
-      const regenBtn = document.getElementById('regenerate-btn');
-      if (regenBtn) regenBtn.disabled = true;
 
       try {
         // En el flujo normal el filter ya se generó en el step 2. Si por
@@ -4396,15 +4146,6 @@
         }
         const data = await res.json();
         state.pipelineCode = data.pipeline_code || data.filter_code;
-        // Inicializar la copia editable con el contenido generado. Si el
-        // operador modifica el textarea, `pipelineCodeEdited` diverge y el
-        // deploy usa esa versión en lugar de `pipelineCode`.
-        state.pipelineCodeEdited = state.pipelineCode;
-        state.pipelineCodeDirty = false;
-        const confEditor = document.getElementById('pipeline-conf-editor');
-        if (confEditor) confEditor.value = state.pipelineCode;
-        const dirtyInd = document.getElementById('pipeline-dirty-indicator');
-        if (dirtyInd) dirtyInd.style.opacity = '0';
         if (elements.pipelineStatus) elements.pipelineStatus.classList.add('hidden');
         // Avanzar al paso Desplegar
         goToStep(4);
@@ -4413,29 +4154,10 @@
       } finally {
         generating = false;
         elements.generatePipelineBtn.disabled = false;
-        const regenBtn = document.getElementById('regenerate-btn');
-        if (regenBtn) regenBtn.disabled = false;
       }
     }
 
     elements.generatePipelineBtn?.addEventListener('click', runPipelineGeneration);
-
-    // ── Editor del .conf (step 5) ─────────────────────────────────────────
-    document.getElementById('pipeline-conf-editor')?.addEventListener('input', (e) => {
-      state.pipelineCodeEdited = e.target.value;
-      state.pipelineCodeDirty = (state.pipelineCodeEdited !== state.pipelineCode);
-      const ind = document.getElementById('pipeline-dirty-indicator');
-      if (ind) ind.style.opacity = state.pipelineCodeDirty ? '1' : '0';
-    });
-    document.getElementById('pipeline-reset-btn')?.addEventListener('click', () => {
-      const editor = document.getElementById('pipeline-conf-editor');
-      if (!editor) return;
-      editor.value = state.pipelineCode;
-      state.pipelineCodeEdited = state.pipelineCode;
-      state.pipelineCodeDirty = false;
-      const ind = document.getElementById('pipeline-dirty-indicator');
-      if (ind) ind.style.opacity = '0';
-    });
 
     // ── Paso Desplegar (step 5): resumen + bindings ──────────────────────
     // Pinta el resumen amigable a partir del state (qué se detectó, de dónde
@@ -4480,8 +4202,8 @@
     // reusa el pipeline ya generado. Resultado cacheado en state.caseConfs.
     async function fetchCaseConf(id) {
       const cm = caseMeta(id);
-      if (cm.isCustom && (state.pipelineCode || state.pipelineCodeEdited)) {
-        return state.pipelineCodeEdited || state.pipelineCode;
+      if (cm.isCustom && state.pipelineCode) {
+        return state.pipelineCode;
       }
       const data = EXAMPLE_DATA[id];
       const meta = LOG_EXAMPLES.find(e => e.id === id);
@@ -4804,41 +4526,6 @@
       });
     }
 
-    function showConfModal(conf) {
-      const modal = document.getElementById('conf-modal');
-      const content = document.getElementById('conf-modal-content');
-      if (!modal || !content) return;
-      content.textContent = maskConf(conf);
-      modal.classList.remove('hidden');
-      modal.style.display = 'flex';
-    }
-    function hideConfModal() {
-      const modal = document.getElementById('conf-modal');
-      if (!modal) return;
-      modal.classList.add('hidden');
-      modal.style.display = 'none';
-    }
-    document.getElementById('conf-modal-close')?.addEventListener('click', hideConfModal);
-    document.getElementById('conf-modal')?.addEventListener('click', (e) => {
-      if (e.target.id === 'conf-modal') hideConfModal();
-    });
-    document.getElementById('conf-modal-copy')?.addEventListener('click', (e) => {
-      const content = document.getElementById('conf-modal-content')?.textContent || '';
-      copyToClipboard(content, e.currentTarget);
-    });
-    document.getElementById('conf-modal-download')?.addEventListener('click', () => {
-      const content = document.getElementById('conf-modal-content')?.textContent || '';
-      const blob = new Blob([content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'logstash.conf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
-
     // Collect input config
     function collectInputConfig() {
       const config = {};
@@ -4984,11 +4671,14 @@
     }
 
     function collectDeployBody(startIngestion) {
-      const projectName = document.getElementById('deploy-project-name')?.value?.trim() || 'log-analytics';
+      // Fijo: el campo que lo elegía no está en el wizard. Cada SA despliega
+      // en su propia cuenta Huawei, así que el nombre no colisiona entre SAs;
+      // sí colisionaría con un segundo entorno en la misma cuenta.
+      const projectName = 'log-analytics';
       const inputCfg = collectInputConfig();
       const outputCfg = collectOutputConfig(state.outputPlugins[0]);
       const indexName = document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}';
-      const conf = state.pipelineCodeDirty ? state.pipelineCodeEdited : state.pipelineCode;
+      const conf = state.pipelineCode;
 
       const body = {
         project_name: projectName,
@@ -5063,47 +4753,6 @@
       return body;
     }
 
-    // Genera el index template y lo muestra en la fase 2 del paso Desplegar.
-    // Multi-deploy: un `PUT _index_template/<tipo>` por tipo (cada uno con sus
-    // fields + su índice), concatenados — el operador los aplica todos de una.
-    async function fetchAndShowIndexTemplate() {
-      const projectName = document.getElementById('deploy-project-name')?.value?.trim() || 'log-analytics';
-      const snippetEl = document.getElementById('deploy-template-snippet');
-      const patternEl = document.getElementById('deploy-index-pattern');
-      // `slug` deja que el backend previsualice el template CURADO (templates/<slug>.json)
-      // cuando el tipo lo tiene (ej. fintech-transactions) — el mismo que se aplica en
-      // el deploy. Sin esto, el preview mostraba el auto-generado de los `fields`, que
-      // divergía entre carga individual (state.fields enriquecidos) y múltiple (crudos).
-      const fetchTpl = async (fields, indexName, namespace, name, slug) => {
-        const res = await fetch('/api/v1/onboarding/index-template', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields, namespace, opensearch_index: indexName, project_name: name, slug: slug || '' }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      };
-      try {
-        const types = (state.selectedExamples || []).filter(id => id !== 'custom');
-        if (types.length > 1) {
-          const results = await Promise.all(types.map(id => {
-            const meta = LOG_EXAMPLES.find(e => e.id === id);
-            const data = EXAMPLE_DATA[id];
-            const idx = caseMeta(id).index;
-            return fetchTpl(data?.fields || [], idx, '', `${projectName}-${id}`, id);
-          }));
-          if (snippetEl) snippetEl.textContent = results.map(r => r.put_snippet).join('\n\n');
-          if (patternEl) patternEl.textContent = results.map(r => r.index_pattern).join(', ');
-        } else {
-          const indexName = document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}';
-          const data = await fetchTpl(state.fields, indexName, pipelineNamespace(), projectName, slugFromIndex(indexName));
-          if (snippetEl) snippetEl.textContent = data.put_snippet || '';
-          if (patternEl) patternEl.textContent = data.index_pattern || 'logs-*';
-        }
-      } catch (err) {
-        console.error('Error generating index template:', err);
-      }
-    }
 
     // Extrae un mensaje legible del `detail` de un error de FastAPI (string u objeto).
     function detailMsg(data) {
@@ -5264,7 +4913,7 @@
     async function runDeploy({ btn }) {
       if (state.provisioning) return;   // ya hay un deploy en curso
       const preStatus = document.getElementById('deploy-status-1');
-      const conf = state.pipelineCodeDirty ? state.pipelineCodeEdited : state.pipelineCode;
+      const conf = state.pipelineCode;
       if (!conf) {
         if (preStatus) showStatus(preStatus, '⚠ El configuration file todavía no está listo. Volvé al paso 3 y tocá "Revisar y desplegar".', 'error');
         return;
@@ -5327,8 +4976,7 @@
         }
 
         state.lastDeploySucceeded = true;
-        state.businessRulesApplied = false;
-        state.provisioning = false;
+          state.provisioning = false;
         await hydrateActiveEnv();   // renderiza la tarjeta del entorno activo
         // Arrancar automáticamente el PRIMER paso de la puesta en marcha (schema).
         // El resto (ingesta → capabilities) queda como botones en infra.
@@ -6024,14 +5672,11 @@
     }
 
     // ── Destroy del entorno — FinOps manual, evita acumular costos.
-    // Dispara desde dos lugares: botón en step 5 (wizard) y botón de la
-    // tarjeta en "Entorno desplegado". Función compartida con feedback
-    // inline cuando el step 5 está visible, o un toast in-app en otro caso.
-    async function destroyEnvironment({ source } = { source: 'step5' }) {
-      const step5DestroyBtn = document.getElementById('tf-destroy-btn');
+    // Se dispara desde el botón de la tarjeta en "Entorno desplegado" y reporta
+    // con un toast. Hubo un segundo punto de entrada en un step 5 del wizard que
+    // ya no existe: sus ramas colgaban de elementos ausentes y nunca corrían.
+    async function destroyEnvironment() {
       const infraDestroyBtn = document.getElementById('infra-destroy-btn');
-      const statusEl = document.getElementById('tf-status');
-      const resultEl = document.getElementById('tf-result');
 
       const ok = await confirmModal({
         title: '¿Destruir el cluster actual?',
@@ -6040,16 +5685,7 @@
       });
       if (!ok) return;
 
-      // Bloquear ambos botones en simultáneo: el destroy es global, no hay
-      // por qué permitir doble-click desde el otro punto de entrada.
-      if (step5DestroyBtn) step5DestroyBtn.disabled = true;
       if (infraDestroyBtn) { infraDestroyBtn.disabled = true; infraDestroyBtn.textContent = 'Destruyendo… (2-5 min)'; }
-
-      const step5Visible = document.getElementById('step-5')?.classList.contains('active');
-      if (step5Visible && resultEl && statusEl) {
-        resultEl.classList.add('hidden');
-        showStatus(statusEl, 'Destruyendo entorno (2-5 min)...', 'loading');
-      }
 
       try {
         // Reenviar creds del form si están a mano (cubre entornos legacy sin
@@ -6090,39 +5726,25 @@
           ? 'ℹ ' + (data.message || 'No había entorno activo.')
           : '✓ ' + (data.message || 'Entorno destruido.');
 
-        if (step5Visible && statusEl) {
-          showStatus(statusEl, successMsg, 'success');
-        } else {
-          toast(successMsg, data.status === 'noop' ? 'info' : 'success');
-        }
+        toast(successMsg, data.status === 'noop' ? 'info' : 'success');
 
         // El entorno ya no existe: re-hidratar la vista infra (pasa a empty
-        // state + apaga el dot de la nav) y limpiar el botón del step 5.
+        // state y apaga el dot de la nav).
         state.lastDeploySucceeded = false;
         state.pendingDeploy = null;   // el body cacheado ya no aplica
         state.lastStatus = null;
         state.provisioning = false;
         stopActiveEnvTicker();
-        if (step5DestroyBtn) step5DestroyBtn.style.display = 'none';
         renderInfraView(null);
       } catch (err) {
-        const errMsg = 'Error al destruir: ' + err.message;
-        if (step5Visible && statusEl) {
-          showStatus(statusEl, errMsg, 'error');
-        } else {
-          toast(errMsg, 'error');
-        }
+        toast('Error al destruir: ' + err.message, 'error');
       } finally {
-        if (step5DestroyBtn) step5DestroyBtn.disabled = false;
         // infra-destroy-btn se re-renderiza en renderInfraView; no hace falta
         // re-habilitarlo manualmente si el destroy tuvo éxito. En error, sí.
         const reBtn = document.getElementById('infra-destroy-btn');
         if (reBtn) { reBtn.disabled = false; reBtn.innerHTML = icon('trash') + ' Destruir entorno'; }
       }
     }
-
-    document.getElementById('tf-destroy-btn')?.addEventListener('click',
-      () => destroyEnvironment({ source: 'step5' }));
 
     // ── Estado del entorno + contador en vivo.
     // El backend (/api/v1/terraform/status) lee terraform.tfstate y decide
@@ -6175,9 +5797,6 @@
       state.rawLog = '';
       clearMapping();
       state.pipelineCode = '';
-      state.pipelineCodeEdited = '';
-      state.pipelineCodeDirty = false;
-      state.businessRulesApplied = false;
       if (elements.rawLog) elements.rawLog.value = '';
       // Sugerir índice Y prefijo OBS nuevos: cada pipeline en paralelo lee de
       // su propia ruta del bucket (sincedb por prefijo) y escribe a su propio
@@ -6617,8 +6236,7 @@
         showView('pipeline');
         goToStep(1);
       });
-      body.querySelector('#infra-destroy-btn')?.addEventListener('click', () =>
-        destroyEnvironment({ source: 'infra' }));
+      body.querySelector('#infra-destroy-btn')?.addEventListener('click', destroyEnvironment);
       // Secuencia de puesta en marcha.
       body.querySelector('#infra-apply-schema-btn')?.addEventListener('click', (e) =>
         infraApplySchema(e.currentTarget));
@@ -7394,10 +7012,10 @@
       if (!ok) return;
       state = {
         rawLog: '', filterCode: '', fields: [], generatedFromLog: '',
-        inputPlugin: 'obs', inputConfig: {}, readExistingMode: false,
-        dedupId: '', outputPlugins: ['opensearch'], outputConfig: {},
-        pipelineCode: '', pipelineCodeEdited: '', pipelineCodeDirty: false,
-        businessRulesApplied: false, selectedExamples: [], deployMode: 'demo',
+        inputPlugin: 'obs', readExistingMode: false,
+        dedupId: '', outputPlugins: ['opensearch'],
+        pipelineCode: '',
+        selectedExamples: [], deployMode: 'demo',
         logFileContent: '',
         logFileName: '', logFileLines: 0, pendingDeploy: null, lastStatus: null,
         provisioning: false, previewMode: false,
@@ -8062,7 +7680,6 @@
 
       // Estado de sesión.
       _fetch('/auth/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
-        window.__AUTH__ = d || {};
         if (!d || !d.auth) return;                 // single-user
         if (!d.logged_in) { showLogin(); return; } // hosteado sin sesión
         var box = document.getElementById('nav-user');
