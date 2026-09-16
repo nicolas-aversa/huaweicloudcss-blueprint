@@ -117,6 +117,55 @@ def test_el_favicon_esta_declarado():
         "falta static/favicon.png — regeneralo con `py build_favicon.py`")
 
 
+def test_ningun_comentario_se_traga_css():
+    """Un `*/` perdido convierte el resto del archivo en comentario.
+
+    Pasó de verdad: un script de limpieza borró una regla cuyo comentario estaba
+    pegado arriba, se llevó el `*/` y dejó el `{` del cuerpo. Desde ahí el
+    navegador se comió 130 líneas de CSS — entre ellas `.icon`, así que TODOS los
+    íconos de la app salieron como manchas negras y las flechas de los botones
+    ocuparon media pantalla.
+
+    Contar `/*` contra `*/` NO alcanza: cuando falta un cierre, el `/*` siguiente
+    hace de cierre y el conteo queda balanceado igual, con CSS comido en el medio.
+    La señal real es un comentario largo que contiene llaves.
+    """
+    html = _INDEX.read_text(encoding="utf-8")
+    style = html[html.index("<style>"):html.index("</style>")]
+
+    culpables = []
+    for m in re.finditer(r"/\*.*?\*/", style, re.DOTALL):
+        cuerpo = m.group(0)
+        # Los comentarios cortos SÍ pueden citar CSS de ejemplo; un comentario de
+        # 5+ líneas con llaves adentro es una regla que se perdió.
+        if cuerpo.count("\n") >= 5 and ("{" in cuerpo or "}" in cuerpo):
+            linea = style[:m.start()].count("\n") + html[:html.index("<style>")].count("\n") + 1
+            culpables.append(f"L{linea}: {cuerpo.splitlines()[0][:70]}")
+
+    assert not culpables, (
+        "hay comentarios que se están tragando reglas CSS:\n  " + "\n  ".join(culpables))
+
+
+def test_la_regla_base_de_los_iconos_esta_viva():
+    """`.icon` da tamaño Y `fill: none` a los 37 símbolos del sprite.
+
+    Sin ella un `<svg class="icon">` sin otra regla cae al tamaño por defecto del
+    elemento reemplazado (300×150) y se pinta con `fill: black`. Es el síntoma que
+    delató el comentario roto: flechas negras gigantes en los botones del home.
+    """
+    html = _INDEX.read_text(encoding="utf-8")
+    style = html[html.index("<style>"):html.index("</style>")]
+    sin_comentarios = re.sub(r"/\*.*?\*/", "", style, flags=re.DOTALL)
+
+    # Anclada al inicio de línea: `.btn-sm .icon {` también empieza con `.icon`
+    # tras un espacio, y esa NO es la regla base.
+    m = re.search(r"^\s*\.icon\s*\{([^}]*)\}", sin_comentarios, re.MULTILINE)
+    assert m, "desapareció la regla base .icon (o quedó dentro de un comentario)"
+    cuerpo = m.group(1)
+    for prop in ("width", "height", "fill", "stroke"):
+        assert prop in cuerpo, f".icon perdió `{prop}`: {cuerpo.strip()[:120]}"
+
+
 def test_no_quedo_rastro_del_pie_del_nav():
     """La región y el puntito verde se sacaron del rail; su CSS y el JS que los
     alimentaba se van con ellos, o queda código muerto apuntando a la nada."""

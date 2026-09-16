@@ -357,10 +357,8 @@
       border-color: var(--text-muted);
     }
 
-    /* (.btn-ghost — botón terciario — se define más abajo{
-      background: var(--text-primary);
-      color: #fff;
-    }
+    /* (.btn-ghost — botón terciario — se define más abajo, junto al wizard.) */
+
     .btn:disabled {
       opacity: 0.45;
       cursor: not-allowed;
@@ -1198,22 +1196,6 @@
       border-color: var(--accent-red);
       box-shadow: 0 0 0 2px var(--accent-ring);
     }
-    /* Badge ECS oficial vs custom (step 2 Mapping).
-       - ECS oficial → verde, indica que el path existe en la spec 8.11
-       - Custom      → naranja{
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      font-size: var(--fs-xs);
-      font-weight: 600;
-      border-radius: var(--radius-sm);
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      margin-left: 8px;
-      vertical-align: middle;
-      cursor: default;
-    }
     .mapping-ecs-input {
       font-family: var(--font-mono);
       font-size: var(--fs-xs);
@@ -1547,8 +1529,6 @@
       border-color: var(--accent); background: var(--accent-tint);
     }
     #log-file-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
-    /* Sub-toggle del paso 1 (origen del dataset): más chico que el toggle
-       principal{ margin-bottom: 12px; }
     .case-tabs {
       display: flex; gap: 4px; margin-bottom: 20px;
       border-bottom: 2px solid var(--border-subtle);
@@ -2081,7 +2061,6 @@
       .app-nav__brand { width: 100%; }
       .app-nav__items { padding: 12px; }
       .main-content { padding: 36px 16px 36px; }
-      /* Apilados, el separador vertical del bucket no separa nada{ border-left: none; padding-left: 0; margin-left: 0; }
       .container { max-width: 100%; }
       .step-nav { flex-wrap: wrap; gap: 8px; }
       .step-nav .spacer { display: none; }
