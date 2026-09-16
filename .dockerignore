@@ -4,6 +4,7 @@
 .dockerignore
 Dockerfile
 docker-compose.yml
+docker-compose.hosted.yml
 
 # Secretos / estado (se inyectan/mapean en runtime)
 .env
@@ -24,10 +25,14 @@ venv/
 datasets/*.log
 datasets/*.csv
 
-# Docs de vendor (bloat)
-docs/*.pdf
-docs/*_parte_*.txt
-docs/logstash_7.10_completo.txt
+# Lo que no corre en producción. El Dockerfile hace `COPY . .`, así que sin esto
+# la imagen se lleva los tests, el panel de la ECS (que se despliega aparte, en
+# FunctionGraph + Cloudflare) y los dashboards ya generados, que el backend
+# reconstruye desde `verticals/` en runtime.
+tests/
+ecs-panel/
+docs/dashboards/
+build_*.py
 
 # Terraform: estado y providers
 terraform/.terraform/
@@ -36,8 +41,6 @@ terraform/*.tfstate
 terraform/*.tfstate.*
 terraform.tfstate
 
-# Salidas de herramientas
-graphify-out/
 terraform/*.auto.tfvars.json
 terraform/.pipelines.json
 terraform/pipeline.conf

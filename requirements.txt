@@ -9,8 +9,14 @@ esdk-obs-python>=3.23
 # Routes (salida del cluster a MaaS). Import lazy en main.py (no rompe si falta).
 huaweicloudsdkcore>=3.1
 huaweicloudsdkcss>=3.1
-# Cliente HTTP para hablarle al cluster CSS (OpenSearch). Liviano, async-friendly.
-httpx>=0.27
+# Cliente HTTP con el que se le habla al cluster CSS (OpenSearch) y a las APIs de
+# Huawei: main.py lo importa en 5 lugares. Estaba SIN declarar y la app arrancaba
+# igual porque huaweicloudsdkcore lo arrastra — el día que ese SDK lo suelte, el
+# contenedor deja de levantar y el error no apunta acá.
+requests>=2.31
+# Carga el .env al arrancar (main.py, import de nivel de módulo). Mismo caso:
+# entraba transitiva por uvicorn[standard].
+python-dotenv>=1.0
 # Cifrado en reposo del settings file por-usuario (Fernet). Ya venía transitiva;
 # la declaramos porque ahora es dependencia directa (ver maas_integrator._fernet).
 cryptography>=42

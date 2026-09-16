@@ -10,8 +10,6 @@ __pycache__/
 .venv/
 venv/
 
-# Temporales de validación de Logstash
-logstash_validate_*/
 
 # Datasets grandes (no versionar; se bajan del Release o build scripts). Los .log
 # pesan ~350 MB en total → nunca commitearlos.
@@ -46,4 +44,3 @@ data/
 .env.hosted
 # Historial de ejecuciones en single-user (en hosted vive bajo data/).
 runs/
-jobs/
