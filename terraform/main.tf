@@ -47,6 +47,24 @@ variable "obs_secret_key" {
 variable "opensearch_password" {
   type      = string
   sensitive = true
+
+  # La política de Huawei CSS. Sin esto el `apply` llega hasta crear el cluster
+  # —minutos— y recién ahí la API rechaza la contraseña. El wizard valida lo mismo
+  # en el navegador; esta copia ataja los deploys que no pasan por el formulario.
+  #
+  # Son 3 de las 4 clases, no las 4: exigir símbolo sí o sí rechazaría contraseñas
+  # como "Huawei1234" (minúscula + mayúscula + dígito), que Huawei acepta.
+  validation {
+    condition = (
+      length(var.opensearch_password) >= 8 &&
+      length(var.opensearch_password) <= 32 &&
+      length([
+        for patron in ["[a-z]", "[A-Z]", "[0-9]", "[~!@#$%^&*()\\-_=+|\\[\\]{};:,<.>/?]"] :
+        true if can(regex(patron, var.opensearch_password))
+      ]) >= 3
+    )
+    error_message = "Huawei CSS pide 8-32 caracteres y al menos 3 de: minúscula, mayúscula, número, símbolo."
+  }
 }
 
 # ── Variables de infraestructura ─────────────────────────────────────────────

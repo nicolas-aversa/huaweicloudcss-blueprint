@@ -249,6 +249,139 @@ def test_demo_dataset_files_and_source_include_custom_case(store):
     assert main._bundled_dataset("firewall-de-acme") == "evento 1\nevento 2\nevento 3"
 
 
+# ── "Preparar bucket" con casos custom ──────────────────────────────────────
+# Un caso creado por un SA queda disponible para todos (el store es por
+# instancia), pero el dataset vive en el bucket de CADA UNO. Sin esto, el
+# segundo que quiere demostrarlo se encuentra el bucket vacío. Lo de arriba
+# cubre el mapeo; esto cubre el endpoint, que es lo que el botón llama.
+def _fake_obs(calls, ya_estan=()):
+    class _FakeObs:
+        def __init__(self, **kwargs):
+            calls["kwargs"] = kwargs
+        def ensure_bucket(self, region=""):
+            calls.setdefault("ensure", []).append(region)
+            return False
+        def object_exists(self, key):
+            return key in ya_estan
+        def put_file(self, key, path):
+            calls.setdefault("put", []).append(key)
+        def close(self):
+            pass
+    return _FakeObs
+
+
+def _eventos(res):
+    return [json.loads(l[len("data: "):]) for l in res.text.splitlines()
+            if l.startswith("data: ")]
+
+
+def test_preparar_bucket_sube_el_dataset_de_un_caso_custom(client, store, monkeypatch):
+    """El SSE de /datasets/preload tiene que incluir el `.log` del caso custom
+    bajo `<slug>-logs/<slug>.log`, igual que un built-in."""
+    custom_cases.save_case(_meta(), LOG)
+    calls = {}
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+
+    res = client.post("/api/v1/datasets/preload", json={
+        "access_key": "AK", "secret_key": "SK", "bucket": "mis-demos",
+        "region": "la-south-2",
+    })
+    assert res.status_code == 200
+
+    clave = "firewall-de-acme-logs/firewall-de-acme.log"
+    assert clave in calls.get("put", []), (
+        f"el caso custom no se subió. Subidos: {calls.get('put', [])}")
+    hechos = [e for e in _eventos(res)
+              if e.get("type") == "file" and e.get("slug") == "firewall-de-acme"]
+    assert hechos and hechos[-1]["state"] == "done", (
+        "el progreso del caso custom no llega al front por el SSE")
+
+
+def test_un_dataset_custom_se_resube_aunque_ya_este_en_el_bucket(client, store, monkeypatch):
+    """`only_missing` es un atajo válido para los `.log` del repo, que no cambian
+    bajo el mismo nombre. Un caso custom SÍ cambia: se borra y se recrea con el
+    mismo slug y otro contenido. Si se lo saltea, el bucket se queda con la
+    versión vieja y la demo muestra datos que ya no son los del caso."""
+    custom_cases.save_case(_meta(), LOG)
+    clave = "firewall-de-acme-logs/firewall-de-acme.log"
+    calls = {}
+    # Todo ya está en el bucket, incluido el dataset del caso custom.
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls, ya_estan={clave}))
+
+    res = client.post("/api/v1/datasets/preload", json={
+        "access_key": "AK", "secret_key": "SK", "bucket": "mis-demos",
+        "only_missing": True,
+    })
+    assert res.status_code == 200
+    assert clave in calls.get("put", []), (
+        "el dataset custom se salteó por only_missing: el bucket se queda con la "
+        "versión vieja del caso")
+
+    saltados = [e for e in _eventos(res)
+                if e.get("type") == "file" and e.get("state") == "skipped"]
+    assert all(e["slug"] != "firewall-de-acme" for e in saltados)
+
+
+# ── El chatbot de un caso creado desde el Builder ───────────────────────────
+# El síntoma reportado fue "no se generó el chatbot". El agente SÍ se creaba; lo
+# que faltaba era (a) que el front renderizara el chat —cubierto en
+# tests/test_front_chat_slugs.py— y (b) que el backend supiera a QUÉ índice
+# apuntar. Esto último es lo de acá: sin spec, el chat no manda `system_prompt` y
+# el modelo cae al default del connector, que quedó armado con otro vertical.
+def test_el_spec_de_un_caso_custom_sale_de_los_fields_persistidos(store, monkeypatch, tmp_path):
+    custom_cases.save_case(_meta(), LOG)
+    registro = {
+        "firewall-de-acme": {
+            "index": "firewall-de-acme-%{+YYYY.MM}",
+            "fields": [
+                {"field_path": "data.src", "type": "ip", "business_label": "Origen", "dimension": True},
+                {"field_path": "data.bytes", "type": "long", "business_label": "Bytes", "dimension": False},
+            ],
+            "label": "",          # modo demo: industry_label viene vacío
+        }
+    }
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: registro)
+
+    spec = main._resolve_capability_spec("firewall-de-acme", terraform_dir=tmp_path)
+
+    assert spec, "un caso custom con fields tiene que resolver un spec"
+    # Igualdad exacta, no `startswith`: el patrón sale del índice REAL que el
+    # deploy persistió, y un `startswith` deja pasar cualquier sufijo inventado.
+    assert spec["index_pattern"] == "firewall-de-acme-*", (
+        f"el chat apuntaría al índice equivocado: {spec['index_pattern']}")
+    assert spec["label"] == "Firewall de ACME", (
+        "con el label vacío en el registry hay que caer al nombre del caso, no a "
+        "'Tus logs'")
+
+
+def test_sin_fields_no_hay_spec(store, monkeypatch, tmp_path):
+    """Un caso `live` o un slug desconocido no tiene de dónde derivarlo: {} y que
+    el llamador decida, en vez de inventar un índice."""
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {"x": {"fields": []}})
+    assert main._resolve_capability_spec("x", terraform_dir=tmp_path) == {}
+    assert main._resolve_capability_spec("no-existe", terraform_dir=tmp_path) == {}
+
+
+def test_un_vertical_del_repo_usa_su_spec_curado(store, tmp_path):
+    """El spec curado gana siempre: derivar de fields perdería los forecasts y las
+    operaciones que el vertical declara a mano."""
+    spec = main._resolve_capability_spec("siem", terraform_dir=tmp_path)
+    assert spec and spec["index_pattern"] == "siem*"
+
+
+def test_el_label_del_registry_cae_al_nombre_del_caso(store):
+    """`_registry_label` centraliza el fallback que antes estaba en 1 de los 4
+    lugares que escriben el registro. Lo lee el chatbot para nombrar la fuente."""
+    custom_cases.save_case(_meta(), LOG)
+
+    assert main._registry_label("", "firewall-de-acme") == "Firewall de ACME"
+    assert main._registry_label("   ", "firewall-de-acme") == "Firewall de ACME"
+    # El label explícito del flujo productivo gana sobre el del caso.
+    assert main._registry_label("ACME Corp", "firewall-de-acme") == "ACME Corp"
+    # Un slug sin caso y sin label: vacío, no un placeholder inventado.
+    assert main._registry_label("", "no-existe") == ""
+
+
 # ── Deploy: el caso se despliega con SU input ───────────────────────────────
 def _deploy_req(case_kw):
     return main.TerraformDeployRequest(

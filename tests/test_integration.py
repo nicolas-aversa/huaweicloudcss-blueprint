@@ -1113,10 +1113,18 @@ def test_settings_huawei_roundtrip(monkeypatch, tmp_path):
 
 
 @requires_datasets
-def test_datasets_preload_uploads_missing(monkeypatch):
+def test_datasets_preload_uploads_missing(monkeypatch, tmp_path):
     """El preload sube los datasets FALTANTES a `<slug>-logs/` con put_file
     (streaming de disco), saltea los que ya están (only_missing) y crea el
-    bucket si no existe — todo streameado por SSE."""
+    bucket si no existe — todo streameado por SSE.
+
+    El store de casos se aísla en un tmp_path: el aserto de abajo es una igualdad
+    estricta contra los built-in, así que un caso custom en `data/cases/` (el de
+    alguien que probó el Builder en esta máquina) lo rompía. Que los casos custom
+    SÍ entren al preload lo cubre tests/test_custom_cases.py.
+    """
+    import auth
+    monkeypatch.setattr(auth, "DATA_ROOT", tmp_path)
     calls = {"put": [], "ensure": []}
 
     class _FakeObs:
@@ -3429,7 +3437,7 @@ def test_capability_builders_wellformed():
         "transacciones-alyc", "fortianalyzer",
         "fortianalyzer-soc", "fortianalyzer-traffic",
         "fortianalyzer-utm", "fortianalyzer-event",
-        "streaming-ott"}
+        "streaming-ott", "cts"}
     verticals = []
     for slug in C.get_capability_slugs():
         s = C.get_capability_spec(slug)
@@ -3735,7 +3743,10 @@ def test_teardown_orphans_by_name(monkeypatch):
     fc_names = [fc["name"] for s in C.get_capability_slugs()
                 for fc in (C.get_capability_spec(s) or {}).get("forecasts", [])]
     searches = len([1 for m, u in calls if m == "POST" and u.endswith("/forecasters/_search")])
-    assert searches == len(fc_names) and len(fc_names) == 39
+    # Lo que importa: el teardown busca TODOS los forecasters que el registro
+    # define, sin saltearse ninguno (uno que quede vivo sigue consumiendo ML del
+    # cluster). El número fijo es un tripwire de inventario: 14 capabilities × 3.
+    assert searches == len(fc_names) and len(fc_names) == 42
 
 
 @requires_datasets
@@ -4383,21 +4394,35 @@ def test_verticals_registry_wellformed():
     visible = V.visible_verticals()
     assert [v["slug"] for v in visible] == [
         "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
-        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos"]
+        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos",
+        "cts"]
     for v in visible:
         # Card + datos de front + specs backend presentes en cada primario.
         for k in ("label", "full_label", "group", "icon", "index_base", "description",
                   "sample", "filter_code", "fields", "suggested_questions",
-                  "industry_fields", "dataset_files", "capability", "dashboard"):
+                  "industry_fields", "capability", "dashboard"):
             assert v.get(k), f"{v['slug']} sin {k}"
 
+    # `dataset_files` NO entra en la lista de arriba porque dejó de ser universal:
+    # CTS es el único caso visible cuyo dato la plataforma no sube. Son trazas de
+    # auditoría reales que ya viven en OTRO bucket, y de ahí salen dos invariantes
+    # que valen plata.
     cts = V.get_vertical("cts")
-    assert cts["hidden"] is True and "label" not in cts and "capability" not in cts
-    assert cts["sample"] and cts["dashboard"]   # aporta EXAMPLE_DATA + dashboard legacy
+    assert "dataset_files" not in cts, (
+        "si CTS declarara dataset, 'Preparar bucket' intentaría subirle encima a "
+        "las trazas reales y el guard del deploy exigiría verificarlas")
+    assert cts["obs_bucket"] == "mi-tracker-cts" and cts["obs_prefix"] == "CloudTraces/"
+    assert cts["dedup_id"], "sin dedup, re-ingerir las trazas las duplica"
+
+    for v in visible:
+        if v["slug"] != "cts":
+            assert v.get("dataset_files"), f"{v['slug']} sin dataset_files"
+            # Y nadie más trae bucket propio: el resto lee del bucket de demos.
+            assert not v.get("obs_bucket"), f"{v['slug']} no debería traer bucket propio"
 
     # Agregadores == lo que consume el backend.
-    assert len(V.capability_specs()) == 13
-    assert len(V.industry_fields()) == 13
+    assert len(V.capability_specs()) == 14
+    assert len(V.industry_fields()) == 14
     assert set(V.demo_dataset_files()) == {
         "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
         "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos"}
@@ -4423,7 +4448,7 @@ def test_verticals_back_registro_consistente():
 
 def test_index_inyecta_verticals_y_endpoint():
     """GET / reemplaza el placeholder por el JSON real (no queda null) y expone
-    los 8 verticales visibles; GET /api/v1/verticals devuelve el mismo payload."""
+    los 9 verticales visibles; GET /api/v1/verticals devuelve el mismo payload."""
     import re as _re
 
     html = client.get("/").text
@@ -4433,8 +4458,15 @@ def test_index_inyecta_verticals_y_endpoint():
     injected = _json.loads(m.group(1))
     assert len(injected["groups"]) == 6
     visible = [v for v in injected["verticals"] if not v["hidden"]]
-    assert len(visible) == 8
-    assert {v["slug"] for v in visible} >= {"siem", "transacciones-alyc", "fortianalyzer"}
+    assert len(visible) == 9
+    assert {v["slug"] for v in visible} >= {"siem", "transacciones-alyc", "fortianalyzer", "cts"}
+
+    # El front necesita el origen propio para no mandar CTS a buscar sus trazas
+    # al bucket de demos: sin estas dos claves el caso se despliega contra el
+    # bucket equivocado y no ingiere nada.
+    cts = next(v for v in injected["verticals"] if v["slug"] == "cts")
+    assert cts["obsBucket"] == "mi-tracker-cts" and cts["obsPrefix"] == "CloudTraces/"
+    assert all(v["obsBucket"] == "" for v in visible if v["slug"] != "cts")
 
     api = client.get("/api/v1/verticals").json()
     assert api == injected
@@ -4807,3 +4839,103 @@ def test_el_guard_tolera_espacios_en_el_prefijo(bucket_con_state):
     """Un prefijo de puros espacios es un prefijo vacío."""
     with pytest.raises(main.HTTPException):
         main.generate_input_block(_s3_input(bucket_con_state, "   "))
+
+
+# ── Bucket por caso ─────────────────────────────────────────────────────────
+# Hasta ahora el bucket era uno solo para todo el deploy ("el bucket es
+# universal, viene del request"). CTS rompió esa premisa: sus trazas de
+# auditoría son reales y viven en otro bucket. Lo que sigue protege que los dos
+# mundos convivan en un mismo deploy sin pisarse.
+
+
+def _case_b(slug, prefix, bucket=""):
+    return main.PipelineCase(
+        slug=slug, filter_code="filter { }", index_name=slug + "-%{+YYYY.MM}",
+        obs_prefix=prefix, obs_bucket=bucket, read_existing_bucket=True)
+
+
+def _deploy_req_b(*cases, bucket="demos-del-sa"):
+    return main.TerraformDeployRequest(
+        pipeline_conf="filter { }", obs_bucket=bucket,
+        obs_access_key="AK", obs_secret_key="SK",
+        obs_endpoint="https://obs.la-south-2.myhuaweicloud.com",
+        cases=list(cases))
+
+
+def test_un_caso_con_bucket_propio_no_usa_el_del_request():
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"))
+
+    conf = main._build_pipeline_conf_for_case(req.cases[0], req)
+
+    assert 'bucket => "mi-tracker-cts"' in conf
+    assert 'prefix => "CloudTraces/"' in conf
+    assert "demos-del-sa" not in conf
+
+
+def test_un_caso_sin_bucket_propio_sigue_usando_el_del_request():
+    """El comportamiento de los casos que ya existian no cambia."""
+    req = _deploy_req_b(_case_b("siem", "siem-logs/"))
+
+    assert 'bucket => "demos-del-sa"' in main._build_pipeline_conf_for_case(
+        req.cases[0], req)
+
+
+def test_en_un_mismo_deploy_conviven_dos_buckets():
+    """El corazon del cambio: CTS junto a un caso de demo tiene que producir dos
+    pipelines apuntando a buckets distintos, y ninguno ver el del otro."""
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"),
+                        _case_b("siem", "siem-logs/"))
+
+    cts_conf = main._build_pipeline_conf_for_case(req.cases[0], req)
+    siem_conf = main._build_pipeline_conf_for_case(req.cases[1], req)
+
+    assert 'bucket => "mi-tracker-cts"' in cts_conf
+    assert 'bucket => "demos-del-sa"' in siem_conf
+    assert "demos-del-sa" not in cts_conf
+    assert "mi-tracker-cts" not in siem_conf
+
+
+def test_el_upload_nunca_escribe_en_el_bucket_de_un_caso(monkeypatch):
+    """Son trazas de auditoria reales: escribirles encima no se deshace.
+
+    El skip NO puede depender de `read_existing_bucket`, que lo manda el front;
+    abajo de ese guard hay un `delete_prefix`. Por eso el caso se arma con el
+    flag en False a proposito.
+    """
+    subidas, borrados = [], []
+
+    class FakeOBS:
+        def __init__(self, **kw):
+            self.bucket = kw.get("bucket")
+
+        def delete_prefix(self, p):
+            borrados.append((self.bucket, p))
+            return 0
+
+        def put_object(self, key, data):
+            subidas.append((self.bucket, key))
+
+        def close(self):
+            pass
+
+    import obs_client
+    monkeypatch.setattr(obs_client, "OBSClient", FakeOBS)
+
+    cts = main.PipelineCase(slug="cts", obs_prefix="CloudTraces/",
+                            obs_bucket="mi-tracker-cts", raw_log="una traza",
+                            read_existing_bucket=False)
+
+    main._do_obs_upload(_deploy_req_b(cts))
+
+    assert subidas == [], "escribio en un bucket ajeno: %r" % (subidas,)
+    assert borrados == [], "borro un prefijo ajeno: %r" % (borrados,)
+
+
+def test_preparar_bucket_sigue_sin_incluir_cts():
+    """CTS no declara `dataset_files`, y de eso depende que la pre-carga lo
+    ignore. Si alguien le agregara uno, "Preparar bucket" le subiria sinteticos
+    encima a las trazas reales."""
+    import verticals as V
+
+    assert "cts" not in V.demo_dataset_files()
+    assert "cts" not in main._demo_dataset_files()

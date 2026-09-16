@@ -1856,6 +1856,13 @@ def preload_datasets(request: dict):
                 yield _sse({"type": "error", "message": str(exc)})
                 return
             uploaded = skipped = errors = 0
+            # Los datasets de los casos creados desde la plataforma se re-suben
+            # siempre, aunque `only_missing` esté activo: un `.log` bundleado del
+            # repo no cambia nunca bajo el mismo nombre, pero un caso custom sí —
+            # se borra y se vuelve a crear con el mismo slug y otro contenido. Con
+            # el atajo de `object_exists` el bucket se quedaba con la versión vieja
+            # y la demo mostraba datos que ya no son los del caso.
+            custom = set(custom_cases.dataset_files())
             for slug, files in _demo_dataset_files().items():
                 for fname in files:
                     key = f"{slug}-logs/{fname}"
@@ -1866,7 +1873,7 @@ def preload_datasets(request: dict):
                                     "state": "error", "detail": f"falta datasets/{fname} en el repo"})
                         continue
                     try:
-                        if only_missing and client.object_exists(key):
+                        if only_missing and slug not in custom and client.object_exists(key):
                             skipped += 1
                             yield _sse({"type": "file", "slug": slug, "key": key, "state": "skipped"})
                             continue
@@ -1904,7 +1911,15 @@ class PipelineCase(BaseModel):
     filter_code: str = Field(default="", description="Bloque filter {} generado")
     fields: list[dict] = Field(default_factory=list, description="Campos del step 2")
     index_name: str = Field(default="logs-%{+YYYY.MM}", description="Índice del output")
-    obs_prefix: str = Field(default="logs/", description="Prefijo OBS para este caso (el bucket es universal, viene del request)")
+    obs_prefix: str = Field(default="logs/", description="Prefijo OBS para este caso")
+    obs_bucket: str = Field(
+        default="",
+        description=(
+            "Bucket propio del caso. VACÍO = el del request, que es lo que usan todos los "
+            "casos de demo (su dataset vive en el bucket de demos del SA). Lo declara un "
+            "vertical cuyo dato NO es un dataset que la plataforma sube, sino uno que ya "
+            "existe en otro bucket — hoy solo CTS, que lee trazas reales de mi-tracker-cts."),
+    )
     read_existing_bucket: bool = Field(default=False, description="El caso lee datos reales ya presentes en su prefijo (ej. CTS → CloudTraces/); no subir sintéticos/dataset encima.")
     log_file_content: str = Field(default="", description="Contenido completo del archivo importado por el usuario (custom). Se sube tal cual a OBS, sin sintéticos.")
     document_id: str = Field(default="", description="document_id de dedup para read_existing (ej. CTS → %{trace_id}, fintech → %{[@metadata][generated_id]}). Vacío = ids auto de Logstash.")
@@ -2102,6 +2117,14 @@ def _do_obs_upload(request: TerraformDeployRequest) -> None:
                 if case.input_config or custom_cases.case_type_for(case.slug) == "live":
                     print(f"[obs_upload] [{case.slug}] skip — la fuente no es OBS (caso live)")
                     continue
+                if case.obs_bucket:
+                    # Un caso con bucket propio trae datos que la plataforma NO
+                    # subió y no le pertenecen (CTS: trazas de auditoría reales).
+                    # El guard va acá y no solo en `read_existing_bucket` porque
+                    # ese flag lo manda el front: si alguna vez llegara en false,
+                    # más abajo hay un `delete_prefix` que no se deshace.
+                    print(f"[obs_upload] [{case.slug}] skip — bucket propio ({case.obs_bucket})")
+                    continue
                 if case.read_existing_bucket:
                     print(f"[obs_upload] [{case.slug}] skip — read_existing_bucket (datos reales en su prefijo)")
                     continue
@@ -2281,7 +2304,11 @@ def _build_pipeline_conf_for_case(case: "PipelineCase", request: "TerraformDeplo
             "s3": {
                 "access_key_id": request.obs_access_key,
                 "secret_access_key": request.obs_secret_key,
-                "bucket": request.obs_bucket,
+                # El bucket del caso si lo declara, si no el del request. Es lo
+                # que permite que en un mismo deploy convivan los casos de demo
+                # (bucket del SA) con uno que lee datos preexistentes de otro
+                # lado — hoy CTS, sobre mi-tracker-cts.
+                "bucket": case.obs_bucket or request.obs_bucket,
                 "region": request.obs_region,
                 "endpoint": request.obs_endpoint,
                 "prefix": case.obs_prefix,
@@ -2370,7 +2397,7 @@ def _do_terraform_sequence(
                 # productivo). En multi-caso, cada caso creado desde la
                 # plataforma aporta su propio label → el chatbot nombra bien la
                 # fuente en vez de rotular todo igual.
-                "label": request.industry_label or custom_cases.label_for(case.slug) or "",
+                "label": _registry_label(request.industry_label, case.slug),
             }
     else:
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
@@ -2380,7 +2407,7 @@ def _do_terraform_sequence(
             "index": request.opensearch_index,
             "obs_prefix": request.obs_prefix,
             "fields": request.fields or [],
-            "label": request.industry_label or "",
+            "label": _registry_label(request.industry_label, slug),
         }
 
     _write_pipelines_registry(terraform_dir, registry)
@@ -2908,7 +2935,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                     "index": case.index_name,
                     "obs_prefix": case.obs_prefix,
                     "fields": case.fields or [],
-                    "label": request.industry_label or "",
+                    "label": _registry_label(request.industry_label, case.slug),
                 }
         else:
             slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
@@ -2918,7 +2945,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                 "index": request.opensearch_index,
                 "obs_prefix": request.obs_prefix,
                 "fields": request.fields or [],
-                "label": request.industry_label or "",
+                "label": _registry_label(request.industry_label, slug),
             }
         _write_pipelines_registry(terraform_dir, registry)
         pipelines_var = {
@@ -3744,6 +3771,21 @@ def _write_pipelines_registry(terraform_dir: Path, registry: dict[str, dict]) ->
         )
     except OSError as exc:
         print(f"[deploy] no se pudo persistir el registro de pipelines: {exc!r}")
+
+
+def _registry_label(request_label: str, slug: str) -> str:
+    """Nombre de la fuente que se persiste en el registro de pipelines.
+
+    Lo lee el chatbot para rotular de dónde salen los datos. El fallback a
+    `custom_cases.label_for` importa: en modo demo `industry_label` viene vacío,
+    así que sin él un caso creado desde el Builder quedaba con label `""` y el
+    asistente lo llamaba "Tus logs" en vez de por su nombre.
+
+    Existe como función porque hay CUATRO lugares que escriben el registro (los
+    caminos SSE y no-SSE, cada uno con su rama multi-caso y de caso único) y el
+    fallback estaba puesto en uno solo.
+    """
+    return (request_label or "").strip() or custom_cases.label_for(slug) or ""
 
 
 def _remove_pipelines_registry(terraform_dir: Path) -> None:
@@ -4825,6 +4867,46 @@ def _teardown_orphans_by_name(base: str, user: str, password: str) -> None:
     print("[capabilities] teardown de huérfanos por nombre OK")
 
 
+def _resolve_capability_spec(slug: str, base: str = "", user: str = "",
+                             password: str = "", terraform_dir: Path | None = None) -> dict:
+    """Spec de capabilities del slug: el curado del vertical, o uno derivado de
+    los `fields` que el deploy persistió en el registro de pipelines.
+
+    **Es la única fuente**, y por eso vive suelta. El provisioning ya derivaba el
+    spec así, pero el chat (`/capabilities/ppl-chat`) lo resolvía por su cuenta
+    mirando solo `_CAPABILITY_SPECS`, que trae ÚNICAMENTE los verticals del repo.
+    Resultado: para un caso creado desde el Builder el chat no encontraba spec, no
+    mandaba `system_prompt`, y el modelo caía al default del connector —que quedó
+    armado con otro vertical— y respondía sobre el índice equivocado. Dos lugares
+    resolviendo lo mismo con distinto criterio es exactamente el bug.
+
+    Devuelve {} si el slug no tiene spec curado ni fields persistidos.
+    """
+    import capabilities as caps
+
+    spec = caps.get_capability_spec(slug)
+    if spec:
+        return spec
+    if terraform_dir is None:
+        terraform_dir = _active_terraform_dir()
+    entry = _read_pipelines_registry(terraform_dir).get(slug, {})
+    fields = entry.get("fields") or []
+    if not fields:
+        return {}
+    from index_template import index_pattern_from_name
+    index = entry.get("index", "")
+    ip = index_pattern_from_name(index) if index else f"{slug}*"
+    label = entry.get("label") or custom_cases.label_for(slug) or "Tus logs"
+    # Enums del índice ya ingestado (sin LLM, terms agg nativa). Solo si hay
+    # cluster: el chat siempre lo tiene, un provisioning sin endpoint no.
+    enums = _discover_enums(base, user, password, ip, fields) if base else {}
+    spec = caps.build_spec_from_fields(slug, ip, fields, label, enums)
+    print(f"[capabilities] spec derivado de fields para '{slug}': "
+          f"{len(spec.get('fields', {}))} fields, {len(spec.get('forecasts', []))} forecasts, "
+          f"index={ip}, enums={list(enums.keys())}")
+    return spec
+
+
 def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             password: str, https_enabled: bool,
                             force: bool = False) -> dict:
@@ -4841,24 +4923,9 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
 
     terraform_dir = _active_terraform_dir()
 
-    spec = caps.get_capability_spec(slug)
+    spec = _resolve_capability_spec(slug, base, user, password, terraform_dir)
     if not spec:
-        # Sin spec curado → ¿es un slug productivo con fields persistidos en el
-        # registry de pipelines? Se arma un spec con la MISMA forma a partir de
-        # los campos detectados (paso 2) + los enums descubiertos del índice.
-        pipe_reg = _read_pipelines_registry(terraform_dir)
-        entry = pipe_reg.get(slug, {})
-        prod_fields = entry.get("fields") or []
-        if not prod_fields:
-            return {}
-        from index_template import index_pattern_from_name
-        prod_index = entry.get("index", "")
-        prod_ip = index_pattern_from_name(prod_index) if prod_index else f"{slug}*"
-        prod_label = entry.get("label") or "Tus logs"
-        # Descubrir enums del índice ya ingestado (sin LLM, terms agg nativa).
-        prod_enums = _discover_enums(base, user, password, prod_ip, prod_fields) if base else {}
-        spec = caps.build_spec_from_fields(slug, prod_ip, prod_fields, prod_label, prod_enums)
-        print(f"[capabilities] spec productivo construido para '{slug}': {len(spec.get('fields',{}))} fields, {len(spec.get('forecasts',[]))} forecasts, enums={list(prod_enums.keys())}")
+        return {}
 
     registry = _read_capabilities(terraform_dir)
     ids: dict = dict(registry.get(slug, {}))
@@ -5881,7 +5948,10 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     # equivocado. El agente/DevTools no tiene el problema: cada PPLTool pasa su prompt.
     import capabilities as caps
     predict_params: dict = {"prompt": request.question}
-    _spec = getattr(caps, "_CAPABILITY_SPECS", {}).get(request.slug)
+    # Por `_resolve_capability_spec` y no por `_CAPABILITY_SPECS`: ese dict solo
+    # tiene los verticals del repo, así que un caso creado desde el Builder se
+    # quedaba sin system_prompt y el chat respondía sobre el índice de otro.
+    _spec = _resolve_capability_spec(request.slug, base, user, password, terraform_dir)
     if _spec:
         index_pattern = _spec.get("index_pattern", f"{request.slug}*")
         _sp = caps.build_ppl_system_prompt(
