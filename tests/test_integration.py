@@ -18,13 +18,30 @@ from fastapi.testclient import TestClient
 import main
 
 
-# Los datasets no se versionan (se regeneran con los build scripts). Los tests que
-# leen los .log reales se saltean si la data no está presente en datasets/.
+# Los datasets no se versionan (pesan ~1,3 GB; se bajan del Release o se
+# regeneran con los build scripts). Los tests que leen los .log reales se saltean
+# si falta la data.
+#
+# El marcador pide los archivos CONCRETOS que usa cada test, no "algún .log":
+# con `any(glob("*.log"))` alcanzaba con tener uno cualquiera para que dejara de
+# saltear, y entonces los tests que necesitaban otro fallaban con un `assert None
+# is not None` que no decía qué archivo faltaba. Una descarga parcial —que es lo
+# normal— se veía como cuatro tests rotos.
 _DATASETS_DIR = pathlib.Path(__file__).resolve().parent.parent / "datasets"
-requires_datasets = pytest.mark.skipif(
-    not any(_DATASETS_DIR.glob("*.log")),
-    reason="datasets no presentes (regenerá con build_vertical_datasets.py / build_siem_dataset.py)",
-)
+
+
+def necesita_datasets(*nombres):
+    """Skip con el motivo exacto si falta alguno de los `.log` que el test lee."""
+    faltan = [n for n in nombres if not (_DATASETS_DIR / n).is_file()]
+    return pytest.mark.skipif(
+        bool(faltan),
+        reason=f"faltan en datasets/: {', '.join(faltan)}" if faltan else "",
+    )
+
+
+# Compat: los tests que solo necesitan "algún" dataset del catálogo.
+requires_datasets = necesita_datasets(*sorted(
+    f for fs in __import__("verticals").demo_dataset_files().values() for f in fs))
 
 
 SAMPLE_FINANCIAL_LOG = (

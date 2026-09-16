@@ -10,9 +10,12 @@ __pycache__/
 .venv/
 venv/
 
+# Cache local de wrangler (lo deja `npx wrangler deploy` del panel de la ECS).
+.wrangler/
 
-# Datasets grandes (no versionar; se bajan del Release o build scripts). Los .log
-# pesan ~350 MB en total → nunca commitearlos.
+
+# Datasets grandes (no versionar; se bajan del Release o build scripts). Entre
+# .log y .csv pasan de 1,2 GB → nunca commitearlos.
 datasets/*.log
 datasets/train_identity.csv
 datasets/train_transaction.csv
