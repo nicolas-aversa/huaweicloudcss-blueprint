@@ -1320,6 +1320,31 @@ def health_check() -> dict:
     return {"status": "ok"}
 
 
+def _error_de_maas(exc: Exception) -> HTTPException:
+    """Traduce un fallo del LLM a algo que el usuario pueda accionar.
+
+    Antes esto miraba si el mensaje contenía `MAAS_API_KEY` y, si no, lo mandaba
+    tal cual con un 502. Resultado: un 401 de ModelArts llegaba a la pantalla como
+    un volcado de JSON (`{'error': {'code': 'ModelArts.81003', ...}}`) que no le
+    decía a nadie que el problema era la API key ni dónde arreglarlo.
+    """
+    mensaje = str(exc)
+    es_auth = any(m in mensaje for m in ("401", "Unauthorized", "81003",
+                                         "Invalid authorization"))
+    if es_auth:
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=("MaaS rechazó la API key. Andá a ⚙ Configuración, volvé a pegar "
+                    "la MaaS API key y usá el botón Probar para confirmarla."))
+    # 500 = problema de configuración de ESTA instancia, no de MaaS. Los dos
+    # marcadores: el texto que levanta `_build_client` y el nombre de la env var,
+    # por si el mensaje viene de otro llamador.
+    if "No hay API Key de MaaS" in mensaje or "MAAS_API_KEY" in mensaje:
+        return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             detail=mensaje)
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=mensaje)
+
+
 def _llm_filter(raw_log: str, namespace: str = "data", ecs_overlay: bool = False,
                 feedback: str = "", previous_filter: str = "",
                 input_type: str = "") -> dict:
@@ -1341,16 +1366,7 @@ def _llm_filter(raw_log: str, namespace: str = "data", ecs_overlay: bool = False
             detail=str(exc),
         ) from exc
     except RuntimeError as exc:
-        message = str(exc)
-        is_config_error = "MAAS_API_KEY" in message
-        raise HTTPException(
-            status_code=(
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-                if is_config_error
-                else status.HTTP_502_BAD_GATEWAY
-            ),
-            detail=message,
-        ) from exc
+        raise _error_de_maas(exc) from exc
 
 
 @app.post(
@@ -1631,6 +1647,10 @@ def get_maas_settings() -> dict:
         "configured": bool(key),
         "source": _mi.maas_key_source(),
         "masked": f"••••{key[-4:]}" if key else "",
+        # Motivo por el que la key GUARDADA no sirve (o ''). Sin esto, una key
+        # corrupta se veía igual que una sana: el campo mostraba puntitos en los
+        # dos casos y el único síntoma era un 401 al analizar un log.
+        "problem": _mi.maas_key_problem(),
         # Modelo que usa cada consumo (solo lectura — se configuran por env var).
         "models": {
             # Paso 2 del wizard: análisis del log + generación del filter.
@@ -1662,6 +1682,20 @@ def set_maas_settings(request: dict) -> dict:
     key = get_maas_api_key()
     audit.record("settings_maas", "MaaS API key actualizada" if key else "MaaS API key borrada")
     return {"configured": bool(key), "source": maas_key_source()}
+
+
+@app.post(
+    "/api/v1/settings/maas/test",
+    tags=["settings"],
+    summary="Prueba la API key de MaaS contra el modelo real",
+)
+def test_maas_settings() -> dict:
+    """Devuelve ``{ok, detail}``. Nunca 4xx/5xx: el resultado de la prueba ES el
+    contenido, no el status — así el front lo pinta igual en los dos casos sin
+    tratar un fallo esperado como un error de la app."""
+    import maas_integrator as _mi
+
+    return _mi.probar_api_key()
 
 
 @app.get(

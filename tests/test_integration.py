@@ -173,8 +173,15 @@ def test_generate_filter_maas_502(monkeypatch):
 
 
 def test_generate_filter_missing_api_key_500(monkeypatch):
+    """Falta de configuración = 500 (es de esta instancia), no 502.
+
+    El mensaje es el REAL que levanta `_build_client`; el fixture usaba uno que el
+    código dejó de producir hace tiempo, así que el test pasaba por la rama
+    equivocada del mapeo."""
     def boom(_log, *args, **kwargs):
-        raise RuntimeError("La variable de entorno MAAS_API_KEY no está definida.")
+        raise RuntimeError(
+            "No hay API Key de MaaS: configurala en ⚙ Configuración de la "
+            "plataforma o definí MAAS_API_KEY en el entorno.")
 
     monkeypatch.setattr(main, "generate_logstash_filter", boom)
 
@@ -183,6 +190,27 @@ def test_generate_filter_missing_api_key_500(monkeypatch):
         json={"raw_log": SAMPLE_FINANCIAL_LOG},
     )
     assert res.status_code == 500
+
+
+def test_generate_filter_401_de_maas_apunta_a_la_key(monkeypatch):
+    """Un 401 de ModelArts tiene que decir QUÉ hacer.
+
+    Antes llegaba a la pantalla el volcado crudo del JSON
+    (`{'error': {'code': 'ModelArts.81003', ...}}`), que no menciona ni la API key
+    ni dónde arreglarla. Es exactamente el error que bloqueó una demo."""
+    def boom(_log, *args, **kwargs):
+        raise RuntimeError(
+            "Error al invocar el modelo MaaS: Error code: 401 - {'error': "
+            "{'code': 'ModelArts.81003', 'message': 'Invalid authorization header.'}}")
+
+    monkeypatch.setattr(main, "generate_logstash_filter", boom)
+
+    res = client.post("/api/v1/onboarding/generate-filter",
+                      json={"raw_log": SAMPLE_FINANCIAL_LOG})
+    assert res.status_code == 502
+    detalle = str(res.json()["detail"])
+    assert "API key" in detalle and "Configuración" in detalle, detalle
+    assert "ModelArts.81003" not in detalle, "no volcar el JSON crudo del proveedor"
 
 
 # --- /generate-pipeline (nuevo flujo: filter_code ya generado) --------------
@@ -1013,6 +1041,90 @@ def test_settings_maas_key_roundtrip(monkeypatch, tmp_path):
     client.post("/api/v1/settings/maas", json={"api_key": ""})
     assert client.get("/api/v1/settings/maas").json()["source"] == "env"
     assert mi.get_maas_api_key() == "env-key-zzz9"
+
+
+def test_una_key_envenenada_en_disco_no_se_usa(monkeypatch, tmp_path):
+    """La validación tiene que correr al LEER, no solo al escribir.
+
+    Vivía únicamente en `set_maas_api_key`, así que una key guardada ANTES de que
+    esa barrera existiera seguía ahí para siempre: el settings file tiene
+    precedencia sobre el env y nadie la volvía a mirar. El síntoma era un 401 de
+    ModelArts que no mencionaba la configuración, y la UI mostraba el campo con
+    puntitos — indistinguible de una key sana."""
+    import json as _json
+    import maas_integrator as mi
+
+    settings = tmp_path / "settings.json"
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", settings)
+    monkeypatch.setenv("MAAS_API_KEY", "env-key-zzz9")
+
+    # Escrita a mano, esquivando el setter: es lo que quedó en los discos viejos.
+    settings.write_text(_json.dumps({"maas_api_key": "•" * 12}), encoding="utf-8")
+
+    assert mi.get_maas_api_key() == "env-key-zzz9", (
+        "la key corrupta del disco tiene que ignorarse y caer al env, no viajar "
+        "al header Authorization")
+    assert mi.maas_key_source() == "env"
+
+    problema = mi.maas_key_problem()
+    assert problema and "caracteres" in problema
+    assert client.get("/api/v1/settings/maas").json()["problem"] == problema
+
+
+def test_la_key_del_env_se_strippea(monkeypatch, tmp_path):
+    """El env era la ÚNICA rama que esquivaba toda normalización: un `\\r` de un
+    .env editado en Windows entraba literal al header `Authorization`."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.setenv("MAAS_API_KEY", "  env-key-con-espacios\r\n")
+    assert mi.get_maas_api_key() == "env-key-con-espacios"
+
+
+def test_probar_la_key_traduce_el_401(monkeypatch, tmp_path):
+    """El botón Probar tiene que decir qué pasa, no volcar el error del SDK."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.setenv("MAAS_API_KEY", "una-key-cualquiera")
+
+    class _Boom:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    raise RuntimeError("Error code: 401 - ModelArts.81003")
+
+    monkeypatch.setattr(mi, "_build_client", lambda: _Boom())
+    r = client.post("/api/v1/settings/maas/test").json()
+    assert r["ok"] is False
+    assert "rechazó la API key" in r["detail"]
+    assert "81003" not in r["detail"]
+
+    class _Ok:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    return object()
+
+    monkeypatch.setattr(mi, "_build_client", lambda: _Ok())
+    r = client.post("/api/v1/settings/maas/test").json()
+    assert r["ok"] is True
+
+
+def test_probar_sin_key_no_revienta(monkeypatch, tmp_path):
+    """Sin key configurada, el botón responde 200 con ok=False: el resultado de la
+    prueba es el contenido, no el status."""
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.delenv("MAAS_API_KEY", raising=False)
+
+    res = client.post("/api/v1/settings/maas/test")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is False and "No hay API Key" in body["detail"]
 
 
 def test_settings_huawei_roundtrip(monkeypatch, tmp_path):

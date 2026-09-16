@@ -359,9 +359,25 @@ def _write_settings(data: dict) -> None:
 
 
 def get_maas_api_key() -> str:
-    """Key configurada en la plataforma (settings file) > MAAS_API_KEY del env."""
-    key = (_read_settings().get("maas_api_key") or "").strip()
-    return key or os.getenv("MAAS_API_KEY", "")
+    """Key configurada en la plataforma (settings file) > MAAS_API_KEY del env.
+
+    **Valida también al LEER**, no solo al escribir. La validación vivía únicamente
+    en `set_maas_api_key`, así que una key que se guardó antes de que esa barrera
+    existiera seguía ahí para siempre: el archivo tiene precedencia sobre el env, y
+    nadie la volvía a mirar. El síntoma era un 401 de ModelArts que no decía nada
+    sobre la configuración. Si la guardada no sirve, se ignora y se cae al env — el
+    llamador ve "no hay key", que es verdad y es accionable.
+
+    El env también se strippea: es la única rama que esquivaba `validate_api_key`,
+    y un `\\r` de un `.env` editado en Windows entra literal al header.
+    """
+    guardada = (_read_settings().get("maas_api_key") or "").strip()
+    if guardada:
+        try:
+            return validate_api_key(guardada)
+        except InvalidApiKey as exc:
+            print(f"[settings] la MaaS key guardada no es usable ({exc}); uso el env")
+    return (os.getenv("MAAS_API_KEY", "") or "").strip()
 
 
 class InvalidApiKey(ValueError):
@@ -412,10 +428,31 @@ def set_maas_api_key(key: str) -> None:
 
 
 def maas_key_source() -> str:
-    """De dónde sale la key efectiva: 'settings' | 'env' | 'none' (para la UI)."""
-    if (_read_settings().get("maas_api_key") or "").strip():
+    """De dónde sale la key efectiva: 'settings' | 'env' | 'none' (para la UI).
+
+    Mira la guardada con los mismos ojos que `get_maas_api_key`: una key corrupta
+    no cuenta como configurada. Antes decía 'settings' con solo estar no-vacía, así
+    que la UI mostraba "configurada ✓" sobre una key que MaaS rechazaba.
+    """
+    if maas_key_problem() == "" and (_read_settings().get("maas_api_key") or "").strip():
         return "settings"
-    return "env" if os.getenv("MAAS_API_KEY", "") else "none"
+    return "env" if (os.getenv("MAAS_API_KEY", "") or "").strip() else "none"
+
+
+def maas_key_problem() -> str:
+    """Por qué la key GUARDADA no sirve, o '' si está bien (o si no hay ninguna).
+
+    Lo consume `GET /api/v1/settings/maas` para que la UI pueda decir *qué* está
+    mal en vez de mostrar un campo con puntitos indistinguible de uno sano.
+    """
+    guardada = (_read_settings().get("maas_api_key") or "").strip()
+    if not guardada:
+        return ""
+    try:
+        validate_api_key(guardada)
+    except InvalidApiKey as exc:
+        return str(exc)
+    return ""
 
 
 def get_pipeline_model() -> str:
@@ -606,6 +643,48 @@ def _build_client() -> OpenAI:
     base_url = os.getenv("MAAS_BASE_URL", DEFAULT_BASE_URL)
 
     return OpenAI(api_key=api_key, base_url=base_url)
+
+
+def probar_api_key() -> dict:
+    """Llama a MaaS con la key efectiva y dice si sirve. `{ok, detail}`.
+
+    Existe porque hasta ahora la única forma de saber si la key andaba era subir
+    un log y esperar: si estaba mal, el error llegaba como un volcado del JSON de
+    ModelArts en medio del wizard. Acá el usuario aprieta un botón al lado del
+    campo y en dos segundos sabe si el problema es la key o es otra cosa.
+
+    Pide 1 token del modelo real (el mismo `base_url` y el mismo modelo que usa el
+    análisis), así que también cubre el caso "key válida pero de otra región".
+    """
+    try:
+        cliente = _build_client()
+    except RuntimeError as exc:
+        return {"ok": False, "detail": str(exc)}
+
+    try:
+        cliente.chat.completions.create(
+            model=get_pipeline_model(),
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+        )
+    except Exception as exc:                      # el SDK envuelve todo
+        texto = str(exc)
+        if "401" in texto or "Unauthorized" in texto or "81003" in texto:
+            return {"ok": False, "detail": (
+                "MaaS rechazó la API key. Copiala de nuevo desde la consola de "
+                "ModelArts MaaS y volvé a guardarla. Si la key es correcta, "
+                "verificá que sea de la misma región que el endpoint configurado.")}
+        if "403" in texto or "Forbidden" in texto:
+            return {"ok": False, "detail": (
+                "La API key es válida pero no tiene permiso sobre este modelo "
+                f"({get_pipeline_model()}). Revisá la suscripción en MaaS.")}
+        if "404" in texto:
+            return {"ok": False, "detail": (
+                f"El modelo '{get_pipeline_model()}' no existe en este endpoint. "
+                "Revisá MAAS_BASE_URL / el nombre del modelo.")}
+        return {"ok": False, "detail": f"No se pudo contactar a MaaS: {texto}"}
+
+    return {"ok": True, "detail": f"La key funciona con {get_pipeline_model()}."}
 
 
 def _strip_markdown_fences(text: str) -> str:

@@ -2279,7 +2279,7 @@
         <div class="app-view is-home active" id="view-home">
 
           <section class="hero">
-            <span class="eyebrow eyebrow--muted">Kit de preventa · Huawei Cloud CSS</span>
+            <span class="eyebrow eyebrow--muted">Tool de preventa · Huawei Cloud CSS</span>
             <h1 class="hero__title">Del log crudo a OpenSearch,<br><span class="accent">con dashboards y chatbot</span>.</h1>
             <p class="hero__sub" id="home-hero-sub">El pipeline lo escribe el LLM. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.</p>
             <!-- La entrada al wizard son los dos caminos de abajo; acá solo
@@ -2306,7 +2306,7 @@
                 <span class="path__icon"><svg class="icon"><use href="#ic-code"/></svg></span>
                 <h2 class="path__name">Dataset nuevo</h2>
               </div>
-              <p class="path__lead">Traés un log y la IA arma el caso desde cero, con lo mismo que los de ejemplo.</p>
+              <p class="path__lead">Traés un log y con IA armamos el caso desde cero, con lo mismo que los de ejemplo.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un dataset <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
           </section>
@@ -2330,7 +2330,7 @@
                 <span class="guide-block__once">una sola vez</span>
               </div>
               <ol class="guide-list">
-                <li><strong>⚙ Configuración</strong> → cargá tus credenciales (AK/SK de OBS, MaaS API key, bucket) y tu infraestructura (project ID, región, AZ, VPC/subnet/SG). Cada card valida al guardar.</li>
+                <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS, MaaS API key, bucket) e <strong>Infraestructura General</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
                 <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros. Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
               </ol>
             </section>
@@ -2456,7 +2456,18 @@
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-maas-key">MaaS API Key</label><input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••"></div>
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-maas-key">MaaS API Key</label>
+                  <div style="display:flex; gap:8px; align-items:flex-start;">
+                    <input type="password" class="form-input" id="settings-maas-key" autocomplete="off" placeholder="••••••" style="flex:1; min-width:0;">
+                    <!-- Sin esto, la única forma de saber si la key servía era subir
+                         un log y esperar: si estaba mal, el error llegaba como un
+                         volcado del JSON de ModelArts en medio del wizard. -->
+                    <button class="btn btn-secondary btn-sm" type="button" id="settings-maas-test"
+                            title="Llama a MaaS con esta key y te dice si funciona">Probar</button>
+                  </div>
+                  <div id="settings-maas-test-status" style="font-size:var(--fs-sm); margin-top:6px;"></div>
+                </div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label><input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss"></div>
               </div>
               <!-- Las dos acciones en la misma fila: metido dentro del campo del
@@ -7109,20 +7120,42 @@
 
     function _maasField() { return document.getElementById('settings-maas-key'); }
 
-    async function refreshMaasKeyStatus() {
+    // El `dirty` manda: NO pisar lo que el usuario esté tipeando.
+    //
+    // Esta función corre al entrar a ⚙ Configuración, y su fetch resuelve un rato
+    // después. Sin este guard, a quien pegaba la key apenas abría la pantalla le
+    // reemplazaba el valor por los puntitos Y le reseteaba `dirty` — entonces
+    // `maasKeyEdit()` devolvía `changed: false`, el POST nunca salía, y el status
+    // igual decía "✓ Credenciales guardadas". O sea: reingresar una key rota no la
+    // arreglaba nunca, sin ninguna señal de que no se había guardado.
+    // `wireSecretField` (el equivalente para el SK de OBS) ya tenía este guard.
+    // `forzar: true` solo DESPUÉS de guardar, que es cuando el campo tiene que
+    // volver a los puntitos: si no, la key queda a la vista en un input de texto.
+    async function refreshMaasKeyStatus({ forzar = false } = {}) {
       const keyIn = _maasField();
+      const pisar = () => keyIn && (forzar || keyIn.dataset.dirty !== '1');
+      const repintar = (configurada) => {
+        if (!pisar()) return;
+        keyIn.value = configurada ? _MAAS_PLACEHOLDER : '';
+        keyIn.dataset.masked = configurada ? '1' : '';
+        keyIn.dataset.dirty = '';
+      };
       try {
         const res = await fetch('/api/v1/settings/maas');
         const d = await res.json();
         state._maasConfigured = !!(d.source && d.source !== 'none');
-        if (keyIn) {
-          keyIn.value = state._maasConfigured ? _MAAS_PLACEHOLDER : '';
-          keyIn.dataset.masked = state._maasConfigured ? '1' : '';
-          keyIn.dataset.dirty = '';
+        repintar(state._maasConfigured);
+        // Una key guardada que no pasa la validación: hay que decirlo acá, porque
+        // el campo con puntitos se ve igual que el de una key sana y el único
+        // síntoma era un 401 críptico recién al analizar un log.
+        const out = document.getElementById('settings-maas-test-status');
+        if (out && d.problem) {
+          out.textContent = '✗ La key guardada no sirve: ' + d.problem;
+          out.style.color = 'var(--accent-hover)';
         }
       } catch (_e) {
         state._maasConfigured = false;
-        if (keyIn) { keyIn.value = ''; keyIn.dataset.masked = ''; keyIn.dataset.dirty = ''; }
+        repintar(false);
       }
     }
 
@@ -7142,8 +7175,50 @@
     function maasKeyEdit() {
       const el = _maasField();
       if (!el || el.dataset.dirty !== '1') return { value: '', changed: false };
-      return { value: (el.value || '').trim(), changed: true };
+      const v = (el.value || '').trim();
+      // Cinturón y tirantes, igual que `secretFieldEdit`: si algún navegador
+      // restaura el relleno decorativo, no se manda como si fuera la key.
+      return { value: v === _MAAS_PLACEHOLDER ? '' : v, changed: true };
     }
+
+    // Probar la key contra MaaS. Si el campo está tocado, la guarda primero: no
+    // tiene sentido probar la vieja cuando el usuario acaba de pegar otra.
+    document.getElementById('settings-maas-test')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const out = document.getElementById('settings-maas-test-status');
+      const pintar = (texto, ok) => {
+        if (!out) return;
+        out.textContent = texto;
+        out.style.color = ok === null ? 'var(--text-muted)'
+                        : ok ? 'var(--accent-green)' : 'var(--accent-hover)';
+      };
+      btn.disabled = true;
+      pintar('Probando…', null);
+      try {
+        const edit = maasKeyEdit();
+        if (edit.changed) {
+          const g = await fetch('/api/v1/settings/maas', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', body: JSON.stringify({ api_key: edit.value }),
+          });
+          if (!g.ok) {
+            const d = await g.json().catch(() => ({}));
+            pintar('✗ ' + ((d.detail && d.detail.message) || 'No se pudo guardar la key.'), false);
+            return;
+          }
+          await refreshMaasKeyStatus({ forzar: true });
+        }
+        const r = await fetch('/api/v1/settings/maas/test', {
+          method: 'POST', credentials: 'same-origin',
+        });
+        const d = await r.json();
+        pintar((d.ok ? '✓ ' : '✗ ') + d.detail, !!d.ok);
+      } catch (err) {
+        pintar('✗ No se pudo probar: ' + err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     // Compat con los llamadores que solo quieren el texto (validación del form).
     function maasKeyInput() {
@@ -7414,7 +7489,7 @@
       }
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);
       _updateProductiveCredsStatus();
-      refreshMaasKeyStatus();
+      refreshMaasKeyStatus({ forzar: true });   // recién guardada: volver a los puntitos
       // El bucket de demos vive en esta card: persistirlo (saveHuaweiSettings manda
       // todos los campos huawei por id, así no pisa la infra de la otra card).
       await saveHuaweiSettings(null);
