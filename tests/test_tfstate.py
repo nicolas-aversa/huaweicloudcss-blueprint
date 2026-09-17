@@ -7,6 +7,8 @@ cuando el backend cambia, Terraform arranca contra un estado vacío, no ve los
 recursos existentes, y un apply intenta crear todo de nuevo.
 """
 import json
+import pathlib
+import re
 
 import pytest
 
@@ -270,9 +272,19 @@ def test_con_bucket_escribe_el_backend(ws, con_bucket):
     assert 's3 = "https://obs.la-south-2.myhuaweicloud.com"' in hcl
     # Sin estos, Terraform aborta validando APIs de AWS que OBS no tiene.
     for flag in ("skip_credentials_validation", "skip_region_validation",
-                 "skip_metadata_api_check", "skip_requesting_account_id",
-                 "use_path_style"):
-        assert flag in hcl
+                 "skip_metadata_api_check", "skip_requesting_account_id"):
+        assert re.search(rf"{flag}\s*=\s*true", hcl), flag
+
+
+def test_el_bucket_va_como_subdominio_no_en_el_path(ws, con_bucket):
+    """OBS rechaza el path-style: el primer `init` real murió con
+    `403 VirtualHostDomainRequired`. Este test solo chequeaba que la clave
+    ESTUVIERA, no su valor — y estaba en `true`."""
+    tfstate.prepare(ws, "k")
+
+    hcl = (ws / tfstate.BACKEND_FILE).read_text(encoding="utf-8")
+    m = re.search(r"use_path_style\s*=\s*(\w+)", hcl)
+    assert m and m.group(1) == "false", hcl
 
 
 def test_primer_init_no_pide_migracion(ws, con_bucket):
@@ -412,3 +424,14 @@ def test_workspace_sembrado_con_providers_igual_pide_init(ws, con_bucket):
     assert necesita_init is True
     assert extra == []                       # nada que migrar: es el primero
     assert (ws / tfstate.BACKEND_FILE).exists()
+
+
+def test_terraform_corre_sin_color():
+    """Terraform colorea aunque no haya terminal. Sin `-no-color`, el error de un
+    init fallido llegaba al front con los `[31m` adentro, ilegible."""
+    fuente = (pathlib.Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
+    llamadas = re.findall(r'\["terraform", "(init|apply|destroy)"[^\]]*\]', fuente)
+    assert len(llamadas) >= 4, "cambió la forma de invocar terraform en main.py"
+    sin_flag = [l for l in re.findall(r'\["terraform", "(?:init|apply|destroy)"[^\]]*\]', fuente)
+                if "-no-color" not in l]
+    assert not sin_flag, sin_flag

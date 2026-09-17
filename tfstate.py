@@ -196,8 +196,15 @@ def _backend_hcl(cfg: dict, key: str) -> str:
 
     Los `skip_*` no son opcionales: OBS no tiene STS, ni el endpoint de metadata
     de EC2, ni las regiones de AWS, así que sin ellos Terraform aborta validando
-    cosas que no existen. `use_path_style` porque OBS no sirve el bucket como
-    subdominio para este endpoint.
+    cosas que no existen.
+
+    `use_path_style = false`: el bucket va como subdominio
+    (`<bucket>.obs.<region>.myhuaweicloud.com`), que es como lo pide OBS. Estuvo
+    en `true` con la creencia de que OBS no servía el bucket como subdominio, y
+    era al revés: el primer `init` contra un bucket real murió con
+    `403 VirtualHostDomainRequired: Virtual host domain is required while
+    accessing a specific bucket`. El SDK de OBS con el que la app sube los
+    datasets usa virtual-host desde siempre — por eso ese camino andaba y este no.
 
     `endpoints.s3` (anidado) es la forma desde Terraform 1.6.3; el `endpoint`
     plano que aparece en tutoriales viejos ya no se acepta. Acá se pinea 1.9.8.
@@ -224,7 +231,7 @@ terraform {{
     skip_region_validation      = true
     skip_metadata_api_check     = true
     skip_requesting_account_id  = true
-    use_path_style              = true
+    use_path_style              = false
   }}
 }}
 '''

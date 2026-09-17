@@ -2712,13 +2712,15 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
         obs_future = obs_executor.submit(_do_obs_upload, request)
 
     # ── terraform init (si hace falta) ────────────────────────────────────
+    # `-no-color` en init/apply/destroy: Terraform colorea aunque no haya
+    # terminal, y el error llegaba al front con los `[31m` adentro.
     init_extra = _backend_init_args(terraform_dir)
     if init_extra is not None:
         yield _sse({"type": "progress", "percent": 3, "phase": "Terraform init",
                     "message": ("Migrando el estado a OBS…" if init_extra
                                 else "Descargando provider HuaweiCloud…")})
         init_result = subprocess.run(
-            ["terraform", "init", "-input=false", *init_extra],
+            ["terraform", "init", "-input=false", "-no-color", *init_extra],
             cwd=terraform_dir, capture_output=True, text=True, timeout=180,
         )
         for ln in (init_result.stdout or "").splitlines():
@@ -2740,7 +2742,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     completed_resources: set[str] = set()
     tf_lines: list[str] = []
     process = subprocess.Popen(
-        ["terraform", "apply", "-auto-approve", "-input=false"],
+        ["terraform", "apply", "-auto-approve", "-input=false", "-no-color"],
         cwd=terraform_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -3358,7 +3360,7 @@ def _reap_expired_envs(ttl_hours: float) -> None:
             if when > cutoff:
                 continue
             print(f"[ttl-reaper] destruyendo entorno vencido de {udir.name} (deployed {ts})", flush=True)
-            r = _sp.run(["terraform", "destroy", "-auto-approve", "-input=false"],
+            r = _sp.run(["terraform", "destroy", "-auto-approve", "-input=false", "-no-color"],
                         cwd=tdir, capture_output=True, text=True, timeout=1800)
             ok = r.returncode == 0
             audit.record("ttl_autodestroy", f"user_dir={udir.name} ok={ok}", user="(ttl-reaper)")
@@ -6004,7 +6006,7 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
 
     print("[terraform_destroy] ejecutando terraform destroy -auto-approve -input=false...")
     result = subprocess.run(
-        ["terraform", "destroy", "-auto-approve", "-input=false"],
+        ["terraform", "destroy", "-auto-approve", "-input=false", "-no-color"],
         cwd=terraform_dir,
         capture_output=True,
         text=True,
