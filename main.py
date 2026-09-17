@@ -5503,6 +5503,18 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
                 "message": "No hay un cluster alcanzable. ¿Provisionaste el entorno (paso 1)?",
             },
         )
+    # Tras un F5 el body se rearma desde /terraform/status, sin la password.
+    # Este endpoint no pasa por `_fill_obs_creds`; la del cluster está en el
+    # teardown o en el state. Sin esto, el template y los dashboards fallaban
+    # con mensajes que culpaban al cluster ("rechazó el template").
+    if not request.opensearch_password:
+        request.opensearch_password = _stored_opensearch_password(terraform_dir)
+    if not request.opensearch_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"stage": "apply_schema",
+                    "message": "No tengo la password de OpenSearch del cluster: reingresá por "
+                               "Pipeline → Desplegar, o cargala en el paso 3."})
 
     # Run de Actividad: cada sub-paso queda registrado con su resultado. Antes
     # todo esto era best-effort con un print() y no había forma de saber después

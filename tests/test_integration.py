@@ -5296,3 +5296,37 @@ def test_la_fase_2_repone_la_password_del_cluster(monkeypatch, tmp_path):
     req = _main.TerraformDeployRequest(pipeline_conf="x", opensearch_password="PW-BODY")
     _main._fill_obs_creds(req)
     assert req.opensearch_password == "PW-BODY"
+
+
+def test_apply_schema_repone_la_password_del_cluster(monkeypatch, tmp_path):
+    """Tras un F5 el body llega sin password y `/apply-schema` no pasa por
+    `_fill_obs_creds`: el template y los dashboards fallaban con mensajes que
+    culpaban al cluster. Se toma la del cluster; sin ninguna, es un 400 claro."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"; td.mkdir()
+    monkeypatch.setattr(_main, "_active_terraform_dir", lambda: td)
+    monkeypatch.setattr(_main, "_cluster_with_public_access",
+                        lambda d: {"public_endpoint": "1.2.3.4:9200", "endpoint": "10.0.0.1:9200"})
+    monkeypatch.setattr(_main, "_read_pipelines_registry", lambda d: {})
+    visto = {}
+
+    def _templates(request, cluster):
+        visto["password"] = request.opensearch_password
+        return True
+    monkeypatch.setattr(_main, "_apply_index_templates", _templates)
+    monkeypatch.setattr(_main, "_import_dashboards", lambda *a, **k: True)
+    monkeypatch.setattr(_main, "_os_req", lambda *a, **k: None)   # el timepicker, sin red
+
+    body = {"pipeline_conf": "x", "opensearch_index": "olist-%{+YYYY.MM}", "pipeline_slug": "olist"}
+
+    # Sin cluster conocido → 400 que dice qué falta, no "el cluster rechazó".
+    res = client.post("/api/v1/onboarding/apply-schema", json=body)
+    assert res.status_code == 400 and "password" in res.json()["detail"]["message"].lower()
+
+    # Con la password en el teardown, la usa.
+    (td / "destroy.auto.tfvars.json").write_text(_json.dumps({"opensearch_password": "PW-CLUSTER"}))
+    res = client.post("/api/v1/onboarding/apply-schema", json=body)
+    assert res.status_code == 200, res.text
+    assert visto["password"] == "PW-CLUSTER"
