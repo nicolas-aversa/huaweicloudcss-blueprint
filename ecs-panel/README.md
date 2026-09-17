@@ -69,7 +69,7 @@ Huawei, en la agency.
 | `worker.js` | El frente en Cloudflare: sirve la página, valida la password, invoca la función. La página usa los tokens del app (`static/index.html`, `:root`): mismas superficies, mismo rojo, misma Inter — es la card de login del app puesta sola en la pantalla. |
 | `wrangler.toml` | Config del Worker. **Los secretos no van acá.** |
 | `test_panel.py` | 41 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
-| `worker.test.mjs` | 46 checks: el Worker con Web Crypto real y `fetch` interceptado, **más el JS del panel** corrido en un sandbox con timers controlados y una ECS que tarda en arrancar. Ese último bloque es el que hacía falta: el script del panel vive dentro de un template string y hasta ahora no lo ejecutaba ningún test. `node ecs-panel/worker.test.mjs` (desde esta carpeta). |
+| `worker.test.mjs` | 47 checks: el Worker con Web Crypto real y `fetch` interceptado, **más el JS del panel** corrido en un sandbox con timers controlados y una ECS que tarda en arrancar. Ese último bloque es el que hacía falta: el script del panel vive dentro de un template string y hasta ahora no lo ejecutaba ningún test. `node ecs-panel/worker.test.mjs` (desde esta carpeta). |
 
 ## Despliegue
 

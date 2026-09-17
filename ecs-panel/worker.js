@@ -313,6 +313,9 @@ button.off:hover:not(:disabled) { background:var(--bg-tertiary); border-color:va
 button:disabled { opacity:.4; cursor:not-allowed; }
 .msg { margin:14px 0 0; padding:10px 12px; border-radius:var(--radius-sm); font-size:var(--fs-sm);
   background:var(--bg-subtle); border:1px solid var(--border-subtle); color:var(--text-secondary); }
+/* Vacía no existe: con fondo y borde, el nbsp de relleno se veía como una
+   caja sin nada debajo de los botones. */
+.msg:empty { display:none; }
 .msg.bad { color:var(--accent-hover); background:var(--accent-tint); border-color:transparent; font-weight:500; }
 .url { margin:16px 0 0; text-align:center; font-size:var(--fs-sm); min-height:18px; }
 .url a { color:var(--accent); text-decoration:none; font-weight:500; }
@@ -366,7 +369,7 @@ function paginaPanel() {
 </div>
 <button id=on disabled>Encender</button>
 <button id=off class=off disabled>Apagar</button>
-<p class=msg id=msg>&nbsp;</p>
+<p class=msg id=msg></p>
 <p class=url id=url></p>
 <script>
 const $ = id => document.getElementById(id);

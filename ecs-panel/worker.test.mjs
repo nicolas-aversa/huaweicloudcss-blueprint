@@ -76,7 +76,10 @@ check("entrega una cookie", !!cookie);
 const sc = r.headers.get("Set-Cookie") || "";
 check("la cookie es HttpOnly + Secure + SameSite=Strict",
   sc.includes("HttpOnly") && sc.includes("Secure") && sc.includes("SameSite=Strict"));
-check("la respuesta ya es el panel", (await r.text()).includes("Encender"));
+const panelTrasLogin = await r.text();
+check("la respuesta ya es el panel", panelTrasLogin.includes("Encender"));
+check("la caja de mensajes arranca vacía de verdad (sin &nbsp;), y vacía se oculta",
+  /<p class=msg id=msg><\/p>/.test(panelTrasLogin) && /\.msg:empty\s*\{\s*display:none/.test(panelTrasLogin));
 
 console.log("── con sesión ──");
 r = await pedir({ qs: "?a=status", cookie });
