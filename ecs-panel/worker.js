@@ -231,11 +231,16 @@ function html(cuerpo, status = 200, extra = {}) {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-      // La página no carga nada de afuera: todo va inline. `connect-src` y
-      // `form-action` tienen que estar SÍ O SÍ: con `default-src 'none'` solo,
-      // el navegador bloquea el propio fetch de la página hacia `?a=status`
-      // (connect-src cae al default) y el panel queda en "Consultando…".
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; " +
+      // Lo único de afuera es Inter, de Google Fonts —la misma fuente que el
+      // app, para que el panel se vea de la misma familia—. Todo lo demás va
+      // inline. `connect-src` y `form-action` tienen que estar SÍ O SÍ: con
+      // `default-src 'none'` solo, el navegador bloquea el propio fetch de la
+      // página hacia `?a=status` (connect-src cae al default) y el panel queda
+      // en "Consultando…". Y sin `font-src` la fuente falla EN SILENCIO: el
+      // navegador cae a la del sistema y nadie se entera.
+      "Content-Security-Policy": "default-src 'none'; " +
+        "style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src https://fonts.gstatic.com; " +
         "script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'",
       "Referrer-Policy": "no-referrer",
       ...extra,
@@ -244,58 +249,101 @@ function html(cuerpo, status = 200, extra = {}) {
 }
 
 // ── Páginas ──────────────────────────────────────────────────────────────────
+// Los tokens son los del app (static/index.html, `:root`): mismas superficies,
+// mismo rojo, misma escala de radios y tipografía. El panel es la card de login
+// del app puesta sola en la pantalla — así se lee como parte de la misma
+// plataforma y no como un sitio aparte.
 const CSS = `
-:root { color-scheme: light dark; --bg:#f6f7f9; --card:#fff; --fg:#16181d;
-  --muted:#6b7280; --line:#e5e7eb; --on:#16a34a; --off:#6b7280; --busy:#d97706;
-  --danger:#dc2626; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#181b21;
-  --fg:#e8eaed; --muted:#9aa0a6; --line:#2a2e36; } }
+:root {
+  --bg-primary:#ffffff; --bg-secondary:#f6f5f1; --bg-tertiary:#efeee8; --bg-subtle:#faf9f6;
+  --border-subtle:#e7e5dd; --border-default:#d9d7cd;
+  --text-primary:#15161a; --text-secondary:#515463; --text-muted:#8a8b94;
+  --accent:#e50000; --accent-hover:#cc0000; --accent-tint:rgba(229,0,0,.08);
+  --accent-ring:rgba(229,0,0,.14); --accent-green:#16a34a;
+  --shadow-lg:0 12px 32px rgba(20,22,30,.10);
+  --radius-sm:6px; --radius-md:8px; --radius-lg:12px;
+  --fs-xs:11px; --fs-sm:12px; --fs-base:13px; --fs-md:14px; --fs-lg:16px; --fs-xl:20px;
+  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --ease:cubic-bezier(.4,0,.2,1); --t-base:.18s var(--ease);
+}
 * { box-sizing:border-box; }
-body { margin:0; min-height:100vh; display:flex; align-items:center;
-  justify-content:center; padding:24px; background:var(--bg); color:var(--fg);
-  font:16px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-.card { width:100%; max-width:420px; background:var(--card); border-radius:16px;
-  padding:28px 24px; box-shadow:0 1px 3px rgba(0,0,0,.1); }
-h1 { margin:0 0 4px; font-size:20px; }
-.sub { margin:0 0 24px; color:var(--muted); font-size:14px; }
-.state { display:flex; align-items:center; gap:10px; padding:16px;
-  border:1px solid var(--line); border-radius:12px; margin-bottom:20px; }
-.dot { width:12px; height:12px; border-radius:50%; background:var(--off); flex:none; }
-.dot.on { background:var(--on); }
-.dot.busy { background:var(--busy); animation:pulse 1.2s infinite; }
+body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:24px; background:var(--bg-secondary); color:var(--text-primary);
+  font:var(--fs-base)/1.5 var(--font-sans); -webkit-font-smoothing:antialiased; }
+.card { width:100%; max-width:392px; background:var(--bg-primary);
+  border:1px solid var(--border-subtle); border-radius:var(--radius-lg);
+  padding:32px 30px; box-shadow:var(--shadow-lg); }
+.brand { display:flex; align-items:center; gap:11px; margin-bottom:22px; }
+.brand__logo { width:40px; height:40px; flex:none; border-radius:var(--radius-md);
+  background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; }
+.brand__logo svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2;
+  stroke-linecap:round; stroke-linejoin:round; }
+.brand__text { display:flex; flex-direction:column; line-height:1.2; }
+.brand__name { font-size:var(--fs-lg); font-weight:700; letter-spacing:-.01em; }
+.brand__sub { font-size:var(--fs-xs); color:var(--text-muted); }
+h1 { margin:0 0 6px; font-size:var(--fs-xl); font-weight:700; letter-spacing:-.01em; }
+.sub { margin:0 0 22px; color:var(--text-secondary); font-size:var(--fs-base); }
+label { display:block; font-size:var(--fs-xs); font-weight:700; color:var(--text-secondary); margin:0 0 6px; }
+input { width:100%; padding:11px 13px; margin-bottom:16px; font-size:var(--fs-md); font-family:inherit;
+  color:var(--text-primary); background:var(--bg-tertiary);
+  border:1px solid var(--border-default); border-radius:var(--radius-sm);
+  transition:border-color var(--t-base), box-shadow var(--t-base), background var(--t-base); }
+input:focus { outline:none; background:var(--bg-primary); border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-tint); }
+.state { display:flex; align-items:center; gap:10px; padding:14px 16px;
+  border:1px solid var(--border-subtle); border-radius:var(--radius-md);
+  background:var(--bg-subtle); margin-bottom:16px; }
+.dot { width:10px; height:10px; border-radius:50%; background:var(--text-muted); flex:none; }
+.dot.on { background:var(--accent-green); }
+.dot.busy { background:var(--accent); animation:pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity:.35; } }
-.state b { font-size:15px; }
-button { width:100%; padding:15px; font-size:16px; font-weight:600;
-  font-family:inherit; border:0; border-radius:12px; cursor:pointer;
-  margin-bottom:10px; background:var(--on); color:#fff; }
-button.off { background:var(--card); color:var(--fg); border:1px solid var(--line); }
+.state b { font-size:var(--fs-md); font-weight:600; }
+button { width:100%; padding:12px; font-size:var(--fs-md); font-weight:700; font-family:inherit;
+  border:1px solid transparent; border-radius:var(--radius-sm); cursor:pointer; margin-bottom:10px;
+  background:var(--accent); color:#fff;
+  transition:background var(--t-base), border-color var(--t-base), color var(--t-base); }
+button:hover:not(:disabled) { background:var(--accent-hover); }
+button:focus-visible { outline:none; box-shadow:0 0 0 3px var(--accent-ring); }
+button.off { background:var(--bg-primary); color:var(--text-primary); border-color:var(--border-default); }
+button.off:hover:not(:disabled) { background:var(--bg-tertiary); border-color:var(--text-muted); }
 button:disabled { opacity:.4; cursor:not-allowed; }
-input { width:100%; padding:14px; font-size:16px; font-family:inherit;
-  border:1px solid var(--line); border-radius:12px; margin-bottom:12px;
-  background:var(--bg); color:var(--fg); }
-.msg { margin:14px 0 0; padding:12px; border-radius:10px; font-size:14px;
-  background:var(--bg); color:var(--muted); }
-.msg.bad { color:var(--danger); }
-.url { margin-top:20px; text-align:center; font-size:13px; }
-.url a { color:var(--muted); }
+.msg { margin:14px 0 0; padding:10px 12px; border-radius:var(--radius-sm); font-size:var(--fs-sm);
+  background:var(--bg-subtle); border:1px solid var(--border-subtle); color:var(--text-secondary); }
+.msg.bad { color:var(--accent-hover); background:var(--accent-tint); border-color:transparent; font-weight:500; }
+.url { margin:16px 0 0; text-align:center; font-size:var(--fs-sm); min-height:18px; }
+.url a { color:var(--accent); text-decoration:none; font-weight:500; }
+.url a:hover { text-decoration:underline; }
 `;
+
+// El mismo `#ic-layers` del sprite del app.
+const LOGO = `<svg viewBox="0 0 24 24" aria-hidden="true">` +
+  `<path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5"/></svg>`;
 
 function shell(cuerpo) {
   return `<!doctype html><html lang=es><head><meta charset=utf-8>` +
     `<meta name=viewport content="width=device-width,initial-scale=1">` +
-    `<title>ECS · Plataforma CSS</title><style>${CSS}</style></head>` +
-    `<body><div class=card>${cuerpo}</div></body></html>`;
+    `<title>ECS · Blueprint</title>` +
+    `<link rel=preconnect href="https://fonts.googleapis.com">` +
+    `<link rel=preconnect href="https://fonts.gstatic.com" crossorigin>` +
+    `<link rel=stylesheet href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">` +
+    `<style>${CSS}</style></head>` +
+    `<body><div class=card>` +
+    `<div class=brand><span class=brand__logo>${LOGO}</span>` +
+    `<span class=brand__text><span class=brand__name>Blueprint</span>` +
+    `<span class=brand__sub>Huawei Cloud CSS</span></span></div>` +
+    `${cuerpo}</div></body></html>`;
 }
 
 function paginaLogin(error = "") {
   return shell(
     `<h1>Panel de la ECS</h1>` +
-    `<p class=sub>Ingresá la contraseña para continuar.</p>` +
+    `<p class=sub>Ingresá la contraseña para prender o apagar la máquina.</p>` +
+    (error ? `<p class="msg bad" style="margin:0 0 14px">${escapar(error)}</p>` : "") +
     `<form method=post action="?a=login">` +
-    `<input type=password name=password placeholder="Contraseña" autofocus ` +
+    `<label for=password>Contraseña</label>` +
+    `<input type=password id=password name=password placeholder="••••••••" autofocus ` +
     `autocomplete="current-password">` +
-    `<button type=submit>Entrar</button></form>` +
-    (error ? `<p class="msg bad">${escapar(error)}</p>` : ""));
+    `<button type=submit>Entrar</button></form>`);
 }
 
 function escapar(txt) {
@@ -306,7 +354,7 @@ function escapar(txt) {
 function paginaPanel() {
   return shell(`
 <h1>Panel de la ECS</h1>
-<p class=sub>Plataforma CSS Accelerator</p>
+<p class=sub>La máquina que hostea la plataforma.</p>
 <div class=state>
   <div class=dot id=dot></div>
   <b id=estado>Consultando…</b>

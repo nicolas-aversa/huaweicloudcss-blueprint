@@ -122,6 +122,14 @@ const csp = r.headers.get("Content-Security-Policy") || "";
 check("declara connect-src (el fetch de status)", /connect-src\s+'self'/.test(csp), csp);
 check("declara form-action (el POST del login)", /form-action\s+'self'/.test(csp), csp);
 check("sigue sin permitir recursos externos", csp.includes("default-src 'none'"), csp);
+// La fuente es la única cosa que viene de afuera, y una CSP que la bloquea no
+// tira error: el navegador cae a la del sistema y el panel se ve "casi" como el
+// app sin que nadie sepa por qué.
+const conInter = await (await pedir({ cookie })).text();
+check("la página pide Inter (la fuente del app)", /fonts\.googleapis\.com\/css2\?family=Inter/.test(conInter));
+check("y la CSP la deja pasar: style-src con googleapis",
+  /style-src[^;]*https:\/\/fonts\.googleapis\.com/.test(csp), csp);
+check("y font-src con gstatic", /font-src[^;]*https:\/\/fonts\.gstatic\.com/.test(csp), csp);
 
 console.log("── la página no filtra secretos ──");
 const panelHtml = await (await pedir({ cookie })).text();
