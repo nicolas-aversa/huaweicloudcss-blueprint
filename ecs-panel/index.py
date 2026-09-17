@@ -1,17 +1,23 @@
 # -*- coding:utf-8 -*-
-"""Prende y apaga la ECS que hostea la plataforma, manejando sus puertos.
+"""Prende y apaga la ECS que hostea la plataforma.
 
 Reemplaza a la función que sólo hacía start/stop por timer. Agrega:
 
-  1. Apertura/cierre de los puertos 80 y 443 en el security group, atado al
-     encendido y al apagado.
-  2. Consulta de estado, para que el frente pueda mostrar si está prendida.
-  3. Una invocación directa (`{"action": ...}`), por donde entra el frente web.
+  1. Consulta de estado, para que el frente pueda mostrar si está prendida —
+     y si está en medio de una transición.
+  2. Una invocación directa (`{"action": ...}`), por donde entra el frente web.
 
 **El contrato del timer se mantiene**: un evento con `user_event` =
 `"<id>,<startup|shutdown>"` hace lo mismo que antes, así que los timers ya
-configurados siguen funcionando sin tocarlos — pero ahora también manejan los
-puertos.
+configurados siguen funcionando sin tocarlos.
+
+**No toca el security group.** Una versión anterior abría el 80/443 al encender y
+lo cerraba al apagar. Era trabajo inútil: una ECS apagada no responde a nada, con
+los puertos como estén, así que cerrarlos no protegía nada — y el resto del repo
+(`hosted-up.sh`, `HOSTING.md`) ya pide esos puertos abiertos como requisito
+permanente. Lo que sí costaba: dos llamadas por cada consulta de estado en vez de
+una, permisos de VPC en la agency, y un estado "apagada + puertos abiertos" del
+que había que saber salir. Los puertos se abren una vez, en el SG, y se quedan.
 
 Acá NO hay página ni login. FunctionGraph no ofrece ninguna puerta HTTP gratis
 (el APIG compartido está dado de baja y APIC es sólo AP-Singapore), así que el
@@ -20,8 +26,8 @@ protege a esta función es la credencial IAM que hace falta para invocarla.
 
 Se sube pegándolo en la consola: un archivo, sin dependencias fuera de la stdlib.
 
-**Red: public access, NO VPC access.** Sólo habla con las APIs de control de
-Huawei, que son públicas; adentro de una VPC quedaría sin salida a internet y
+**Red: public access, NO VPC access.** Sólo habla con la API de control de
+Huawei, que es pública; adentro de una VPC quedaría sin salida a internet y
 todas las llamadas darían timeout.
 
 Configuración, en Environment/User Data de la función:
@@ -29,22 +35,16 @@ Configuración, en Environment/User Data de la función:
     project_id   (ya existía)
     region       (ya existía)
     ecs_id       instancia a manejar
-    sg_id        security group donde se abren/cierran los puertos
     app_url      opcional — URL de la plataforma, para el link del frente
-    ports        opcional, default "80,443"
-    source_cidr  opcional, default "0.0.0.0/0"
-    rule_marker  opcional, default "ecs-panel:auto"
 
-La agency de la función necesita permisos de **ECS** (start/stop/query) y de
-**VPC** (crear, listar y borrar reglas de security group).
+La agency de la función necesita permisos de **ECS** (start/stop/query). Nada más.
 """
 import json
 import urllib.error
-import urllib.parse
 import urllib.request
 
-# Generoso para una API de control, pero acotado: un `start` encadena hasta
-# cuatro llamadas y el timeout de la función es de 60 s.
+# Generoso para una API de control, pero acotado: el timeout de la función es de
+# 60 s y una acción encadena dos llamadas.
 HTTP_TIMEOUT = 15
 
 # Estados que cuentan como "prendida" / "apagada".
@@ -71,21 +71,17 @@ def _cfg(context):
         "project_id": get("project_id"),
         "region": get("region"),
         "ecs_id": get("ecs_id"),
-        "sg_id": get("sg_id"),
-        "ports": get("ports") or "80,443",
-        "cidr": get("source_cidr") or "0.0.0.0/0",
-        "marker": get("rule_marker") or "ecs-panel:auto",
         # El frente se sirve desde otro dominio, no desde la ECS: allá el link a
         # la plataforma no se puede derivar de `location`, hay que declararlo acá.
         "app_url": get("app_url") or "",
     }
-    faltan = [k for k in ("project_id", "region", "ecs_id", "sg_id") if not cfg[k]]
+    faltan = [k for k in ("project_id", "region", "ecs_id") if not cfg[k]]
     if faltan:
         raise PanelError("Falta configurar en User Data: " + ", ".join(faltan))
     return cfg
 
 
-# ── Llamadas a las APIs de Huawei ────────────────────────────────────────────
+# ── Llamadas a la API de Huawei ──────────────────────────────────────────────
 def _api(method, url, token, body=None):
     """Request autenticado con el token IAM que da la agency. Devuelve dict."""
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -105,11 +101,6 @@ def _api(method, url, token, body=None):
 
 def _ecs_url(cfg, sufijo=""):
     return "https://ecs.%s.myhuaweicloud.com/v1/%s/cloudservers%s" % (
-        cfg["region"], cfg["project_id"], sufijo)
-
-
-def _vpc_url(cfg, sufijo=""):
-    return "https://vpc.%s.myhuaweicloud.com/v3/%s/vpc/security-group-rules%s" % (
         cfg["region"], cfg["project_id"], sufijo)
 
 
@@ -150,78 +141,20 @@ def ecs_action(cfg, token, arrancar, ecs_ids=None):
     return res.get("job_id", "")
 
 
-# ── Reglas del security group ────────────────────────────────────────────────
-# El SG es el de la ECS: tiene la regla de SSH y lo que haya puesto Terraform.
-# Por eso el panel SOLO puede borrar reglas que él mismo creó, y las reconoce por
-# el `description` marcador. Nunca borra por puerto ni por posición: un match por
-# puerto se llevaría puesta una regla puesta a mano, y uno por posición es una
-# bomba de tiempo.
-def _own_rules(cfg, token):
-    """Reglas del SG creadas por el panel (las marcadas)."""
-    url = _vpc_url(cfg, "?" + urllib.parse.urlencode(
-        {"security_group_id": cfg["sg_id"], "limit": 2000}))
-    reglas = _api("GET", url, token).get("security_group_rules") or []
-    return [r for r in reglas if (r.get("description") or "") == cfg["marker"]]
-
-
-def ports_open(cfg, token):
-    """True si el panel tiene su regla puesta."""
-    return bool(_own_rules(cfg, token))
-
-
-def open_ports(cfg, token):
-    """Abre los puertos. Idempotente: si ya están, no duplica la regla."""
-    if _own_rules(cfg, token):
-        return False
-    _api("POST", _vpc_url(cfg), token, {"security_group_rule": {
-        "security_group_id": cfg["sg_id"],
-        "direction": "ingress",
-        "ethertype": "IPv4",
-        "protocol": "tcp",
-        "multiport": cfg["ports"],
-        "remote_ip_prefix": cfg["cidr"],
-        "description": cfg["marker"],
-    }})
-    return True
-
-
-def close_ports(cfg, token):
-    """Borra las reglas del panel. Idempotente: sin reglas propias, no hace nada."""
-    borradas = 0
-    for regla in _own_rules(cfg, token):
-        _api("DELETE", _vpc_url(cfg, "/" + regla["id"]), token)
-        borradas += 1
-    return borradas
-
-
-# ── Las dos operaciones, con el orden que importa ────────────────────────────
 def do_start(cfg, token, ecs_ids=None):
-    """Abrir puertos PRIMERO, después arrancar.
-
-    Caddy pide/renueva el certificado de Let's Encrypt al bootear y necesita el
-    80/443 alcanzable: si arranca con los puertos cerrados, el challenge ACME
-    falla y la plataforma queda sin HTTPS.
-    """
-    open_ports(cfg, token)
     ecs_action(cfg, token, True, ecs_ids)
     return "Encendiendo. Tarda ~40-60 s en estar disponible."
 
 
 def do_stop(cfg, token, ecs_ids=None):
-    """Detener PRIMERO, después cerrar puertos.
-
-    Al revés, si el stop falla quedaría una máquina encendida e inalcanzable.
-    """
     ecs_action(cfg, token, False, ecs_ids)
-    close_ports(cfg, token)
-    return "Apagando y cerrando los puertos."
+    return "Apagando."
 
 
 def run_action(accion, cfg, token, logger):
     """Las tres acciones que entiende el frente."""
     if accion == "status":
-        return {"ecs": ecs_status(cfg, token), "ports": ports_open(cfg, token),
-                "app_url": cfg["app_url"]}
+        return {"ecs": ecs_status(cfg, token), "app_url": cfg["app_url"]}
 
     estado = ecs_status(cfg, token)
 
@@ -231,22 +164,11 @@ def run_action(accion, cfg, token, logger):
         return {"ok": True, "message": "Hay una operación en curso, esperá.",
                 "ecs": estado}
 
-    # Guarda contra el doble toque, pero SIN saltarse los puertos.
-    #
-    # Antes esto devolvía temprano y no tocaba el security group. El agujero: si
-    # `do_start` abría los puertos y después fallaba el arranque, quedabas en
-    # "apagada + puertos abiertos" y **no había forma de cerrarlos desde el panel**
-    # — apretar Apagar respondía "ya estaba apagada" y no hacía nada. Lo mismo si
-    # alguien apagaba la ECS desde la consola de Huawei. Ahora la acción siempre
-    # reconcilia el SG con el estado deseado, aunque la ECS ya esté donde toca.
+    # Guarda contra el doble toque (o contra alguien que la prendió por consola).
     if accion == "start" and estado == ON:
-        abrio = open_ports(cfg, token)
-        return {"ok": True, "ecs": estado, "message": (
-            "Ya estaba encendida; abrí los puertos." if abrio else "Ya estaba encendida.")}
+        return {"ok": True, "ecs": estado, "message": "Ya estaba encendida."}
     if accion == "stop" and estado == OFF:
-        cerradas = close_ports(cfg, token)
-        return {"ok": True, "ecs": estado, "message": (
-            "Ya estaba apagada; cerré los puertos." if cerradas else "Ya estaba apagada.")}
+        return {"ok": True, "ecs": estado, "message": "Ya estaba apagada."}
 
     logger.info("acción %s (estado actual %s)", accion, estado)
     mensaje = do_start(cfg, token) if accion == "start" else do_stop(cfg, token)
@@ -297,7 +219,7 @@ def handler(event, context):
     token = context.getToken()
     if not token:
         logger.error("sin token IAM: ¿la función tiene una agency asignada?")
-        msg = "No hay token IAM. Asigná una agency con permisos de ECS y VPC."
+        msg = "No hay token IAM. Asigná una agency con permisos de ECS."
         return {"error": msg} if directa else "authentication failed"
 
     if not directa:
@@ -317,8 +239,7 @@ def handler(event, context):
 
 
 def _handle_timer(event, cfg, token, logger):
-    """Encendido/apagado programado. Mismo `user_event` que la función anterior,
-    pero ahora también abre y cierra los puertos."""
+    """Encendido/apagado programado. Mismo `user_event` que la función anterior."""
     try:
         ecs_ids, operacion = parse_user_event(event.get("user_event", ""))
     except ValueError as exc:

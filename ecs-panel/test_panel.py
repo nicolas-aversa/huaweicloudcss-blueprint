@@ -3,10 +3,9 @@
 
 Se concentran en lo que puede romper en silencio y salir caro:
 
-  - que el cierre de puertos NO toque reglas ajenas (si borra la de SSH, te
-    quedás afuera de la máquina),
-  - el orden de las operaciones (puertos antes de encender, apagar antes de
-    cerrar),
+  - el estado en vivo: que una ECS arrancando NO se reporte como apagada (es lo
+    que congelaba el panel),
+  - que no se dispare una acción con otra en curso, ni se re-apague/re-arranque,
   - que el contrato del timer siga andando igual que en la función anterior.
 
 No hablan con Huawei: `_api` se reemplaza por un doble que registra las llamadas.
@@ -27,8 +26,6 @@ _spec.loader.exec_module(panel)
 CFG = {
     "project_id": "proj-1", "region": "la-south-2",
     "ecs_id": "a0b8d54a-9153-482a-9ff3-52ed6e03c88e",
-    "sg_id": "e7fbf08c-7864-479d-98fe-d01aa4a2077a",
-    "ports": "80,443", "cidr": "0.0.0.0/0", "marker": "ecs-panel:auto",
     "app_url": "",
 }
 
@@ -36,8 +33,7 @@ CFG = {
 class FakeAPI:
     """Doble de `_api`: registra las llamadas y responde lo que se le configure."""
 
-    def __init__(self, rules=None, status="SHUTOFF"):
-        self.rules = list(rules or [])
+    def __init__(self, status="SHUTOFF"):
         self.status = status
         # `OS-EXT-STS:task_state`. Es el campo que distingue "apagada" de
         # "arrancando": durante un os-start el `status` sigue diciendo SHUTOFF.
@@ -51,17 +47,6 @@ class FakeAPI:
 
     def __call__(self, method, url, token, body=None):
         self.calls.append((method, url, body))
-        if "security-group-rules" in url:
-            if method == "GET":
-                return {"security_group_rules": self.rules}
-            if method == "POST":
-                nueva = dict(body["security_group_rule"], id="nueva-1")
-                self.rules.append(nueva)
-                return {"security_group_rule": nueva}
-            if method == "DELETE":
-                rid = url.rsplit("/", 1)[-1]
-                self.rules = [r for r in self.rules if r["id"] != rid]
-                return {}
         if url.endswith("/action"):
             return {"job_id": "job-1"}
         if self.secuencia:
@@ -71,14 +56,13 @@ class FakeAPI:
                            "OS-EXT-STS:task_state": self.task_state}}
 
     @property
-    def verbos(self):
-        """Secuencia de (método, recurso) para chequear el ORDEN."""
-        out = []
-        for metodo, url, _ in self.calls:
-            recurso = "sg" if "security-group-rules" in url else (
-                "ecs-action" if url.endswith("/action") else "ecs-get")
-            out.append((metodo, recurso))
-        return out
+    def acciones(self):
+        """Los payloads de los POST a /action, en orden."""
+        return [b for m, u, b in self.calls if u.endswith("/action")]
+
+    @property
+    def urls(self):
+        return [u for _, u, _ in self.calls]
 
 
 @pytest.fixture
@@ -92,9 +76,7 @@ class FakeContext:
     def __init__(self, token="tok"):
         self._d = {
             "project_id": CFG["project_id"], "region": CFG["region"],
-            "ecs_id": CFG["ecs_id"], "sg_id": CFG["sg_id"],
-            "ports": CFG["ports"], "source_cidr": CFG["cidr"],
-            "rule_marker": CFG["marker"], "app_url": CFG["app_url"],
+            "ecs_id": CFG["ecs_id"], "app_url": CFG["app_url"],
         }
         self._token = token
 
@@ -111,98 +93,12 @@ class FakeContext:
         return _L()
 
 
-# ── Lo crítico: no borrar reglas ajenas ──────────────────────────────────────
-# Un SG real tiene la regla de SSH, las que puso Terraform para Beats/CSS, y
-# posiblemente una 443 que alguien agregó a mano. Si el panel las borra, rompe la
-# infra o te deja sin acceso.
-AJENAS = [
-    {"id": "ssh", "multiport": "22", "description": "acceso SSH"},
-    {"id": "beats", "multiport": "5044", "description": "terraform: beats"},
-    # La trampa: MISMOS puertos que el panel, pero puesta a mano.
-    {"id": "manual", "multiport": "80,443", "description": "puesta a mano"},
-    # Otra trampa: sin description (la API devuelve "" o None).
-    {"id": "sin-desc", "multiport": "443", "description": None},
-]
-PROPIA = {"id": "del-panel", "multiport": "80,443", "description": "ecs-panel:auto"}
-
-
-def test_close_ports_solo_borra_las_propias(api):
-    api.rules = AJENAS + [PROPIA]
-
-    borradas = panel.close_ports(CFG, "tok")
-
-    assert borradas == 1
-    assert {r["id"] for r in api.rules} == {"ssh", "beats", "manual", "sin-desc"}
-    # Y que el DELETE fue exactamente al id propio, no a otro.
-    deletes = [u for m, u, _ in api.calls if m == "DELETE"]
-    assert len(deletes) == 1 and deletes[0].endswith("/del-panel")
-
-
-def test_close_ports_sin_reglas_propias_no_borra_nada(api):
-    """Apagar dos veces seguidas, o apagar algo que nunca encendió el panel."""
-    api.rules = list(AJENAS)
-
-    assert panel.close_ports(CFG, "tok") == 0
-    assert not [m for m, _, _ in api.calls if m == "DELETE"]
-    assert len(api.rules) == 4
-
-
-def test_marker_configurable_no_pisa_el_default(api):
-    """Con otro marcador, una regla del marcador default es ajena."""
-    api.rules = [PROPIA, {"id": "otro", "description": "mi-marcador"}]
-
-    assert panel.close_ports(dict(CFG, marker="mi-marcador"), "tok") == 1
-    assert {r["id"] for r in api.rules} == {"del-panel"}
-
-
-# ── Idempotencia al abrir ────────────────────────────────────────────────────
-def test_open_ports_no_duplica(api):
-    assert panel.open_ports(CFG, "tok") is True
-    assert panel.open_ports(CFG, "tok") is False
-    assert len([r for r in api.rules if r["description"] == CFG["marker"]]) == 1
-
-
-def test_open_ports_manda_la_regla_correcta(api):
-    panel.open_ports(CFG, "tok")
-
-    regla = [b for m, _, b in api.calls if m == "POST"][0]["security_group_rule"]
-    assert regla == {
-        "security_group_id": CFG["sg_id"], "direction": "ingress",
-        "ethertype": "IPv4", "protocol": "tcp", "multiport": "80,443",
-        "remote_ip_prefix": "0.0.0.0/0", "description": "ecs-panel:auto"}
-
-
-def test_open_ports_ignora_una_regla_ajena_con_los_mismos_puertos(api):
-    """Que alguien haya abierto el 80/443 a mano no exime al panel de poner la
-    suya: si no, al apagar no tendría qué borrar y quedaría abierto."""
-    api.rules = [{"id": "manual", "multiport": "80,443", "description": "a mano"}]
-
-    assert panel.open_ports(CFG, "tok") is True
-
-
-# ── El orden de las operaciones ──────────────────────────────────────────────
-def test_start_abre_puertos_antes_de_encender(api):
-    """Caddy pide el cert de Let's Encrypt al bootear: con el 80/443 cerrado el
-    challenge ACME falla y la plataforma queda sin HTTPS."""
-    panel.do_start(CFG, "tok")
-
-    assert api.verbos == [("GET", "sg"), ("POST", "sg"), ("POST", "ecs-action")]
-
-
-def test_stop_apaga_antes_de_cerrar_puertos(api):
-    """Al revés, si el stop falla queda una máquina encendida e inalcanzable."""
-    api.rules = [PROPIA]
-
-    panel.do_stop(CFG, "tok")
-
-    assert api.verbos == [("POST", "ecs-action"), ("GET", "sg"), ("DELETE", "sg")]
-
-
+# ── Las dos acciones ─────────────────────────────────────────────────────────
 def test_stop_usa_soft_no_hard(api):
     """La versión anterior usaba HARD, que es desenchufar la máquina."""
     panel.do_stop(CFG, "tok")
 
-    payload = [b for m, u, b in api.calls if u.endswith("/action")][0]
+    [payload] = api.acciones
     assert payload["os-stop"]["type"] == "SOFT"
     assert "HARD" not in str(payload)
 
@@ -210,8 +106,21 @@ def test_stop_usa_soft_no_hard(api):
 def test_start_manda_os_start_con_el_id(api):
     panel.do_start(CFG, "tok")
 
-    payload = [b for m, u, b in api.calls if u.endswith("/action")][0]
-    assert payload == {"os-start": {"servers": [{"id": CFG["ecs_id"]}]}}
+    assert api.acciones == [{"os-start": {"servers": [{"id": CFG["ecs_id"]}]}}]
+
+
+def test_la_funcion_solo_habla_con_ecs(api):
+    """Una versión anterior también abría y cerraba puertos en el security group.
+    Se fue: una ECS apagada no responde a nada, con los puertos como estén. Si
+    esto vuelve a tocar VPC, la agency vuelve a necesitar esos permisos y cada
+    consulta de estado vuelve a costar dos llamadas."""
+    panel.handler({"action": "status"}, FakeContext())
+    panel.handler({"action": "start"}, FakeContext())
+    api.status = "ACTIVE"
+    panel.handler({"action": "stop"}, FakeContext())
+
+    assert api.urls, "no llamó a nada"
+    assert all(u.startswith("https://ecs.") for u in api.urls), api.urls
 
 
 # ── Contrato del timer (no romper los triggers ya configurados) ──────────────
@@ -227,20 +136,26 @@ def test_parse_user_event_invalido(malo):
         panel.parse_user_event(malo)
 
 
-def test_timer_shutdown_apaga_y_cierra(api):
-    api.rules = [PROPIA]
-
+def test_timer_shutdown_apaga(api):
     r = panel.handler({"user_event": "%s,shutdown" % CFG["ecs_id"]}, FakeContext())
 
     assert isinstance(r, str) and "initiated" in r
-    assert api.verbos == [("POST", "ecs-action"), ("GET", "sg"), ("DELETE", "sg")]
+    assert [list(p)[0] for p in api.acciones] == ["os-stop"]
 
 
-def test_timer_startup_abre_y_enciende(api):
+def test_timer_startup_enciende(api):
     r = panel.handler({"user_event": "%s,startup" % CFG["ecs_id"]}, FakeContext())
 
     assert isinstance(r, str)
-    assert api.verbos == [("GET", "sg"), ("POST", "sg"), ("POST", "ecs-action")]
+    assert [list(p)[0] for p in api.acciones] == ["os-start"]
+
+
+def test_timer_con_varios_ids_los_manda_todos(api):
+    """El timer viejo aceptaba `id1,id2,shutdown`; se mantiene."""
+    panel.handler({"user_event": "id-a,id-b,shutdown"}, FakeContext())
+
+    [payload] = api.acciones
+    assert payload["os-stop"]["servers"] == [{"id": "id-a"}, {"id": "id-b"}]
 
 
 def test_timer_con_payload_invalido_devuelve_string(api):
@@ -267,10 +182,17 @@ def test_el_timer_reporta_los_errores_como_string(api):
 # ── Invocación directa (por donde entra el frente) ───────────────────────────
 def test_directa_status(api):
     api.status = "ACTIVE"
-    api.rules = [PROPIA]
 
     assert panel.handler({"action": "status"}, FakeContext()) == {
-        "ecs": "ACTIVE", "ports": True, "app_url": ""}
+        "ecs": "ACTIVE", "app_url": ""}
+
+
+def test_status_es_una_sola_llamada(api):
+    """El frente poletea cada 5 s: cada llamada de más se paga en latencia. Con el
+    manejo de puertos eran dos (ECS + VPC)."""
+    panel.handler({"action": "status"}, FakeContext())
+
+    assert len(api.calls) == 1
 
 
 # ── El estado en vivo ────────────────────────────────────────────────────────
@@ -338,16 +260,16 @@ def test_directa_start(api):
     r = panel.handler({"action": "start"}, FakeContext())
 
     assert r["ok"] is True
-    assert api.verbos == [("GET", "ecs-get"), ("GET", "sg"), ("POST", "sg"),
-                          ("POST", "ecs-action")]
+    assert [list(p)[0] for p in api.acciones] == ["os-start"]
 
 
 def test_directa_stop(api):
     api.status = "ACTIVE"
-    api.rules = [PROPIA]
 
-    assert panel.handler({"action": "stop"}, FakeContext())["ok"] is True
-    assert ("DELETE", "sg") in api.verbos
+    r = panel.handler({"action": "stop"}, FakeContext())
+
+    assert r["ok"] is True
+    assert [list(p)[0] for p in api.acciones] == ["os-stop"]
 
 
 def test_start_sobre_una_maquina_encendida_no_la_rearranca(api):
@@ -356,35 +278,16 @@ def test_start_sobre_una_maquina_encendida_no_la_rearranca(api):
     r = panel.handler({"action": "start"}, FakeContext())
 
     assert r["ok"] is True and "Ya estaba" in r["message"]
-    assert not [c for c in api.calls if c[1].endswith("/action")]
+    assert api.acciones == []
 
 
-def test_start_sobre_una_maquina_encendida_igual_abre_los_puertos(api):
-    """Encendida pero inalcanzable (alguien la prendió por consola, o el cierre
-    quedó a medias): el botón tiene que servir para eso."""
-    api.status = "ACTIVE"
-    api.rules = []
-
-    r = panel.handler({"action": "start"}, FakeContext())
-
-    assert not [c for c in api.calls if c[1].endswith("/action")]
-    assert len(api.rules) == 1 and "abrí los puertos" in r["message"]
-
-
-def test_stop_sobre_una_maquina_apagada_cierra_los_puertos(api):
-    """**La expectativa cambió a propósito.** Este test afirmaba que un `stop`
-    sobre una máquina ya apagada tampoco tocaba el SG, y eso dejaba un estado del
-    que no se podía salir: si `do_start` abría los puertos y después fallaba el
-    arranque, quedaba "apagada + puertos abiertos" y el botón Apagar respondía "ya
-    estaba apagada" sin cerrar nada. La acción ahora reconcilia el SG siempre."""
+def test_stop_sobre_una_maquina_apagada_no_la_reapaga(api):
     api.status = "SHUTOFF"
-    api.rules = [PROPIA]
 
     r = panel.handler({"action": "stop"}, FakeContext())
 
-    assert not [c for c in api.calls if c[1].endswith("/action")], "no re-apaga"
-    assert api.rules == [], "los puertos SÍ se cierran"
-    assert "cerré los puertos" in r["message"]
+    assert r["ok"] is True and "Ya estaba" in r["message"]
+    assert api.acciones == []
 
 
 def test_no_se_dispara_una_accion_con_otra_en_curso(api):
@@ -397,7 +300,7 @@ def test_no_se_dispara_una_accion_con_otra_en_curso(api):
 
     assert r["ecs"] == panel.TRANSICION
     assert "en curso" in r["message"]
-    assert not [c for c in api.calls if c[1].endswith("/action")]
+    assert api.acciones == []
 
 
 def test_directa_devuelve_json_pelado(api):
@@ -423,10 +326,21 @@ def test_directa_normaliza_la_accion(api):
 # ── Errores de configuración y de entorno ────────────────────────────────────
 def test_falta_config_avisa_cual(api):
     ctx = FakeContext()
-    ctx._d["sg_id"] = None
+    ctx._d["region"] = None
 
-    assert "sg_id" in panel.handler({"action": "status"}, ctx)["error"]
+    assert "region" in panel.handler({"action": "status"}, ctx)["error"]
     assert api.calls == []
+
+
+def test_la_config_del_sg_ya_no_es_obligatoria(api):
+    """Una función configurada con `sg_id` y compañía sigue andando (se ignoran),
+    y una nueva no tiene por qué declararlos."""
+    ctx = FakeContext()
+    ctx._d.update({"sg_id": "sg-viejo", "ports": "80,443", "rule_marker": "x"})
+    assert "error" not in panel.handler({"action": "status"}, ctx)
+
+    assert "sg_id" not in FakeContext()._d
+    assert "error" not in panel.handler({"action": "status"}, FakeContext())
 
 
 def test_sin_agency_avisa_en_vez_de_fallar_feo(api):
@@ -476,7 +390,7 @@ def test_el_timer_tambien_tolera_el_string(api):
     r = panel.handler('{"user_event": "%s,startup"}' % CFG["ecs_id"], FakeContext())
 
     assert "initiated" in r
-    assert ("POST", "ecs-action") in api.verbos
+    assert [list(p)[0] for p in api.acciones] == ["os-start"]
 
 
 @pytest.mark.parametrize("basura", [None, [], 42, "no es json", '"solo un string"'])

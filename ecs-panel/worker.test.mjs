@@ -17,7 +17,7 @@ const ENV = {
 };
 
 let llamadas = [];
-let estadoFalso = { ecs: "SHUTOFF", ports: false, app_url: "https://1.2.3.4.sslip.io" };
+let estadoFalso = { ecs: "SHUTOFF", app_url: "https://1.2.3.4.sslip.io" };
 
 globalThis.fetch = async (url, opts = {}) => {
   llamadas.push({ url: String(url), method: opts.method });
@@ -29,8 +29,8 @@ globalThis.fetch = async (url, opts = {}) => {
       return new Response("sin token", { status: 401 });
     }
     const accion = JSON.parse(opts.body).action;
-    if (accion === "start") { estadoFalso = { ...estadoFalso, ecs: "ACTIVE", ports: true }; }
-    if (accion === "stop") { estadoFalso = { ...estadoFalso, ecs: "SHUTOFF", ports: false }; }
+    if (accion === "start") { estadoFalso = { ...estadoFalso, ecs: "ACTIVE" }; }
+    if (accion === "stop") { estadoFalso = { ...estadoFalso, ecs: "SHUTOFF" }; }
     const cuerpo = accion === "status" ? estadoFalso : { ok: true, message: "listo", ecs: estadoFalso.ecs };
     return new Response(JSON.stringify({ result: JSON.stringify(cuerpo) }), { status: 200 });
   }
@@ -81,7 +81,7 @@ check("la respuesta ya es el panel", (await r.text()).includes("Encender"));
 console.log("── con sesión ──");
 r = await pedir({ qs: "?a=status", cookie });
 let d = await r.json();
-check("status responde el estado", d.ecs === "SHUTOFF" && d.ports === false, JSON.stringify(d));
+check("status responde el estado", d.ecs === "SHUTOFF", JSON.stringify(d));
 check("status trae el link a la plataforma", d.app_url === "https://1.2.3.4.sslip.io");
 
 r = await pedir({ qs: "?a=start", cookie, method: "GET" });
@@ -90,11 +90,11 @@ check("start por GET → 405 (un prefetch no puede encender)", r.status === 405)
 r = await pedir({ qs: "?a=start", cookie, method: "POST" });
 check("start por POST funciona", (await r.json()).ok === true);
 d = await (await pedir({ qs: "?a=status", cookie })).json();
-check("tras encender: ACTIVE + puertos abiertos", d.ecs === "ACTIVE" && d.ports === true);
+check("tras encender: ACTIVE", d.ecs === "ACTIVE");
 
 await pedir({ qs: "?a=stop", cookie, method: "POST" });
 d = await (await pedir({ qs: "?a=status", cookie })).json();
-check("tras apagar: SHUTOFF + puertos cerrados", d.ecs === "SHUTOFF" && d.ports === false);
+check("tras apagar: SHUTOFF", d.ecs === "SHUTOFF");
 
 console.log("── cookies falsas ──");
 for (const [nombre, mala] of [
@@ -143,7 +143,7 @@ console.log("── el JS del panel, contra una ECS que TARDA ──");
 
   const nodos = {};
   const nodo = () => ({ textContent: "", className: "", innerHTML: "", disabled: false });
-  for (const id of ["estado", "puertos", "dot", "on", "off", "url", "msg"]) nodos[id] = nodo();
+  for (const id of ["estado", "dot", "on", "off", "url", "msg"]) nodos[id] = nodo();
 
   let ahora = 0;
   const timers = [];        // {id, cuando, cada, fn}
@@ -166,11 +166,11 @@ console.log("── el JS del panel, contra una ECS que TARDA ──");
   let consultas = 0, encendiendo = false;
   const backend = {
     status: () => {
-      if (!encendiendo) return { ecs: "SHUTOFF", ports: false, app_url: "https://x" };
+      if (!encendiendo) return { ecs: "SHUTOFF", app_url: "https://x" };
       consultas++;
       return consultas < 3
-        ? { ecs: "TRANSICION", ports: true, app_url: "https://x" }
-        : { ecs: "ACTIVE", ports: true, app_url: "https://x" };
+        ? { ecs: "TRANSICION", app_url: "https://x" }
+        : { ecs: "ACTIVE", app_url: "https://x" };
     },
     start: () => { encendiendo = true; return { ok: true, message: "Encendiendo.", ecs: "TRANSICION" }; },
   };
@@ -235,7 +235,7 @@ console.log("── el JS del panel, contra una ECS que TARDA ──");
     // El contrato viejo: NUNCA dice TRANSICION. Miente con SHUTOFF hasta el final.
     vistas++;
     return new Response(JSON.stringify(
-      { ecs: arrancado && vistas > 3 ? "ACTIVE" : "SHUTOFF", ports: arrancado, app_url: "https://x" }));
+      { ecs: arrancado && vistas > 3 ? "ACTIVE" : "SHUTOFF", app_url: "https://x" }));
   };
   runInNewContext(js, sandbox2);
   await new Promise(r => setImmediate(r));

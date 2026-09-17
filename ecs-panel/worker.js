@@ -6,13 +6,13 @@
  * triggers de APIG (dedicado, facturado por hora) o APIC (solo AP-Singapore).
  * En LA-Santiago no queda ninguna opción sin costo.
  *
- * Este Worker sirve la página y valida al usuario; la lógica de verdad —prender,
- * apagar, abrir y cerrar los puertos del security group— sigue viviendo en la
- * función de FunctionGraph (`index.py`), que se invoca por la API normal.
+ * Este Worker sirve la página y valida al usuario; la lógica de verdad —prender
+ * y apagar— sigue viviendo en la función de FunctionGraph (`index.py`), que se
+ * invoca por la API normal.
  *
  * Que esté partido en dos no es casualidad: la credencial que guarda Cloudflare
  * se scopea a "invocar esta función" y nada más. Si se filtra, lo máximo que
- * consigue alguien es prender y apagar la máquina — no tocar ECS ni VPC. Los
+ * consigue alguien es prender y apagar la máquina — no tocar la ECS en sí. Los
  * permisos anchos se quedan del lado de Huawei, en la agency de la función.
  *
  * Secrets (wrangler secret put <NOMBRE>):
@@ -265,7 +265,6 @@ h1 { margin:0 0 4px; font-size:20px; }
 .dot.busy { background:var(--busy); animation:pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity:.35; } }
 .state b { font-size:15px; }
-.state span { display:block; color:var(--muted); font-size:13px; }
 button { width:100%; padding:15px; font-size:16px; font-weight:600;
   font-family:inherit; border:0; border-radius:12px; cursor:pointer;
   margin-bottom:10px; background:var(--on); color:#fff; }
@@ -310,7 +309,7 @@ function paginaPanel() {
 <p class=sub>Plataforma CSS Accelerator</p>
 <div class=state>
   <div class=dot id=dot></div>
-  <div><b id=estado>Consultando…</b><span id=puertos>&nbsp;</span></div>
+  <b id=estado>Consultando…</b>
 </div>
 <button id=on disabled>Encender</button>
 <button id=off class=off disabled>Apagar</button>
@@ -340,7 +339,6 @@ function pintar(d) {
                           : t === OFF ? 'Apagada'
                           : esperando === ON ? 'Encendiendo…'
                           : esperando === OFF ? 'Apagando…' : 'Cambiando…';
-  $('puertos').textContent = d.ports ? 'Puertos 80/443 abiertos' : 'Puertos cerrados';
   $('dot').className = 'dot' + (t === ON ? ' on' : quieto ? '' : ' busy');
   $('on').disabled = !quieto || t === ON;
   $('off').disabled = !quieto || t === OFF;

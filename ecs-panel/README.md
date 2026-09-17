@@ -1,8 +1,24 @@
 # Panel de la ECS
 
 Webapp mínima para **prender y apagar desde el celular** la ECS que hostea la plataforma, sin entrar
-a la consola de Huawei Cloud. Al encender **abre los puertos 80 y 443** en el security group; al
-apagar **los cierra**.
+a la consola de Huawei Cloud.
+
+## Los puertos no se tocan
+
+Una versión anterior abría el 80/443 en el security group al encender y los cerraba al apagar. Se
+fue: **una ECS apagada no responde a nada, con los puertos como estén**, así que cerrarlos no
+protegía nada. Y el resto del repo (`hosted-up.sh`, `HOSTING.md`) ya pide esos puertos abiertos
+como requisito permanente de la máquina — el panel los cerraba contra su propia documentación.
+
+Lo que sí costaba: cada consulta de estado eran dos llamadas (ECS + VPC) en vez de una, la agency
+necesitaba permisos de VPC, y existía el estado "apagada + puertos abiertos" con toda una lógica
+para salir de él. Los puertos se abren **una vez** en el SG y se quedan.
+
+> Si venís de la versión anterior: la regla que el panel había creado (description
+> `ecs-panel:auto`) queda como está si la ECS estaba encendida al actualizar — ya nadie la borra.
+> Si estaba **apagada**, la regla no existe: agregá a mano una regla de entrada TCP `80,443` desde
+> `0.0.0.0/0` en el SG de la ECS antes del próximo encendido, o Caddy no va a poder renovar el
+> certificado.
 
 ## El estado en vivo
 
@@ -25,10 +41,6 @@ Hay dos redes, a propósito:
 La segunda no es redundante: **el Worker y la función se despliegan por separado**, así que el panel
 tiene que aguantar hablando con una función vieja que todavía miente. Hay un test de eso.
 
-Las acciones además **reconcilian el security group**: apretar Apagar sobre una máquina ya apagada
-cierra los puertos igual. Sin eso, si el arranque fallaba después de abrirlos quedabas en
-"apagada + puertos abiertos" sin forma de salir desde el panel.
-
 ## Por qué son dos piezas
 
 FunctionGraph **no ofrece ninguna puerta HTTP gratis**. Las HTTP functions solo aceptan triggers de
@@ -39,39 +51,37 @@ para cuentas nuevas. En LA-Santiago no queda ninguna opción sin costo.
 Así que el frente vive afuera y la lógica adentro:
 
 ```
-celular → Cloudflare Worker  ──(API de invocación)──→  FunctionGraph  ──→  ECS + VPC
+celular → Cloudflare Worker  ──(API de invocación)──→  FunctionGraph  ──→  ECS
           password + cookie                            agency con
           (worker.js)                                  permisos reales (index.py)
 ```
 
 Partirlo así tiene una ventaja que no es accidental: **la credencial que guarda Cloudflare se
 scopea a "invocar esta función" y nada más**. Si se filtra, lo máximo que consigue alguien es
-prenderte y apagarte la máquina — no tocar ECS ni VPC. Los permisos anchos se quedan del lado de
+prenderte y apagarte la máquina — no tocar la ECS en sí. Los permisos anchos se quedan del lado de
 Huawei, en la agency.
 
 ## Qué es cada archivo
 
 | | |
 |---|---|
-| `index.py` | La función de FunctionGraph: ECS y reglas de security group. ~295 líneas, sin dependencias fuera de la stdlib. Reemplaza a la función de start/stop que ya tenías. |
+| `index.py` | La función de FunctionGraph: consulta el estado y prende/apaga. ~280 líneas, sin dependencias fuera de la stdlib. Reemplaza a la función de start/stop que ya tenías. |
 | `worker.js` | El frente en Cloudflare: sirve la página, valida la password, invoca la función. |
 | `wrangler.toml` | Config del Worker. **Los secretos no van acá.** |
-| `test_panel.py` | 46 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
+| `test_panel.py` | 41 tests de la función. `py -m pytest ecs-panel/ -q` desde la raíz del repo. |
 | `worker.test.mjs` | 41 checks: el Worker con Web Crypto real y `fetch` interceptado, **más el JS del panel** corrido en un sandbox con timers controlados y una ECS que tarda en arrancar. Ese último bloque es el que hacía falta: el script del panel vive dentro de un template string y hasta ahora no lo ejecutaba ningún test. `node ecs-panel/worker.test.mjs` (desde esta carpeta). |
 
 ## Despliegue
 
 ### 1. La función (Huawei)
 
-**Agency de IAM** delegada en FunctionGraph, con permisos de **ECS** (consultar, arrancar, detener)
-y **VPC** (crear, listar y borrar reglas de security group). Si ya tenías una para el encendido
-programado, seguramente solo tiene ECS: **agregale VPC**, o el panel encenderá bien pero fallará al
-abrir los puertos.
+**Agency de IAM** delegada en FunctionGraph, con permisos de **ECS** (consultar, arrancar, detener).
+Si ya tenías una para el encendido programado, sirve tal cual.
 
 Crear una función Python, pegar `index.py`, handler `index.handler`, timeout 60 s.
 
-**Red: public access, no VPC access.** La función sólo habla con las APIs de control de Huawei, que
-son públicas. Adentro de una VPC [queda aislada de
+**Red: public access, no VPC access.** La función sólo habla con la API de control de Huawei, que
+es pública. Adentro de una VPC [queda aislada de
 internet](https://support.huaweicloud.com/intl/en-us/functiongraph_faq/functiongraph_03_0834.html) y
 necesitaría un NAT gateway sólo para volver al punto de partida; el síntoma sería un timeout en la
 primera llamada, sin ninguna pista de que el problema es la red.
@@ -83,11 +93,10 @@ Configuración en Environment/User Data:
 | `project_id` | sí | Project ID de la región. |
 | `region` | sí | Ej. `la-south-2`. |
 | `ecs_id` | sí | La instancia a manejar. |
-| `sg_id` | sí | El security group donde se abren y cierran los puertos. |
 | `app_url` | no | URL de la plataforma (ej. `https://<EIP>.sslip.io`), para el link "Abrir la plataforma". No se puede derivar sola: el frente vive en el dominio del Worker. |
-| `ports` | no | Default `80,443`. |
-| `source_cidr` | no | Default `0.0.0.0/0`. |
-| `rule_marker` | no | Default `ecs-panel:auto`. Ver "Cómo decide qué borrar". |
+
+`sg_id`, `ports`, `source_cidr` y `rule_marker` eran de la versión que manejaba puertos; si siguen
+en el User Data, se ignoran.
 
 **No hace falta ningún trigger HTTP.** El Worker la invoca por la API.
 
@@ -117,7 +126,7 @@ La URL que imprime es la que guardás como bookmark en el celular.
 
 Un trigger **Timer** sobre la función, con `user_event` = `<ecs_id>,startup` o
 `<ecs_id>,shutdown`. Es el mismo contrato que la función anterior, así que un timer ya configurado
-sigue funcionando apuntado a esta — y ahora además maneja los puertos.
+sigue funcionando apuntado a esta.
 
 ## Seguridad
 
@@ -130,23 +139,20 @@ se loguea una vez y queda.
 entre invocaciones no hay dónde contar intentos. La comparación sí es de tiempo constante (se
 comparan los SHA-256, no los strings, para que el tiempo tampoco dependa del largo).
 
-## Cómo decide qué borrar
+**Para cambiar la contraseña** no hay que tocar código: es un secreto del Worker.
 
-Ese security group tiene la regla de SSH y las que haya puesto Terraform. El panel **solo borra
-reglas que él mismo creó**, y las reconoce porque el campo `description` es exactamente
-`rule_marker`. Nunca borra por puerto ni por posición: un match por puerto se llevaría puesta una
-regla agregada a mano, y uno por posición es una bomba de tiempo.
+```bash
+cd ecs-panel
+npx wrangler secret put PANEL_PASSWORD    # pide el valor nuevo por consola
+```
 
-Por eso, si alguien abrió el 80/443 a mano, el panel igual crea la suya: si no, al apagar no
-tendría qué borrar y el puerto quedaría abierto.
+Rige al instante, sin redeploy. Las sesiones ya abiertas **siguen válidas**: la cookie se firma
+con `PANEL_SECRET`, no con la contraseña. Si además querés cerrar todas las sesiones (un celular
+perdido, una cookie que pudo quedar en otro navegador), rotá también `PANEL_SECRET` con el mismo
+comando: todas las cookies dejan de validar y hay que volver a loguearse.
 
 ## Detalles que no son arbitrarios
 
-- **Encender abre los puertos ANTES de arrancar.** Caddy pide y renueva el certificado de Let's
-  Encrypt al bootear, y necesita el 80/443 alcanzable; con los puertos cerrados el challenge ACME
-  falla y la plataforma queda sin HTTPS.
-- **Apagar detiene ANTES de cerrar los puertos.** Al revés, si el stop falla queda una máquina
-  encendida e inalcanzable.
 - **El apagado es `SOFT`, no `HARD`** (la versión anterior usaba HARD). Un `HARD` es desenchufar la
   máquina. Aunque el estado de Terraform ahora viva en OBS, adentro siguen estando el `users.json`,
   los settings cifrados de cada SA, los casos creados y el registro de pipelines.
@@ -172,15 +178,12 @@ URL `<EIP>.sslip.io` se mantiene y el apagado es transparente para la app.
 
 ## Verificación la primera vez
 
-Mirá el security group en la consola después de cada paso:
-
 1. Abrir la URL del Worker sin sesión → pide password. Con una incorrecta → rechaza.
-2. **Encender** → aparece una regla 80/443 con el `description` del marcador, y la ECS pasa a
-   `ACTIVE` en ~40-60 s.
-3. Abrir la plataforma → carga con candado verde (si el cert no renovó, revisá el orden de los
-   puertos).
-4. **Apagar** → la ECS pasa a `SHUTOFF` y la regla marcada desaparece.
-5. **La regla de SSH sigue ahí.** Este es el chequeo que importa.
+2. **Encender** → el panel pasa a "Encendiendo…" con el punto pulsando, sigue consultando, y en
+   ~40-60 s dice "Encendida".
+3. Abrir la plataforma → carga con candado verde. Si no carga, revisá que el SG de la ECS tenga
+   el 80/443 abierto — el panel ya no lo hace por vos.
+4. **Apagar** → "Apagando…" y después "Apagada".
 
 ## Limitación conocida
 
