@@ -1914,6 +1914,17 @@ def preload_datasets(request: dict):
                         errors += 1
                         yield _sse({"type": "file", "slug": slug, "key": key,
                                     "state": "error", "detail": str(exc)})
+            # Los casos `live` no tienen dataset: leen de su fuente (un bucket
+            # propio, Kafka, Beats…) en cada deploy. No hay nada que subir, pero
+            # si no se los lista el SA ve que "su caso no se subió" y no sabe
+            # por qué. Van al final, con la fuente y sin secretos.
+            for case in custom_cases.list_cases():
+                if case.get("case_type") != "live":
+                    continue
+                yield _sse({"type": "file", "slug": case["slug"], "key": case["slug"],
+                            "state": "live",
+                            "detail": "lee de " + custom_cases.source_label(case["slug"])
+                                      + " en cada deploy: no hay dataset que subir"})
             yield _sse({"type": "complete",
                         "uploaded": uploaded, "skipped": skipped, "errors": errors})
         finally:

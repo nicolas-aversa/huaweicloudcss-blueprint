@@ -346,6 +346,28 @@ def input_config_for(slug: str) -> dict:
     return _walk_secrets(case.get("input_config") or {}, _decrypt)
 
 
+def source_label(slug: str) -> str:
+    """De dónde lee un caso `live`, para mostrar: `obs://bucket/prefijo`,
+    `kafka (topic)`, `beats (puerto)`… Sin secretos: solo el plugin y lo que
+    identifica la fuente."""
+    cfg = (get_case(slug) or {}).get("input_config") or {}
+    plugin = str(cfg.get("plugin_type", "") or "")
+    sub = cfg.get(plugin) or {}
+    if plugin in ("obs", "s3"):
+        prefijo = str(sub.get("prefix", "") or "").strip("/")
+        return f"obs://{sub.get('bucket', '?')}" + (f"/{prefijo}" if prefijo else "")
+    if plugin == "kafka":
+        topics = sub.get("topics") or sub.get("topic") or "?"
+        if isinstance(topics, list):
+            topics = ", ".join(str(t) for t in topics)
+        return f"kafka ({topics})"
+    if plugin == "beats":
+        return f"beats (puerto {sub.get('port', '?')})"
+    if plugin == "jdbc":
+        return "jdbc"
+    return plugin or "su fuente"
+
+
 def case_type_for(slug: str) -> str:
     """`dataset` | `live` | '' (no es un caso creado desde la plataforma)."""
     case = get_case(slug)

@@ -615,3 +615,32 @@ def test_delete_case_endpoint_forbidden_for_non_owner(store, monkeypatch):
 
     assert exc.value.status_code == 403
     assert custom_cases.get_case("firewall-de-acme") is not None
+
+
+# ── Un caso `live` en "Preparar" ────────────────────────────────────────────
+def test_preparar_bucket_lista_los_casos_live_y_dice_por_que_no_los_sube(client, store, monkeypatch):
+    """Un caso armado desde "Ya está en un bucket" no tiene dataset: es `live` y
+    Logstash lee de ese bucket en cada deploy. "Preparar" no lo subía —correcto—
+    pero tampoco lo mencionaba, y el SA veía que "su caso no se subió"."""
+    custom_cases.save_case(dict(_meta(), label="Lee de mi bucket", sample="src=1.2.3.4 bytes=10", input_config={
+        "plugin_type": "obs",
+        "obs": {"bucket": "demoscss", "prefix": "nuevooo/", "access_key_id": "AK",
+                "secret_access_key": "SK", "endpoint": "https://obs.la-south-2.myhuaweicloud.com"},
+    }), log_text="")
+    calls = {}
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+
+    res = client.post("/api/v1/datasets/preload", json={
+        "access_key": "AK", "secret_key": "SK", "bucket": "mis-demos"})
+    assert res.status_code == 200
+
+    assert not [k for k in calls.get("put", []) if k.startswith("lee-de-mi-bucket")], \
+        "un caso live no tiene .log que subir"
+    [ev] = [e for e in _eventos(res) if e.get("slug") == "lee-de-mi-bucket"]
+    assert ev["state"] == "live"
+    assert "obs://demoscss/nuevooo" in ev["detail"] and "no hay dataset" in ev["detail"]
+    assert "SK" not in ev["detail"] and "AK" not in ev["detail"], "sin secretos en el SSE"
+
+
+def test_source_label_no_filtra_secretos_ni_rompe_con_listas():
+    assert custom_cases.source_label("no-existe") == "su fuente"
