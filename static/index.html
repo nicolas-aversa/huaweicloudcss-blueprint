@@ -178,7 +178,7 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
-      margin: 2px 0 6px 0;
+      margin: 2px 0 4px 0;
       padding-left: 24px;
     }
     .nav-substeps__track {
@@ -202,7 +202,7 @@
       display: flex;
       align-items: center;
       width: 100%;
-      padding: 7px 12px;
+      padding: 5px 12px;
       border: none;
       background: transparent;
       border-radius: var(--radius-md);
@@ -557,18 +557,25 @@
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      padding: var(--sp-4) var(--sp-3) var(--sp-1);
+      padding: var(--sp-2) var(--sp-3) var(--sp-1);
     }
     .nav-group__label:first-child { padding-top: var(--sp-1); }
 
+    /* Con los sub-pasos del wizard abiertos, el rail medía ~815px y en una
+       laptop no entraba: aparecía una barra de scroll al lado del menú. Dos
+       cosas: menos aire (padding 20→12, gap 8→4, labels 16→8 arriba, sub-pasos
+       7→5) recupera ~100px, y la barra se oculta manteniendo el scroll — en
+       una pantalla todavía más chica sigue scrolleando con la rueda, sin barra. */
     .app-nav__items {
       flex: 1;
       overflow-y: auto;
-      padding: 20px 12px;
+      scrollbar-width: none;
+      padding: 12px 12px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 4px;
     }
+    .app-nav__items::-webkit-scrollbar { display: none; }
     .nav-item {
       position: relative;
       display: flex;
@@ -2077,6 +2084,9 @@
       .app-view.is-settings.active { min-height: calc(100vh - 72px); }   /* 36 + 36 */
       .settings-card { padding: 12px 18px; }
       .settings-card__head { margin-bottom: 10px; }
+      /* Y el rail con los sub-pasos abiertos. */
+      .app-nav__items { padding-top: 8px; padding-bottom: 8px; gap: 2px; }
+      .nav-substep { padding: 4px 12px; }
     }
 
     /* Home: los dos caminos no entran cómodos lado a lado — se apilan y el

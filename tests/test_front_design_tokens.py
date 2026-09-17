@@ -242,3 +242,17 @@ def test_el_deploy_no_hardcodea_fresh_deploy():
     html = _INDEX.read_text(encoding="utf-8")
     assert not re.search(r"fresh_deploy:\s*true", html), "fresh_deploy hardcodeado en true"
     assert "fresh_deploy: !state.envActive" in html
+
+
+def test_el_rail_oculta_la_barra_pero_sigue_scrolleando(css):
+    """Con los sub-pasos del wizard abiertos el rail no entraba en una laptop y
+    aparecía la barra de scroll al lado del menú. Se oculta la barra pero NO el
+    scroll: en una pantalla más chica todavía tiene que poder bajarse con la
+    rueda. Las dos cosas juntas, o se rompe una."""
+    m = re.search(r"^\s*\.app-nav__items\s*\{([^}]*)\}", css, re.MULTILINE)
+    assert m, "desapareció la regla base .app-nav__items"
+    cuerpo = m.group(1)
+    assert re.search(r"overflow-y:\s*auto", cuerpo), "el rail dejó de scrollear"
+    assert re.search(r"scrollbar-width:\s*none", cuerpo), "la barra vuelve a verse (Firefox)"
+    assert re.search(r"\.app-nav__items::-webkit-scrollbar\s*\{[^}]*display:\s*none", css), \
+        "la barra vuelve a verse (Chrome/Edge/Safari)"
