@@ -337,7 +337,7 @@ def test_el_spec_de_un_caso_custom_sale_de_los_fields_persistidos(store, monkeyp
                 {"field_path": "data.src", "type": "ip", "business_label": "Origen", "dimension": True},
                 {"field_path": "data.bytes", "type": "long", "business_label": "Bytes", "dimension": False},
             ],
-            "label": "",          # modo demo: industry_label viene vacío
+            "label": "",          # registro viejo, sin label
         }
     }
     monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: registro)
@@ -374,12 +374,9 @@ def test_el_label_del_registry_cae_al_nombre_del_caso(store):
     lugares que escriben el registro. Lo lee el chatbot para nombrar la fuente."""
     custom_cases.save_case(_meta(), LOG)
 
-    assert main._registry_label("", "firewall-de-acme") == "Firewall de ACME"
-    assert main._registry_label("   ", "firewall-de-acme") == "Firewall de ACME"
-    # El label explícito del flujo productivo gana sobre el del caso.
-    assert main._registry_label("ACME Corp", "firewall-de-acme") == "ACME Corp"
-    # Un slug sin caso y sin label: vacío, no un placeholder inventado.
-    assert main._registry_label("", "no-existe") == ""
+    assert main._registry_label("firewall-de-acme") == "Firewall de ACME"
+    # Un slug sin caso: vacío, no un placeholder inventado.
+    assert main._registry_label("no-existe") == ""
 
 
 # ── Deploy: el caso se despliega con SU input ───────────────────────────────
@@ -619,13 +616,13 @@ def test_delete_case_endpoint_forbidden_for_non_owner(store, monkeypatch):
 
 # ── Un caso `live` en "Preparar" ────────────────────────────────────────────
 def test_preparar_bucket_lista_los_casos_live_y_dice_por_que_no_los_sube(client, store, monkeypatch):
-    """Un caso armado desde "Ya está en un bucket" no tiene dataset: es `live` y
-    Logstash lee de ese bucket en cada deploy. "Preparar" no lo subía —correcto—
-    pero tampoco lo mencionaba, y el SA veía que "su caso no se subió"."""
-    custom_cases.save_case(dict(_meta(), label="Lee de mi bucket", sample="src=1.2.3.4 bytes=10", input_config={
-        "plugin_type": "obs",
-        "obs": {"bucket": "demoscss", "prefix": "nuevooo/", "access_key_id": "AK",
-                "secret_access_key": "SK", "endpoint": "https://obs.la-south-2.myhuaweicloud.com"},
+    """Un caso `live` (Kafka, Beats, JDBC) no tiene dataset: Logstash lee de la
+    fuente en cada deploy. "Preparar" no lo subía —correcto— pero tampoco lo
+    mencionaba, y el SA veía que "su caso no se subió"."""
+    custom_cases.save_case(dict(_meta(), label="Lee de Kafka", sample="src=1.2.3.4 bytes=10", input_config={
+        "plugin_type": "kafka",
+        "kafka": {"bootstrap_servers": "k:9092", "topics": ["logs", "audit"],
+                  "sasl_username": "u", "sasl_password": "SECRETO"},
     }), log_text="")
     calls = {}
     monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
@@ -634,13 +631,23 @@ def test_preparar_bucket_lista_los_casos_live_y_dice_por_que_no_los_sube(client,
         "access_key": "AK", "secret_key": "SK", "bucket": "mis-demos"})
     assert res.status_code == 200
 
-    assert not [k for k in calls.get("put", []) if k.startswith("lee-de-mi-bucket")], \
-        "un caso live no tiene .log que subir"
-    [ev] = [e for e in _eventos(res) if e.get("slug") == "lee-de-mi-bucket"]
+    assert not [k for k in calls.get("put", []) if k.startswith("lee-de-kafka")],         "un caso live no tiene .log que subir"
+    [ev] = [e for e in _eventos(res) if e.get("slug") == "lee-de-kafka"]
     assert ev["state"] == "live"
-    assert "obs://demoscss/nuevooo" in ev["detail"] and "no hay dataset" in ev["detail"]
-    assert "SK" not in ev["detail"] and "AK" not in ev["detail"], "sin secretos en el SSE"
+    assert "kafka (logs, audit)" in ev["detail"] and "no hay dataset" in ev["detail"]
+    assert "SECRETO" not in ev["detail"], "sin secretos en el SSE"
 
 
-def test_source_label_no_filtra_secretos_ni_rompe_con_listas():
+def test_source_label_de_un_caso_inexistente():
     assert custom_cases.source_label("no-existe") == "su fuente"
+
+
+def test_un_caso_no_puede_leer_directo_de_un_bucket(store):
+    """El flujo "Ya está en un bucket" se fue: un caso así solo lo podía desplegar
+    quien tuviera acceso a ESE bucket, y la alternativa —descargarle los datos al
+    cliente para guardarlos como dataset— es justo lo que no queremos hacer. Sin
+    archivo y con fuente OBS, el error manda al paso 1 a subir el archivo."""
+    with pytest.raises(custom_cases.CaseError, match="subilo en el paso 1"):
+        custom_cases.save_case(dict(_meta(), sample="x=1", input_config={
+            "plugin_type": "obs", "obs": {"bucket": "ajeno", "prefix": "logs/"},
+        }), log_text="")

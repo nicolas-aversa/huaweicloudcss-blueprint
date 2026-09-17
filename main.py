@@ -1540,121 +1540,6 @@ def generate_pipeline(request: OnboardingRequest) -> PipelineResponse:
 # modelos. `chatbot.py`/`document_loader.py` quedan en el repo por si se reexpone.
 
 
-# ── Industry matching: vocabulario por INDUSTRIA ─────────────────────────────
-# El eje es `verticals.GROUPS` (Fintech, Seguridad, Retail, Media, Oil & Gas,
-# Salud), no los casos. Antes esto puntuaba slug por slug y devolvía un CASO, así
-# que el wizard terminaba preguntando "¿tu log es SIEM o Traces de CTS?" cuando lo
-# que quiere saber es de qué industria son los datos. El vocabulario de cada
-# industria es la unión del de sus casos.
-def _industry_vocab() -> dict[str, set[str]]:
-    """`group_id -> {campos}`, uniendo el `industry_fields` de cada miembro.
-
-    Se arma en cada llamada y no como constante de módulo porque los casos
-    creados desde el Builder se dan de alta en runtime.
-    """
-    por_slug = verticals.industry_fields()
-    out: dict[str, set[str]] = {}
-    for v in verticals.all_verticals():
-        campos = por_slug.get(v["slug"]) or []
-        if campos:
-            out.setdefault(v.get("group", ""), set()).update(f.lower() for f in campos)
-    # Los sub-specs (ej. fortianalyzer-soc) no son verticales del registro pero
-    # aportan vocabulario: se los cuelga del grupo de su vertical padre.
-    slugs = {v["slug"]: v.get("group", "") for v in verticals.all_verticals()}
-    for slug, campos in por_slug.items():
-        if slug in slugs:
-            continue
-        padre = next((g for s, g in slugs.items() if slug.startswith(s + "-")), "")
-        if padre:
-            out.setdefault(padre, set()).update(f.lower() for f in campos)
-    out.pop("", None)
-    return out
-
-
-def _match_industry(detected_fields: list[str]) -> dict:
-    """Matchea los campos detectados contra las industrias conocidas.
-
-    Devuelve `{group, score}`. `group` es un id de `verticals.GROUPS`, que es lo
-    que el front pinta como chips y lo que termina siendo el `industry_label` con
-    el que el chatbot nombra la fuente.
-    """
-    detectados = {f.lower() for f in detected_fields}
-    mejor, mejor_score = "", 0.0
-    for grupo, vocab in _industry_vocab().items():
-        if not vocab:
-            continue
-        score = len(detectados & vocab) / len(vocab)
-        if score > mejor_score:
-            mejor, mejor_score = grupo, score
-    return {"group": mejor, "score": mejor_score} if mejor else {"group": "", "score": 0.0}
-
-
-@app.post(
-    "/api/v1/obs/read-sample",
-    tags=["onboarding"],
-    summary="Lee una muestra del primer objeto bajo un prefijo OBS y detecta la industria",
-)
-def obs_read_sample(request: dict) -> dict:
-    """Lee el primer objeto del bucket + prefijo, extrae la primera línea,
-    detecta campos con el LLM, y matchea la industria.
-
-    Body: ``{access_key, secret_key, endpoint, region, bucket, prefix}``
-    Returns: ``{sample_line, total_objects, object_key, industry_match}``
-    """
-    from obs_client import OBSClient, OBSConfigError, OBSUploadError
-
-    # El front manda estos campos vacíos: el SK ya no baja al navegador. Si
-    # vienen con valor (leer el bucket de un tercero), ese gana.
-    import maas_integrator as _mi
-    ak, sk = _mi.resolve_obs_creds(request.get("access_key", ""), request.get("secret_key", ""))
-    endpoint = request.get("endpoint") or _default_obs_endpoint()
-    region = request.get("region") or get_region()
-    bucket = request.get("bucket", "")
-    prefix = request.get("prefix", "")
-
-    if not ak or not sk:
-        raise HTTPException(status_code=400,
-                            detail="Faltan credenciales OBS: cargalas en ⚙ Configuración.")
-    if not bucket:
-        raise HTTPException(status_code=400, detail="Falta el nombre del bucket.")
-
-    try:
-        client = OBSClient(
-            access_key_id=ak,
-            secret_access_key=sk,
-            endpoint=endpoint,
-            bucket=bucket,
-        )
-    except OBSConfigError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    try:
-        sample_line, total_objects, object_key = client.read_sample(prefix)
-    except OBSUploadError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    finally:
-        client.close()
-
-    # Detectar campos con el LLM
-    detected_fields: list[str] = []
-    try:
-        result = generate_logstash_filter(sample_line, namespace="data")
-        detected_fields = [f.get("name", "") or f.get("field", "") for f in result.get("fields", [])]
-    except Exception:
-        pass
-
-    # Industry matching
-    industry_match = _match_industry(detected_fields)
-
-    return {
-        "sample_line": sample_line,
-        "total_objects": total_objects,
-        "object_key": object_key,
-        "detected_fields": detected_fields,
-        "industry_match": industry_match,
-    }
-
-
 @app.get(
     "/api/v1/settings/maas",
     tags=["settings"],
@@ -1984,7 +1869,6 @@ class TerraformDeployRequest(BaseModel):
     https_enabled: bool = Field(default=True, description="Habilitar HTTPS para OpenSearch")
     fields: list[dict] = Field(default_factory=list)
     namespace: str = Field(default="data", description="Namespace de los campos (para el index template).")
-    industry_label: str = Field(default="", description="Etiqueta de la industria confirmada en el paso 1 (despliegue productivo). Se persiste en el registro y nombra la fuente en el chatbot.")
     log_file_content: str = Field(default="", description="Contenido del archivo importado (custom single-case). Se sube tal cual a OBS, sin sintéticos.")
     start_ingestion: bool = Field(default=False)
     cases: list[PipelineCase] = Field(default_factory=list, description="Casos múltiples para deploy en paralelo")
@@ -2425,11 +2309,9 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
                 "index": case.index_name,
                 "obs_prefix": case.obs_prefix,
                 "fields": case.fields or [],
-                # `industry_label` es único para todo el request (camino
-                # productivo). En multi-caso, cada caso creado desde la plataforma
-                # aporta su propio label → el chatbot nombra bien la fuente en vez
-                # de rotular todo igual.
-                "label": _registry_label(request.industry_label, case.slug),
+                # Cada caso creado desde la plataforma aporta su propio label →
+                # el chatbot nombra bien la fuente en vez de rotular todo igual.
+                "label": _registry_label(case.slug),
             }
     else:
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
@@ -2439,7 +2321,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
             "index": request.opensearch_index,
             "obs_prefix": request.obs_prefix,
             "fields": request.fields or [],
-            "label": _registry_label(request.industry_label, slug),
+            "label": _registry_label(slug),
         }
     _write_pipelines_registry(terraform_dir, registry)
 
@@ -3493,19 +3375,19 @@ def _write_pipelines_registry(terraform_dir: Path, registry: dict[str, dict]) ->
         print(f"[deploy] no se pudo persistir el registro de pipelines: {exc!r}")
 
 
-def _registry_label(request_label: str, slug: str) -> str:
+def _registry_label(slug: str) -> str:
     """Nombre de la fuente que se persiste en el registro de pipelines.
 
-    Lo lee el chatbot para rotular de dónde salen los datos. El fallback a
-    `custom_cases.label_for` importa: en modo demo `industry_label` viene vacío,
-    así que sin él un caso creado desde el Builder quedaba con label `""` y el
-    asistente lo llamaba "Tus logs" en vez de por su nombre.
+    Lo lee el chatbot para rotular de dónde salen los datos. Sin esto un caso
+    creado desde el Builder quedaba con label `""` y el asistente lo llamaba
+    "Tus logs" en vez de por su nombre.
 
-    Existe como función porque hay CUATRO lugares que escriben el registro (los
+    Existe como función porque hay varios lugares que escriben el registro (los
     caminos SSE y no-SSE, cada uno con su rama multi-caso y de caso único) y el
-    fallback estaba puesto en uno solo.
+    fallback estaba puesto en uno solo. Antes recibía también un `industry_label`
+    del flujo "Ya está en un bucket", que ya no existe.
     """
-    return (request_label or "").strip() or custom_cases.label_for(slug) or ""
+    return custom_cases.label_for(slug) or ""
 
 
 def _remove_pipelines_registry(terraform_dir: Path) -> None:

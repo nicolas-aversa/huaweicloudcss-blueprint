@@ -1537,10 +1537,6 @@
       font-size: var(--fs-sm); font-weight: 600; color: var(--accent-green);
     }
     .sample-found__head .icon { width: 14px; height: 14px; }
-    /* Releer / Borrar, empujados a la derecha. Heredan el verde del head, así que
-       se les repone el color de botón. */
-    .sample-found__actions { margin-left: auto; display: flex; gap: var(--sp-2); }
-    .sample-found__actions .btn { color: var(--text-secondary); }
     .sample-found pre {
       margin: 0; padding: 9px 11px; background: var(--bg-tertiary); border-radius: var(--radius-sm);
       font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5;
@@ -2369,7 +2365,7 @@
 
             <div class="guide-more">
               <strong>¿Y además?</strong>
-              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo, un bucket o una fuente en vivo) y queda como una card más del grid, con sus dashboards y su asistente, para vos y para el resto del equipo.</span>
+              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo o una fuente en vivo) y queda como una card más del grid, con sus dashboards y su asistente, para vos y para el resto del equipo.</span>
               <span><strong>Actividad</strong>: qué se ejecutó y por qué falló, con la salida de Terraform.</span>
               <span><strong>Panel de control</strong> (admins): quién entra, quién administra.</span>
             </div>
@@ -2573,7 +2569,7 @@
 
 
             <div class="form-group hidden" id="rawlog-group">
-              <!-- Una sola pregunta. `state.sourceMode` (file|obs|live) decide qué
+              <!-- Una sola pregunta. `state.sourceMode` (file|live) decide qué
                    panel se ve, qué hace Siguiente, qué plugin usa el paso 3 y si el
                    dataset queda repetible o en vivo. Antes eso se infería de si
                    state.logFileContent estaba vacío: implícito y frágil. -->
@@ -2583,11 +2579,6 @@
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-upload"/></svg></span>
                   <span class="src-card__name">Tengo el archivo</span>
                   <span class="src-card__desc">Lo subís, se guarda en tu bucket y lo desplegás las veces que quieras.</span>
-                </button>
-                <button type="button" class="src-card" data-src="obs" role="radio" aria-checked="false">
-                  <span class="src-card__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
-                  <span class="src-card__name">Ya está en un bucket</span>
-                  <span class="src-card__desc">Logstash lee de ese prefijo en OBS. No se copia nada.</span>
                 </button>
                 <button type="button" class="src-card" data-src="live" role="radio" aria-checked="false">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-activity"/></svg></span>
@@ -2604,29 +2595,6 @@
                   <div style="font-size:var(--fs-sm); color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
                 </div>
                 <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
-              </div>
-
-              <div id="source-pane-obs" class="hidden">
-                <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                  <div class="form-group" style="flex:1; min-width:190px;">
-                    <label class="form-label" style="font-size:var(--fs-xs);">Bucket</label>
-                    <input type="text" class="form-input" id="productive-bucket" placeholder="mi-bucket-logs" style="font-size:var(--fs-sm);">
-                  </div>
-                  <div class="form-group" style="flex:1; min-width:190px;">
-                    <label class="form-label" style="font-size:var(--fs-xs);">Prefijo</label>
-                    <input type="text" class="form-input" id="productive-prefix" placeholder="logs/" style="font-size:var(--fs-sm);">
-                  </div>
-                  <div class="form-group" style="flex:1; min-width:150px;">
-                    <label class="form-label" style="font-size:var(--fs-xs);">Región</label>
-                    <input type="text" class="form-input" id="productive-region" value="la-south-2" style="font-size:var(--fs-sm);">
-                  </div>
-                  <div class="form-group" style="flex:2; min-width:220px;">
-                    <label class="form-label" style="font-size:var(--fs-xs);">Endpoint</label>
-                    <input type="text" class="form-input" id="productive-endpoint" value="https://obs.la-south-2.myhuaweicloud.com" style="font-size:var(--fs-sm);">
-                  </div>
-                </div>
-                <div id="productive-creds-status" style="font-size:var(--fs-xs); margin-bottom:8px;"></div>
-                <button class="btn btn-secondary btn-sm" type="button" id="obs-read-sample"><svg class="icon"><use href="#ic-search"/></svg> Leer una muestra</button>
               </div>
 
               <div id="source-pane-live" class="hidden">
@@ -2651,33 +2619,16 @@
                 <p class="form-hint" id="live-hint" style="margin:8px 0 0;"></p>
               </div>
 
-              <!-- Único widget de resultado para las tres vías: antes cada una
+              <!-- Único widget de resultado para las dos vías: antes cada una
                    mostraba el suyo (o ninguno, en la de pegar). -->
               <div class="sample-found hidden" id="rawlog-sample-group">
                 <div class="sample-found__head">
                   <svg class="icon"><use href="#ic-check"/></svg>
                   <span id="sample-found-label">Muestra detectada</span>
-                  <!-- Solo en la vía OBS: las otras dos (archivo, pegar) se
-                       rehacen cambiando el archivo o el texto. -->
-                  <span id="sample-found-actions" class="sample-found__actions hidden">
-                    <button class="btn btn-secondary btn-sm" type="button" id="sample-refresh"
-                            title="Volver a leer del bucket"><svg class="icon"><use href="#ic-refresh"/></svg> Releer</button>
-                    <button class="btn btn-secondary btn-sm" type="button" id="sample-clear"
-                            title="Descartar la muestra y empezar de nuevo"><svg class="icon"><use href="#ic-x"/></svg> Borrar</button>
-                  </span>
                 </div>
                 <pre id="rawlog-sample-preview"></pre>
               </div>
 
-              <!-- Sin contenido propio: es el canal de "leyendo…" y de error del
-                   flujo OBS. El eco de la muestra que mostraba acá repetía la
-                   primera línea que el panel de arriba ya muestra entera. -->
-              <div id="productive-analyze-status" class="hidden" style="font-size:var(--fs-base); color:var(--text-secondary); margin-top:12px;"></div>
-
-              <div id="industry-match-panel" class="hidden" style="margin-top:12px;">
-                <label class="form-label" id="industry-match-suggestion">¿De qué industria son estos datos?</label>
-                <div class="src-chips" id="industry-match-chips"></div>
-              </div>
               <div class="field-error" id="step1-custom-error"></div>
                   <textarea id="raw-log" style="display:none;"></textarea>
             </div>
@@ -3037,13 +2988,6 @@
     // Lo que va en el body por un campo de SK: '' salvo que lo hayan re-tipeado.
     function secretFieldValue(id) {
       return secretFieldEdit(document.getElementById(id)).value;
-    }
-
-    // ¿Hay un SK utilizable? El guardado en la cuenta, o uno recién tipeado.
-    function skAvailable() {
-      return !!((state.obsCreds && state.obsCreds.skConfigured)
-                || secretFieldValue('settings-obs-sk')
-                || secretFieldValue('input-secret-access-key'));
     }
 
     // Llama al LLM con el raw log y guarda el filter + fields en `state`.
@@ -3788,7 +3732,7 @@
       );
 
       // Slugs con bundle de capabilities en el backend + labels. SLUG_LABELS es
-      // global: lo usan el panel del chatbot, el industry match y el deploy.
+      // global: lo usan el panel del chatbot y el deploy.
       CAPABILITY_SLUGS = new Set(_VVIS.filter(v => v.hasCapability).map(v => v.slug));
       SLUG_LABELS = Object.fromEntries(_VVIS.map(v => [v.slug, v.fullLabel]));
 
@@ -3847,9 +3791,7 @@
         const PLUGIN_LABEL = { obs: 'OBS', kafka: 'Kafka', beats: 'Beats/Filebeat', jdbc: 'una base (JDBC)' };
         summary.innerHTML = state.sourceMode === 'file'
           ? `<strong>Dataset repetible.</strong> Se guarda <strong>${escapeHtml(state.logFileName || 'tu archivo')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket, así lo desplegás las veces que quieras.`
-          : state.sourceMode === 'obs'
-            ? `<strong>Lee de tu bucket.</strong> No se copia nada: al desplegar, Logstash lee del prefijo que indicaste en OBS.`
-            : `<strong>Dataset en vivo.</strong> Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión del paso 3. Esa fuente tiene que estar levantada y ser alcanzable al desplegar.`;
+          : `<strong>Dataset en vivo.</strong> Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión del paso 3. Esa fuente tiene que estar levantada y ser alcanzable al desplegar.`;
         summary.innerHTML += ` · ${state.fields.length} campo${state.fields.length === 1 ? '' : 's'} detectado${state.fields.length === 1 ? '' : 's'}.`;
       }
 
@@ -4548,22 +4490,18 @@
       const config = {};
       
       if (state.inputPlugin === 'obs') {
-        // En custom manda el paso 3 (es el que se llama "Origen y destino" y el
-        // que el usuario ve y edita); los campos del paso 1 solo actúan de
-        // fallback para lo que vino de leer una muestra de OBS. Antes se leía
-        // siempre el paso 1 y, si habías subido un archivo, estaba vacío: el
-        // prefijo que declarabas en el paso 3 no llegaba al .conf.
+        // En custom manda el paso 3 ("Origen y destino"), que es el que el
+        // usuario ve y edita. Las credenciales son las de la cuenta.
         if (state.deployMode === 'custom') {
-          const v = (a, b) => (document.getElementById(a)?.value || '').trim()
-                           || (document.getElementById(b)?.value || '').trim();
-          config.bucket = v('input-bucket', 'productive-bucket');
+          const v = a => (document.getElementById(a)?.value || '').trim();
+          config.bucket = v('input-bucket');
           config.access_key_id = state.obsCreds.ak || '';
           // Vacío a propósito: el SK no bajó al navegador. `generate_input_block`
           // lo completa server-side con el de la cuenta antes de armar el .conf.
           config.secret_access_key = '';
-          config.endpoint = v('input-endpoint', 'productive-endpoint') || `https://obs.${hwRegion()}.myhuaweicloud.com`;
-          config.region = v('input-region', 'productive-region') || hwRegion();
-          config.prefix = v('input-prefix', 'productive-prefix');
+          config.endpoint = v('input-endpoint') || `https://obs.${hwRegion()}.myhuaweicloud.com`;
+          config.region = v('input-region') || hwRegion();
+          config.prefix = v('input-prefix');
         } else {
           config.bucket = document.getElementById('input-bucket')?.value || '';
           config.access_key_id = document.getElementById('input-access-key-id')?.value || '';
@@ -4715,11 +4653,6 @@
         https_enabled: outputCfg.ssl === true,
         fields: state.fields,
         namespace: pipelineNamespace(),
-        // Industria confirmada en el paso 1 (productivo): nombra la fuente del
-        // cliente en el chatbot ("Retail / E-commerce" en vez del slug crudo).
-        // Etiqueta de la INDUSTRIA ("Fintech"), no del caso: es cómo el chatbot
-        // nombra la fuente. Sale de DEMO_VERTICALS, que son los grupos.
-        industry_label: (DEMO_VERTICALS.find(g => g.id === state.matchedIndustry)?.label) || '',
         read_existing_bucket: !!state.readExistingMode,
         document_id: state.dedupId || '',
         start_ingestion: startIngestion,
@@ -6504,8 +6437,6 @@
         if (fileInput) fileInput.value = '';
         const pasteEl = document.getElementById('builder-paste');
         if (pasteEl) pasteEl.value = '';
-        document.getElementById('productive-analyze-status')?.classList.add('hidden');
-        document.getElementById('industry-match-panel')?.classList.add('hidden');
         if (typeof showSample === 'function') showSample('');
         // El paso arranca siempre en "Tengo el archivo", el camino normal.
         if (typeof switchSourceMode === 'function') switchSourceMode('file');
@@ -6634,17 +6565,6 @@
     // Toggle entre "Datasets de ejemplo" (grid multi-select) y "Dataset nuevo"
     // (pegar el log propio). Solo se muestra una sección a la vez. Entrar a
     // custom activa ese flujo; volver a demos limpia la selección custom.
-    function _updateProductiveCredsStatus() {
-      const el = document.getElementById('productive-creds-status');
-      if (!el) return;
-      const hasCreds = state.obsCreds && state.obsCreds.ak && skAvailable();
-      if (hasCreds) {
-        el.innerHTML = '';
-      } else {
-        el.innerHTML = '<span style="color:var(--accent-hover);">⚠ Faltan AK/SK. Abrí Configuración (⚙) en el nav bar para cargarlos.</span>';
-      }
-    }
-
     // Paso 2 en modo productivo: si todavía NO se analizó el bucket (sin sample),
     // mostrar el placeholder que manda al paso 1 y ocultar la tabla; con sample
     // analizado, el mapping se muestra normal. Llamado desde switchExampleMode,
@@ -6676,12 +6596,10 @@
       document.getElementById('step3-input-section')?.classList.remove('hidden');
       // Placeholder del step 2 en modo builder (solo si aún no hay sample analizado).
       updateProductiveStep2();
-      // Estado de creds OBS (para el atajo de leer muestra de OBS).
-      // Y re-renderizar el form de fuente: `renderInputConfig` corre al boot en
+      // Re-renderizar el form de fuente: `renderInputConfig` corre al boot en
       // modo demo, y sin esto el paso 3 quedaba con el BUCKET DE DEMOS precargado
       // en custom — y ese bucket, que nadie eligió, terminaba en el .conf.
       if (mode === 'custom') {
-        _updateProductiveCredsStatus();
         renderInputConfig(state.inputPlugin || 'obs');
         applyStep3PluginVisibility();
       }
@@ -6974,8 +6892,8 @@
     document.querySelectorAll('[data-go-next]').forEach(btn => {
       btn.addEventListener('click', async () => {
         // Builder, paso 1: "Siguiente" ES el análisis. Si pegaste log, GLM-5.2
-        // arma la estructura del texto; si no, lee una muestra de OBS. Si falla,
-        // el error queda inline y NO se avanza. Si ya se analizó, sigue derecho.
+        // arma la estructura del texto. Si falla, el error queda inline y NO se
+        // avanza. Si ya se analizó, sigue derecho.
         if (currentStep === 1 && state.deployMode === 'custom' && !state.rawLog) {
           const pasted = document.getElementById('builder-paste')?.value.trim() || '';
           const errEl = document.getElementById('step1-custom-error');
@@ -6984,10 +6902,7 @@
           let ok;
           // Cada vía tiene su acción; la decide `sourceMode`, no el contenido.
           // (La de archivo no entra acá: _handleLogFile ya dejó la muestra.)
-          if (state.sourceMode === 'obs') {
-            btn.innerHTML = 'Leyendo muestra de OBS…';
-            ok = await analyzeProductiveBucket();
-          } else if (state.sourceMode === 'live') {
+          if (state.sourceMode === 'live') {
             if (!pasted) {
               if (errEl) errEl.textContent = 'Pegá 2-3 líneas de tu log para detectar la estructura.';
               ok = false;
@@ -7108,7 +7023,6 @@
         const akIn = document.getElementById('settings-obs-ak');
         if (akIn && !akIn.value) akIn.value = state.obsCreds.ak || '';
         wireSecretField(document.getElementById('settings-obs-sk'), state.obsCreds.skConfigured);
-        _updateProductiveCredsStatus();
         const badge = document.getElementById('nav-settings-label');
         if (badge && state.obsCreds.ak) badge.textContent = 'Configuración';
       } catch (_) {}
@@ -7265,10 +7179,6 @@
       // Reflejar la región efectiva en los defaults de los forms que se
       // renderizan antes de este fetch.
       const region = hwRegion();
-      const prodRegion = document.getElementById('productive-region');
-      if (prodRegion && prodRegion.value === 'la-south-2') prodRegion.value = region;
-      const prodEp = document.getElementById('productive-endpoint');
-      if (prodEp && prodEp.value.includes('la-south-2')) prodEp.value = `https://obs.${region}.myhuaweicloud.com`;
       const outEp = document.getElementById('output-obs-endpoint');
       if (outEp && outEp.value.includes('la-south-2')) outEp.value = `https://obs.${region}.myhuaweicloud.com`;
       // Bucket de demos: el campo del wizard se pinta antes de este fetch, así que
@@ -7496,7 +7406,6 @@
         }
       }
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);
-      _updateProductiveCredsStatus();
       refreshMaasKeyStatus({ forzar: true });   // recién guardada: volver a los puntitos
       // El bucket de demos vive en esta card: persistirlo (saveHuaweiSettings manda
       // todos los campos huawei por id, así no pisa la infra de la otra card).
@@ -7514,13 +7423,15 @@
     });
 
 
-    // ── Modo productivo: leer la muestra del bucket + industry matching ────────
-    // Lo dispara "Siguiente" del paso 1 (no hay botón aparte: dos CTAs para la
-    // misma acción confundían). Devuelve true si se puede avanzar al paso 2.
     // ── Origen del dataset (paso 1) ────────────────────────────────────────
-    // Subir el archivo y leerlo de OBS traen el MISMO dataset: son dos paneles
-    // del mismo paso, no dos flujos. `state.sourceMode` decide cuál se usa al
-    // apretar Siguiente.
+    // Dos vías: subir el archivo (dataset repetible) o una fuente en vivo.
+    // `state.sourceMode` decide cuál se usa al apretar Siguiente.
+    //
+    // Hubo una tercera, "Ya está en un bucket": Logstash leía de un prefijo de
+    // OBS del cliente. Se fue porque un caso así solo lo podía desplegar quien
+    // tuviera acceso a ESE bucket, y la alternativa —que la plataforma se
+    // descargara los datos del cliente para guardarlos como dataset— es
+    // exactamente lo que no queremos hacer con datos de un tercero.
     // Pistas de dónde sacar las líneas, por fuente. Antes era un panel fijo de
     // cuatro filas siempre visible; ahora acompaña a la fuente elegida.
     const LIVE_HINTS = {
@@ -7537,9 +7448,7 @@
         b.setAttribute('aria-checked', String(on));
       });
       document.getElementById('source-pane-file')?.classList.toggle('hidden', src !== 'file');
-      document.getElementById('source-pane-obs')?.classList.toggle('hidden', src !== 'obs');
       document.getElementById('source-pane-live')?.classList.toggle('hidden', src !== 'live');
-      if (src === 'obs') _updateProductiveCredsStatus();
       if (src === 'live') _syncLivePlugin();
       // La fuente elegida acá manda en el paso 3: sin esto se podía subir un
       // archivo y después elegir Kafka, contradiciendo el paso 1.
@@ -7585,7 +7494,7 @@
       if (btn) switchSourceMode(btn.dataset.src);
     });
 
-    // Muestra detectada: un solo widget para las tres vías (antes cada una tenía
+    // Muestra detectada: un solo widget para las dos vías (antes cada una tenía
     // el suyo, y la de pegar no mostraba nada).
     // Primera línea no vacía de un texto pegado. Sin regex a propósito: es lo
     // único que hace falta y evita escapes en el template.
@@ -7597,152 +7506,15 @@
       return '';
     }
 
-    function showSample(line, origen, conAcciones) {
+    function showSample(line, origen) {
       const box = document.getElementById('rawlog-sample-group');
       const pre = document.getElementById('rawlog-sample-preview');
       const lab = document.getElementById('sample-found-label');
-      const acc = document.getElementById('sample-found-actions');
       if (!box || !pre) return;
       if (!line) { box.classList.add('hidden'); return; }
       pre.textContent = String(line).substring(0, 600);
       if (lab) lab.textContent = origen || 'Muestra detectada';
-      // Releer/Borrar solo tienen sentido leyendo de un bucket: las otras dos vías
-      // se rehacen cambiando el archivo o el texto pegado.
-      if (acc) acc.classList.toggle('hidden', !conAcciones);
       box.classList.remove('hidden');
-    }
-
-    // Industrias como chips, con el ícono de cada grupo del registro. `sugerida`
-    // es el group id que devolvió el matcher; puede venir vacío.
-    function pintarIndustrias(sugerida) {
-      const panel = document.getElementById('industry-match-panel');
-      const chips = document.getElementById('industry-match-chips');
-      const lab = document.getElementById('industry-match-suggestion');
-      if (!panel || !chips) return;
-      state.matchedIndustry = sugerida || '';
-      chips.innerHTML = DEMO_VERTICALS.map(g => `
-        <button type="button" class="src-chip${g.id === sugerida ? ' is-active' : ''}"
-                role="radio" aria-checked="${g.id === sugerida}" data-industria="${escapeHtml(g.id)}">
-          <svg class="icon"><use href="#ic-${escapeHtml(g.icon || 'box')}"/></svg>${escapeHtml(g.label)}
-        </button>`).join('');
-      if (lab) {
-        lab.textContent = sugerida
-          ? 'Detectamos esta industria. Cambiala si no es la correcta.'
-          : '¿De qué industria son estos datos?';
-      }
-      panel.classList.remove('hidden');
-    }
-
-    document.getElementById('industry-match-chips')?.addEventListener('click', (e) => {
-      const chip = e.target.closest('.src-chip');
-      if (!chip) return;
-      document.querySelectorAll('#industry-match-chips .src-chip').forEach(c => {
-        const on = c === chip;
-        c.classList.toggle('is-active', on);
-        c.setAttribute('aria-checked', String(on));
-      });
-      state.matchedIndustry = chip.dataset.industria || '';
-    });
-
-    // Releer: vuelve a pedir la muestra con los valores que estén AHORA en los
-    // campos (bucket/prefijo/región/endpoint se releen en cada llamada).
-    document.getElementById('sample-refresh')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      try { await analyzeProductiveBucket(); } finally { btn.disabled = false; }
-    });
-
-    // Borrar: descarta la muestra Y lo que se derivó de ella. Sin `clearMapping`
-    // quedarían los campos del dataset anterior y el paso 2 mostraría un mapping
-    // que no corresponde a nada.
-    document.getElementById('sample-clear')?.addEventListener('click', () => {
-      state.rawLog = '';
-      const ta = document.getElementById('raw-log');
-      if (ta) ta.value = '';
-      clearMapping();
-      state.matchedIndustry = '';
-      showSample('');
-      document.getElementById('industry-match-panel')?.classList.add('hidden');
-      document.getElementById('productive-analyze-status')?.classList.add('hidden');
-      updateProductiveStep2();
-    });
-    document.getElementById('obs-read-sample')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      const prev = btn.innerHTML;
-      btn.innerHTML = 'Leyendo…';
-      try { await analyzeProductiveBucket(); } finally {
-        btn.disabled = false; btn.innerHTML = prev;
-      }
-    });
-
-    async function analyzeProductiveBucket() {
-      const statusEl = document.getElementById('productive-analyze-status');
-      const matchPanel = document.getElementById('industry-match-panel');
-      const bucketEl = document.getElementById('productive-bucket');
-
-      const bucket = bucketEl?.value?.trim();
-      const prefix = document.getElementById('productive-prefix')?.value?.trim();
-      const endpoint = document.getElementById('productive-endpoint')?.value?.trim() || `https://obs.${hwRegion()}.myhuaweicloud.com`;
-      const region = document.getElementById('productive-region')?.value?.trim() || hwRegion();
-      const ak = state.obsCreds.ak || '';
-      const sk = '';   // el servidor pone el de la cuenta: nunca bajó al navegador
-
-      // Errores accionables (inline en el campo; toast solo para lo que no es de campo).
-      if (!ak || !state.obsCreds.skConfigured) {
-        _updateProductiveCredsStatus();
-        toast('Faltan las credenciales OBS: cargalas en Configuración antes de continuar.', 'error');
-        return false;
-      }
-      if (!bucket) {
-        setFieldError(bucketEl, 'Ingresá el bucket donde están tus logs.');
-        return false;
-      }
-      clearFieldError(bucketEl);
-
-      statusEl.classList.remove('hidden');
-      statusEl.innerHTML = '<div class="status status-loading" style="margin:0;">Leyendo la muestra del bucket y detectando la estructura…</div>';
-
-      try {
-        const res = await fetch('/api/v1/obs/read-sample', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_key: ak, secret_key: sk, endpoint, region, bucket, prefix: prefix || '' }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(detailMsg(data));
-
-        statusEl.classList.add('hidden');   // el panel de arriba ya muestra la muestra
-
-        // Guardar el sample para que el pipeline generation lo use.
-        const rawLogEl = document.getElementById('raw-log');
-        if (rawLogEl) rawLogEl.value = data.sample_line;
-        state.rawLog = data.sample_line;
-        updateProductiveStep2();   // ya hay sample → el paso 2 muestra el mapping
-
-        // Detección de campos + filter (LLM). Si falla, NO avanzamos: el paso 2
-        // quedaría vacío. El detalle del error va inline acá.
-        const gen = await transformLog();
-        if (!gen.ok) throw new Error(gen.error);
-
-        // Industria (heurístico, sin LLM). Antes esto ofrecía los CASOS de demo
-        // ("SIEM", "Traces de CTS"), que no es lo que se pregunta: la industria es
-        // el eje de `verticals.GROUPS` — Fintech, Seguridad, Retail…
-        pintarIndustrias(data.industry_match && data.industry_match.group);
-        showSample(data.sample_line, `Leída de ${bucket}${prefix ? '/' + prefix : ''}`, true);
-        // El bucket del que se leyó la muestra es el origen real del dataset:
-        // se propaga al paso 3, que es donde el usuario lo ve y lo edita. Sin
-        // esto había que volver a tipearlo ahí para que llegara al .conf.
-        [['input-bucket', bucket], ['input-prefix', prefix || ''],
-         ['input-region', region], ['input-endpoint', endpoint]].forEach(([id, val]) => {
-          const el = document.getElementById(id);
-          if (el && val) el.value = val;
-        });
-        return true;
-      } catch (e) {
-        statusEl.innerHTML = `<div class="status status-error" style="margin:0;">No se pudo analizar el bucket: ${escapeHtml(e.message)}</div>`;
-        matchPanel.classList.add('hidden');
-        return false;
-      }
     }
 
     // ── Auto-cargar ejemplo para pruebas rápidas ───────────────────────────────

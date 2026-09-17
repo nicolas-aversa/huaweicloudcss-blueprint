@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -226,13 +226,6 @@ Audit trail: acciones, ratings, servicios, usuarios y recursos.""",
         '¿Hubo alguna acción con código de error?',
         '¿Qué acciones hizo cada usuario sobre recursos de ECS?',
     ],
-
-    # Vocabulario para el matcher de industria (paso 1 del modo productivo).
-    'industry_fields': {
-        'trace_id', 'trace_name', 'trace_type', 'trace_rating', 'service_type',
-        'resource_type', 'resource_name', 'event_type', 'source_ip',
-        'tracker_name', 'domain_id', 'project_id', 'record_time',
-    },
 
     # ── Chatbot / PPL ────────────────────────────────────────────────────────
     # Las descripciones las lee el LLM para armar la consulta PPL: dicen qué

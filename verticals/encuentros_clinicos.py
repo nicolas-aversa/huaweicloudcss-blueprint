@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -100,16 +100,6 @@ VERTICAL = {
         '¿Cuál es el costo promedio por clase de encuentro?',
         '¿Cuántos encuentros hay por día?',
     ],
-    'industry_fields': {
-        'claim',
-        'cost',
-        'department',
-        'diagnosis',
-        'patient.id',
-        'procedure',
-        'provider',
-        'visit_date',
-    },
     'dataset_files': ['encuentros-clinicos.log'],
     'capability': {
         'label': 'Encuentros clínicos',

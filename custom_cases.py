@@ -284,10 +284,15 @@ def save_case(meta: dict, log_text: str, created_by: str = "") -> dict:
         if not input_config:
             raise CaseError(
                 "Sin archivo de datos hay que decir de dónde salen: elegí la fuente "
-                "(Kafka, Beats, JDBC u OBS) en el paso 3, o importá un .log.")
-        if input_config["plugin_type"] in ("obs", "s3") and not input_config.get(
-                input_config["plugin_type"], {}).get("bucket"):
-            raise CaseError("Para un caso que lee de OBS hace falta el bucket de origen.")
+                "(Kafka, Beats o JDBC) en el paso 3, o importá un .log.")
+        # Un caso que lee de un bucket ajeno ya no se puede crear: solo lo podía
+        # desplegar quien tuviera acceso a ESE bucket, y copiarle los datos al
+        # cliente para guardarlos como dataset es justo lo que no queremos hacer.
+        # Si el dato es un archivo, se sube como archivo.
+        if input_config["plugin_type"] in ("obs", "s3"):
+            raise CaseError(
+                "Un caso no puede leer directo de un bucket: si los datos son un "
+                "archivo, subilo en el paso 1 y queda guardado como dataset.")
 
     sample = str(meta.get("sample", "") or "").strip() or (lines[0] if lines else "")
     if not sample:
@@ -347,15 +352,12 @@ def input_config_for(slug: str) -> dict:
 
 
 def source_label(slug: str) -> str:
-    """De dónde lee un caso `live`, para mostrar: `obs://bucket/prefijo`,
-    `kafka (topic)`, `beats (puerto)`… Sin secretos: solo el plugin y lo que
-    identifica la fuente."""
+    """De dónde lee un caso `live`, para mostrar: `kafka (topic)`,
+    `beats (puerto)`, `jdbc`. Sin secretos: solo el plugin y lo que identifica
+    la fuente."""
     cfg = (get_case(slug) or {}).get("input_config") or {}
     plugin = str(cfg.get("plugin_type", "") or "")
     sub = cfg.get(plugin) or {}
-    if plugin in ("obs", "s3"):
-        prefijo = str(sub.get("prefix", "") or "").strip("/")
-        return f"obs://{sub.get('bucket', '?')}" + (f"/{prefijo}" if prefijo else "")
     if plugin == "kafka":
         topics = sub.get("topics") or sub.get("topic") or "?"
         if isinstance(topics, list):

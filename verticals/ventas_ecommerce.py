@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -106,19 +106,6 @@ VERTICAL = {
         '¿Cuántas órdenes hay por día de la semana?',
         '¿Cuántas cancelaciones hay por motivo?',
     ],
-    'industry_fields': {
-        'category',
-        'customer_gender',
-        'customer_id',
-        'day_of_week',
-        'geo.city',
-        'geo.country',
-        'manufacturer',
-        'order_id',
-        'status',
-        'taxful_total_price',
-        'total_quantity',
-    },
     'dataset_files': ['ventas-ecommerce.log'],
     'capability': {
         'label': 'Ventas e-commerce',

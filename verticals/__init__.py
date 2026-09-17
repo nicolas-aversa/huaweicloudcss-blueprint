@@ -11,10 +11,9 @@ Convenciones del shape de `VERTICAL`:
   dedup_id                                                        -> document_id de dedup (opcional)
   sample, filter_code, fields                                     -> EXAMPLE_DATA del wizard
   suggested_questions                                             -> preguntas del chatbot
-  industry_fields (set)                                           -> matching de industria (productivo)
   dataset_files (list)                                            -> archivos a pre-cargar en OBS
   capability, dashboard                                           -> specs de OpenSearch
-  extra_capabilities/extra_dashboards/extra_industry_fields       -> sub-specs backend-only
+  extra_capabilities/extra_dashboards                             -> sub-specs backend-only
   hidden (bool)                                                   -> sin card ni grupo (ej. cts legacy)
 """
 from __future__ import annotations
@@ -85,16 +84,6 @@ def dashboard_specs() -> dict:
         if "dashboard" in v:
             out[v["slug"]] = v["dashboard"]
         out.update(v.get("extra_dashboards", {}))
-    return out
-
-
-def industry_fields() -> dict:
-    """`slug -> set(campos)` para el matching de industria (+ extra_industry_fields)."""
-    out: dict = {}
-    for v in _VERTICALS:
-        if "industry_fields" in v:
-            out[v["slug"]] = v["industry_fields"]
-        out.update(v.get("extra_industry_fields", {}))
     return out
 
 

@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -162,20 +162,6 @@ VERTICAL = {
         '¿Cuántos logs hay por país de origen?',
         '¿Cuántos logs hay por día?',
     ],
-    'industry_fields': {
-        'app',
-        'appcat',
-        'attack',
-        'dstip',
-        'dstport',
-        'policyid',
-        'rcvdbyte',
-        'sentbyte',
-        'srccountry',
-        'srcip',
-        'srcport',
-        'subtype',
-    },
     'dataset_files': ['fortianalyzer.log'],
     'capability': {
         'label': 'FortiAnalyzer',
@@ -751,62 +737,6 @@ Eventos de sistema, SD-WAN y REST API: mensajes, status, latencia, jitter, packe
                 {'type': 'table', 'title': 'Top REST API Paths', 'field': 'path', 'query': 'subtype:rest-api'},
                 {'type': 'table', 'title': 'Top Health Checks', 'field': 'healthcheck', 'query': 'subtype:sdwan'},
             ],
-        },
-    },
-    'extra_industry_fields': {
-        'fortianalyzer-soc': {
-            'attack',
-            'crscore',
-            'dstip',
-            'dstport',
-            'severity',
-            'srccountry',
-            'srcip',
-            'subtype',
-            'url',
-            'utmaction',
-            'virus',
-        },
-        'fortianalyzer-traffic': {
-            'action',
-            'app',
-            'appcat',
-            'dstcountry',
-            'dstip',
-            'dstport',
-            'policyid',
-            'proto',
-            'rcvdbyte',
-            'sentbyte',
-            'srccountry',
-            'srcintf',
-            'srcip',
-        },
-        'fortianalyzer-utm': {
-            'attack',
-            'attackid',
-            'catdesc',
-            'crscore',
-            'filename',
-            'hostname',
-            'severity',
-            'srcip',
-            'subtype',
-            'url',
-            'utmaction',
-            'virus',
-        },
-        'fortianalyzer-event': {
-            'healthcheck',
-            'jitter',
-            'latency',
-            'level',
-            'msg',
-            'packetloss',
-            'path',
-            'status',
-            'subtype',
-            'user',
         },
     },
 }

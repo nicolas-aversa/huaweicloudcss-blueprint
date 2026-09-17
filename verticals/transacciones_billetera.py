@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -268,16 +268,6 @@ VERTICAL = {
         '¿Cuántos clientes distintos operaron?',
         '¿Cuántas transacciones hay por día?',
     ],
-    'industry_fields': {
-        'transaction.account_ref',
-        'transaction.channel',
-        'transaction.customer_id',
-        'transaction.funnel',
-        'transaction.message_type',
-        'transaction.operation_code',
-        'transaction.response_code',
-        'transaction.sequence_number',
-    },
     'dataset_files': ['transacciones-billetera.log'],
     'capability': {
         'label': 'Transacciones billetera',

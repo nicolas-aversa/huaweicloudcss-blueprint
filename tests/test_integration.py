@@ -948,39 +948,6 @@ def test_obs_upload_skips_for_read_existing_bucket(monkeypatch):
     assert calls["n"] == 0
 
 
-def test_obs_read_sample_handles_stream_folder_and_gz():
-    """Regresión del 'NoneType' object is not callable en read_sample (flujo
-    "Despliegue productivo"): el download debe ir EN MEMORIA (body.buffer), debe
-    saltear el marcador de carpeta (key con '/' final, size 0) que listObjects
-    devuelve primero, y descomprimir .gz (los traces de CTS vienen gzipeados)."""
-    import gzip
-    from types import SimpleNamespace as NS
-    from obs_client import OBSClient
-
-    payload = gzip.compress(b'\n{"trace_name":"loginUser","code":200}\notra linea\n')
-
-    class _FakeSdk:
-        def listObjects(self, bucket, prefix=None, marker=None, max_keys=None):
-            return NS(status=200, body=NS(contents=[
-                NS(key="CloudTraces/", size=0),                      # marcador de carpeta
-                NS(key="CloudTraces/t1.json.gz", size=len(payload)),  # objeto real
-                NS(key="CloudTraces/t2.json.gz", size=len(payload)),
-            ], is_truncated=False))
-
-        def getObject(self, bucket, key, loadStreamInMemory=False, range=None):
-            assert loadStreamInMemory, "el sample debe descargarse en memoria (body.buffer)"
-            return NS(status=200, body=NS(buffer=payload))
-
-    client = OBSClient.__new__(OBSClient)   # sin __init__: no requiere el SDK real
-    client._bucket = "mi-tracker-cts"
-    client._client = _FakeSdk()
-
-    line, total, key = client.read_sample("CloudTraces/")
-    assert key == "CloudTraces/t1.json.gz"          # salteó el folder-marker
-    assert total == 2                                # solo objetos reales
-    # gunzip + hasta 3 líneas no vacías
-    assert line.startswith('{"trace_name":"loginUser","code":200}')
-    assert "otra linea" in line
 
 
 def test_settings_maas_key_rejects_garbage(monkeypatch, tmp_path):
@@ -4449,7 +4416,7 @@ def test_verticals_registry_wellformed():
         # Card + datos de front + specs backend presentes en cada primario.
         for k in ("label", "full_label", "group", "icon", "index_base", "description",
                   "sample", "filter_code", "fields", "suggested_questions",
-                  "industry_fields", "capability", "dashboard"):
+                  "capability", "dashboard"):
             assert v.get(k), f"{v['slug']} sin {k}"
 
     # `dataset_files` NO entra en la lista de arriba porque dejó de ser universal:
@@ -4471,7 +4438,6 @@ def test_verticals_registry_wellformed():
 
     # Agregadores == lo que consume el backend.
     assert len(V.capability_specs()) == 14
-    assert len(V.industry_fields()) == 14
     assert set(V.demo_dataset_files()) == {
         "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
         "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos"}
@@ -4489,76 +4455,10 @@ def test_verticals_back_registro_consistente():
     assert C._CAPABILITY_SPECS == V.capability_specs()
     assert main._DEMO_DATASET_FILES == V.demo_dataset_files()
 
-    # El vocabulario de industria se agrupa por GROUPS, no por caso: antes esto
-    # comparaba contra un `main._INDUSTRY_FIELDS` por slug, y de ahí salía que el
-    # wizard preguntara "¿tu log es SIEM o Traces de CTS?" en vez de la industria.
-    vocab = main._industry_vocab()
-    grupos_con_casos = {v["group"] for v in V.all_verticals()
-                        if V.industry_fields().get(v["slug"])}
-    assert set(vocab) == grupos_con_casos, "cada grupo con casos tiene vocabulario"
-    assert all(vocab.values()), "ningún grupo queda con vocabulario vacío"
-
     # dashboards = verticales + el spec sin vertical (`firewall`, que no tiene card).
     assert "firewall" in D._DASHBOARD_SPECS
     assert "firewall" not in V.dashboard_specs()
     assert set(D.get_available_slugs()) == set(V.dashboard_specs()) | {"firewall"}
-
-
-def test_el_match_devuelve_una_industria_no_un_caso():
-    """Lo que el wizard pregunta es la industria (Fintech, Seguridad…), no cuál de
-    los casos de demo se parece más. Devolver un slug de caso hacía que el
-    selector ofreciera "SIEM" o "Traces de CTS" como si fueran industrias."""
-    import verticals as V
-
-    ids = {g["id"] for g in V.GROUPS}
-
-    # Campos de un log de seguridad: los toma del vocabulario de SIEM/CTS/Forti,
-    # que viven todos en el grupo `seguridad`.
-    campos = list(V.industry_fields()["siem"])
-    r = main._match_industry(campos)
-    assert r["group"] in ids, f"{r['group']!r} no es un id de GROUPS"
-    assert r["group"] == "seguridad"
-    assert 0 < r["score"] <= 1
-
-    # Un log que no se parece a nada: sin industria, no una al azar.
-    vacio = main._match_industry(["zzz_nada", "tampoco"])
-    assert vacio == {"group": "", "score": 0.0}
-
-
-def test_el_match_agrupa_el_vocabulario_de_todos_los_casos_de_la_industria():
-    """El vocabulario de una industria es la UNIÓN del de sus casos: un log de
-    billetera tiene que matchear `fintech` aunque sus campos vengan del caso de
-    ALyC o del de fraude."""
-    import verticals as V
-
-    for slug, esperado in (("transacciones-billetera", "fintech"),
-                           ("ventas-ecommerce", "retail"),
-                           ("produccion-pozos", "energia")):
-        campos = list(V.industry_fields()[slug])
-        assert main._match_industry(campos)["group"] == esperado, slug
-
-
-def test_read_sample_expone_la_industria(monkeypatch):
-    """El endpoint que consume el front devuelve `industry_match.group`."""
-    class _FakeObs:
-        def __init__(self, **kw):
-            pass
-        def read_sample(self, prefix=""):
-            return {"sample_line": '{"event":{"action":"deny"}}', "total_objects": 1,
-                    "object_key": "k"}
-        def close(self):
-            pass
-
-    monkeypatch.setattr("obs_client.OBSClient", _FakeObs)
-    monkeypatch.setattr(main, "generate_logstash_filter",
-                        lambda *a, **k: {"filter_code": "filter {}", "fields": []})
-
-    res = client.post("/api/v1/obs/read-sample", json={
-        "access_key": "AK", "secret_key": "SK", "bucket": "b", "prefix": "p/",
-        "endpoint": "https://obs.x.com", "region": "la-south-2"})
-    assert res.status_code == 200
-    match = res.json()["industry_match"]
-    assert set(match) == {"group", "score"}, match
 
 
 def test_index_inyecta_verticals_y_endpoint():

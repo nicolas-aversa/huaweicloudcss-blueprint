@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -112,18 +112,6 @@ VERTICAL = {
         '¿Cuántos eventos hay por CDN pop?',
         '¿Cuántos eventos hay por día?',
     ],
-    'industry_fields': {
-        'bitrate_kbps',
-        'buffering_ms',
-        'cdn_pop',
-        'content_type',
-        'device',
-        'error_code',
-        'event',
-        'session_id',
-        'title',
-        'watch_seconds',
-    },
     'dataset_files': ['streaming-ott.log'],
     'capability': {
         'label': 'Streaming OTT',

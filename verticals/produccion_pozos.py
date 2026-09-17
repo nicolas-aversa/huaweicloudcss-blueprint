@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -127,20 +127,6 @@ VERTICAL = {
         '¿Cuál es la producción de petróleo por día?',
         '¿Cuál es la presión de fondo promedio por pozo?',
     ],
-    'industry_fields': {
-        'avg_dhp',
-        'avg_dht',
-        'avg_whp',
-        'avg_wht',
-        'choke_size',
-        'downtime',
-        'gas_vol',
-        'oil_vol',
-        'on_stream_hrs',
-        'wat_vol',
-        'well',
-        'well_type',
-    },
     'dataset_files': ['produccion-pozos.log'],
     'capability': {
         'label': 'Producción de pozos',

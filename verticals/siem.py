@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -382,18 +382,6 @@ VERTICAL = {
         '¿Cuántos logins SSH fallidos hubo y desde qué IPs?',
         '¿Cuántos eventos hay por día?',
     ],
-    'industry_fields': {
-        'event.action',
-        'event.category',
-        'event.dataset',
-        'event.outcome',
-        'event.severity',
-        'network.protocol',
-        'rule.name',
-        'security.denied',
-        'source.geo.country_name',
-        'source.ip',
-    },
     'dataset_files': ['siem-fortigate.log', 'siem-cloudaudit.log', 'siem-auth.log', 'siem-waf.log'],
     'capability': {
         'label': 'SIEM',

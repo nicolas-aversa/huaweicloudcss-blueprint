@@ -89,16 +89,6 @@ VERTICAL = {
         '¿Cuántas transacciones son fraude vs legítimas?',
         '¿Cuántas transacciones hay por día?',
     ],
-    'industry_fields': {
-        'fraud.amount',
-        'fraud.card.brand',
-        'fraud.card.type',
-        'fraud.device.type',
-        'fraud.email.purchaser',
-        'fraud.is_fraud',
-        'fraud.product_cd',
-        'fraud.transaction_id',
-    },
     'dataset_files': ['fraud-detection.log'],
     'capability': {
         'label': 'Fraud Detection',

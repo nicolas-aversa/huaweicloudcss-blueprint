@@ -2,7 +2,7 @@
 
 Definición única del vertical (card, filtro, campos, capability spec, dashboard
 spec, preguntas del chatbot, vocabulario de industria y datasets). Lo consumen
-tanto el backend (capabilities/dashboards/industry/datasets) como el frontend
+tanto el backend (capabilities/dashboards/datasets) como el frontend
 (inyectado por `GET /` como `window.__VERTICALS__`). Ver `verticals/__init__.py`.
 """
 
@@ -134,19 +134,6 @@ VERTICAL = {
         '¿Cuántos rechazos hay por motivo?',
         '¿Cuántas operaciones hay por día?',
     ],
-    'industry_fields': {
-        'comitente',
-        'especie',
-        'evt',
-        'fee',
-        'market',
-        'notional',
-        'plazo',
-        'price',
-        'qty',
-        'reject_reason',
-        'side',
-    },
     'dataset_files': ['transacciones-alyc.log'],
     'capability': {
         'label': 'Transacciones ALyC',
