@@ -255,6 +255,9 @@ def con_bucket(monkeypatch):
 _CONFIG_REGISTRADA = {
     "bucket": "demos-css", "key": "k", "region": "la-south-2",
     "endpoints": {"s3": "https://obs.la-south-2.myhuaweicloud.com"},
+    "access_key": "AK", "secret_key": "SK",
+    "skip_credentials_validation": True, "skip_region_validation": True,
+    "skip_metadata_api_check": True, "skip_requesting_account_id": True,
     "use_path_style": False, "skip_s3_checksum": True,
 }
 
@@ -303,9 +306,37 @@ def test_el_bucket_va_como_subdominio_no_en_el_path(ws, con_bucket):
 
 
 def test_primer_init_no_pide_migracion(ws, con_bucket):
-    """Sin init previo no hay estado que migrar, pero SÍ hay que inicializar:
-    el workspace viene del template con los providers ya cacheados."""
+    """Sin init previo ni state local no hay nada que migrar, pero SÍ hay que
+    inicializar: el workspace viene del template con los providers cacheados."""
     assert tfstate.prepare(ws, "k") == (True, [])
+
+
+def test_primer_init_con_state_local_migra(ws, con_bucket):
+    """Terraform NO deja registro de backend para el `local` implícito. Un
+    workspace que desplegó en el disco y ahora estrena bucket se ve igual que
+    uno nuevo —sin `.terraform/terraform.tfstate`— pero tiene un state con
+    recursos. Un init pelado con `-input=false` muere con "Can't ask approval
+    for state migration when interactive input is disabled". Pasó."""
+    _escribir_state(ws, _state(_recurso("huaweicloud_css_cluster")))
+
+    assert tfstate.prepare(ws, "k") == (True, ["-migrate-state", "-force-copy"])
+
+
+def test_primer_init_con_state_local_vacio_no_migra(ws, con_bucket):
+    _escribir_state(ws, _state())          # sin recursos: nada que migrar
+
+    assert tfstate.prepare(ws, "k") == (True, [])
+
+
+def test_rotar_credenciales_reconfigura(ws, con_bucket):
+    """Terraform guarda la config ENTERA del backend —AK/SK incluidas— y si algo
+    cambió aborta con "Backend configuration changed". La comparación vieja
+    miraba tres claves: rotar las credenciales no disparaba ningún init."""
+    _registrar_backend(ws, "s3", {"access_key": "VIEJA"})
+    assert tfstate.prepare(ws, "k") == (True, ["-reconfigure"])
+
+    _registrar_backend(ws, "s3", {"region": "otra-region"})
+    assert tfstate.prepare(ws, "k") == (True, ["-reconfigure"])
 
 
 def test_pasar_de_local_a_remoto_migra(ws, con_bucket):
@@ -388,14 +419,19 @@ def test_sin_bucket_de_demos_el_estado_queda_local(monkeypatch):
     assert tfstate.backend_settings() == {}
 
 
-def test_sin_credenciales_no_hay_backend(monkeypatch):
-    """Un backend sin AK/SK no puede escribir: mejor seguir local que romper el
-    deploy con un init que falla."""
+def test_bucket_sin_credenciales_es_un_error_no_una_vuelta_a_local(monkeypatch):
+    """**La expectativa cambió a propósito.** Este test afirmaba que sin AK/SK
+    "mejor seguir local que romper el deploy". Pero "seguir local" no era
+    inocuo: `prepare` borraba el backend.tf y traía el state de OBS al disco
+    con `-force-copy`. Un guardado parcial de ⚙ Configuración movía el state de
+    lugar sin que nadie lo pidiera, y el init siguiente fallaba "a veces". Ahora
+    es un error con nombre, que el deploy muestra y no sigue."""
     import maas_integrator as mi
     monkeypatch.setattr(mi, "get_huawei_settings", lambda: {"demo_bucket": "b"})
     monkeypatch.setattr(mi, "resolve_obs_creds", lambda *a, **k: ("", ""))
 
-    assert tfstate.backend_settings() == {}
+    with pytest.raises(tfstate.BackendIncompleto, match="`b`"):
+        tfstate.backend_settings()
 
 
 def test_usa_el_mismo_bucket_que_los_datasets(monkeypatch):

@@ -171,11 +171,21 @@ def state_bucket() -> str:
     return (_mi.get_huawei_settings().get("demo_bucket") or "").strip()
 
 
+class BackendIncompleto(RuntimeError):
+    """Hay bucket de state pero no credenciales para llegar a él."""
+
+
 def backend_settings() -> dict:
-    """Config del backend para el usuario actual, o `{}` si no hay con qué.
+    """Config del backend para el usuario actual, o `{}` si no hay bucket.
 
     No hay nada que activar: si el SA tiene bucket de demos y credenciales, su
     estado va a OBS. Todo sale de lo que la cuenta ya tiene.
+
+    Bucket sin AK/SK levanta `BackendIncompleto` en vez de devolver `{}`. Antes
+    devolvía `{}` y `prepare` lo tomaba como "quiere local": borraba el
+    `backend.tf` y **migraba el state de OBS al disco** con `-force-copy`, sin
+    que nadie lo pidiera. Un guardado parcial de ⚙ Configuración alcanzaba para
+    que el state cambiara de lugar, y de ahí que el init fallara "a veces".
     """
     import maas_integrator as _mi
 
@@ -184,11 +194,34 @@ def backend_settings() -> dict:
         return {}
     ak, sk = _mi.resolve_obs_creds()
     if not (ak and sk):
-        return {}
+        raise BackendIncompleto(
+            f"El bucket de state `{bucket}` está configurado pero faltan las AK/SK de "
+            "OBS: cargalas en ⚙ Configuración → Credenciales de la cuenta.")
     region = _mi.get_region()
     return {"bucket": bucket, "region": region,
             "endpoint": f"https://obs.{region}.myhuaweicloud.com",
             "access_key": ak, "secret_key": sk}
+
+
+def _backend_config(cfg: dict, key: str) -> dict:
+    """La config del backend, con las mismas claves y valores que Terraform
+    registra en `.terraform/terraform.tfstate` → `backend.config` tras el init.
+    Es lo que se escribe al HCL y lo que se compara para decidir si hace falta
+    re-inicializar: una sola fuente para las dos cosas."""
+    return {
+        "bucket": cfg["bucket"],
+        "key": key,
+        "region": cfg["region"],
+        "endpoints": {"s3": cfg["endpoint"]},
+        "access_key": cfg["access_key"],
+        "secret_key": cfg["secret_key"],
+        "skip_credentials_validation": True,
+        "skip_region_validation": True,
+        "skip_metadata_api_check": True,
+        "skip_requesting_account_id": True,
+        "use_path_style": False,
+        "skip_s3_checksum": True,
+    }
 
 
 def _backend_hcl(cfg: dict, key: str) -> str:
@@ -209,35 +242,37 @@ def _backend_hcl(cfg: dict, key: str) -> str:
     `endpoints.s3` (anidado) es la forma desde Terraform 1.6.3; el `endpoint`
     plano que aparece en tutoriales viejos ya no se acepta. Acá se pinea 1.9.8.
     """
+    c = _backend_config(cfg, key)
+    tf = lambda v: "true" if v else "false"   # noqa: E731
     return f'''# Generado por la plataforma — NO editar a mano.
 # El estado de Terraform vive en OBS, no en el disco de esta máquina: es lo único
 # capaz de destruir los clusters CSS, y un disco perdido significaba clusters
 # facturando sin forma de darlos de baja.
 terraform {{
   backend "s3" {{
-    bucket = "{cfg['bucket']}"
-    key    = "{key}"
-    region = "{cfg['region']}"
+    bucket = "{c['bucket']}"
+    key    = "{c['key']}"
+    region = "{c['region']}"
 
     endpoints = {{
-      s3 = "{cfg['endpoint']}"
+      s3 = "{c['endpoints']['s3']}"
     }}
 
-    access_key = "{cfg['access_key']}"
-    secret_key = "{cfg['secret_key']}"
+    access_key = "{c['access_key']}"
+    secret_key = "{c['secret_key']}"
 
     # OBS es compatible con S3 pero no trae las APIs auxiliares de AWS.
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_metadata_api_check     = true
-    skip_requesting_account_id  = true
-    use_path_style              = false
+    skip_credentials_validation = {tf(c['skip_credentials_validation'])}
+    skip_region_validation      = {tf(c['skip_region_validation'])}
+    skip_metadata_api_check     = {tf(c['skip_metadata_api_check'])}
+    skip_requesting_account_id  = {tf(c['skip_requesting_account_id'])}
+    use_path_style              = {tf(c['use_path_style'])}
     # El SDK de AWS firma el PutObject por chunks (`x-amz-content-sha256:
     # STREAMING-…`) y OBS lo calcula sobre el cuerpo crudo: no coinciden y OBS
     # rechaza la escritura con `XAmzContentSHA256Mismatch`. Sin esto el apply
     # crea los clusters y después NO PUEDE guardar el state: queda solo en
     # `errored.tfstate`, y el siguiente apply crea un segundo par de clusters.
-    skip_s3_checksum            = true
+    skip_s3_checksum            = {tf(c['skip_s3_checksum'])}
   }}
 }}
 '''
@@ -259,19 +294,42 @@ def _recorded_backend(terraform_dir: Path) -> str:
     return (_recorded(terraform_dir).get("type") or "local").strip()
 
 
-# Lo que, si cambia entre inits, obliga a re-leer la config del backend aunque
-# el state siga en el mismo lugar. Terraform lo detecta solo y aborta el apply
-# con "Backend configuration changed"; acá se detecta antes para mandar
-# `-reconfigure`, que re-lee sin migrar nada. Pasó con `skip_s3_checksum`: se
-# agregó al HCL y, como el backend seguía siendo s3, no se inicializaba.
-_DESEADA = {"use_path_style": False, "skip_s3_checksum": True}
+def _config_cambio(reg: dict, cfg: dict, key: str) -> bool:
+    """True si la config registrada por el último init difiere en ALGO de la que
+    se acaba de escribir al HCL.
 
-
-def _config_cambio(reg: dict, cfg: dict) -> bool:
+    Terraform compara la config entera —credenciales incluidas, que guarda en
+    claro en el registro— y si algo cambió aborta el apply con "Backend
+    configuration changed"; acá se detecta antes para mandar `-reconfigure`, que
+    re-lee sin migrar nada. La versión anterior comparaba tres claves: rotar las
+    AK/SK, que es lo que más se cambia, no disparaba ningún init.
+    """
     grabada = reg.get("config") or {}
-    if (grabada.get("endpoints") or {}).get("s3") != cfg["endpoint"]:
-        return True
-    return any(bool(grabada.get(k)) != v for k, v in _DESEADA.items())
+    for k, v in _backend_config(cfg, key).items():
+        tiene = grabada.get(k)
+        if isinstance(v, bool):
+            if bool(tiene) != v:
+                return True
+        elif isinstance(v, dict):
+            if (tiene or {}) != v:
+                return True
+        elif (tiene or "") != v:
+            return True
+    return False
+
+
+def _local_state_has_resources(terraform_dir: Path) -> bool:
+    """¿El `terraform.tfstate` del disco tiene recursos? Mira SOLO el archivo
+    local: `has_resources` leería el remoto si ya hay `backend.tf` escrito, y acá
+    se llama justo después de escribirlo."""
+    estado = _read_local(terraform_dir)
+    if estado:
+        return bool(estado.get("resources"))
+    archivo = terraform_dir / STATE_FILE
+    try:
+        return archivo.is_file() and archivo.stat().st_size >= _MIN_STATE_BYTES
+    except OSError:
+        return False
 
 
 def prepare(terraform_dir: Path | str, state_key: str) -> tuple[bool, list[str]]:
@@ -307,7 +365,14 @@ def prepare(terraform_dir: Path | str, state_key: str) -> tuple[bool, list[str]]
     invalidate(terraform_dir)
 
     if not tenia:
-        # Nunca se inicializó: init limpio, sin nada que migrar.
+        # Sin registro de backend. Ojo: Terraform NO escribe registro para el
+        # `local` implícito, así que "sin registro" también es un workspace que
+        # desplegó en el disco y ahora estrena bucket. Si hay state local con
+        # recursos, hay que migrarlo; un `init` pelado con `-input=false` muere
+        # con "Can't ask approval for state migration when interactive input is
+        # disabled" — y pasó.
+        if quiere_remoto and _local_state_has_resources(terraform_dir):
+            return True, ["-migrate-state", "-force-copy"]
         return True, []
     destino = "s3" if quiere_remoto else "local"
     if tenia != destino:
@@ -318,8 +383,9 @@ def prepare(terraform_dir: Path | str, state_key: str) -> tuple[bool, list[str]]
         # Mismo backend pero otro bucket u otra key: es una mudanza del state.
         if grabada.get("bucket") != cfg["bucket"] or grabada.get("key") != state_key:
             return True, ["-migrate-state", "-force-copy"]
-        # Mismo lugar, otra config: re-leer sin migrar.
-        if _config_cambio(reg, cfg):
+        # Mismo lugar, otra config (credenciales rotadas, otra región, otro
+        # flag): re-leer sin migrar.
+        if _config_cambio(reg, cfg, state_key):
             return True, ["-reconfigure"]
     return False, []
 

@@ -2654,7 +2654,14 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     # ── terraform init (si hace falta) ────────────────────────────────────
     # `-no-color` en init/apply/destroy: Terraform colorea aunque no haya
     # terminal, y el error llegaba al front con los `[31m` adentro.
-    init_extra = _backend_init_args(terraform_dir)
+    try:
+        init_extra = _backend_init_args(terraform_dir)
+    except tfstate.BackendIncompleto as exc:
+        # Bucket de state sin credenciales. Antes esto caía a "local" en silencio
+        # y migraba el state de OBS al disco; ahora se corta acá y se dice.
+        yield _sse({"type": "step", "name": "Backend del state", "ok": False, "reason": str(exc)[:300]})
+        yield _sse({"type": "error", "message": str(exc)})
+        return
     if init_extra is not None:
         yield _sse({"type": "progress", "percent": 3, "phase": "Terraform init",
                     "message": ("Migrando el estado a OBS…" if init_extra
