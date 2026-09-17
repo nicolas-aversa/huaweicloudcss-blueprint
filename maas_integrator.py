@@ -57,7 +57,7 @@ def _load_mappings() -> dict:
 #                       bajo carga, glm-5.2 a veces tarda >2min en CSS).
 # ---------------------------------------------------------------------------
 
-DEFAULT_BASE_URL = "https://api.modelarts-maas.com/v1"
+DEFAULT_BASE_URL = "https://api-ap-southeast-1.modelarts-maas.com/openai/v1"
 DEFAULT_MODEL = "glm-5.2"
 # Modo de razonamiento de GLM-5.2 para la generación del pipeline. El modelo
 # razona el parseo (qué plugin usar, namespacing, @timestamp, tipos) antes de
