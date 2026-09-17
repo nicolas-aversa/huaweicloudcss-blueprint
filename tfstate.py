@@ -23,6 +23,7 @@ a la red salvo que el workspace esté efectivamente en remoto.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -83,6 +84,29 @@ def read_state(terraform_dir: Path | str) -> dict:
     return estado
 
 
+def tf_env() -> dict[str, str]:
+    """El entorno con el que corre TODO `terraform`.
+
+    Desde Terraform 1.11 el SDK de AWS que trae el backend s3 calcula un
+    checksum CRC por defecto en cada PutObject y lo manda con codificación
+    `aws-chunked` (el cambio de "default integrity protections" de enero
+    2025). OBS no entiende ese encoding, calcula el SHA-256 sobre el cuerpo
+    crudo y rechaza con `XAmzContentSHA256Mismatch`. `skip_s3_checksum` en el
+    HCL alcanzaba para Terraform 1.9 (el de la imagen Docker) y NO alcanza
+    para 1.13 (el de una máquina de desarrollo): con 1.13.3 el apply creó los
+    clusters y no pudo guardar el state. Estas dos variables son la perilla
+    oficial del SDK para volver a calcular checksums solo cuando la API los
+    exige; con ellas puestas, `state push` contra OBS funcionó.
+
+    Van en cada invocación —init, apply, destroy, output, state pull/push—
+    porque cualquiera de ellas puede escribir o leer el state.
+    """
+    env = dict(os.environ)
+    env.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
+    env.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
+    return env
+
+
 def invalidate(terraform_dir: Path | str) -> None:
     """Descarta el cache de ese workspace. Se llama tras un apply o un destroy:
     sin esto, el status podría mostrar hasta 5 s el mundo anterior."""
@@ -105,7 +129,7 @@ def _pull_remote(terraform_dir: Path) -> dict:
     archivo local — por eso los parsers de arriba no cambian."""
     try:
         res = subprocess.run(
-            ["terraform", "state", "pull"], cwd=str(terraform_dir),
+            ["terraform", "state", "pull"], cwd=str(terraform_dir), env=tf_env(),
             capture_output=True, text=True, timeout=_PULL_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"[tfstate] no se pudo leer el state remoto: {exc}", flush=True)
@@ -415,7 +439,7 @@ def push_errored_state(terraform_dir: Path | str) -> tuple[bool, str]:
     try:
         res = subprocess.run(
             ["terraform", "state", "push", "-no-color", ERRORED_FILE],
-            cwd=str(terraform_dir), capture_output=True, text=True, timeout=120)
+            cwd=str(terraform_dir), env=tf_env(), capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"no se pudo correr `terraform state push`: {exc}"
     if res.returncode != 0:

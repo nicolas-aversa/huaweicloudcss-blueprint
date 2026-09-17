@@ -2743,7 +2743,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                                 else "Descargando provider HuaweiCloud…")})
         init_result = subprocess.run(
             ["terraform", "init", "-input=false", "-no-color", *init_extra],
-            cwd=terraform_dir, capture_output=True, text=True, timeout=180,
+            cwd=terraform_dir, env=tfstate.tf_env(), capture_output=True, text=True, timeout=180,
         )
         for ln in (init_result.stdout or "").splitlines():
             yield _sse({"type": "log", "source": "terraform init", "message": ln})
@@ -2785,6 +2785,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     process = subprocess.Popen(
         ["terraform", "apply", "-auto-approve", "-input=false", "-no-color"],
         cwd=terraform_dir,
+        env=tfstate.tf_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -2824,7 +2825,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                 "message": "Obteniendo endpoints…"})
     output_result = subprocess.run(
         ["terraform", "output", "-json"],
-        cwd=terraform_dir, capture_output=True, text=True, timeout=30,
+        cwd=terraform_dir, env=tfstate.tf_env(), capture_output=True, text=True, timeout=30,
     )
     if not apply_failed and output_result.returncode != 0:
         yield _sse({"type": "error", "message": output_result.stderr or "terraform output falló"})
@@ -3441,7 +3442,7 @@ def _reap_expired_envs(ttl_hours: float) -> None:
                 continue
             print(f"[ttl-reaper] destruyendo entorno vencido de {udir.name} (deployed {ts})", flush=True)
             r = _sp.run(["terraform", "destroy", "-auto-approve", "-input=false", "-no-color"],
-                        cwd=tdir, capture_output=True, text=True, timeout=1800)
+                        cwd=tdir, env=tfstate.tf_env(), capture_output=True, text=True, timeout=1800)
             ok = r.returncode == 0
             audit.record("ttl_autodestroy", f"user_dir={udir.name} ok={ok}", user="(ttl-reaper)")
             if ok:
@@ -5924,6 +5925,7 @@ def terraform_status() -> TerraformStatusResponse:
         proc = subprocess.run(
             ["terraform", "output", "-json"],
             cwd=terraform_dir,
+            env=tfstate.tf_env(),
             capture_output=True,
             text=True,
             timeout=30,
@@ -6109,6 +6111,7 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
     result = subprocess.run(
         ["terraform", "destroy", "-auto-approve", "-input=false", "-no-color"],
         cwd=terraform_dir,
+        env=tfstate.tf_env(),
         capture_output=True,
         text=True,
         timeout=900,

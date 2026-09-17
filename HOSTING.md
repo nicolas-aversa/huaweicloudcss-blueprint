@@ -155,6 +155,14 @@ red: la lectura del state sigue siendo la del archivo local.
 > en la 1.10. No hay lock remoto. En la práctica no hace falta: cada SA tiene su propio
 > state y la app ya serializa deploys por usuario.
 
+> **Terraform más nuevo que 1.9 (una máquina de desarrollo, p. ej. 1.13)**: desde la
+> 1.11 el SDK de AWS del backend s3 manda un checksum CRC por defecto en cada `PutObject`
+> con codificación `aws-chunked`, que OBS rechaza con `XAmzContentSHA256Mismatch` — el
+> apply crea los clusters y **no puede guardar el state**. `skip_s3_checksum` no alcanza
+> ahí. La app corre todo `terraform` con `AWS_REQUEST_CHECKSUM_CALCULATION=when_required`
+> y `AWS_RESPONSE_CHECKSUM_VALIDATION=when_required` (`tfstate.tf_env()`), que es la
+> perilla oficial del SDK. Si corrés `terraform` a mano contra el bucket, exportalas antes.
+
 ## Estado
 
 - ✅ **Cola de jobs**: el deploy corre en background y sobrevive un refresh del browser.

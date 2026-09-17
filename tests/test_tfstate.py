@@ -552,3 +552,49 @@ def test_si_el_push_falla_el_archivo_se_queda(ws, monkeypatch):
 
     assert not ok and "lineage" in detalle
     assert (ws / tfstate.ERRORED_FILE).exists()
+
+
+# ── El SDK de AWS sin checksums por defecto ──────────────────────────────────
+def test_tf_env_apaga_los_checksums_del_sdk(monkeypatch):
+    """Terraform ≥1.11 manda un CRC por defecto en cada PutObject, con encoding
+    aws-chunked, y OBS lo rechaza con XAmzContentSHA256Mismatch. Pasó con
+    1.13.3: los clusters se crearon y el state quedó en errored.tfstate.
+    `skip_s3_checksum` del HCL no alcanza; estas dos variables sí."""
+    monkeypatch.delenv("AWS_REQUEST_CHECKSUM_CALCULATION", raising=False)
+    monkeypatch.delenv("AWS_RESPONSE_CHECKSUM_VALIDATION", raising=False)
+    env = tfstate.tf_env()
+    assert env["AWS_REQUEST_CHECKSUM_CALCULATION"] == "when_required"
+    assert env["AWS_RESPONSE_CHECKSUM_VALIDATION"] == "when_required"
+    assert "PATH" in env, "hereda el entorno, no lo reemplaza"
+
+    # Si el operador las fijó a mano, se respetan.
+    monkeypatch.setenv("AWS_REQUEST_CHECKSUM_CALCULATION", "when_supported")
+    assert tfstate.tf_env()["AWS_REQUEST_CHECKSUM_CALCULATION"] == "when_supported"
+
+
+def test_toda_invocacion_de_terraform_lleva_el_entorno():
+    """Cualquier comando puede leer o escribir el state: init, apply, destroy,
+    output, state pull/push. Uno solo sin `env=` y el error vuelve por ahí."""
+    raiz = pathlib.Path(__file__).resolve().parent.parent
+    for archivo in ("main.py", "tfstate.py"):
+        lineas = (raiz / archivo).read_text(encoding="utf-8").splitlines()
+        for i, linea in enumerate(lineas):
+            if '["terraform",' not in linea:
+                continue
+            # La llamada sigue unas líneas más (cwd, env, capture_output…).
+            llamada = "\n".join(lineas[i:i + 6])
+            assert "tf_env()" in llamada, \
+                f"{archivo}:{i + 1}: invocación de terraform sin tf_env():\n{llamada}"
+
+
+def test_el_state_push_y_pull_usan_el_entorno(ws, monkeypatch):
+    (ws / tfstate.ERRORED_FILE).write_text("{}", encoding="utf-8")
+    visto = {}
+
+    def _run(cmd, **kw):
+        visto[cmd[2]] = kw.get("env") or {}
+        return FakeRun(stdout="{}")
+    monkeypatch.setattr(tfstate.subprocess, "run", _run)
+
+    tfstate.push_errored_state(ws)
+    assert visto["push"].get("AWS_REQUEST_CHECKSUM_CALCULATION") == "when_required"

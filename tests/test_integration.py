@@ -1561,25 +1561,23 @@ def test_deploy_caps_concurrent_pipelines(monkeypatch, tmp_path):
     assert "Máximo" in str(res.json()["detail"])
 
 
-def test_terraform_destroy_returns_noop_when_state_empty(monkeypatch):
-    """Si el tfstate no existe o está vacío, destroy responde noop sin
-    invocar el subprocess de terraform.
+def test_terraform_destroy_returns_noop_when_state_empty(monkeypatch, tmp_path):
+    """Sin tfstate (workspace local, sin backend remoto) destroy responde noop
+    sin invocar terraform.
 
-    Si el tfstate real ya tiene contenido (caso post-deploy), skip — no
-    queremos arriesgar a destruir un cluster real desde un test, y mockear
-    el chequeo de tamaño para forzar el path noop sería invasivo. El
-    smoke-test del endpoint en `test_terraform_destroy_endpoint_exists`
-    cubre el caso "endpoint vivo y responde shape correcto".
+    Corre en un workspace propio: antes pegaba al `terraform/` del repo y se
+    salteaba si había un tfstate real. Con el backend en OBS eso dejó de
+    alcanzar —el `backend.tf` de un deploy local hacía que el state se leyera
+    con `terraform state pull`, o sea un subprocess— y encima el test apuntaba
+    el endpoint de destroy al workspace de verdad de la máquina.
     """
-    from pathlib import Path as _Path
     import main as _main
 
-    real_tfstate = _Path(_main.__file__).parent / "terraform" / "terraform.tfstate"
-    if real_tfstate.exists() and real_tfstate.stat().st_size >= 200:
-        pytest.skip("tfstate real con contenido — saltando para no riesgar destroy real")
+    (tmp_path / "terraform").mkdir()
+    fake_main = tmp_path / "main.py"
+    fake_main.write_text("")
+    monkeypatch.setattr(_main, "__file__", str(fake_main))
 
-    # Doble safety: si por alguna razón el test no fuera saltado, mockeamos
-    # subprocess.run para que falle el test antes de invocar terraform.
     def _fake_run(*args, **kwargs):
         raise AssertionError("subprocess.run no debería invocarse en path noop")
     monkeypatch.setattr(_main.subprocess, "run", _fake_run)
