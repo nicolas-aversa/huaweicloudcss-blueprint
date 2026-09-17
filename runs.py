@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import threading
+import re
 import time
 import uuid
 from pathlib import Path
@@ -103,6 +104,14 @@ def start(kind: str, detail: str = "", run_id: str | None = None) -> dict:
     return run
 
 
+# Mismo patrón que `main._CONF_SECRET_RE` (`clave => "valor"` de un .conf de
+# Logstash). Duplicado a propósito: importar `main` desde acá sería circular.
+_CONF_SECRET_KEYS = ("secret_access_key", "access_key_id", "jdbc_password",
+                     "ssl_truststore_password", "sasl_password", "password")
+_CONF_SECRET_RE = re.compile(
+    r'((?:' + "|".join(_CONF_SECRET_KEYS) + r')\s*=>\s*)(["\'])(?:(?!\2).)*\2')
+
+
 def append(run: dict | str, event: dict, d: Path | None = None) -> None:
     """Agrega un evento y persiste. `run` puede ser el dict o un id.
 
@@ -115,6 +124,13 @@ def append(run: dict | str, event: dict, d: Path | None = None) -> None:
     d = d or runs_dir()
     evt = dict(event)
     evt.setdefault("ts", int(time.time()))
+    # Segunda capa contra secretos en el historial: `main._deploy_stream_gen` ya
+    # enmascara todo lo que emite, pero esto se guarda en disco por 30 días y se
+    # muestra con botón Copiar, así que acá se vuelve a pasar el regex del .conf
+    # (sin los literales, que este módulo no conoce). Barato y sin dependencias.
+    for k in ("message", "reason"):
+        if isinstance(evt.get(k), str):
+            evt[k] = _CONF_SECRET_RE.sub(lambda m: f'{m.group(1)}"••••••••"', evt[k])
     with _GUARD:
         if evt.get("type") == "log":
             msg = str(evt.get("message", ""))

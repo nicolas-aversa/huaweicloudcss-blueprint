@@ -437,11 +437,20 @@ resource "huaweicloud_css_logstash_configuration" "pipeline" {
   name = substr("pipeline-${each.key}", 0, 32)
 
   # Inyectar los hosts de OpenSearch en el `.conf` de esta entrada.
-  conf_content = each.value.pipeline_conf != "" ? replace(
+  #
+  # `sensitive()`: el .conf lleva AK/SK de OBS y la password de OpenSearch. El
+  # provider guarda el state con esos valores como `***` (por `sensitive_words`)
+  # y el config los tiene en claro, así que CADA apply muestra un update in-place
+  # con el diff del .conf entero — y ahí salían las credenciales en claro, en el
+  # log que la plataforma streamea y guarda en Actividad. Con esto el plan dice
+  # `(sensitive value)`. El update perpetuo sigue (es comportamiento documentado
+  # del provider), pero mudo. `var.pipelines` no puede ser sensible porque va
+  # en el for_each; se marca acá, en el atributo.
+  conf_content = sensitive(each.value.pipeline_conf != "" ? replace(
     each.value.pipeline_conf,
     "hosts => []",
     local.hosts_literal
-  ) : ""
+  ) : "")
 
   setting {
     queue_type = "memory"

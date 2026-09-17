@@ -5097,3 +5097,112 @@ def test_deploy_no_aplica_si_el_state_anterior_no_se_pudo_subir(monkeypatch):
     errores = [e for e in eventos if e.get("type") == "error"]
     assert errores and "errored.tfstate" in errores[0]["message"], eventos[-3:]
     assert applies == [], "aplicó igual: state bifurcado"
+
+
+# ── Secretos fuera del log del deploy ────────────────────────────────────────
+# El log de un deploy real, guardado en Actividad con botón Copiar, tenía AK, SK
+# y la password de OpenSearch en claro: el plan de Terraform imprime el diff del
+# `conf_content` entero en cada apply (el provider guarda `***` en el state y el
+# config tiene el valor real → update in-place perpetuo). Tres capas: `sensitive()`
+# en el HCL, el envoltorio del stream, y el regex en `runs.append`.
+def test_mask_text_tapa_pares_del_conf_y_literales():
+    texto = ('          -     access_key_id => "***"\n'
+             '          +     access_key_id => "HPUA-LITERAL"\n'
+             "          +     password => 'Clave-Fuerte-1'\n"
+             '                bucket => "demoscss"\n'
+             'Error: IAM rechazó HPUA-LITERAL y SK-LITERAL-XYZ\n')
+    out = main.mask_text(texto, ["HPUA-LITERAL", "SK-LITERAL-XYZ", "Clave-Fuerte-1", "", "ab"])
+
+    for secreto in ("HPUA-LITERAL", "SK-LITERAL-XYZ", "Clave-Fuerte-1"):
+        assert secreto not in out, out
+    assert 'bucket => "demoscss"' in out, "lo que no es secreto queda igual"
+    assert "Error: IAM rechazó" in out
+
+
+def test_el_conf_content_es_sensible_en_el_hcl():
+    """Sin `sensitive()` el plan imprime el .conf entero con las credenciales."""
+    hcl = (pathlib.Path(__file__).resolve().parent.parent / "terraform" / "main.tf").read_text(encoding="utf-8")
+    bloque = hcl[hcl.index('resource "huaweicloud_css_logstash_configuration" "pipeline"'):]
+    bloque = bloque[:bloque.index("\n}\n")]
+    assert re.search(r"conf_content\s*=\s*sensitive\(", bloque), "conf_content sin sensitive()"
+
+
+def test_deploy_stream_no_filtra_secretos_y_borra_el_tfvars(monkeypatch, tmp_path):
+    """Un apply que imprime el diff del .conf y un error con las credenciales:
+    nada de eso llega al stream. Y al terminar, `deploy.auto.tfvars.json` (los
+    .conf en claro + creds) ya no está; lo que el destroy necesita quedó en
+    `destroy.auto.tfvars.json`, incluidas las variables requeridas de infra."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(_main, "get_huawei_settings", lambda: {
+        "vpc_id": "vpc-1", "subnet_id": "net-2", "security_group_id": "sg-3",
+        "availability_zone": "la-south-2a", "region": "la-south-2"})
+    monkeypatch.setattr(_main, "_do_obs_upload", lambda req: None)
+    monkeypatch.setattr(_main, "_backend_init_args", lambda d: None)
+    monkeypatch.setattr(_main.tfstate, "push_errored_state", lambda d: (True, ""))
+    monkeypatch.setattr(_main.subprocess, "run", lambda *a, **k: _OkProc())
+
+    class _PopenFalso:
+        returncode = 1
+
+        def __init__(self, *a, **k):
+            self.stdout = iter([
+                '  ~ resource "huaweicloud_css_logstash_configuration" "pipeline" {\n',
+                '          -     access_key_id => "***"\n',
+                '          +     access_key_id => "AK-REAL-1234"\n',
+                '          +     secret_access_key => "SK-REAL-5678"\n',
+                "          +     password => 'PW-REAL-9'\n",
+                'Error: el provider rechazó AK-REAL-1234 / SK-REAL-5678 / PW-REAL-9\n',
+            ])
+
+        def wait(self):
+            return 1
+
+    class _Stdout:
+        def __init__(self, lines):
+            self._lines = lines
+        def __iter__(self):
+            return self._lines
+        def close(self):
+            pass
+
+    def _popen(*a, **k):
+        p = _PopenFalso()
+        p.stdout = _Stdout(p.stdout)
+        return p
+    monkeypatch.setattr(_main.subprocess, "Popen", _popen)
+
+    req = _main.TerraformDeployRequest(
+        pipeline_conf='input {} output { elasticsearch { password => "PW-REAL-9" } }',
+        obs_access_key="AK-REAL-1234", obs_secret_key="SK-REAL-5678",
+        obs_bucket="demoscss", opensearch_password="PW-REAL-9",
+        opensearch_index="siem-%{+YYYY.MM}", read_existing_bucket=True)
+
+    eventos = list(_main._deploy_stream_gen(req, td, None, None))
+    todo = "".join(eventos)
+
+    assert eventos, "el stream no emitió nada"
+    for secreto in ("AK-REAL-1234", "SK-REAL-5678", "PW-REAL-9"):
+        assert secreto not in todo, f"{secreto} salió por el stream"
+    assert "access_key_id" in todo, "la línea sigue ahí, solo sin el valor"
+    assert not (td / "deploy.auto.tfvars.json").exists(), "el tfvars con secretos quedó en disco"
+    teardown = _json.loads((td / "destroy.auto.tfvars.json").read_text(encoding="utf-8"))
+    assert teardown["vpc_id"] == "vpc-1" and teardown["obs_secret_key"] == "SK-REAL-5678", \
+        "el destroy necesita creds + infra; sin el tfvars del deploy no tiene otro origen"
+
+
+def test_runs_append_tambien_enmascara(tmp_path, monkeypatch):
+    """Segunda capa: lo que se guarda en Actividad pasa por el regex del .conf,
+    aunque el evento hubiera llegado crudo."""
+    import runs as _runs
+    monkeypatch.setattr(_runs, "runs_dir", lambda: tmp_path)
+    run = _runs.start("deploy", "t")
+    _runs.append(run, {"type": "log", "message": 'x  +  access_key_id => "AK-CRUDO"'}, d=tmp_path)
+    _runs.append(run, {"type": "step", "name": "n", "ok": False,
+                       "reason": "password => 'PW-CRUDO'"}, d=tmp_path)
+
+    guardado = (tmp_path / f"{run['id']}.json").read_text(encoding="utf-8")
+    assert "AK-CRUDO" not in guardado and "PW-CRUDO" not in guardado, guardado

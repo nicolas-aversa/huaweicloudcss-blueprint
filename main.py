@@ -2412,11 +2412,12 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
     (terraform_dir / "deploy.auto.tfvars.json").write_text(
         json.dumps(tfvars, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # `deploy.auto.tfvars.json` se borra al terminar el deploy (lleva el
-    # pipeline_conf y los secretos), pero `terraform destroy` necesita las creds
-    # del provider. Van a un archivo aparte, auto-cargado por terraform, que
-    # persiste hasta el destroy — sin esto el destroy se cuelga pidiendo las
-    # variables por stdin.
+    # `deploy.auto.tfvars.json` se borra al terminar el deploy (lo hace el
+    # `finally` de `_deploy_stream_gen`: lleva los .conf y los secretos), pero
+    # `terraform destroy` necesita las creds del provider Y las variables
+    # requeridas de infra. Van a un archivo aparte, auto-cargado por terraform,
+    # que persiste hasta el destroy — sin esto el destroy se cuelga pidiendo
+    # las variables por stdin.
     _write_destroy_creds(terraform_dir, request)
     return registry
 
@@ -2571,6 +2572,53 @@ def mask_obs_creds(conf: str) -> str:
     return _CONF_OBS_RE.sub(lambda m: f'{m.group(1)}"{_CONF_MASK}"', conf)
 
 
+def mask_text(text: str, secrets: list[str] | tuple[str, ...] = ()) -> str:
+    """Tapa secretos en un texto cualquiera: la salida de Terraform, un error.
+
+    Dos capas. La del `.conf` (`_CONF_SECRET_RE`): un plan que muestra el diff
+    de `conf_content` trae `access_key_id => "HPUA..."` línea por línea, y ese
+    regex ya matchea eso. Y la de los literales: los valores que el request
+    conoce (AK, SK, password, secretos de las fuentes), estén donde estén — un
+    `Error: ... con AK HPUA...` no tiene forma de `clave => "valor"`.
+    Pasó: el log de un deploy real, guardado en Actividad con botón Copiar,
+    tenía las tres credenciales en claro.
+    """
+    if not text:
+        return text or ""
+    out = _CONF_SECRET_RE.sub(lambda m: f'{m.group(1)}"{_CONF_MASK}"', text)
+    # De más largo a más corto: si un secreto contiene a otro, el largo primero.
+    for s in sorted({s for s in secrets if s and len(s) >= 4}, key=len, reverse=True):
+        out = out.replace(s, _CONF_MASK)
+    return out
+
+
+def _deploy_secret_literals(request: "TerraformDeployRequest") -> list[str]:
+    """Los valores que un deploy conoce y que NUNCA tienen que salir por el stream."""
+    out = [request.obs_access_key, request.obs_secret_key, request.opensearch_password]
+    try:
+        out.extend(_pipeline_secrets(request))
+    except Exception:  # noqa: BLE001 — la máscara no puede tumbar el deploy
+        pass
+    return [s for s in out if s and len(s) >= 4]
+
+
+def _mask_sse(raw: str, secrets: list[str]) -> str:
+    """Enmascara `message` y `reason` de un evento SSE ya serializado. Si no
+    parsea como evento, se enmascara el string entero."""
+    if not raw.startswith("data: "):
+        return mask_text(raw, secrets)
+    try:
+        ev = json.loads(raw[len("data: "):])
+    except (ValueError, TypeError):
+        return mask_text(raw, secrets)
+    if not isinstance(ev, dict):
+        return raw
+    for k in ("message", "reason"):
+        if isinstance(ev.get(k), str):
+            ev[k] = mask_text(ev[k], secrets)
+    return _sse(ev)
+
+
 def unmask_conf(conf: str, ak: str = "", sk: str = "", reference: str = "") -> str:
     """Repone en el `.conf` los secretos que se enmascararon al enviarlo.
 
@@ -2606,7 +2654,33 @@ def _sse(data: dict) -> str:
 
 def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                        logstash_flavor: str | None, opensearch_flavor: str | None):
-    """Generador que corre el deploy y emite eventos SSE con progreso real."""
+    """Generador que corre el deploy y emite eventos SSE con progreso real.
+
+    Es un envoltorio: TODO evento del generador crudo pasa por `_mask_sse`
+    antes de salir. Un solo punto, en vez de acordarse en cada `yield`: el log
+    de un deploy real mostró AK, SK y password en claro porque el plan de
+    Terraform imprime el diff del `.conf`. Además, al terminar —como sea—
+    borra `deploy.auto.tfvars.json`, que lleva los `.conf` en claro más las
+    credenciales, y que el comentario de `_prepare_deploy_tfvars` prometía
+    borrar desde siempre sin que nadie lo hiciera. Lo que el destroy necesita
+    (creds + IDs de infra) vive en `destroy.auto.tfvars.json`.
+    """
+    secrets = _deploy_secret_literals(request)
+    try:
+        for raw in _deploy_stream_gen_raw(request, terraform_dir, logstash_flavor,
+                                          opensearch_flavor, secrets):
+            yield _mask_sse(raw, secrets)
+    finally:
+        try:
+            (terraform_dir / "deploy.auto.tfvars.json").unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"[deploy] no se pudo borrar deploy.auto.tfvars.json: {exc!r}", flush=True)
+
+
+def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
+                           logstash_flavor: str | None, opensearch_flavor: str | None,
+                           secrets: list[str]):
+    """El deploy de verdad. No lo llames directo: `_deploy_stream_gen` enmascara."""
     import concurrent.futures
 
     # ── Pre-flight: la infra Huawei (vpc/subnet/sg/az) tiene que venir de ⚙
@@ -2674,7 +2748,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
             yield _sse({"type": "log", "source": "terraform init", "message": ln})
         if init_result.returncode != 0:
             err = init_result.stderr or init_result.stdout or "terraform init falló"
-            print("[terraform init FALLÓ]\n" + err, flush=True)
+            print("[terraform init FALLÓ]\n" + mask_text(err, secrets), flush=True)
             for ln in err.splitlines():
                 yield _sse({"type": "log", "level": "error", "source": "terraform init", "message": ln})
             yield _sse({"type": "step", "name": "terraform init", "ok": False, "reason": err[-300:]})
@@ -2739,7 +2813,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                 "reason": ("".join(tf_lines)[-300:] if apply_failed else "")})
     if apply_failed:
         tail = "".join(tf_lines)[-3000:]
-        print("[terraform apply FALLÓ]\n" + tail, flush=True)   # visible en `docker compose logs`
+        print("[terraform apply FALLÓ]\n" + mask_text(tail, secrets), flush=True)   # docker compose logs
 
     # ── terraform output ─────────────────────────────────────────────────
     # Se lee INCLUSO si el apply falló: un apply parcial igual guarda estado, así
@@ -3662,7 +3736,11 @@ _DESTROY_CREDS_NAME = "destroy.auto.tfvars.json"
 
 
 def _write_destroy_creds(terraform_dir: Path, request: "TerraformDeployRequest") -> None:
-    """Persiste solo las credenciales del provider para el teardown."""
+    """Persiste lo que el teardown necesita y el deploy.auto.tfvars.json ya no
+    tiene (se borra al terminar el deploy): las credenciales del provider y las
+    variables REQUERIDAS de infra (vpc/subnet/sg/az), que en Docker no tienen
+    otro origen. Sin las segundas, `terraform destroy` moría con "No value for
+    required variable". Ningún secreto nuevo: es el mismo archivo de siempre."""
     creds: dict[str, Any] = {}
     if request.obs_access_key:
         creds["hwc_access_key"] = request.obs_access_key
@@ -3672,6 +3750,12 @@ def _write_destroy_creds(terraform_dir: Path, request: "TerraformDeployRequest")
         creds["obs_secret_key"] = request.obs_secret_key
     if request.opensearch_password:
         creds["opensearch_password"] = request.opensearch_password
+    creds.update(_huawei_infra_tfvars())
+    huawei_project_id = get_huawei_project_id()
+    if huawei_project_id:
+        creds["huawei_project_id"] = huawei_project_id
+    if request.existing_opensearch_endpoint:
+        creds["existing_opensearch_endpoint"] = request.existing_opensearch_endpoint
     if not creds:
         return
     try:
