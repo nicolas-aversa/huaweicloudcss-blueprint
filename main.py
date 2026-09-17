@@ -3088,17 +3088,33 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
 
     Solo aplica a slugs de demo conocidos (built-in + casos creados desde la
     plataforma); el flujo productivo (prefijo del cliente) no se toca.
-    Best-effort: si el chequeo en sí falla (red, permisos), no bloquea el deploy."""
+    Best-effort: si el chequeo en sí falla (red, permisos), no bloquea el deploy.
+
+    Cubre también el body de UN solo caso, que viaja sin `cases` (con una
+    tarjeta el front manda `pipeline_slug` + `obs_prefix`). Antes el guard
+    iteraba solo `request.cases`, así que el deploy más común —un caso— pasaba
+    sin chequeo: si el upload del dataset al guardar el caso había fallado en
+    silencio, Logstash arrancaba contra un prefijo vacío y nadie avisaba.
+
+    Un dataset custom que falte se SUBE acá mismo (el `.log` vive en el store
+    de casos) en vez de mandar al SA a "Preparar": el archivo está a mano y es
+    chico. Los built-in que falten sí cortan con el 400 de siempre.
+    """
     from obs_client import OBSClient, OBSConfigError, OBSUploadError
 
     known = _demo_dataset_files()
-    cases = request.cases or []
+    # (slug, prefijo, lee-del-bucket, trae-fuente-propia), venga como venga.
+    if request.cases:
+        objetivos = [(c.slug, c.obs_prefix, c.read_existing_bucket, bool(c.input_config))
+                     for c in request.cases]
+    else:
+        slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+        objetivos = [(slug, request.obs_prefix, request.read_existing_bucket, False)]
     # Un caso `live` (Kafka/Beats/JDBC del cliente) no tiene dataset en OBS: no
     # se lo puede exigir, si no el guard bloquearía un deploy perfectamente válido.
-    demo_cases = [c for c in cases
-                  if c.read_existing_bucket and c.slug in known
-                  and not c.input_config
-                  and custom_cases.case_type_for(c.slug) != "live"]
+    demo_cases = [(slug, prefix) for slug, prefix, lee, fuente in objetivos
+                  if lee and slug in known and not fuente
+                  and custom_cases.case_type_for(slug) != "live"]
     if not demo_cases or not request.obs_access_key or not request.obs_bucket:
         return
     missing: list[str] = []
@@ -3110,10 +3126,19 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
             bucket=request.obs_bucket,
         )
         try:
-            for case in demo_cases:
-                prefix = (case.obs_prefix or f"{case.slug}-logs/").rstrip("/") + "/"
-                if not client.prefix_has_objects(prefix):
-                    missing.append(case.slug)
+            for slug, prefix in demo_cases:
+                prefix = (prefix or f"{slug}-logs/").rstrip("/") + "/"
+                if client.prefix_has_objects(prefix):
+                    continue
+                src = custom_cases.dataset_path(slug)
+                if src is not None:
+                    try:
+                        client.put_file(f"{prefix}{slug}.log", str(src))
+                        print(f"[deploy] el dataset de '{slug}' faltaba en el bucket: subido")
+                        continue
+                    except (OBSConfigError, OBSUploadError) as exc:
+                        print(f"[deploy] no se pudo subir el dataset de '{slug}': {exc!r}")
+                missing.append(slug)
         finally:
             client.close()
     except (OBSConfigError, OBSUploadError) as exc:

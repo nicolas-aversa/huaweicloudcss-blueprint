@@ -262,11 +262,15 @@ def _fake_obs(calls, ya_estan=()):
             calls.setdefault("ensure", []).append(region)
             return False
         def object_exists(self, key):
-            return key in ya_estan
+            return key in self._keys
+        def prefix_has_objects(self, prefix):
+            return any(k.startswith(prefix) for k in self._keys)
         def put_file(self, key, path):
             calls.setdefault("put", []).append(key)
+            self._keys.add(key)          # lo subido pasa a estar
         def close(self):
             pass
+    _FakeObs._keys = set(ya_estan)
     return _FakeObs
 
 
@@ -436,6 +440,59 @@ def test_live_case_skips_the_dataset_guard(store, monkeypatch):
     req = _deploy_req({"slug": "kafka-de-acme", "filter_code": "filter {}",
                        "read_existing_bucket": True})
     main._check_demo_datasets_present(req)  # no debe levantar HTTPException
+
+
+# ── El guard de datasets con el body de UN caso ─────────────────────────────
+# Con una sola tarjeta el front manda `pipeline_slug` + `obs_prefix`, sin
+# `cases`. El guard iteraba solo `cases`, así que el deploy más común pasaba sin
+# chequeo: si el upload del dataset al guardar el caso había fallado en silencio,
+# Logstash arrancaba contra un prefijo vacío y nadie avisaba.
+def _deploy_req_unico(slug, **kw):
+    return main.TerraformDeployRequest(
+        pipeline_conf="input {}", obs_access_key="AK", obs_secret_key="SK",
+        obs_bucket="mi-bucket", obs_endpoint="https://obs.x.com", opensearch_password="pw",
+        pipeline_slug=slug, obs_prefix=f"{slug}-logs/", read_existing_bucket=True, **kw)
+
+
+def test_el_guard_cubre_el_deploy_de_un_solo_caso(store, monkeypatch):
+    """Bucket vacío y el upload de rescate también falla → 400 accionable, en
+    vez de 20 minutos de deploy contra un prefijo sin datos."""
+    from obs_client import OBSUploadError
+    custom_cases.save_case(_meta(), LOG)
+    Fake = _fake_obs({})                                        # bucket vacío
+    def _put_falla(self, key, path):
+        raise OBSUploadError("OBS rechazó el upload")
+    Fake.put_file = _put_falla
+    monkeypatch.setattr("obs_client.OBSClient", Fake)
+
+    with pytest.raises(main.HTTPException) as exc:
+        main._check_demo_datasets_present(_deploy_req_unico("firewall-de-acme"))
+    assert exc.value.status_code == 400
+    assert exc.value.detail["stage"] == "datasets_missing"
+    assert "firewall-de-acme" in exc.value.detail["message"]
+
+
+def test_el_guard_sube_el_dataset_custom_si_falta(store, monkeypatch):
+    """El `.log` del caso vive en el store: si falta en el bucket, se sube ahí
+    mismo en vez de mandar al SA a "Preparar"."""
+    custom_cases.save_case(_meta(), LOG)
+    calls = {}
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+
+    main._check_demo_datasets_present(_deploy_req_unico("firewall-de-acme"))   # no levanta
+
+    assert calls.get("put") == ["firewall-de-acme-logs/firewall-de-acme.log"]
+
+
+def test_el_guard_no_toca_el_flujo_productivo(monkeypatch):
+    """Un slug que no es de demo (prefijo del cliente) ni se chequea: el guard no
+    tiene por qué saber qué hay ahí."""
+    class _Explota:
+        def __init__(self, **kw):
+            raise AssertionError("no tenía que abrir OBS")
+    monkeypatch.setattr("obs_client.OBSClient", _Explota)
+
+    main._check_demo_datasets_present(_deploy_req_unico("acme-prod"))
 
 
 def test_dataset_case_never_stores_the_creators_bucket(store):
