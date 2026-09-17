@@ -203,6 +203,9 @@ console.log("── el JS del panel, contra una ECS que TARDA ──");
 
   check("arranca mostrando el estado real", nodos.estado.textContent === "Apagada",
         nodos.estado.textContent);
+  check("el link a la plataforma se ve aunque esté apagada (atenuado)",
+        /href="https:\/\/x"/.test(nodos.url.innerHTML) && /class=off/.test(nodos.url.innerHTML),
+        nodos.url.innerHTML);
 
   nodos.on.onclick();                            // apretar "Encender"
   await new Promise(r => setImmediate(r));
@@ -222,6 +225,9 @@ console.log("── el JS del panel, contra una ECS que TARDA ──");
         nodos.estado.textContent);
   check("y ahí sí corta el polling", !timers.some(t => t.cada));
   check("habilita el botón de apagar", nodos.off.disabled === false);
+  check("encendida, el link deja de estar atenuado",
+        /href="https:\/\/x"/.test(nodos.url.innerHTML) && !/class=off/.test(nodos.url.innerHTML),
+        nodos.url.innerHTML);
 
   // ── Contra el backend VIEJO, que miente ──────────────────────────────────
   // El Worker y la función de FunctionGraph se despliegan por separado: hasta

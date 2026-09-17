@@ -313,6 +313,7 @@ button:disabled { opacity:.4; cursor:not-allowed; }
 .url { margin:16px 0 0; text-align:center; font-size:var(--fs-sm); min-height:18px; }
 .url a { color:var(--accent); text-decoration:none; font-weight:500; }
 .url a:hover { text-decoration:underline; }
+.url a.off { color:var(--text-muted); }
 `;
 
 // El mismo `#ic-layers` del sprite del app.
@@ -392,8 +393,11 @@ function pintar(d) {
   $('off').disabled = !quieto || t === OFF;
   // El link sale de la config de la función: esta página vive en el dominio del
   // Worker, no en el de la ECS, así que no se puede derivar de location.
-  $('url').innerHTML = (t === ON && d.app_url)
-    ? '<a href="' + d.app_url + '" target=_blank rel=noopener>Abrir la plataforma</a>' : '';
+  // Siempre visible si hay URL: aparecer solo con la ECS encendida hacía que
+  // pareciera que el link no existía. Apagada, se ve atenuado.
+  $('url').innerHTML = d.app_url
+    ? '<a href="' + d.app_url + '" target=_blank rel=noopener' + (t === ON ? '' : ' class=off') +
+      '>Abrir la plataforma</a>' : '';
 
   // El polling sigue mientras NO esté quieto. Antes esto cortaba apenas veía un
   // estado estable, y como la API devuelve el estado viejo durante el
