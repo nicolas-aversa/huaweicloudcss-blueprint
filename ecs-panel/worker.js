@@ -21,11 +21,15 @@
  *   HW_USER          usuario IAM dedicado, con permiso SOLO de invocar la función
  *   HW_DOMAIN        cuenta (domain name) de ese usuario
  *   HW_PASSWORD      su contraseña
+ *   HW_PROJECT_ID    project id de la región (identifica la cuenta: no va al repo)
+ *   FUNCTION_URN     URN de la función de FunctionGraph (ídem)
  *
  * Vars (wrangler.toml):
  *   HW_REGION        p. ej. la-south-2
- *   HW_PROJECT_ID    project id de esa región
- *   FUNCTION_URN     URN de la función de FunctionGraph
+ *
+ * El Worker lee todo de `env` sin distinguir var de secret. La diferencia está
+ * en el deploy: `wrangler deploy` reemplaza las vars por las del toml y borra
+ * las del dashboard; los secrets sobreviven.
  */
 
 const SESSION_TTL = 7 * 24 * 3600;      // una semana: se loguea una vez desde el celular

@@ -1,18 +1,27 @@
-name = "ecs-panel"
+# El nombre ES la URL: `css` → https://css.naversa.workers.dev. Con otro nombre,
+# `wrangler deploy` crea un Worker NUEVO y el viejo sigue sirviendo lo de antes
+# — pasó: un deploy con `name = "ecs-panel"` publicó el rediseño y la contraseña
+# nueva en ecs-panel.naversa.workers.dev mientras el bookmark seguía en css.
+name = "css"
 main = "worker.js"
-compat_date = "2025-01-01"
+compatibility_date = "2025-01-01"
 
 # Los secretos NO van acá: se cargan con `wrangler secret put <NOMBRE>` y quedan
-# cifrados del lado de Cloudflare. Este archivo se versiona; ahí no puede haber
-# ni la contraseña del panel ni las credenciales de Huawei.
+# cifrados del lado de Cloudflare. Este archivo se versiona en un repo público;
+# ahí no puede haber ni la contraseña del panel ni las credenciales de Huawei.
 #
 #   wrangler secret put PANEL_PASSWORD
 #   wrangler secret put PANEL_SECRET
 #   wrangler secret put HW_USER
 #   wrangler secret put HW_DOMAIN
 #   wrangler secret put HW_PASSWORD
+#
+# HW_PROJECT_ID y FUNCTION_URN identifican tu cuenta: tampoco van en el archivo.
+# Se cargan igual que los secretos (`wrangler secret put HW_PROJECT_ID`, etc.);
+# el Worker los lee de `env` sin distinguir var de secret. Y OJO con `[vars]`:
+# `wrangler deploy` reemplaza TODAS las vars del Worker por las de este archivo
+# —las que hayas puesto en el dashboard se borran—. Los secrets no se tocan.
+# Si tenés valores como vars en el dashboard, desplegá con `--keep-vars`.
 
 [vars]
 HW_REGION = "la-south-2"
-HW_PROJECT_ID = ""     # project id de esa región
-FUNCTION_URN = ""      # urn:fss:la-south-2:<project>:function:default:ecs-panel:latest

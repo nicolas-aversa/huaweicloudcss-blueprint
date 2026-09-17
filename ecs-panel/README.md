@@ -108,17 +108,31 @@ esta arquitectura es justamente que esa credencial no pueda hacer nada más.
 
 ### 3. El Worker (Cloudflare)
 
-En `wrangler.toml` completá `HW_REGION`, `HW_PROJECT_ID` y `FUNCTION_URN` (lo muestra la consola de
-FunctionGraph). Después, los secretos — **nunca en el archivo**:
+**El `name` del `wrangler.toml` es la URL**: `css` → `css.naversa.workers.dev`. Con otro nombre,
+`deploy` crea un Worker nuevo y el viejo sigue sirviendo lo de antes (pasó: un deploy con
+`name = "ecs-panel"` publicó el rediseño y la contraseña nueva en otra URL mientras el bookmark
+seguía apuntando a la vieja).
+
+En el toml solo va `HW_REGION`. Todo lo demás se carga con `wrangler secret put` — **nunca en el
+archivo**, que se versiona en un repo público:
 
 ```bash
-wrangler secret put PANEL_PASSWORD   # larga y aleatoria, ver "Seguridad"
-wrangler secret put PANEL_SECRET     # otro string largo al azar, para firmar la cookie
-wrangler secret put HW_USER          # el usuario IAM del paso 2
-wrangler secret put HW_DOMAIN        # la cuenta (domain name) de ese usuario
-wrangler secret put HW_PASSWORD
-wrangler deploy
+cd ecs-panel
+npx wrangler secret put PANEL_PASSWORD   # larga y aleatoria, ver "Seguridad"
+npx wrangler secret put PANEL_SECRET     # otro string largo al azar, para firmar la cookie
+npx wrangler secret put HW_USER          # el usuario IAM del paso 2
+npx wrangler secret put HW_DOMAIN        # la cuenta (domain name) de ese usuario
+npx wrangler secret put HW_PASSWORD
+npx wrangler secret put HW_PROJECT_ID    # project id de la región
+npx wrangler secret put FUNCTION_URN     # lo muestra la consola de FunctionGraph
+npx wrangler deploy
 ```
+
+`HW_PROJECT_ID` y `FUNCTION_URN` no son contraseñas, pero identifican tu cuenta y el Worker los lee
+de `env` igual. Van como secrets por una razón práctica: **`wrangler deploy` reemplaza las vars del
+Worker por las del toml** y borra las que estén solo en el dashboard; los secrets sobreviven a
+cualquier deploy. Si ya los tenés como vars en el dashboard, desplegá con `--keep-vars` o pasalos a
+secrets una vez.
 
 La URL que imprime es la que guardás como bookmark en el celular.
 
