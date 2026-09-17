@@ -3591,6 +3591,30 @@
         : '';
       const credsReadonly = isProductive ? 'readonly' : '';
 
+      // Archivo subido en el paso 1: el destino NO se elige. El .log va al
+      // bucket de demos de la cuenta bajo `<slug>-logs/<archivo>` al guardar el
+      // caso, y Logstash lee de ahí. Es lo que permite que el caso sea del
+      // equipo: cada SA lo prepara en SU bucket con la misma convención. Antes
+      // acá aparecía el formulario de OBS con bucket y prefijo editables —que
+      // `save_case` descarta para un caso con dataset— y la pregunta obligada
+      // era "¿acá pongo a dónde quiero que suba?". Se muestra el destino real.
+      if (plugin === 'obs' && isProductive && state.sourceMode === 'file') {
+        const bucket = demoBucket();
+        const archivo = state.logFileName || 'tu-archivo.log';
+        container.innerHTML = `
+          <div class="how-sample" id="file-dest">
+            <span class="how-sample__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
+            <div class="how-sample__body">
+              <div class="how-sample__title">Tu archivo va al bucket de demos de tu cuenta</div>
+              <code class="how-sample__cmd">obs://${escapeHtml(bucket || '‹bucket de demos›')}/‹slug›-logs/${escapeHtml(archivo)}</code>
+              <div class="how-sample__note">${bucket
+                ? 'Se sube al guardar el caso, con ese nombre, y Logstash lee de ahí. El ‹slug› sale del nombre que le pongas al caso. La ubicación no se elige a mano: es la convención con la que el resto del equipo lo prepara en su propio bucket (⚙ Configuración → Preparar).'
+                : '<span style="color:var(--accent-hover);font-weight:var(--fw-semi);">Falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.</span> Sin él, el caso se guarda pero el archivo no sube.'}</div>
+            </div>
+          </div>`;
+        return;
+      }
+
       const configs = {
         'obs': `
           <div class="form-row" style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -6730,6 +6754,9 @@
         // Archivo importado OK → limpiar el error inline de la drop-zone.
         document.getElementById('step1-custom-error')?.classList.remove('show');
         document.getElementById('log-file-drop')?.classList.remove('input-error');
+        // El paso 3 muestra el destino con el nombre del archivo: repintarlo
+        // ahora, que ya se sabe cómo se llama.
+        if (state.deployMode === 'custom' && state.sourceMode === 'file') renderInputConfig('obs');
       };
       reader.onerror = () => toast('No se pudo leer el archivo.', 'error');
       reader.readAsText(file);

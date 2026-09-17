@@ -256,3 +256,16 @@ def test_el_rail_oculta_la_barra_pero_sigue_scrolleando(css):
     assert re.search(r"scrollbar-width:\s*none", cuerpo), "la barra vuelve a verse (Firefox)"
     assert re.search(r"\.app-nav__items::-webkit-scrollbar\s*\{[^}]*display:\s*none", css), \
         "la barra vuelve a verse (Chrome/Edge/Safari)"
+
+
+def test_con_archivo_el_paso_3_muestra_el_destino_en_vez_de_pedirlo():
+    """El .log de un caso va al bucket de demos bajo `<slug>-logs/<archivo>` y
+    `save_case` descarta cualquier bucket/prefijo que se tipee. Mostrar el
+    formulario de OBS editable ahí hacía preguntar "¿acá pongo a dónde sube?"."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function renderInputConfig(plugin)")
+    fn = html[i:html.index("function renderOutputConfig", i)]
+    assert "state.sourceMode === 'file'" in fn, "el paso 3 no distingue el flujo de archivo"
+    assert 'id="file-dest"' in fn and "-logs/" in fn
+    # La rama del archivo va ANTES del formulario editable, y corta.
+    assert fn.index("state.sourceMode === 'file'") < fn.index("'obs': `")
