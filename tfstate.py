@@ -232,18 +232,46 @@ terraform {{
     skip_metadata_api_check     = true
     skip_requesting_account_id  = true
     use_path_style              = false
+    # El SDK de AWS firma el PutObject por chunks (`x-amz-content-sha256:
+    # STREAMING-…`) y OBS lo calcula sobre el cuerpo crudo: no coinciden y OBS
+    # rechaza la escritura con `XAmzContentSHA256Mismatch`. Sin esto el apply
+    # crea los clusters y después NO PUEDE guardar el state: queda solo en
+    # `errored.tfstate`, y el siguiente apply crea un segundo par de clusters.
+    skip_s3_checksum            = true
   }}
 }}
 '''
 
 
-def _recorded_backend(terraform_dir: Path) -> str:
-    """Qué backend registró el último `init`: 's3', 'local', o '' si nunca corrió."""
+def _recorded(terraform_dir: Path) -> dict:
+    """El bloque `backend` que registró el último `init` ({} si nunca corrió)."""
     try:
         datos = json.loads((terraform_dir / _BACKEND_RECORD).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+    return datos.get("backend") or {}
+
+
+def _recorded_backend(terraform_dir: Path) -> str:
+    """Qué backend registró el último `init`: 's3', 'local', o '' si nunca corrió."""
+    if not (terraform_dir / _BACKEND_RECORD).is_file():
         return ""
-    return ((datos.get("backend") or {}).get("type") or "local").strip()
+    return (_recorded(terraform_dir).get("type") or "local").strip()
+
+
+# Lo que, si cambia entre inits, obliga a re-leer la config del backend aunque
+# el state siga en el mismo lugar. Terraform lo detecta solo y aborta el apply
+# con "Backend configuration changed"; acá se detecta antes para mandar
+# `-reconfigure`, que re-lee sin migrar nada. Pasó con `skip_s3_checksum`: se
+# agregó al HCL y, como el backend seguía siendo s3, no se inicializaba.
+_DESEADA = {"use_path_style": False, "skip_s3_checksum": True}
+
+
+def _config_cambio(reg: dict, cfg: dict) -> bool:
+    grabada = reg.get("config") or {}
+    if (grabada.get("endpoints") or {}).get("s3") != cfg["endpoint"]:
+        return True
+    return any(bool(grabada.get(k)) != v for k, v in _DESEADA.items())
 
 
 def prepare(terraform_dir: Path | str, state_key: str) -> tuple[bool, list[str]]:
@@ -284,7 +312,51 @@ def prepare(terraform_dir: Path | str, state_key: str) -> tuple[bool, list[str]]
     destino = "s3" if quiere_remoto else "local"
     if tenia != destino:
         return True, ["-migrate-state", "-force-copy"]
+    if quiere_remoto:
+        reg = _recorded(terraform_dir)
+        grabada = reg.get("config") or {}
+        # Mismo backend pero otro bucket u otra key: es una mudanza del state.
+        if grabada.get("bucket") != cfg["bucket"] or grabada.get("key") != state_key:
+            return True, ["-migrate-state", "-force-copy"]
+        # Mismo lugar, otra config: re-leer sin migrar.
+        if _config_cambio(reg, cfg):
+            return True, ["-reconfigure"]
     return False, []
+
+
+# ── errored.tfstate ──────────────────────────────────────────────────────────
+# Cuando Terraform no puede escribir el state al backend, lo deja en este
+# archivo y avisa que otro apply "crearía un state bifurcado". Bifurcado quiere
+# decir: los clusters que ya se crearon no están en ningún state, y el siguiente
+# apply crea OTRO par — facturando los dos, y sin forma de destruir el primero
+# desde la app. Pasó: el PutObject a OBS falló por el checksum y los clusters
+# quedaron solo acá.
+ERRORED_FILE = "errored.tfstate"
+
+
+def push_errored_state(terraform_dir: Path | str) -> tuple[bool, str]:
+    """Si quedó un `errored.tfstate`, lo sube al backend ANTES de operar.
+
+    Devuelve `(ok, detalle)`. `ok` también cuando no había nada que subir. Si el
+    push falla, el que llama tiene que PARAR: seguir es bifurcar el state.
+    No usa `-force`: si Terraform rechaza el push por linaje o serial, es que el
+    backend tiene un state más nuevo y pisarlo a ciegas es peor.
+    """
+    terraform_dir = Path(terraform_dir)
+    archivo = terraform_dir / ERRORED_FILE
+    if not archivo.is_file():
+        return True, ""
+    try:
+        res = subprocess.run(
+            ["terraform", "state", "push", "-no-color", ERRORED_FILE],
+            cwd=str(terraform_dir), capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"no se pudo correr `terraform state push`: {exc}"
+    if res.returncode != 0:
+        return False, (res.stderr or res.stdout or "terraform state push falló").strip()
+    archivo.unlink()
+    invalidate(terraform_dir)
+    return True, "state recuperado de errored.tfstate y subido al backend"
 
 
 def state_key_for(user_id: str) -> str:

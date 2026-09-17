@@ -5020,3 +5020,32 @@ def test_preparar_bucket_sigue_sin_incluir_cts():
 
     assert "cts" not in V.demo_dataset_files()
     assert "cts" not in main._demo_dataset_files()
+
+
+def test_deploy_no_aplica_si_el_state_anterior_no_se_pudo_subir(monkeypatch):
+    """Un `errored.tfstate` es lo ÚNICO que sabe qué clusters existen de un
+    apply que no pudo guardar su state. Si no se puede subir, el deploy tiene
+    que PARAR antes del apply: seguir crea un segundo par de clusters, con el
+    primero facturando sin que nadie lo pueda destruir desde la app."""
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda _d: {})
+    monkeypatch.setattr(main, "_backend_init_args", lambda _d: None)
+    monkeypatch.setattr(main.tfstate, "push_errored_state",
+                        lambda _d: (False, "Error: lineage mismatch"))
+    applies = []
+
+    def _popen(*a, **k):
+        applies.append(a)
+        raise AssertionError("no tiene que llegar al apply")
+    monkeypatch.setattr(main.subprocess, "Popen", _popen)
+
+    res = client.post("/api/v1/terraform/deploy-stream", json={
+        "pipeline_conf": "input {} output {}", "obs_access_key": "AK",
+        "obs_secret_key": "SK", "obs_bucket": "mis-demos", "opensearch_password": "pw",
+        "opensearch_index": "logs-%{+YYYY.MM}", "read_existing_bucket": True,
+    })
+    assert res.status_code == 200
+    import json as _json
+    eventos = [_json.loads(l[len("data: "):]) for l in res.text.splitlines() if l.startswith("data: ")]
+    errores = [e for e in eventos if e.get("type") == "error"]
+    assert errores and "errored.tfstate" in errores[0]["message"], eventos[-3:]
+    assert applies == [], "aplicó igual: state bifurcado"

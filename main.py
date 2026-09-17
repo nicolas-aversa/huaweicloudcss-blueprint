@@ -2675,6 +2675,25 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
             return
         yield _sse({"type": "step", "name": "terraform init", "ok": True})
 
+    # ── state que quedó sin subir ────────────────────────────────────────
+    # Si el apply anterior creó recursos pero no pudo guardar el state, está en
+    # errored.tfstate. Subirlo ANTES de aplicar es lo único que evita que este
+    # apply cree un segundo par de clusters. Si no se puede subir, no se sigue.
+    ok_push, detalle_push = tfstate.push_errored_state(terraform_dir)
+    if detalle_push:
+        yield _sse({"type": "log", "level": "" if ok_push else "error",
+                    "source": "terraform state push", "message": detalle_push})
+    if not ok_push:
+        yield _sse({"type": "step", "name": "Recuperar el state anterior", "ok": False,
+                    "reason": detalle_push[-300:]})
+        yield _sse({"type": "error", "message": (
+            "Quedó un state sin subir de un deploy anterior (errored.tfstate) y no se "
+            "pudo recuperar. No se aplica nada: un apply ahora crearía los clusters de "
+            "nuevo, con los anteriores facturando sin state.\n" + detalle_push[-1500:])})
+        return
+    if detalle_push:
+        yield _sse({"type": "step", "name": "Recuperar el state anterior", "ok": True})
+
     # ── terraform apply (streaming línea por línea) ──────────────────────
     yield _sse({"type": "progress", "percent": 5, "phase": "Terraform apply",
                 "message": "Aplicando infraestructura…"})
@@ -5944,6 +5963,15 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
     except Exception as exc:  # noqa: BLE001
         print(f"[terraform_destroy] teardown de capabilities falló (best-effort): {exc!r}")
 
+    # Un errored.tfstate tiene los recursos que el backend no conoce: sin
+    # subirlo, el destroy no los ve y quedan facturando.
+    ok_push, detalle_push = tfstate.push_errored_state(terraform_dir)
+    if not ok_push:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"stage": "terraform_destroy",
+                    "message": "Hay un state sin subir (errored.tfstate) y no se pudo "
+                               "recuperar; el destroy no vería esos recursos. " + detalle_push})
     print("[terraform_destroy] ejecutando terraform destroy -auto-approve -input=false...")
     result = subprocess.run(
         ["terraform", "destroy", "-auto-approve", "-input=false", "-no-color"],

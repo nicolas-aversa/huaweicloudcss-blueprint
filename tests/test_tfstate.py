@@ -250,11 +250,26 @@ def con_bucket(monkeypatch):
         "access_key": "AK", "secret_key": "SK"})
 
 
-def _registrar_backend(ws, tipo):
-    """Simula lo que Terraform deja en .terraform/terraform.tfstate tras un init."""
+# La config que Terraform registra tras un init contra el backend de `con_bucket`
+# con la key "k". Es lo que `prepare` compara para decidir si hay que re-leer.
+_CONFIG_REGISTRADA = {
+    "bucket": "demos-css", "key": "k", "region": "la-south-2",
+    "endpoints": {"s3": "https://obs.la-south-2.myhuaweicloud.com"},
+    "use_path_style": False, "skip_s3_checksum": True,
+}
+
+
+def _registrar_backend(ws, tipo, config=None):
+    """Simula lo que Terraform deja en .terraform/terraform.tfstate tras un init.
+    Para s3, con la config tal como la registra Terraform (todas las claves)."""
     d = ws / ".terraform"
     d.mkdir(exist_ok=True)
-    datos = {"backend": {"type": tipo}} if tipo else {}
+    if tipo == "s3":
+        datos = {"backend": {"type": "s3", "config": dict(_CONFIG_REGISTRADA, **(config or {}))}}
+    elif tipo:
+        datos = {"backend": {"type": tipo}}
+    else:
+        datos = {}
     (d / "terraform.tfstate").write_text(json.dumps(datos), encoding="utf-8")
 
 
@@ -314,6 +329,34 @@ def test_backend_sin_cambios_no_migra(ws, con_bucket):
     _registrar_backend(ws, "s3")
 
     assert tfstate.prepare(ws, "k") == (False, [])
+
+
+def test_el_backend_salta_el_checksum_de_s3(ws, con_bucket):
+    """OBS rechaza el PutObject firmado por chunks con `XAmzContentSHA256Mismatch`.
+    Pasó en un deploy real: los clusters se crearon y el state quedó solo en
+    errored.tfstate. `skip_s3_checksum` es el flag de Terraform para los S3
+    compatibles que no soportan esa firma."""
+    tfstate.prepare(ws, "k")
+
+    hcl = (ws / tfstate.BACKEND_FILE).read_text(encoding="utf-8")
+    assert re.search(r"skip_s3_checksum\s*=\s*true", hcl), hcl
+
+
+def test_cambio_de_config_sin_mudanza_reconfigura(ws, con_bucket):
+    """El backend sigue siendo s3 y el state sigue en el mismo bucket/key, pero
+    la config cambió (acá: falta `skip_s3_checksum`, que se agregó después del
+    init anterior). Sin init, Terraform aborta el apply con "Backend
+    configuration changed". `-reconfigure` re-lee la config sin migrar nada."""
+    _registrar_backend(ws, "s3", {"skip_s3_checksum": None})
+
+    assert tfstate.prepare(ws, "k") == (True, ["-reconfigure"])
+
+
+def test_otra_key_en_el_mismo_bucket_es_una_mudanza(ws, con_bucket):
+    """Cambiar la key es mover el state: eso sí migra, no reconfigura."""
+    _registrar_backend(ws, "s3", {"key": "tfstate/otro/terraform.tfstate"})
+
+    assert tfstate.prepare(ws, "k") == (True, ["-migrate-state", "-force-copy"])
 
 
 def test_local_estable_no_migra(ws, sin_bucket):
@@ -435,3 +478,41 @@ def test_terraform_corre_sin_color():
     sin_flag = [l for l in re.findall(r'\["terraform", "(?:init|apply|destroy)"[^\]]*\]', fuente)
                 if "-no-color" not in l]
     assert not sin_flag, sin_flag
+
+
+# ── errored.tfstate ──────────────────────────────────────────────────────────
+# Cuando el backend rechaza la escritura, Terraform deja el state en este
+# archivo. Otro apply sin subirlo crea un state bifurcado: los clusters que ya
+# existen no están en ningún state y se crea OTRO par, facturando los dos.
+def test_sin_errored_no_hace_nada(ws, monkeypatch):
+    run = FakeRun()
+    monkeypatch.setattr(tfstate.subprocess, "run", run)
+
+    assert tfstate.push_errored_state(ws) == (True, "")
+    assert run.comandos == []
+
+
+def test_errored_se_sube_y_se_borra(ws, monkeypatch):
+    (ws / tfstate.ERRORED_FILE).write_text("{}", encoding="utf-8")
+    run = FakeRun()
+    monkeypatch.setattr(tfstate.subprocess, "run", run)
+
+    ok, detalle = tfstate.push_errored_state(ws)
+
+    assert ok and "recuperado" in detalle
+    assert run.comandos == [["terraform", "state", "push", "-no-color", "errored.tfstate"]]
+    assert "-force" not in run.comandos[0], "sin -force: un push rechazado por linaje es una señal, no un obstáculo"
+    assert not (ws / tfstate.ERRORED_FILE).exists(), "subido → ya no hace falta"
+
+
+def test_si_el_push_falla_el_archivo_se_queda(ws, monkeypatch):
+    """Si no se pudo subir, el archivo es lo ÚNICO que sabe qué recursos existen:
+    no se borra, y el que llama tiene que parar en vez de aplicar."""
+    (ws / tfstate.ERRORED_FILE).write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(tfstate.subprocess, "run",
+                        FakeRun(returncode=1, stderr="lineage mismatch"))
+
+    ok, detalle = tfstate.push_errored_state(ws)
+
+    assert not ok and "lineage" in detalle
+    assert (ws / tfstate.ERRORED_FILE).exists()
