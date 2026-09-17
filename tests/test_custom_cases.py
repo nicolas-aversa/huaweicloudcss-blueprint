@@ -62,7 +62,10 @@ def test_save_case_persists_json_and_dataset(store):
     on_disk = json.loads((store / "firewall-de-acme.json").read_text(encoding="utf-8"))
     assert on_disk == case
     # El dataset se guarda ya sin comentarios: es lo que se sube a OBS tal cual.
-    assert (store / "firewall-de-acme.log").read_text(encoding="utf-8") == "evento 1\nevento 2\nevento 3\n"
+    # Sin nombre de archivo cae a `<slug>.log`, pero el contenido es el subido
+    # ENTERO: el comentario `#` no cuenta como dato pero tampoco se pierde.
+    assert case["dataset_files"] == ["firewall-de-acme.log"]
+    assert (store / "firewall-de-acme" / "firewall-de-acme.log").read_bytes() == LOG.encode("utf-8")
 
 
 def test_fields_are_cleaned_of_browser_junk(store):
@@ -708,3 +711,78 @@ def test_un_caso_no_puede_leer_directo_de_un_bucket(store):
         custom_cases.save_case(dict(_meta(), sample="x=1", input_config={
             "plugin_type": "obs", "obs": {"bucket": "ajeno", "prefix": "logs/"},
         }), log_text="")
+
+
+# ── El dataset se guarda con su nombre y su contenido exactos ───────────────
+# Antes se renombraba a `<slug>.log` y se le sacaban las líneas `#`: el archivo
+# que aparecía en el bucket no era el que el SA había subido.
+def test_el_dataset_conserva_nombre_y_bytes(store, monkeypatch):
+    crudo = "# cabecera\r\nid,monto\r\n1,10\r\n2,20\r\n"
+    case = custom_cases.save_case(_meta(label="Reviews Olist"), crudo, filename="reviews-olist.csv")
+
+    assert case["dataset_files"] == ["reviews-olist.csv"]
+    path = custom_cases.dataset_path("reviews-olist")
+    assert path == store / "reviews-olist" / "reviews-olist.csv"
+    assert path.read_bytes() == crudo.encode("utf-8"), "ni el # ni los \\r\\n se tocan"
+    assert case["lines"] == 3, "la cabecera # no cuenta como dato, pero se guarda"
+    assert custom_cases.dataset_files()["reviews-olist"] == ["reviews-olist.csv"]
+
+
+def test_el_dataset_sube_a_obs_con_su_nombre(client, store, monkeypatch):
+    """`<slug>-logs/<nombre original>`: al guardar el caso, al desplegar si
+    falta, y en "Preparar" — los tres con la misma key."""
+    custom_cases.save_case(_meta(label="Reviews Olist"), "a,b\n1,2\n", filename="reviews-olist.csv")
+    calls = {}
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+    monkeypatch.setattr(main, "get_huawei_settings", lambda: {"demo_bucket": "mis-demos"})
+    import maas_integrator as _mi
+    monkeypatch.setattr(_mi, "get_obs_creds", lambda: {"ak": "AK", "sk": "SK"})
+
+    ok, err = main._upload_case_dataset("reviews-olist")
+    assert ok, err
+    assert calls["put"] == ["reviews-olist-logs/reviews-olist.csv"]
+
+    calls.clear()
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+    main._check_demo_datasets_present(_deploy_req_unico("reviews-olist"))
+    assert calls["put"] == ["reviews-olist-logs/reviews-olist.csv"]
+
+    calls.clear()
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+    res = client.post("/api/v1/datasets/preload", json={
+        "access_key": "AK", "secret_key": "SK", "bucket": "mis-demos"})
+    assert res.status_code == 200
+    assert "reviews-olist-logs/reviews-olist.csv" in calls["put"]
+
+
+def test_borrar_el_caso_borra_su_carpeta(store):
+    custom_cases.save_case(_meta(), "x=1\n", filename="datos.txt")
+    assert (store / "firewall-de-acme" / "datos.txt").is_file()
+
+    assert custom_cases.delete_case("firewall-de-acme")
+    assert not (store / "firewall-de-acme").exists()
+    assert custom_cases.dataset_path("firewall-de-acme") is None
+
+
+def test_un_caso_viejo_con_slug_log_plano_sigue_andando(store):
+    """Los casos creados antes tienen `<slug>.log` suelto y `dataset_files`
+    con ese nombre: se siguen encontrando."""
+    case = custom_cases.save_case(_meta(), LOG)
+    # Simular el layout anterior: archivo plano, sin carpeta.
+    (store / "firewall-de-acme.log").write_text(LOG, encoding="utf-8")
+    import shutil
+    shutil.rmtree(store / "firewall-de-acme")
+
+    assert custom_cases.dataset_path("firewall-de-acme") == store / "firewall-de-acme.log"
+    assert custom_cases.dataset_files()["firewall-de-acme"] == ["firewall-de-acme.log"]
+
+
+@pytest.mark.parametrize("feo,esperado", [
+    ("../../etc/passwd", "passwd"),
+    ("C:\\Users\\yo\\mi log (final).txt", "mi_log_final_.txt"),
+    (".oculto", "oculto"),
+    ("", "firewall-de-acme.log"),
+    ("///", "firewall-de-acme.log"),
+])
+def test_safe_filename(feo, esperado):
+    assert custom_cases.safe_filename(feo, "firewall-de-acme") == esperado

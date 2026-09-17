@@ -1257,6 +1257,7 @@ def create_custom_case(request: dict) -> dict:
             },
             str(request.get("log_content", "") or ""),
             created_by=email,
+            filename=str(request.get("log_filename", "") or ""),
         )
     except custom_cases.CaseError as exc:
         raise HTTPException(status_code=400,
@@ -1305,7 +1306,7 @@ def _upload_case_dataset(slug: str) -> tuple[bool, str]:
         client = OBSClient(access_key_id=ak, secret_access_key=sk,
                            endpoint=_default_obs_endpoint(), bucket=bucket)
         client.ensure_bucket(region=region)
-        client.put_file(f"{slug}-logs/{slug}.log", str(src))
+        client.put_file(f"{slug}-logs/{src.name}", str(src))   # con su nombre original
         return True, ""
     except (OBSConfigError, OBSUploadError) as exc:
         return False, str(exc)
@@ -3207,7 +3208,7 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
                 src = custom_cases.dataset_path(slug)
                 if src is not None:
                     try:
-                        client.put_file(f"{prefix}{slug}.log", str(src))
+                        client.put_file(f"{prefix}{src.name}", str(src))
                         print(f"[deploy] el dataset de '{slug}' faltaba en el bucket: subido")
                         continue
                     except (OBSConfigError, OBSUploadError) as exc:
@@ -3754,7 +3755,9 @@ def _write_destroy_creds(terraform_dir: Path, request: "TerraformDeployRequest")
     huawei_project_id = get_huawei_project_id()
     if huawei_project_id:
         creds["huawei_project_id"] = huawei_project_id
-    if request.existing_opensearch_endpoint:
+    # También lo llama el destroy con un `TerraformDestroyRequest`, que no
+    # tiene este campo.
+    if getattr(request, "existing_opensearch_endpoint", ""):
         creds["existing_opensearch_endpoint"] = request.existing_opensearch_endpoint
     if not creds:
         return

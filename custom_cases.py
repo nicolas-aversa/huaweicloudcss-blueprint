@@ -11,8 +11,13 @@ ECS ven los casos creados; borrar queda limitado al creador o a un admin.
 Layout (en el volumen `appdata`, que ya persiste):
 
     $APP_DATA_DIR/cases/
-      <slug>.json   -> metadata con el MISMO shape que un `VERTICAL`
-      <slug>.log    -> el dataset subido
+      <slug>.json           -> metadata con el MISMO shape que un `VERTICAL`
+      <slug>/<archivo>      -> el dataset, con el nombre y el contenido con que
+                               se subió (así llega a OBS: `<slug>-logs/<archivo>`)
+      <slug>.log            -> (casos anteriores) el dataset, renombrado
+
+El archivo se guarda byte a byte: ni se le sacan las líneas `#`, ni se
+renombra a `.log`. Lo que el SA subió es lo que aparece en el bucket.
 
 El JSON respeta las convenciones de `verticals/__init__.py` (slug, label,
 full_label, group, icon, index_base, description, sample, filter_code, fields,
@@ -26,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 import unicodedata
 from pathlib import Path
@@ -149,9 +155,24 @@ def _clean_input_config(cfg: dict | None) -> dict:
 
 def _data_lines(text: str) -> list[str]:
     """Líneas con datos: sin vacías y sin comentarios `#` (mismo criterio que
-    `main._bundled_dataset` y `datasets/README.md`)."""
+    `main._bundled_dataset` y `datasets/README.md`). Solo para CONTAR y para
+    sacar la muestra; el archivo se guarda entero."""
     return [l for l in (text or "").splitlines()
             if l.strip() and not l.lstrip().startswith("#")]
+
+
+_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_filename(nombre: str, slug: str) -> str:
+    """El nombre con que se subió, apto para disco y para una key de OBS.
+
+    Solo el basename (un `../x` no sale de la carpeta del caso), caracteres
+    seguros, sin puntos al inicio, máximo 120. Si no queda nada usable, cae a
+    `<slug>.log`, que es lo que se usaba siempre."""
+    base = str(nombre or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    base = _FILENAME_RE.sub("_", base).lstrip(".")[:120]
+    return base or f"{slug}.log"
 
 
 # ── Lectura ──────────────────────────────────────────────────────────────────
@@ -186,20 +207,31 @@ def get_case(slug: str) -> dict | None:
 
 
 def dataset_path(slug: str) -> Path | None:
-    """Ruta del `.log` del caso, o None si no existe."""
+    """Ruta del dataset del caso, o None si no existe.
+
+    Primero `<slug>/<archivo>` (el nombre original, registrado en
+    `dataset_files`); si no, el `<slug>.log` plano de los casos anteriores."""
     if not slug:
         return None
-    path = cases_dir() / f"{slug}.log"
+    d = cases_dir()
+    case = get_case(slug) or {}
+    for nombre in case.get("dataset_files") or []:
+        path = d / slug / nombre
+        if path.is_file():
+            return path
+    path = d / f"{slug}.log"
     return path if path.is_file() else None
 
 
 def dataset_files() -> dict[str, list[str]]:
-    """`slug -> [archivo]`, para mergear con `verticals.demo_dataset_files()`."""
+    """`slug -> [archivo]`, para mergear con `verticals.demo_dataset_files()`.
+    El nombre es el del archivo en disco: es lo que va a la key de OBS."""
     out: dict[str, list[str]] = {}
     for case in list_cases():
         slug = case["slug"]
-        if dataset_path(slug) is not None:
-            out[slug] = [f"{slug}.log"]
+        path = dataset_path(slug)
+        if path is not None:
+            out[slug] = [path.name]
     return out
 
 
@@ -239,8 +271,11 @@ def front_entries() -> list[dict]:
 
 
 # ── Escritura ────────────────────────────────────────────────────────────────
-def save_case(meta: dict, log_text: str, created_by: str = "") -> dict:
+def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "") -> dict:
     """Valida, normaliza y persiste un caso nuevo. Devuelve el caso guardado.
+
+    `filename` es el nombre con que el SA subió el archivo: el dataset se guarda
+    con ese nombre y con el contenido exacto, y así llega al bucket.
 
     Levanta `CaseError` con un mensaje para el usuario si algo no cierra.
     """
@@ -319,8 +354,9 @@ def save_case(meta: dict, log_text: str, created_by: str = "") -> dict:
         "fields": fields,
         "suggested_questions": questions[:10],
         # Solo los casos con dataset se pre-cargan en OBS; los `live` leen de la
-        # fuente del cliente y no tienen archivo que subir.
-        "dataset_files": [f"{slug}.log"] if case_type == "dataset" else [],
+        # fuente del cliente y no tienen archivo que subir. El nombre es el del
+        # archivo subido: `<slug>-logs/<ese nombre>` en el bucket.
+        "dataset_files": [safe_filename(filename, slug)] if case_type == "dataset" else [],
         "case_type": case_type,
         # La fuente SOLO se guarda para los casos `live`. Un caso con dataset lee
         # de `<slug>-logs/` en el bucket de QUIEN LO DESPLIEGA — guardar acá el
@@ -335,8 +371,12 @@ def save_case(meta: dict, log_text: str, created_by: str = "") -> dict:
     d = cases_dir()
     d.mkdir(parents=True, exist_ok=True)
     if case_type == "dataset":
-        # El dataset se guarda ya sin comentarios: es lo que se sube a OBS tal cual.
-        (d / f"{slug}.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # Byte a byte, con su nombre: lo que el SA subió es lo que aparece en el
+        # bucket. Antes se renombraba a `<slug>.log` y se le sacaban las líneas
+        # `#`; el archivo que llegaba a OBS no era el que había subido.
+        # `write_bytes`, no `write_text`: en Windows este último traduce los \n.
+        (d / slug).mkdir(exist_ok=True)
+        (d / slug / case["dataset_files"][0]).write_bytes((log_text or "").encode("utf-8"))
     (d / f"{slug}.json").write_text(json.dumps(case, ensure_ascii=False, indent=2),
                                     encoding="utf-8")
     return case
@@ -387,6 +427,7 @@ def delete_case(slug: str) -> bool:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+    shutil.rmtree(d / slug, ignore_errors=True)
     return True
 
 

@@ -2642,7 +2642,7 @@
                      style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
                   <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
                   <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
-                  <div style="font-size:var(--fs-sm); color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Las líneas que empiezan con <code>#</code> se ignoran.</div>
+                  <div style="font-size:var(--fs-sm); color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Va al bucket tal cual, con su nombre.</div>
                 </div>
                 <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
               </div>
@@ -3867,7 +3867,7 @@
         const plugin = state.inputPlugin || 'obs';
         const PLUGIN_LABEL = { obs: 'OBS', kafka: 'Kafka', beats: 'Beats/Filebeat', jdbc: 'una base (JDBC)' };
         summary.innerHTML = state.sourceMode === 'file'
-          ? `<strong>Dataset repetible.</strong> Se guarda <strong>${escapeHtml(state.logFileName || 'tu archivo')}</strong> (${lines.toLocaleString('es')} líneas) y se sube a tu bucket, así lo desplegás las veces que quieras.`
+          ? `<strong>Dataset repetible.</strong> Se guarda <strong>${escapeHtml(state.logFileName || 'tu archivo')}</strong> tal cual (${lines.toLocaleString('es')} líneas) y se sube con ese nombre a tu bucket, así lo desplegás las veces que quieras.`
           : `<strong>Dataset en vivo.</strong> Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión del paso 3. Esa fuente tiene que estar levantada y ser alcanzable al desplegar.`;
         summary.innerHTML += ` · ${state.fields.length} campo${state.fields.length === 1 ? '' : 's'} detectado${state.fields.length === 1 ? '' : 's'}.`;
       }
@@ -3917,6 +3917,8 @@
             filter_code: state.filterCode || '',
             fields: state.fields || [],
             log_content: state.logFileContent || '',
+            // El nombre con que se subió: así se guarda y así llega al bucket.
+            log_filename: state.logFileName || '',
             // Fuente elegida en el paso 3. Con archivo el caso es `dataset` y
             // esto queda de referencia; sin archivo es `live` y ES la fuente de
             // la que Logstash va a leer. Los secretos se cifran en el server.
