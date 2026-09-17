@@ -5075,6 +5075,18 @@ def test_deploy_no_aplica_si_el_state_anterior_no_se_pudo_subir(monkeypatch):
     apply que no pudo guardar su state. Si no se puede subir, el deploy tiene
     que PARAR antes del apply: seguir crea un segundo par de clusters, con el
     primero facturando sin que nadie lo pueda destruir desde la app."""
+    # Workspace aislado: el endpoint escribe registry/tfvars/creds de teardown,
+    # y contra `terraform/` del repo eso contaminaba a otros tests (el
+    # huawei_project_id de la cuenta local aparecía en el destroy.auto.tfvars).
+    import tempfile
+    td = pathlib.Path(tempfile.mkdtemp()) / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: td)
+    # La infra de la cuenta viene de ⚙ Configuración: sin esto el pre-flight
+    # corta antes y el test pasaba o no según lo que tuviera guardado la máquina.
+    monkeypatch.setattr(main, "get_huawei_settings", lambda: {
+        "vpc_id": "vpc-1", "subnet_id": "net-2", "security_group_id": "sg-3",
+        "availability_zone": "la-south-2a"})
     monkeypatch.setattr(main, "_read_pipelines_registry", lambda _d: {})
     monkeypatch.setattr(main, "_backend_init_args", lambda _d: None)
     monkeypatch.setattr(main.tfstate, "push_errored_state",
