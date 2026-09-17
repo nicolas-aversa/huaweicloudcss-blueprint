@@ -335,7 +335,11 @@ def _config_cambio(reg: dict, cfg: dict, key: str) -> bool:
             if bool(tiene) != v:
                 return True
         elif isinstance(v, dict):
-            if (tiene or {}) != v:
+            # Terraform registra el bloque `endpoints` con TODAS sus claves
+            # (`dynamodb: null, iam: null, s3: ..., sso: null, sts: null`):
+            # comparar el dict entero decía "cambió" en cada deploy y mandaba un
+            # `-reconfigure` de más. Solo importan las que nosotros fijamos.
+            if any((tiene or {}).get(sk) != sv for sk, sv in v.items()):
                 return True
         elif (tiene or "") != v:
             return True

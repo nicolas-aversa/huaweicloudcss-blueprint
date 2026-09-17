@@ -328,6 +328,18 @@ def test_primer_init_con_state_local_vacio_no_migra(ws, con_bucket):
     assert tfstate.prepare(ws, "k") == (True, [])
 
 
+def test_el_registro_con_endpoints_en_null_no_cuenta_como_cambio(ws, con_bucket):
+    """Terraform registra `endpoints` con todas sus claves en null salvo `s3`.
+    Comparar el dict entero decía "cambió" en cada deploy: un `-reconfigure`
+    de más por vez (se veía como "Successfully configured the backend" en
+    todos los logs)."""
+    _registrar_backend(ws, "s3", {"endpoints": {
+        "dynamodb": None, "iam": None, "sso": None, "sts": None,
+        "s3": "https://obs.la-south-2.myhuaweicloud.com"}})
+
+    assert tfstate.prepare(ws, "k") == (False, [])
+
+
 def test_rotar_credenciales_reconfigura(ws, con_bucket):
     """Terraform guarda la config ENTERA del backend —AK/SK incluidas— y si algo
     cambió aborta con "Backend configuration changed". La comparación vieja
