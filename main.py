@@ -27,12 +27,35 @@ Ejecución local:
 
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
+
+def _salida_utf8(*streams) -> None:
+    """La salida del proceso en UTF-8, pase lo que pase con la consola.
+
+    En Windows, stdout de un pipe (uvicorn lanzado desde una terminal, el
+    output de un IDE) viene en cp1252, y un `print` con `→`, `…` o `FALLÓ`
+    levanta `UnicodeEncodeError`. Pasó adentro de un endpoint: el print del
+    timepicker explotó, el `except` imprimió el error —que traía la misma
+    flecha— y volvió a explotar afuera del try: un 500 con texto plano por una
+    línea de log. En Docker (Linux, UTF-8) es un no-op. `backslashreplace` en
+    vez de fallar: un log nunca justifica tumbar un request.
+    """
+    for s in streams:
+        try:
+            if hasattr(s, "reconfigure") and (s.encoding or "").lower().replace("-", "") != "utf8":
+                s.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except Exception:  # noqa: BLE001 — es un stream raro; seguimos como estaba
+            pass
+
+
+_salida_utf8(sys.stdout, sys.stderr)
 from fastapi import Body, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles

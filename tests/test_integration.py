@@ -5216,3 +5216,25 @@ def test_runs_append_tambien_enmascara(tmp_path, monkeypatch):
 
     guardado = (tmp_path / f"{run['id']}.json").read_text(encoding="utf-8")
     assert "AK-CRUDO" not in guardado and "PW-CRUDO" not in guardado, guardado
+
+
+def test_la_salida_del_proceso_pasa_a_utf8():
+    """Un `print` con `→` en cp1252 tiraba UnicodeEncodeError adentro de un
+    endpoint: 500 por una línea de log. La salida se reconfigura al importar."""
+    class _Stream:
+        def __init__(self, enc):
+            self.encoding = enc
+            self.llamadas = []
+        def reconfigure(self, **kw):
+            self.llamadas.append(kw)
+            self.encoding = kw["encoding"]
+
+    cp = _Stream("cp1252")
+    ya = _Stream("utf-8")
+    main._salida_utf8(cp, ya)
+    assert cp.llamadas == [{"encoding": "utf-8", "errors": "backslashreplace"}]
+    assert ya.llamadas == [], "si ya es UTF-8 no se toca"
+
+    class _SinReconfigure:
+        encoding = "cp1252"
+    main._salida_utf8(_SinReconfigure())   # no levanta
