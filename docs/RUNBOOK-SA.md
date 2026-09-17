@@ -52,7 +52,9 @@ card, sus dashboards y su chatbot — sin tocar código:
 2. Elegí **de dónde salen los datos**:
    - **Tengo el archivo** — subís el `.log` (un evento por línea, hasta 50 MB). Queda guardado y lo
      desplegás las veces que quieras.
-   - **Llegan en vivo** — Kafka, Beats o una base ya corriendo: pegás 2-3 líneas de muestra.
+   - **Llegan en vivo** — Kafka, Beats o una base ya corriendo: pegás 2-3 líneas de muestra. O un
+     **bucket OBS** del cliente: leés una muestra del prefijo y desplegás **una vez** — ese caso no
+     se guarda ni se le copian los datos.
 3. **Siguiente** → el LLM arma el `filter{}` y detecta los campos. Revisalos en el paso 2.
 4. Paso 3: confirmás el destino. Paso 4: **Guardar y desplegar** → nombre, icono y grupo, y el
    entorno arranca. (Si solo querés dejarlo listo, **Solo guardar**.)

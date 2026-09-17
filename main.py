@@ -1540,6 +1540,53 @@ def generate_pipeline(request: OnboardingRequest) -> PipelineResponse:
 # modelos. `chatbot.py`/`document_loader.py` quedan en el repo por si se reexpone.
 
 
+@app.post(
+    "/api/v1/obs/read-sample",
+    tags=["onboarding"],
+    summary="Lee una muestra del primer objeto bajo un prefijo OBS",
+)
+def obs_read_sample(request: dict) -> dict:
+    """Primera línea no vacía del primer objeto real bajo bucket + prefijo.
+
+    Es la vía "Llegan en vivo → Bucket OBS" del paso 1: el SA mira una muestra
+    de los datos del cliente para que el paso 2 detecte los campos, y despliega
+    UNA vez. No descarga el dataset ni lo guarda como caso —eso queda vedado a
+    propósito para datos de un tercero (ver `custom_cases.save_case`)—.
+
+    Body: ``{access_key?, secret_key?, endpoint?, region?, bucket, prefix?}``.
+    Las credenciales vacías se completan con las de la cuenta: el SK nunca baja
+    al navegador. Returns: ``{sample_line, total_objects, object_key}``.
+    """
+    from obs_client import OBSClient, OBSConfigError, OBSUploadError
+    import maas_integrator as _mi
+
+    ak, sk = _mi.resolve_obs_creds(str(request.get("access_key", "") or ""),
+                                   str(request.get("secret_key", "") or ""))
+    endpoint = str(request.get("endpoint", "") or "") or _default_obs_endpoint()
+    bucket = str(request.get("bucket", "") or "").strip()
+    prefix = str(request.get("prefix", "") or "").strip()
+
+    if not ak or not sk:
+        raise HTTPException(status_code=400,
+                            detail="Faltan credenciales OBS: cargalas en ⚙ Configuración.")
+    if not bucket:
+        raise HTTPException(status_code=400, detail="Falta el nombre del bucket.")
+
+    try:
+        client = OBSClient(access_key_id=ak, secret_access_key=sk,
+                           endpoint=endpoint, bucket=bucket)
+    except OBSConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    try:
+        sample_line, total_objects, object_key = client.read_sample(prefix)
+    except OBSUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        client.close()
+    return {"sample_line": sample_line, "total_objects": total_objects,
+            "object_key": object_key}
+
+
 @app.get(
     "/api/v1/settings/maas",
     tags=["settings"],

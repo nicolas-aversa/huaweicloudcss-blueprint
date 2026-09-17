@@ -4461,6 +4461,72 @@ def test_verticals_back_registro_consistente():
     assert set(D.get_available_slugs()) == set(V.dashboard_specs()) | {"firewall"}
 
 
+def test_obs_read_sample_handles_stream_folder_and_gz():
+    """Regresión del 'NoneType' object is not callable en read_sample (vía
+    "Llegan en vivo → Bucket OBS"): el download debe ir EN MEMORIA (body.buffer), debe
+    saltear el marcador de carpeta (key con '/' final, size 0) que listObjects
+    devuelve primero, y descomprimir .gz (los traces de CTS vienen gzipeados)."""
+    import gzip
+    from types import SimpleNamespace as NS
+    from obs_client import OBSClient
+
+    payload = gzip.compress(b'\n{"trace_name":"loginUser","code":200}\notra linea\n')
+
+    class _FakeSdk:
+        def listObjects(self, bucket, prefix=None, marker=None, max_keys=None):
+            return NS(status=200, body=NS(contents=[
+                NS(key="CloudTraces/", size=0),                      # marcador de carpeta
+                NS(key="CloudTraces/t1.json.gz", size=len(payload)),  # objeto real
+                NS(key="CloudTraces/t2.json.gz", size=len(payload)),
+            ], is_truncated=False))
+
+        def getObject(self, bucket, key, loadStreamInMemory=False, range=None):
+            assert loadStreamInMemory, "el sample debe descargarse en memoria (body.buffer)"
+            return NS(status=200, body=NS(buffer=payload))
+
+    client = OBSClient.__new__(OBSClient)   # sin __init__: no requiere el SDK real
+    client._bucket = "mi-tracker-cts"
+    client._client = _FakeSdk()
+
+    line, total, key = client.read_sample("CloudTraces/")
+    assert key == "CloudTraces/t1.json.gz"          # salteó el folder-marker
+    assert total == 2                                # solo objetos reales
+    # gunzip + hasta 3 líneas no vacías
+    assert line.startswith('{"trace_name":"loginUser","code":200}')
+    assert "otra linea" in line
+
+
+
+def test_read_sample_devuelve_solo_la_muestra(monkeypatch):
+    """El endpoint no llama al LLM ni matchea industria: eso lo hacía la versión
+    anterior y era una llamada a MaaS de más, porque el paso 2 vuelve a detectar
+    los campos igual. Devuelve la muestra y nada más."""
+    class _FakeObs:
+        def __init__(self, **kw):
+            pass
+        def read_sample(self, prefix=""):
+            return '{"event":{"action":"deny"}}', 7, "logs/a.log"
+        def close(self):
+            pass
+
+    monkeypatch.setattr("obs_client.OBSClient", _FakeObs)
+    llamadas = []
+    monkeypatch.setattr(main, "generate_logstash_filter",
+                        lambda *a, **k: llamadas.append(1) or {})
+
+    res = client.post("/api/v1/obs/read-sample", json={
+        "access_key": "AK", "secret_key": "SK", "bucket": "b", "prefix": "logs/"})
+    assert res.status_code == 200
+    assert res.json() == {"sample_line": '{"event":{"action":"deny"}}',
+                          "total_objects": 7, "object_key": "logs/a.log"}
+    assert not llamadas, "leer una muestra no tiene por qué llamar al LLM"
+
+
+def test_read_sample_sin_bucket_es_400():
+    res = client.post("/api/v1/obs/read-sample", json={"access_key": "AK", "secret_key": "SK"})
+    assert res.status_code == 400 and "bucket" in res.json()["detail"].lower()
+
+
 def test_index_inyecta_verticals_y_endpoint():
     """GET / reemplaza el placeholder por el JSON real (no queda null) y expone
     los 9 verticales visibles; GET /api/v1/verticals devuelve el mismo payload."""

@@ -357,6 +357,18 @@
       border-color: var(--text-muted);
     }
 
+    /* Acción de campo (Probar, Preparar): gris con letra blanca, para que no
+       compita con el primario rojo ni se confunda con el secundario blanco.
+       --text-muted (#8a8b94) da 3.5:1 con blanco: pasa AA para texto grande /
+       bold. Más claro que eso no se lee. */
+    .btn-muted {
+      background: var(--text-muted);
+      color: #fff;
+    }
+    .btn-muted:hover {
+      background: var(--text-secondary);
+    }
+
     /* (.btn-ghost — botón terciario — se define más abajo, junto al wizard.) */
 
     .btn:disabled {
@@ -1516,6 +1528,34 @@
     /* Fuente en vivo: chips en vez de un <select> nativo, que se veía enorme y
        desalineado con las tarjetas de arriba. */
     .src-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    /* "Cómo sacar la muestra": una tarjeta chica con el comando en su renglón.
+       Antes era un párrafo de hint con el comando incrustado en medio del texto,
+       que no se podía leer ni copiar de un vistazo. */
+    .how-sample {
+      display: flex; gap: 12px; align-items: flex-start;
+      margin-top: 10px; padding: 12px 14px;
+      background: var(--bg-subtle); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+    }
+    .how-sample__tile {
+      flex: none; width: 30px; height: 30px; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      background: var(--accent-tint); color: var(--accent-hover);
+    }
+    .how-sample__tile .icon { width: 15px; height: 15px; }
+    .how-sample__body { min-width: 0; flex: 1; }
+    .how-sample__title {
+      font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .how-sample__cmd {
+      display: block; font-family: var(--font-mono); font-size: var(--fs-sm);
+      color: var(--text-primary); background: var(--bg-primary);
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+      padding: 7px 10px; overflow-x: auto; white-space: nowrap;
+    }
+    .how-sample__note { font-size: var(--fs-sm); color: var(--text-muted); margin-top: 6px; }
+
     .src-chip {
       display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
       padding: 8px 14px; font-family: inherit; font-size: var(--fs-sm); font-weight: 600;
@@ -2466,7 +2506,7 @@
                     <!-- Sin esto, la única forma de saber si la key servía era subir
                          un log y esperar: si estaba mal, el error llegaba como un
                          volcado del JSON de ModelArts en medio del wizard. -->
-                    <button class="btn btn-secondary" type="button" id="settings-maas-test"
+                    <button class="btn btn-muted" type="button" id="settings-maas-test"
                             title="Llama a MaaS con esta API key y te dice si funciona">Probar</button>
                   </div>
                 </div>
@@ -2474,7 +2514,7 @@
                   <label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label>
                   <div class="settings-field__row">
                     <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss">
-                    <button class="btn btn-secondary" type="button" id="settings-hw-preload" title="Sube los datasets de demo a este bucket">Preparar</button>
+                    <button class="btn btn-muted" type="button" id="settings-hw-preload" title="Sube los datasets de demo a este bucket">Preparar</button>
                   </div>
                 </div>
               </div>
@@ -2499,7 +2539,7 @@
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-infra"/></svg></span>
                 <div>
                   <div class="settings-card__title">Infraestructura general</div>
-                  <div class="settings-card__hint">VPC, subnet, security group, project id, región y AZ de tu cuenta — los usan los deploys. <span id="settings-hw-source"></span></div>
+                  <div class="settings-card__hint">VPC, subnet, security group, project id, región y AZ de tu cuenta — los usan los deploys.</div>
                 </div>
               </div>
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px;">
@@ -2583,7 +2623,7 @@
                 <button type="button" class="src-card" data-src="live" role="radio" aria-checked="false">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-activity"/></svg></span>
                   <span class="src-card__name">Llegan en vivo</span>
-                  <span class="src-card__desc">Kafka, Beats o una base de datos vía JDBC.</span>
+                  <span class="src-card__desc">Kafka, Beats, una base vía JDBC o un bucket OBS.</span>
                 </button>
               </div>
 
@@ -2610,13 +2650,40 @@
                     <button type="button" class="src-chip" data-plugin="jdbc" role="radio" aria-checked="false">
                       <svg class="icon"><use href="#ic-database"/></svg> Base de datos (JDBC)
                     </button>
+                    <button type="button" class="src-chip" data-plugin="obs" role="radio" aria-checked="false">
+                      <svg class="icon"><use href="#ic-cloud"/></svg> Bucket OBS
+                    </button>
                   </div>
                 </div>
-                <label class="form-label">Pegá 2-3 líneas de muestra</label>
-                <textarea id="builder-paste" class="form-input" rows="5"
-                  placeholder="Pegá 2-3 líneas representativas de tu log."
-                  style="font-family:var(--font-mono); font-size:var(--fs-sm); resize:vertical; line-height:1.5;"></textarea>
-                <p class="form-hint" id="live-hint" style="margin:8px 0 0;"></p>
+                <!-- Kafka / Beats / JDBC: pegás la muestra a mano. -->
+                <div id="live-paste-pane">
+                  <label class="form-label">Pegá 2-3 líneas de muestra</label>
+                  <textarea id="builder-paste" class="form-input" rows="5"
+                    placeholder="Pegá 2-3 líneas representativas de tu log."
+                    style="font-family:var(--font-mono); font-size:var(--fs-sm); resize:vertical; line-height:1.5;"></textarea>
+                  <div class="how-sample" id="live-hint"></div>
+                </div>
+                <!-- OBS: la muestra se lee del bucket. Es la única fuente en vivo
+                     que puede mostrar el dato antes de desplegar, y por eso mismo
+                     la única que NO se guarda como caso: los datos son de un
+                     tercero y viven en su bucket. Se despliega una vez y listo. -->
+                <div id="live-obs-pane" class="hidden">
+                  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+                    <div class="form-group" style="flex:1; min-width:180px; margin:0;">
+                      <label class="form-label" for="live-obs-bucket">Bucket</label>
+                      <input type="text" class="form-input" id="live-obs-bucket" placeholder="mi-bucket-logs">
+                    </div>
+                    <div class="form-group" style="flex:1; min-width:180px; margin:0;">
+                      <label class="form-label" for="live-obs-prefix">Prefijo</label>
+                      <input type="text" class="form-input" id="live-obs-prefix" placeholder="logs/">
+                    </div>
+                    <button class="btn btn-secondary" type="button" id="live-obs-read" style="flex:none;">
+                      <svg class="icon"><use href="#ic-search"/></svg> Leer una muestra
+                    </button>
+                  </div>
+                  <p class="form-hint" style="margin:8px 0 0;">Lee la primera línea del primer archivo bajo ese prefijo, con las credenciales de tu cuenta. Un caso que lee de un bucket <strong>no se guarda</strong>: se despliega una vez.</p>
+                  <div id="live-obs-status" class="hidden" style="margin-top:10px;"></div>
+                </div>
               </div>
 
               <!-- Único widget de resultado para las dos vías: antes cada una
@@ -4268,15 +4335,7 @@
       // Modo reuse: si ya hay clusters activos, esta fase AGREGA una pipeline
       // nueva en paralelo (su propio índice + prefijo OBS), sin tocar las que
       // ya corren ni re-provisionar los clusters.
-      // Builder (modo custom): no despliega acá — guarda lo analizado como un
-      // caso de demo, que después se despliega desde el grid como cualquier otro.
-      const isBuilder = state.deployMode === 'custom';
-      document.getElementById('builder-save-case-btn')?.classList.toggle('hidden', !isBuilder);
-      document.getElementById('deploy-provision-btn')?.classList.toggle('hidden', isBuilder);
-      const rt = document.getElementById('deploy-review-title')?.closest('.card')?.querySelector('.card-description');
-      if (rt) rt.textContent = isBuilder
-        ? 'Revisá el pipeline (fuente, filter y destino) y guardalo como un dataset reutilizable.'
-        : 'Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.';
+      syncStep4Actions();
 
       const reuse = !!state.envActive;
       const h1 = document.getElementById('deploy-hint-1');
@@ -6902,7 +6961,10 @@
           let ok;
           // Cada vía tiene su acción; la decide `sourceMode`, no el contenido.
           // (La de archivo no entra acá: _handleLogFile ya dejó la muestra.)
-          if (state.sourceMode === 'live') {
+          if (state.sourceMode === 'live' && livePlugin() === 'obs') {
+            if (errEl) errEl.textContent = 'Leé una muestra del bucket para continuar.';
+            ok = false;
+          } else if (state.sourceMode === 'live') {
             if (!pasted) {
               if (errEl) errEl.textContent = 'Pegá 2-3 líneas de tu log para detectar la estructura.';
               ok = false;
@@ -7195,7 +7257,6 @@
       demo_bucket: 'settings-hw-bucket',
     };
     async function refreshHuaweiSettings() {
-      const srcEl = document.getElementById('settings-hw-source');
       try {
         const res = await fetch('/api/v1/settings/huawei');
         const d = await res.json();
@@ -7203,10 +7264,7 @@
           const input = document.getElementById(id);
           if (input) input.value = (d.values || {})[field] || '';
         });
-        if (srcEl) srcEl.innerHTML = d.source === 'settings'
-          ? '<span style="color:var(--accent-green);">✓ Los deploys usan esta cuenta.</span>'
-          : '';
-      } catch (_e) { if (srcEl) srcEl.textContent = ''; }
+      } catch (_e) { /* sin red: los campos quedan como estaban */ }
     }
 
     // El backend REEMPLAZA el bloque `huawei` entero (set_huawei_settings arma
@@ -7435,10 +7493,27 @@
     // Pistas de dónde sacar las líneas, por fuente. Antes era un panel fijo de
     // cuatro filas siempre visible; ahora acompaña a la fuente elegida.
     const LIVE_HINTS = {
-      kafka: 'Para sacar la muestra: <code>kafka-console-consumer --topic &lt;topic&gt; --bootstrap-server &lt;host:9092&gt; --max-messages 3</code> (o el Message Query de la consola DMS).',
-      beats: 'Para sacar la muestra: <code>tail -n 3 /var/log/tu-app.log</code> — el path de <code>filebeat.inputs</code>, no el registry.',
-      jdbc: 'Para sacar la muestra: <code>SELECT * FROM &lt;tabla&gt; LIMIT 3</code>. Cualquier query vale.',
+      kafka: { cmd: 'kafka-console-consumer --topic &lt;topic&gt; --bootstrap-server &lt;host:9092&gt; --max-messages 3',
+               note: 'También sirve el Message Query de la consola de DMS.' },
+      beats: { cmd: 'tail -n 3 /var/log/tu-app.log',
+               note: 'El archivo que lee <code>filebeat.inputs</code>, no el registry.' },
+      jdbc:  { cmd: 'SELECT * FROM &lt;tabla&gt; LIMIT 3',
+               note: 'Cualquier query sirve: pegá las filas tal como salen.' },
     };
+    function pintarHint(plugin) {
+      const el = document.getElementById('live-hint');
+      const hint = LIVE_HINTS[plugin];
+      if (!el) return;
+      el.classList.toggle('hidden', !hint);
+      if (!hint) return;
+      el.innerHTML = `
+        <span class="how-sample__tile"><svg class="icon"><use href="#ic-code"/></svg></span>
+        <div class="how-sample__body">
+          <div class="how-sample__title">Cómo sacar la muestra</div>
+          <code class="how-sample__cmd">${hint.cmd}</code>
+          <div class="how-sample__note">${hint.note}</div>
+        </div>`;
+    }
 
     function switchSourceMode(src) {
       state.sourceMode = src;
@@ -7449,15 +7524,88 @@
       });
       document.getElementById('source-pane-file')?.classList.toggle('hidden', src !== 'file');
       document.getElementById('source-pane-live')?.classList.toggle('hidden', src !== 'live');
-      if (src === 'live') _syncLivePlugin();
-      // La fuente elegida acá manda en el paso 3: sin esto se podía subir un
-      // archivo y después elegir Kafka, contradiciendo el paso 1.
-      state.inputPlugin = (src === 'live')
-        ? livePlugin()
-        : 'obs';
+      if (src === 'live') { _syncLivePlugin(); return; }   // ya deja el paso 3 y el 4 en orden
+      // Archivo: se sube al bucket de demos, así que el input es OBS "normal"
+      // (no read-only) y el caso se puede guardar.
+      state.readExistingMode = false;
+      state.inputPlugin = 'obs';
       renderInputConfig(state.inputPlugin);
       applyStep3PluginVisibility();
+      syncStep4Actions();
     }
+
+    // Paso 4, qué botón hay. Builder (modo custom): no despliega — guarda lo
+    // analizado como un caso de demo, que después se despliega desde el grid
+    // como cualquier otro. La excepción es OBS en vivo: lee de un bucket de un
+    // tercero, así que NO se guarda (ni se le copian los datos); se despliega
+    // una vez, con el botón normal.
+    function syncStep4Actions() {
+      const isBuilder = state.deployMode === 'custom';
+      const unaVez = esObsEnVivo();
+      document.getElementById('builder-save-case-btn')?.classList.toggle('hidden', !isBuilder || unaVez);
+      document.getElementById('deploy-provision-btn')?.classList.toggle('hidden', isBuilder && !unaVez);
+      const rt = document.getElementById('deploy-review-title')?.closest('.card')?.querySelector('.card-description');
+      if (rt) rt.textContent = unaVez
+        ? 'Revisá el pipeline y desplegalo. Lee del bucket del cliente y no se guarda como caso: es para una sola vez.'
+        : isBuilder
+          ? 'Revisá el pipeline (fuente, filter y destino) y guardalo como un dataset reutilizable.'
+          : 'Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.';
+    }
+
+    // Un caso que lee de un bucket OBS ajeno se despliega una vez y no se guarda.
+    function esObsEnVivo() {
+      return state.deployMode === 'custom' && state.sourceMode === 'live' && livePlugin() === 'obs';
+    }
+
+    // Leer la muestra del bucket: primera línea del primer objeto bajo el
+    // prefijo, con las credenciales de la cuenta. Deja la muestra igual que
+    // `_handleLogFile`: `state.rawLog` + widget + mapping limpio para re-detectar.
+    async function leerMuestraObs() {
+      const statusEl = document.getElementById('live-obs-status');
+      const bucketEl = document.getElementById('live-obs-bucket');
+      const bucket = bucketEl?.value.trim() || '';
+      const prefix = document.getElementById('live-obs-prefix')?.value.trim() || '';
+      if (!state.obsCreds.ak || !state.obsCreds.skConfigured) {
+        toast('Faltan las credenciales OBS: cargalas en ⚙ Configuración antes de leer el bucket.', 'error');
+        return false;
+      }
+      if (!bucket) { setFieldError(bucketEl, 'Ingresá el bucket donde están los datos.'); return false; }
+      clearFieldError(bucketEl);
+      statusEl?.classList.remove('hidden');
+      if (statusEl) statusEl.innerHTML = '<div class="status status-loading" style="margin:0;">Leyendo la muestra del bucket…</div>';
+      try {
+        const res = await fetch('/api/v1/obs/read-sample', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bucket, prefix, region: hwRegion() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(detailMsg(data));
+        statusEl?.classList.add('hidden');
+        const rawLogEl = document.getElementById('raw-log');
+        if (rawLogEl) rawLogEl.value = data.sample_line;
+        state.rawLog = data.sample_line;
+        state.logFileContent = '';
+        showSample(data.sample_line, `Leída de ${bucket}${prefix ? '/' + prefix : ''} · ${Number(data.total_objects || 0).toLocaleString('es')} objeto${data.total_objects === 1 ? '' : 's'}`);
+        clearMapping();   // fuerza re-detectar los campos con la muestra nueva
+        document.getElementById('step1-custom-error')?.classList.remove('show');
+        // El bucket del que se leyó es el origen del deploy: va al paso 3, que
+        // es donde se ve y se edita, para no tipearlo dos veces.
+        [['input-bucket', bucket], ['input-prefix', prefix]].forEach(([id, val]) => {
+          const el = document.getElementById(id);
+          if (el) el.value = val;
+        });
+        return true;
+      } catch (e) {
+        if (statusEl) statusEl.innerHTML = `<div class="status status-error" style="margin:0;">No se pudo leer el bucket: ${escapeHtml(e.message)}</div>`;
+        return false;
+      }
+    }
+    document.getElementById('live-obs-read')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const prev = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = 'Leyendo…';
+      try { await leerMuestraObs(); } finally { btn.disabled = false; btn.innerHTML = prev; }
+    });
 
     // Plugin de la fuente en vivo elegido con los chips (antes era un <select>).
     function livePlugin() {
@@ -7465,18 +7613,26 @@
     }
 
     function _syncLivePlugin() {
-      const hint = document.getElementById('live-hint');
       const plugin = livePlugin();
-      if (hint) hint.innerHTML = LIVE_HINTS[plugin] || '';
+      const esObs = plugin === 'obs';
+      document.getElementById('live-paste-pane')?.classList.toggle('hidden', esObs);
+      document.getElementById('live-obs-pane')?.classList.toggle('hidden', !esObs);
+      pintarHint(plugin);
       const ta = document.getElementById('builder-paste');
       if (ta) {
         ta.placeholder = plugin === 'jdbc'
           ? 'Pegá 2-3 filas del resultado de la query.'
           : 'Pegá 2-3 líneas representativas de tu log (JSON, key=value, syslog, CSV…).';
       }
+      // OBS en vivo lee datos que YA están en el bucket del cliente: el input va
+      // read-only one-shot (delete=false, watch=false). Sin esto el backend usa
+      // su default `delete => true` y Logstash BORRARÍA los logs del cliente
+      // después de leerlos.
+      state.readExistingMode = esObs;
       state.inputPlugin = plugin;
       renderInputConfig(plugin);
       applyStep3PluginVisibility();
+      syncStep4Actions();
     }
     document.getElementById('live-plugin')?.addEventListener('click', (e) => {
       const chip = e.target.closest('.src-chip');
