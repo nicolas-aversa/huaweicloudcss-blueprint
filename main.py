@@ -2476,6 +2476,13 @@ def _fill_obs_creds(request) -> None:
     import maas_integrator as _mi
     request.obs_access_key, request.obs_secret_key = _mi.resolve_obs_creds(
         request.obs_access_key, request.obs_secret_key)
+    # La password de OpenSearch tampoco baja al navegador: tras un F5 (o un
+    # reinicio del server) el body de la fase 2 se rearma desde
+    # `/terraform/status`, sin ella, y Terraform moría con "No value for
+    # required variable opensearch_password". Si ya hay un cluster, su password
+    # está en el archivo de teardown o en el state.
+    if not request.opensearch_password:
+        request.opensearch_password = _stored_opensearch_password(_active_terraform_dir())
     # El .conf puede venir enmascarado: lo emite así `/generate-pipeline` (preview
     # del paso 4) y `/terraform/status` (redeploy tras un refresh). Los `.conf`
     # que guardó el deploy anterior son la referencia para reponer TODO lo
@@ -3643,10 +3650,14 @@ def _remove_capabilities(terraform_dir: Path) -> None:
         pass
 
 
-def _cluster_admin_password(terraform_dir: Path) -> str:
-    """Password admin de OpenSearch para llamadas REST fuera del wizard (ej. el
-    copiloto en modo datos). Orden: creds persistidas → env → default de plataforma."""
-    for name in ("destroy.auto.tfvars.json", "deploy.auto.tfvars.json"):
+def _stored_opensearch_password(terraform_dir: Path) -> str:
+    """La password del cluster que YA existe, o "" si no hay cluster.
+
+    Orden: el archivo de teardown, el tfvars del deploy si quedó, y el state
+    (el recurso `huaweicloud_css_cluster` la guarda). Sin default: para armar
+    un tfvars, una password inventada es peor que ninguna — Terraform
+    intentaría CAMBIAR la del cluster."""
+    for name in (_DESTROY_CREDS_NAME, "deploy.auto.tfvars.json"):
         f = terraform_dir / name
         if f.exists():
             try:
@@ -3655,7 +3666,17 @@ def _cluster_admin_password(terraform_dir: Path) -> str:
                     return str(d["opensearch_password"])
             except (json.JSONDecodeError, OSError):
                 pass
-    return os.getenv("OPENSEARCH_PASSWORD", "Huawei1234")
+    try:
+        estado = tfstate.read_state(terraform_dir)
+        return str(tfstate.resource_attributes(estado, "huaweicloud_css_cluster").get("password") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _cluster_admin_password(terraform_dir: Path) -> str:
+    """Password admin de OpenSearch para llamadas REST fuera del wizard (ej. el
+    copiloto en modo datos). Orden: la del cluster → env → default de plataforma."""
+    return _stored_opensearch_password(terraform_dir) or os.getenv("OPENSEARCH_PASSWORD", "Huawei1234")
 
 
 def _cluster_hwc_creds(terraform_dir: Path) -> "tuple[str, str]":
@@ -3766,7 +3787,18 @@ def _write_destroy_creds(terraform_dir: Path, request: "TerraformDeployRequest")
     variables REQUERIDAS de infra (vpc/subnet/sg/az), que en Docker no tienen
     otro origen. Sin las segundas, `terraform destroy` moría con "No value for
     required variable". Ningún secreto nuevo: es el mismo archivo de siempre."""
+    # MERGE con lo que ya había, no reemplazo. La fase 2 llega sin password
+    # (el body se rearma desde /terraform/status tras un F5) y, cuando esto
+    # empezó a escribir también los IDs de infra, ese request pisó el archivo
+    # SIN la password: el apply siguiente murió con "No value for required
+    # variable opensearch_password". Lo que el request no trae, se conserva.
     creds: dict[str, Any] = {}
+    archivo = terraform_dir / _DESTROY_CREDS_NAME
+    if archivo.exists():
+        try:
+            creds = json.loads(archivo.read_text(encoding="utf-8")) or {}
+        except (json.JSONDecodeError, OSError):
+            creds = {}
     if request.obs_access_key:
         creds["hwc_access_key"] = request.obs_access_key
         creds["obs_access_key"] = request.obs_access_key

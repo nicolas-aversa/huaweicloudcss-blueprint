@@ -5238,3 +5238,61 @@ def test_la_salida_del_proceso_pasa_a_utf8():
     class _SinReconfigure:
         encoding = "cp1252"
     main._salida_utf8(_SinReconfigure())   # no levanta
+
+
+# ── La fase 2 no pierde la password del cluster ─────────────────────────────
+def test_el_teardown_no_pierde_la_password_si_el_request_no_la_trae(monkeypatch, tmp_path):
+    """La fase 2 (ingesta) llega sin password: el body se rearma desde
+    /terraform/status tras un F5. Cuando el archivo de teardown empezó a llevar
+    también la infra, ese request lo pisaba SIN la password, y el apply moría
+    con "No value for required variable opensearch_password"."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"; td.mkdir()
+    monkeypatch.setattr(_main, "get_huawei_settings", lambda: {
+        "vpc_id": "vpc-1", "subnet_id": "net-2", "security_group_id": "sg-3"})
+    _main._write_destroy_creds(td, _main.TerraformDeployRequest(
+        pipeline_conf="x", obs_access_key="AK", obs_secret_key="SK", opensearch_password="PW-1"))
+    _main._write_destroy_creds(td, _main.TerraformDeployRequest(
+        pipeline_conf="x", obs_access_key="AK", obs_secret_key="SK"))   # fase 2: sin password
+
+    d = _json.loads((td / "destroy.auto.tfvars.json").read_text(encoding="utf-8"))
+    assert d["opensearch_password"] == "PW-1", "el request sin password borró la guardada"
+    assert d["vpc_id"] == "vpc-1"
+
+
+def test_la_fase_2_repone_la_password_del_cluster(monkeypatch, tmp_path):
+    """Como con las AK/SK: si el body no trae la password y hay un cluster, se
+    toma la de ese cluster (teardown → state). Sin cluster queda vacía: una
+    inventada haría que Terraform intentara CAMBIARLA."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"; td.mkdir()
+    monkeypatch.setattr(_main, "_active_terraform_dir", lambda: td)
+    monkeypatch.setattr(_main, "_stored_confs", lambda: [])
+    import maas_integrator as _mi
+    monkeypatch.setattr(_mi, "resolve_obs_creds", lambda ak="", sk="": (ak, sk))
+
+    req = _main.TerraformDeployRequest(pipeline_conf="x")
+    _main._fill_obs_creds(req)
+    assert req.opensearch_password == "", "sin cluster no se inventa nada"
+
+    # Del state (el archivo de teardown no la tiene).
+    (td / "terraform.tfstate").write_text(_json.dumps({"version": 4, "resources": [{
+        "type": "huaweicloud_css_cluster", "instances": [{"attributes": {"password": "PW-STATE"}}]}]}))
+    req = _main.TerraformDeployRequest(pipeline_conf="x")
+    _main._fill_obs_creds(req)
+    assert req.opensearch_password == "PW-STATE"
+
+    # El archivo de teardown gana sobre el state.
+    (td / "destroy.auto.tfvars.json").write_text(_json.dumps({"opensearch_password": "PW-FILE"}))
+    req = _main.TerraformDeployRequest(pipeline_conf="x")
+    _main._fill_obs_creds(req)
+    assert req.opensearch_password == "PW-FILE"
+
+    # La que viene en el body manda.
+    req = _main.TerraformDeployRequest(pipeline_conf="x", opensearch_password="PW-BODY")
+    _main._fill_obs_creds(req)
+    assert req.opensearch_password == "PW-BODY"
