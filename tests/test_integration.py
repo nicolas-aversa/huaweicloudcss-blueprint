@@ -1483,6 +1483,54 @@ def test_deploy_sequence_merges_pipelines_registry_not_overwrite(monkeypatch, tm
     assert tfvars["pipelines"]["logs-ej2"]["start_ingestion"] is False
 
 
+def test_fresh_deploy_no_pisa_el_registro_con_entorno_activo(monkeypatch, tmp_path):
+    """El front mandaba `fresh_deploy: true` en TODO deploy del wizard. Con un
+    entorno de tres pipelines, agregar un caso dejaba una sola: el backend
+    descartaba el registro y el for_each de Terraform destruía el resto. Con
+    marcador de plataforma el flag se ignora: siempre se mergea, y el
+    project_name es el del entorno (si no, se recrearía el Logstash)."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(_main.subprocess, "run", lambda *a, **k: _OkProc())
+    _main._prepare_deploy_tfvars(_main.TerraformDeployRequest(
+        pipeline_conf="filter { A }", project_name="log-analytics",
+        opensearch_index="siem-%{+YYYY.MM}", obs_prefix="siem-logs/"), td)
+    _main._write_platform_marker(td, "log-analytics")
+
+    _main._prepare_deploy_tfvars(_main.TerraformDeployRequest(
+        pipeline_conf="filter { B }", project_name="otro-nombre", fresh_deploy=True,
+        opensearch_index="reviews-olist-%{+YYYY.MM}", obs_prefix="reviews-olist-logs/"), td)
+
+    registry = _json.loads((td / _main._PIPELINES_REGISTRY_NAME).read_text(encoding="utf-8"))
+    assert set(registry) == {"siem", "reviews-olist"}, "fresh_deploy pisó el registro con entorno activo"
+    tfvars = _json.loads((td / "deploy.auto.tfvars.json").read_text(encoding="utf-8"))
+    assert set(tfvars["pipelines"]) == {"siem", "reviews-olist"}
+    assert tfvars["project_name"] == "log-analytics", "otro project_name recrearía el Logstash"
+
+
+def test_fresh_deploy_limpia_el_registro_sin_entorno(monkeypatch, tmp_path):
+    """Sin marcador no hay entorno: un registro con basura de un deploy que
+    falló antes del apply SÍ se limpia."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(_main.subprocess, "run", lambda *a, **k: _OkProc())
+    _main._prepare_deploy_tfvars(_main.TerraformDeployRequest(
+        pipeline_conf="filter { A }", opensearch_index="basura-%{+YYYY.MM}"), td)
+
+    _main._prepare_deploy_tfvars(_main.TerraformDeployRequest(
+        pipeline_conf="filter { B }", fresh_deploy=True,
+        opensearch_index="siem-%{+YYYY.MM}"), td)
+
+    registry = _json.loads((td / _main._PIPELINES_REGISTRY_NAME).read_text(encoding="utf-8"))
+    assert set(registry) == {"siem"}
+
+
 def test_deploy_caps_concurrent_pipelines(monkeypatch, tmp_path):
     """Un slug NUEVO cuando ya hay _MAX_PIPELINES registradas → 400 (el Logstash
     es 1 nodo). No invoca terraform."""

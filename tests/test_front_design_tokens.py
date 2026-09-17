@@ -233,3 +233,12 @@ def test_no_quedo_rastro_del_pie_del_nav():
     alimentaba se van con ellos, o queda código muerto apuntando a la nada."""
     html = _INDEX.read_text(encoding="utf-8")
     assert "app-nav__footer" not in html
+
+
+def test_el_deploy_no_hardcodea_fresh_deploy():
+    """`fresh_deploy: true` en todo deploy del wizard hacía que agregar un caso a
+    un entorno con tres pipelines dejara UNA: el backend descartaba el registro
+    y Terraform destruía el resto. Con entorno activo se agrega, no se pisa."""
+    html = _INDEX.read_text(encoding="utf-8")
+    assert not re.search(r"fresh_deploy:\s*true", html), "fresh_deploy hardcodeado en true"
+    assert "fresh_deploy: !state.envActive" in html

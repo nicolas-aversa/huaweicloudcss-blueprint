@@ -4715,7 +4715,10 @@
         read_existing_bucket: !!state.readExistingMode,
         document_id: state.dedupId || '',
         start_ingestion: startIngestion,
-        fresh_deploy: true,
+        // Con un entorno activo se AGREGA al registro de pipelines; `true` acá
+        // hacía que el backend lo descartara y Terraform destruyera las que ya
+        // corrían. El backend además lo ignora si hay marcador de plataforma.
+        fresh_deploy: !state.envActive,
       };
 
       // Modo demo: usar cluster OpenSearch existente (con chatbot ya habilitado).
@@ -5644,7 +5647,8 @@
       btn.disabled = true;
       if (statusEl) showStatus(statusEl, 'Iniciando ingesta con Logstash…', 'loading');
       try {
-        const res = await _openDeployStream({ ...body, start_ingestion: true });
+        // La fase 2 corre siempre sobre un entorno que ya existe: nunca es "fresh".
+        const res = await _openDeployStream({ ...body, start_ingestion: true, fresh_deploy: false });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(detailMsg(errData));

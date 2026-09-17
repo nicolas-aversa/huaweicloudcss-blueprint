@@ -1919,7 +1919,7 @@ class TerraformDeployRequest(BaseModel):
     log_file_content: str = Field(default="", description="Contenido del archivo importado (custom single-case). Se sube tal cual a OBS, sin sintéticos.")
     start_ingestion: bool = Field(default=False)
     cases: list[PipelineCase] = Field(default_factory=list, description="Casos múltiples para deploy en paralelo")
-    fresh_deploy: bool = Field(default=False, description="Si True, limpia el registro de pipelines existentes antes de agregar los nuevos (deploy desde wizard). Si False, mergea con pipelines existentes (Nuevo pipeline).")
+    fresh_deploy: bool = Field(default=False, description="Si True, limpia el registro de pipelines antes de agregar los nuevos. SOLO se respeta sin entorno activo (sin marcador de plataforma): con un entorno andando siempre se mergea, porque el for_each de Terraform destruye toda pipeline que no esté en el mapa.")
     existing_opensearch_endpoint: str = Field(default="", description="Endpoint de un cluster OpenSearch existente (ip:port). Si no está vacío, se saltea la creación del cluster OS y se usa este. Solo para demos con chatbot ya habilitado.")
 
 
@@ -2347,7 +2347,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
     """
     (terraform_dir / "pipeline.conf").write_text(request.pipeline_conf, encoding="utf-8")
 
-    registry = {} if request.fresh_deploy else _read_pipelines_registry(terraform_dir)
+    registry = {} if _fresh_deploy_effective(request, terraform_dir) else _read_pipelines_registry(terraform_dir)
     if request.cases:
         for case in request.cases:
             registry[case.slug] = {
@@ -3272,13 +3272,27 @@ def _read_platform_marker(terraform_dir: Path) -> dict[str, Any] | None:
         return None
 
 
+def _fresh_deploy_effective(request, terraform_dir: Path) -> bool:
+    """`fresh_deploy` vale solo SIN entorno activo.
+
+    El front mandaba `fresh_deploy: true` en todo deploy del wizard, y con eso
+    `_prepare_deploy_tfvars` descartaba el registro de pipelines: el `for_each`
+    de Terraform destruía las que ya corrían. Agregar un caso a un entorno con
+    tres pipelines dejaba una. El único uso legítimo de "limpiar" es un
+    workspace sin entorno (un primer deploy que falló antes del apply deja un
+    registro con basura); con marcador de plataforma, se mergea siempre. El
+    front dejó de hardcodearlo, pero el backend no depende de eso.
+    """
+    return bool(getattr(request, "fresh_deploy", False)) and _read_platform_marker(terraform_dir) is None
+
+
 def _effective_project_name(request, terraform_dir: Path) -> str:
-    """project_name a usar en el deploy. En reuse ("Nuevo pipeline", not fresh_deploy)
-    lo FIJAMOS al del entorno existente (marcador): el cluster Logstash se llama
-    "${project_name}-logstash", así que un nombre distinto haría que Terraform lo
-    RECREE (un Logstash nuevo) en vez de agregar la pipeline al que ya está."""
+    """project_name a usar en el deploy. Con entorno activo lo FIJAMOS al del
+    marcador: el cluster Logstash se llama "${project_name}-logstash", así que un
+    nombre distinto haría que Terraform lo RECREE (un Logstash nuevo) en vez de
+    agregar la pipeline al que ya está."""
     requested = request.project_name or "log-analytics"
-    if not getattr(request, "fresh_deploy", False):
+    if not _fresh_deploy_effective(request, terraform_dir):
         existing = (_read_platform_marker(terraform_dir) or {}).get("project_name")
         if existing:
             return existing
