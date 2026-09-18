@@ -451,10 +451,12 @@ def test_live_case_skips_the_dataset_guard(store, monkeypatch):
 # chequeo: si el upload del dataset al guardar el caso había fallado en silencio,
 # Logstash arrancaba contra un prefijo vacío y nadie avisaba.
 def _deploy_req_unico(slug, **kw):
-    return main.TerraformDeployRequest(
+    base = dict(
         pipeline_conf="input {}", obs_access_key="AK", obs_secret_key="SK",
         obs_bucket="mi-bucket", obs_endpoint="https://obs.x.com", opensearch_password="pw",
-        pipeline_slug=slug, obs_prefix=f"{slug}-logs/", read_existing_bucket=True, **kw)
+        pipeline_slug=slug, obs_prefix=f"{slug}-logs/", read_existing_bucket=True)
+    base.update(kw)
+    return main.TerraformDeployRequest(**base)
 
 
 def test_el_guard_cubre_el_deploy_de_un_solo_caso(store, monkeypatch):
@@ -496,6 +498,71 @@ def test_el_guard_no_toca_el_flujo_productivo(monkeypatch):
     monkeypatch.setattr("obs_client.OBSClient", _Explota)
 
     main._check_demo_datasets_present(_deploy_req_unico("acme-prod"))
+
+
+# ── Un input s3 sin bucket no llega a Terraform ─────────────────────────────
+# "Guardar y desplegar" de un dataset nuevo mandó un .conf con `bucket => ""`
+# (armado en el paso 3, antes de conocer el slug). Logstash lo validó OK, arrancó
+# y poleó la nada durante todo el deploy: "No files found in bucket" cada 60 s.
+def _conf_s3(bucket_line):
+    return ("input {\n  s3 {\n    access_key_id => \"AK\"\n    secret_access_key => \"SK\"\n"
+            f"    {bucket_line}\n    region => \"la-south-2\"\n    codec => plain\n  }}\n}}\n\n"
+            "filter {\n  csv { separator => \",\" }\n}\n\n"
+            "output {\n  elasticsearch {\n    hosts => [\"http://x:9200\"]\n    index => \"sp500-%{+YYYY.MM}\"\n  }\n}\n")
+
+
+def test_un_conf_con_bucket_vacio_corta_antes_de_terraform():
+    with pytest.raises(main.HTTPException) as exc:
+        main._check_conf_reads_from_a_bucket(_deploy_req_unico("sp500", pipeline_conf=_conf_s3('bucket => ""')))
+    assert exc.value.status_code == 400
+    assert exc.value.detail["stage"] == "pipeline_conf"
+    assert "sp500" in exc.value.detail["message"]
+
+    # Sin la línea `bucket` directamente, mismo resultado.
+    with pytest.raises(main.HTTPException):
+        main._check_conf_reads_from_a_bucket(_deploy_req_unico("sp500", pipeline_conf=_conf_s3("interval => 60")))
+
+
+def test_un_conf_con_bucket_pasa_y_uno_sin_s3_tambien():
+    main._check_conf_reads_from_a_bucket(_deploy_req_unico("sp500", pipeline_conf=_conf_s3('bucket => "demos"')))
+    kafka = 'input {\n  kafka {\n    bootstrap_servers => "b:9092"\n    topics => ["t"]\n  }\n}\n\nfilter {}\n\noutput { stdout {} }\n'
+    main._check_conf_reads_from_a_bucket(_deploy_req_unico("acme", pipeline_conf=kafka))
+
+
+def test_con_cases_el_bucket_sale_del_request_y_los_live_no_cuentan(store, monkeypatch):
+    """Multi-caso: el .conf lo arma el backend con `case.obs_bucket or
+    request.obs_bucket`. Sin bucket de demos configurado, los casos de demo
+    saldrían leyendo de `""`; un caso live (Kafka) no lee de OBS y no cuenta."""
+    import maas_integrator as _mi
+    monkeypatch.setattr(_mi, "_fernet_cache", None)
+    custom_cases.save_case(_meta("Kafka de ACME", sample="x", input_config=KAFKA), "")
+
+    req = _deploy_req({"slug": "siem", "filter_code": "filter {}", "read_existing_bucket": True})
+    req.cases.append(main.PipelineCase(slug="kafka-de-acme", filter_code="filter {}", read_existing_bucket=True))
+    main._check_conf_reads_from_a_bucket(req)                 # bucket "mi-bucket": pasa
+
+    req.obs_bucket = ""
+    with pytest.raises(main.HTTPException) as exc:
+        main._check_conf_reads_from_a_bucket(req)
+    assert exc.value.detail["stage"] == "pipeline_conf"
+    assert "siem" in exc.value.detail["message"]
+    assert "kafka-de-acme" not in exc.value.detail["message"], "un caso live no lee de OBS"
+
+    # Con bucket propio (CTS) no depende del de demos.
+    req.cases[0].obs_bucket = "mi-tracker-cts"
+    req.cases.pop()
+    main._check_conf_reads_from_a_bucket(req)
+
+
+def test_los_dos_endpoints_de_deploy_pasan_por_el_guard_del_bucket():
+    """Hay dos entradas al deploy (stream y job) y las dos tienen que cortar
+    antes de Terraform, o el error vuelve por la que quedó afuera."""
+    import inspect
+    for fn in (main.terraform_deploy_stream, main.terraform_deploy_job):
+        src = inspect.getsource(fn)
+        assert "_check_conf_reads_from_a_bucket(request)" in src, fn.__name__
+        assert src.index("_check_conf_reads_from_a_bucket(request)") < src.index("_deploy_lock_for_current()"), \
+            f"{fn.__name__}: el guard tiene que correr antes de tomar el lock"
 
 
 def test_dataset_case_never_stores_the_creators_bucket(store):

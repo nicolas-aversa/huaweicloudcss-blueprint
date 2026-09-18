@@ -37,6 +37,12 @@ terraform/deploy.auto.tfvars.json
 terraform/pipeline.conf
 terraform/*.auto.tfvars.json
 terraform/.pipelines.json
+# Marcadores del entorno desplegado en single-user (fecha del deploy, el index
+# template aplicado, los IDs de modelos/agentes de capabilities): estado de UNA
+# máquina, no del repo. Dos de ellos se colaron en un commit con `git add -A`.
+terraform/.platform_deploy.json
+terraform/.index_template.json
+terraform/.capabilities.json
 # Backend remoto del state (OBS): lo genera tfstate.prepare() por workspace y
 # lleva las AK/SK del bucket en claro, igual que destroy.auto.tfvars.json.
 terraform/backend.tf

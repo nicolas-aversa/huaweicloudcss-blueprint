@@ -269,3 +269,18 @@ def test_con_archivo_el_paso_3_muestra_el_destino_en_vez_de_pedirlo():
     assert 'id="file-dest"' in fn and "-logs/" in fn
     # La rama del archivo va ANTES del formulario editable, y corta.
     assert fn.index("state.sourceMode === 'file'") < fn.index("'obs': `")
+
+
+def test_guardar_y_desplegar_rearma_el_conf_con_el_slug():
+    """El .conf del paso 4 se arma antes de guardar el caso: sin bucket ni
+    prefijo (con archivo el paso 3 no los pide) y con el índice genérico.
+    "Guardar y desplegar" lo mandaba tal cual y Logstash arrancaba con
+    `bucket => ""`. Con el slug ya conocido se rearma como el de una card del
+    grid (`fetchCaseConf`) ANTES de lanzar el deploy."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("async function submitSaveCase(e, deployAfter)")
+    fn = html[i:html.index("document.getElementById('save-case-submit')", i)]
+    assert "state.pipelineCode = await fetchCaseConf(slug)" in fn, "el deploy sale con el .conf viejo"
+    assert fn.index("fetchCaseConf(slug)") < fn.index("await runDeploy("), "se rearma DESPUÉS de desplegar"
+    # El archivo ya está en el store: no viaja en cada request de la puesta en marcha.
+    assert "state.logFileContent = ''" in fn

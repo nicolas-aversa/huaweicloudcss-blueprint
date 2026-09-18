@@ -3958,6 +3958,10 @@
         _closeSaveCase();
         await refreshVerticals();
         const slug = data.case?.slug;
+        // El archivo ya vive en el store del caso (y en el bucket): no tiene por
+        // qué seguir viajando en el body del deploy —y de ahí en el de cada paso
+        // de la puesta en marcha— hasta 50 MB por request.
+        state.logFileContent = '';
         // El dataset ya es una card del grid; se deja seleccionada en los dos casos.
         switchExampleMode('demo');
         if (slug) {
@@ -3972,6 +3976,21 @@
             goToStep(1);
             toast(`Dataset "${data.case.label}" guardado, pero no se pudieron subir los datos a tu bucket${data.upload_error ? ` (${data.upload_error})` : ''}. Corregilo en ⚙ Configuración y desplegalo desde el grid.`, 'error', 9000);
             return;
+          }
+          // El .conf del paso 4 se armó ANTES de guardar: sin bucket ni prefijo
+          // (con archivo el paso 3 no los pide) y con el índice genérico. Ahora
+          // que el caso existe se rearma como el de cualquier card del grid
+          // —bucket de demos, `<slug>-logs/`, lectura read-only—, que es lo que
+          // el resto del body ya describe. Sin esto Logstash arrancaba con
+          // `bucket => ""` y poleaba la nada.
+          if (slug) {
+            try {
+              state.pipelineCode = await fetchCaseConf(slug);
+            } catch (err) {
+              goToStep(1);
+              toast(`Dataset "${data.case.label}" guardado, pero no pude rearmar el configuration file (${err.message}). Desplegalo desde el grid.`, 'error', 9000);
+              return;
+            }
           }
           toast(`Dataset "${data.case.label}" guardado. Desplegando…`, 'success');
           await runDeploy({ btn: document.getElementById('deploy-provision-btn') });

@@ -3011,6 +3011,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
                     "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."},
         )
     _check_unavailable_plugins(request)
+    _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
     # Lock por-usuario: se adquiere ya (puede cortar con 409) y se libera cuando
     # el stream se agota/cierra.
@@ -3064,6 +3065,7 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
     _check_unavailable_plugins(request)
+    _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
 
     lock = _deploy_lock_for_current()
@@ -3185,6 +3187,51 @@ def _check_unavailable_plugins(request: "TerraformDeployRequest") -> None:
                 ),
             },
         )
+
+
+_S3_BLOCK_RE = re.compile(r"\bs3\s*\{(.*?)\n\s*\}", re.S)
+_S3_BUCKET_RE = re.compile(r'\bbucket\s*=>\s*"([^"]*)"')
+
+
+def _check_conf_reads_from_a_bucket(request: "TerraformDeployRequest") -> None:
+    """Corta con 400 si un input s3 quedó sin bucket.
+
+    Logstash valida ese .conf sin quejarse (`Config Validation Result: OK`),
+    arranca, registra `{:bucket=>""}` y se queda poleando para siempre un
+    bucket que no existe —"No files found in bucket" cada 60 s— mientras el
+    cluster recién provisionado no ingiere nada. Pasó con "Guardar y
+    desplegar" de un dataset nuevo: el .conf se había armado en el paso 3,
+    antes de conocer el slug y sin campos de bucket/prefijo. Como los 10
+    minutos de apply se pierden igual, el chequeo va acá, antes de Terraform.
+
+    Con `cases` el .conf lo arma el backend con `case.obs_bucket or
+    request.obs_bucket`; sin `cases` viaja armado desde el front, así que se
+    lee del texto. Un bloque s3 de salida sin bucket está igual de roto.
+    """
+    if request.cases:
+        sin_bucket = [c.slug for c in request.cases
+                      if not (c.input_config or custom_cases.case_type_for(c.slug) == "live")
+                      and not (c.obs_bucket or request.obs_bucket)]
+        if sin_bucket:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"stage": "pipeline_conf",
+                        "message": (f"No sé de qué bucket leer los datos de {', '.join(sin_bucket)}: "
+                                    "falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.")})
+        return
+    conf = request.pipeline_conf or ""
+    for bloque in _S3_BLOCK_RE.findall(conf):
+        m = _S3_BUCKET_RE.search(bloque)
+        if m and m.group(1).strip():
+            continue
+        slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"stage": "pipeline_conf",
+                    "message": (f"El configuration file de «{slug}» no dice de qué bucket leer "
+                                "(`bucket => \"\"` en el input s3): Logstash arrancaría y no "
+                                "ingeriría nada. Volvé al paso 3, revisá el origen y tocá "
+                                "«Revisar y desplegar» para rearmarlo.")})
 
 
 def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
