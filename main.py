@@ -2030,6 +2030,16 @@ class TerraformStatusResponse(BaseModel):
     # copiloto lo usa para habilitar el modo "preguntá a tus datos".
     capabilities: dict = Field(default_factory=dict)
     https_enabled: bool = False
+    # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
+    # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
+    # state remoto no se pudo leer (credenciales del bucket rotadas, bucket
+    # borrado). Sin esto la app decía "No tenés ningún entorno levantado"
+    # mientras los clusters seguían vivos y facturando.
+    state_error: str | None = None
+    # Lo que le falta a ESTA cuenta para poder operar. Cada usuario tiene su
+    # propia ⚙ Configuración: un SA nuevo no hereda nada del admin y hasta ahora
+    # veía la misma pantalla vacía sin saber por qué.
+    missing_settings: list[str] = Field(default_factory=list)
 
 
 _DATASETS_DIR = Path(__file__).parent / "datasets"
@@ -6144,6 +6154,37 @@ def dataset_preview(slug: str, lines: int = 6) -> DatasetPreviewResponse:
     return DatasetPreviewResponse(slug=slug, lines=out)
 
 
+# Lo mínimo para que esta cuenta pueda desplegar, con el nombre que tiene el
+# campo en ⚙ Configuración. En hosting multi-SA cada usuario tiene su propio
+# archivo de settings: nada se hereda del admin, ni las AK/SK ni el bucket.
+_CAMPOS_DE_CUENTA = [
+    ("demo_bucket", "Bucket de demos y tfstate"),
+    ("project_id", "Project ID"),
+    ("vpc_id", "VPC"),
+    ("subnet_id", "Subnet"),
+    ("security_group_id", "Security group"),
+    ("availability_zone", "Availability zone"),
+]
+
+
+def _faltantes_de_cuenta() -> list[str]:
+    """Qué le falta a la cuenta actual para poder desplegar. Vacío = está lista.
+
+    Un SA nuevo entra con la configuración en blanco y veía exactamente la misma
+    pantalla que uno que ya desplegó y destruyó: "No tenés ningún entorno
+    levantado", sin una palabra sobre lo que le falta ni sobre que su
+    configuración es suya y no la del admin.
+    """
+    import maas_integrator as _mi
+
+    valores = _mi.get_huawei_settings()
+    faltan = [etiqueta for campo, etiqueta in _CAMPOS_DE_CUENTA if not valores.get(campo)]
+    ak, sk = _mi.resolve_obs_creds()
+    if not (ak and sk):
+        faltan.insert(0, "Access Key / Secret Key de OBS")
+    return faltan
+
+
 @app.get(
     "/api/v1/terraform/status",
     response_model=TerraformStatusResponse,
@@ -6169,7 +6210,16 @@ def terraform_status() -> TerraformStatusResponse:
     if marker is None or not tfstate.has_resources(terraform_dir):
         # Sin marcador (entorno no desplegado desde la app) o sin state real
         # → empty state. El operador solo ve lo que levantó con el wizard.
-        return TerraformStatusResponse(active=False)
+        #
+        # Con una excepción que importa: si hay marcador —o sea, esta cuenta SÍ
+        # desplegó— y el state remoto no se pudo leer, "no tenés ningún entorno"
+        # es mentira. El cluster sigue vivo y facturando, y lo que pasó es que
+        # las credenciales del bucket de state ya no sirven (rotarlas alcanza) o
+        # el bucket no está. Es el modo de falla más engañoso que tiene la app.
+        error = tfstate.error_remoto(terraform_dir) if marker is not None else ""
+        return TerraformStatusResponse(active=False,
+                                       state_error=error or None,
+                                       missing_settings=_faltantes_de_cuenta())
 
     # Timestamp del deploy: preferimos el del marcador (momento exacto del deploy
     # por la plataforma); si no es parseable, caemos al mtime del propio marcador.

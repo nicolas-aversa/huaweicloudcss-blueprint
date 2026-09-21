@@ -170,6 +170,27 @@ def test_state_pull_que_falla_no_levanta(ws, monkeypatch):
     assert tfstate.has_resources(ws) is False
 
 
+def test_un_state_remoto_ilegible_deja_dicho_por_que(ws, monkeypatch):
+    """`{}` por "vacío" y `{}` por "no pude leerlo" se ven iguales desde afuera,
+    y la app los pintaba iguales: "No tenés ningún entorno levantado" con las
+    AK/SK rotadas y los clusters facturando. El motivo queda disponible."""
+    _activar_backend(ws)
+    monkeypatch.setattr(tfstate.subprocess, "run",
+                        FakeRun(returncode=1, stderr="error configuring S3 Backend: InvalidAccessKeyId"))
+    tfstate.invalidate(ws)
+    tfstate.read_state(ws)
+    assert "InvalidAccessKeyId" in tfstate.error_remoto(ws)
+
+    # Cuando vuelve a andar, el error se limpia solo.
+    monkeypatch.setattr(tfstate.subprocess, "run", FakeRun(stdout=json.dumps(_state())))
+    tfstate.invalidate(ws)
+    tfstate.read_state(ws)
+    assert tfstate.error_remoto(ws) == ""
+
+    # Un workspace que nunca falló no tiene nada que decir.
+    assert tfstate.error_remoto(ws.parent / "otro") == ""
+
+
 def test_terraform_ausente_no_levanta(ws, monkeypatch):
     def _no_existe(*a, **k):
         raise FileNotFoundError("terraform")

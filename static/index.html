@@ -6228,12 +6228,40 @@
       if (!active) {
         stopActiveEnvTicker();
 
-        // Empty state simple (el hero vive en Home).
+        // "No tenés ningún entorno" es la respuesta correcta casi siempre, pero
+        // no cuando esta cuenta SÍ desplegó y el state remoto no se pudo leer:
+        // ahí el cluster está vivo y facturando, y lo que hay que arreglar son
+        // las credenciales del bucket. Decir lo otro manda a buscar donde no es.
+        if (data && data.state_error) {
+          body.innerHTML = `
+            <div class="infra-empty">
+              <div class="infra-empty__tile" style="background:var(--accent-tint);color:var(--accent-hover);">${icon('alert-triangle')}</div>
+              <div class="infra-empty__title">No puedo leer el estado de tu entorno</div>
+              <div class="infra-empty__text">Esta cuenta tiene un deploy registrado, así que los clusters probablemente sigan vivos (y facturando), pero el state guardado en OBS no se puede leer. Suele ser que las Access Key / Secret Key del bucket cambiaron, o que el bucket ya no está.</div>
+              <pre style="font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);white-space:pre-wrap;word-break:break-word;max-width:640px;margin:0 0 14px;text-align:left;">${escapeHtml(String(data.state_error).slice(0, 400))}</pre>
+              <button class="btn btn-primary" id="infra-settings-btn">${icon('settings')} Abrir Configuración</button>
+            </div>`;
+          body.querySelector('#infra-settings-btn')?.addEventListener('click', () => showView('settings'));
+          return;
+        }
+
+        // Empty state simple (el hero vive en Home). Si además la cuenta está a
+        // medio configurar, se dice qué falta: cada usuario tiene su propia ⚙
+        // Configuración y un SA nuevo no hereda nada del admin.
+        const faltan = (data && Array.isArray(data.missing_settings)) ? data.missing_settings : [];
         body.innerHTML = `
           <div class="infra-empty">
             <div class="infra-empty__tile">${icon('infra')}</div>
             <div class="infra-empty__title">No tenés ningún entorno levantado</div>
             <div class="infra-empty__text">Creá un pipeline y desplegalo para ver acá tu OpenSearch + Logstash.</div>
+            ${faltan.length ? `
+              <div class="how-sample" style="max-width:560px;text-align:left;margin:0 0 14px;">
+                <span class="how-sample__tile">${icon('settings')}</span>
+                <div class="how-sample__body">
+                  <div class="how-sample__title">Antes vas a necesitar tu cuenta Huawei</div>
+                  <div class="how-sample__note">Falta cargar, en ⚙ Configuración: <strong>${faltan.map(escapeHtml).join(', ')}</strong>. La configuración es tuya, no se comparte con la del resto del equipo.</div>
+                </div>
+              </div>` : ''}
             <button class="btn btn-primary" id="infra-create-btn">${icon('spark')} Crear pipeline</button>
           </div>`;
         body.querySelector('#infra-create-btn')?.addEventListener('click', () => showView('pipeline'));

@@ -287,6 +287,21 @@ def test_la_tarjeta_del_entorno_muestra_si_entraron_documentos():
     assert "fetch('/api/v1/pipelines/health')" in html
 
 
+def test_el_empty_state_de_infra_dice_la_verdad():
+    """"No tenés ningún entorno levantado" se mostraba también cuando el state
+    remoto no se podía leer (AK/SK rotadas) con los clusters facturando, y
+    también a un SA nuevo sin decirle qué le faltaba configurar."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function renderInfraView(")
+    vista = html[i:html.index("async function hydrateActiveEnv(", i)]
+
+    assert "if (data && data.state_error) {" in vista, "el state ilegible se pinta como 'sin entorno'"
+    assert "No puedo leer el estado de tu entorno" in vista
+    assert "data.missing_settings" in vista, "la cuenta a medio configurar no se entera"
+    # El cartel del state ilegible va ANTES del empty state genérico, y corta.
+    assert vista.index("if (data && data.state_error) {") < vista.index("No tenés ningún entorno levantado")
+
+
 def test_guardar_y_desplegar_rearma_el_conf_con_el_slug():
     """El .conf del paso 4 se arma antes de guardar el caso: sin bucket ni
     prefijo (con archivo el paso 3 no los pide) y con el índice genérico.

@@ -124,23 +124,41 @@ def _read_local(terraform_dir: Path) -> dict:
         return {}
 
 
+# Por qué no se pudo leer el state remoto la última vez, por workspace. Un
+# state remoto ilegible y uno vacío se ven igual desde afuera —los dos devuelven
+# `{}`— y la app los pintaba igual: "No tenés ningún entorno levantado". Con las
+# AK/SK rotadas, eso significa una pantalla vacía mientras el cluster factura.
+_ultimo_error: dict[str, str] = {}
+
+
+def error_remoto(terraform_dir: Path | str) -> str:
+    """Por qué falló el último `state pull` de ese workspace, o "" si anduvo."""
+    return _ultimo_error.get(str(Path(terraform_dir)), "")
+
+
 def _pull_remote(terraform_dir: Path) -> dict:
     """`terraform state pull` devuelve el state crudo, con el MISMO shape que el
     archivo local — por eso los parsers de arriba no cambian."""
+    clave = str(terraform_dir)
     try:
         res = subprocess.run(
             ["terraform", "state", "pull"], cwd=str(terraform_dir), env=tf_env(),
             capture_output=True, text=True, timeout=_PULL_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"[tfstate] no se pudo leer el state remoto: {exc}", flush=True)
+        _ultimo_error[clave] = str(exc)[:300]
         return {}
     if res.returncode != 0:
         print(f"[tfstate] state pull falló: {(res.stderr or '')[:300]}", flush=True)
+        _ultimo_error[clave] = (res.stderr or "").strip()[:300] or "terraform state pull falló"
         return {}
     try:
-        return json.loads(res.stdout or "{}")
-    except (json.JSONDecodeError, ValueError):
+        estado = json.loads(res.stdout or "{}")
+    except (json.JSONDecodeError, ValueError) as exc:
+        _ultimo_error[clave] = f"el state remoto no es JSON válido: {exc}"
         return {}
+    _ultimo_error.pop(clave, None)
+    return estado
 
 
 def has_resources(terraform_dir: Path | str) -> bool:
