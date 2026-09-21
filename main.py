@@ -1547,6 +1547,19 @@ def generate_pipeline(request: OnboardingRequest) -> PipelineResponse:
         # resto (una password de Kafka enmascarada acá se perdería).
         pipeline_code = mask_obs_creds("\n\n".join(parts))
 
+        # Único punto por el que pasan TODOS los caminos que arman un .conf (el
+        # LLM, los generadores determinísticos, el catálogo de formatos y el
+        # ejemplo cacheado en el navegador), así que el chequeo va acá: lo que
+        # salga roto de acá llega intacto a Terraform, que lo acepta, y la
+        # pipeline no arranca sin que nada lo diga.
+        errores = [str(p) for p in conf_lint.lint(pipeline_code) if p.nivel == conf_lint.ERROR]
+        if errores:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"stage": "pipeline_conf",
+                        "message": "El configuration file no es válido para Logstash: "
+                                   + "; ".join(errores)})
+
     return PipelineResponse(
         status="success",
         filter_code=filter_code,
@@ -2743,6 +2756,13 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         print(f"[deploy-stream] origen propio corregido: {nota}")
         yield _sse({"type": "log", "message": f"Origen del caso corregido: {nota}"})
 
+    # Lo que el lint sospecha pero no afirma (un patrón grok que no está en
+    # nuestra lista): frenar el deploy por eso sería peor que dejarlo pasar, pero
+    # si después no entra un documento, esta línea es la primera que hay que
+    # mirar.
+    for aviso in _avisos_de_conf(request):
+        yield _sse({"type": "log", "message": f"Aviso del configuration file: {aviso}"})
+
     # ── Setup: pipeline.conf + registry + tfvars ──────────────────────────────
     try:
         _prepare_deploy_tfvars(request, terraform_dir)
@@ -3020,7 +3040,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
             detail={"stage": "pipeline_cap",
                     "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."},
         )
-    _check_unavailable_plugins(request)
+    _check_conf_compila(request)
     _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
     # Lock por-usuario: se adquiere ya (puede cortar con 409) y se libera cuando
@@ -3074,7 +3094,7 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
     if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
-    _check_unavailable_plugins(request)
+    _check_conf_compila(request)
     _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
 
@@ -3166,37 +3186,52 @@ def get_run_endpoint(run_id: str) -> dict:
     return run
 
 
-# La Logstash de CSS (7.10) NO trae todos los plugins bundled de la OSS: el
-# cluster no tiene salida a internet para instalarlos y el deploy no los
-# agrega. Confirmados ausentes hasta ahora; extender la lista al descubrir
-# otros. El sandbox local NO detecta esto (su imagen sí los trae) — por eso
-# el chequeo es estático, antes de gastar el apply.
-_UNAVAILABLE_FILTER_PLUGINS = {"translate"}
+def _errores_de_conf(request: "TerraformDeployRequest") -> list[str]:
+    """Los errores que impedirían que la pipeline arranque, con su caso."""
+    if request.cases:
+        # El `.conf` de cada caso lo arma el backend (input y output salen de
+        # acá), así que lo único que puede venir roto del navegador es el filter.
+        return [f"{c.slug}: {p}" for c in request.cases
+                for p in conf_lint.lint_filtro(c.filter_code or "")
+                if p.nivel == conf_lint.ERROR]
+    slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+    return [f"{slug}: {p}" for p in conf_lint.lint(request.pipeline_conf or "", marcador_hosts=True)
+            if p.nivel == conf_lint.ERROR]
 
 
-def _check_unavailable_plugins(request: "TerraformDeployRequest") -> None:
-    """Corta con 400 si algún .conf usa un plugin que CSS Logstash no tiene."""
-    confs = [(request.pipeline_slug or "principal", request.pipeline_conf or "")]
-    confs += [(c.slug, c.filter_code or "") for c in (request.cases or [])]
-    offending: dict[str, list[str]] = {}
-    for slug, conf in confs:
-        found = sorted(p for p in _UNAVAILABLE_FILTER_PLUGINS
-                       if re.search(rf"\b{p}\s*{{", conf))
-        if found:
-            offending[slug] = found
-    if offending:
-        detail = "; ".join(f"{slug}: {', '.join(ps)}" for slug, ps in offending.items())
+def _avisos_de_conf(request: "TerraformDeployRequest") -> list[str]:
+    """Lo que probablemente rompa pero no estoy seguro (patrones grok raros)."""
+    if request.cases:
+        return [f"{c.slug}: {p}" for c in request.cases
+                for p in conf_lint.lint_filtro(c.filter_code or "")
+                if p.nivel == conf_lint.AVISO]
+    return [str(p) for p in conf_lint.lint(request.pipeline_conf or "")
+            if p.nivel == conf_lint.AVISO]
+
+
+def _check_conf_compila(request: "TerraformDeployRequest") -> None:
+    """Corta con 400 si el configuration file no va a arrancar en Logstash.
+
+    Reemplaza a dos guards que miraban el `.conf` con regex sueltas: el de
+    plugins no instalados (que buscaba UNA palabra, `translate`, y la habría
+    encontrado hasta dentro de un comentario) y el del bucket vacío. Ahora el
+    archivo se lee entero y se chequea lo que de verdad impide que Logstash
+    compile la pipeline: llaves sin cerrar, el cuerpo del filter sin el
+    `filter { }` que lo envuelve, plugins que no existen o que CSS no trae, y el
+    marcador de hosts que Terraform necesita reemplazar.
+
+    Importa que corra ANTES del apply: una pipeline que no compila deja el
+    cluster vivo, vacío y sin un solo error visible — Terraform da "success",
+    Logstash ni siquiera la levanta y el SA se entera 20 minutos después.
+    """
+    errores = _errores_de_conf(request)
+    if errores:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "stage": "unavailable_plugins",
-                "message": (
-                    f"El pipeline usa plugins que la Logstash de CSS no tiene "
-                    f"instalados ({detail}). Reemplazalos (ej. translate → "
-                    "condicionales mutate) y volvé a intentar."
-                ),
-            },
-        )
+            detail={"stage": "pipeline_conf",
+                    "message": ("El configuration file no va a arrancar en Logstash — "
+                                + "; ".join(errores)
+                                + ". Volvé al paso 3, corregilo y tocá «Revisar y desplegar».")})
 
 
 def _origen_propio(slug: str) -> tuple[str, str]:
@@ -3256,43 +3291,29 @@ def _force_case_own_source(request: "TerraformDeployRequest") -> list[str]:
 
 
 def _check_conf_reads_from_a_bucket(request: "TerraformDeployRequest") -> None:
-    """Corta con 400 si un input s3 quedó sin bucket.
+    """Corta con 400 si no hay bucket del que leer.
 
-    Logstash valida ese .conf sin quejarse (`Config Validation Result: OK`),
-    arranca, registra `{:bucket=>""}` y se queda poleando para siempre un
-    bucket que no existe —"No files found in bucket" cada 60 s— mientras el
-    cluster recién provisionado no ingiere nada. Pasó con "Guardar y
-    desplegar" de un dataset nuevo: el .conf se había armado en el paso 3,
-    antes de conocer el slug y sin campos de bucket/prefijo. Como los 10
-    minutos de apply se pierden igual, el chequeo va acá, antes de Terraform.
+    Logstash valida un `.conf` con `bucket => ""` sin quejarse (`Config
+    Validation Result: OK`), arranca, registra `{:bucket=>""}` y se queda
+    poleando para siempre —"No files found in bucket" cada 60 s— mientras el
+    cluster recién provisionado no ingiere nada.
 
-    Con `cases` el .conf lo arma el backend con `case.obs_bucket or
-    request.obs_bucket`; sin `cases` viaja armado desde el front, así que se
-    lee del texto. Un bloque s3 de salida sin bucket está igual de roto.
+    Acá queda solo el caso multi: el `.conf` todavía no existe (lo arma el
+    backend con `case.obs_bucket or request.obs_bucket`), así que se mira el
+    request. El `.conf` de un solo caso lo revisa `_check_conf_compila`, que lo
+    lee entero.
     """
-    if request.cases:
-        sin_bucket = [c.slug for c in request.cases
-                      if not (c.input_config or custom_cases.case_type_for(c.slug) == "live")
-                      and not (c.obs_bucket or request.obs_bucket)]
-        if sin_bucket:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"stage": "pipeline_conf",
-                        "message": (f"No sé de qué bucket leer los datos de {', '.join(sin_bucket)}: "
-                                    "falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.")})
+    if not request.cases:
         return
-    conf = request.pipeline_conf or ""
-    for bloque in (b for b in conf_lint.plugins(conf) if b.nombre == "s3"):
-        if (conf_lint.leer_setting(conf, bloque, "bucket") or "").strip():
-            continue
-        slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+    sin_bucket = [c.slug for c in request.cases
+                  if not (c.input_config or custom_cases.case_type_for(c.slug) == "live")
+                  and not (c.obs_bucket or request.obs_bucket)]
+    if sin_bucket:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"stage": "pipeline_conf",
-                    "message": (f"El configuration file de «{slug}» no dice de qué bucket leer "
-                                "(`bucket => \"\"` en el input s3): Logstash arrancaría y no "
-                                "ingeriría nada. Volvé al paso 3, revisá el origen y tocá "
-                                "«Revisar y desplegar» para rearmarlo.")})
+                    "message": (f"No sé de qué bucket leer los datos de {', '.join(sin_bucket)}: "
+                                "falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.")})
 
 
 def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:

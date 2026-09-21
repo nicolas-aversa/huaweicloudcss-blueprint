@@ -1642,6 +1642,18 @@ def _detect_log_format(line: str) -> str:
     return "unknown"
 
 
+def _problemas_del_filtro(filter_code: str) -> str:
+    """Los errores de un `filter { … }`, en una línea, o "" si está sano.
+
+    Solo los ERRORES: un patrón grok que no está en nuestra lista es un aviso y
+    no tiene por qué disparar un reintento contra el modelo.
+    """
+    import conf_lint
+
+    errores = [str(p) for p in conf_lint.lint_filtro(filter_code) if p.nivel == conf_lint.ERROR]
+    return "; ".join(errores)
+
+
 def _regenerate_with_feedback(
     sample_log: str, namespace: str, ecs_overlay: bool,
     feedback: str, previous_filter: str,
@@ -1973,6 +1985,34 @@ def generate_logstash_filter(
     # (cached example en el frontend, edición manual en el textarea de
     # step 5). Por eso `strip_logstash_comments` es top-level y exportada.
     filter_code = strip_logstash_comments(filter_code)
+
+    # Y recién ahora se revisa lo que devolvió: hasta acá lo único que se
+    # exigía era que fuera un string no vacío. Un filter con una llave de menos,
+    # un plugin que CSS no tiene o el cuerpo sin el `filter { }` que lo envuelve
+    # produce un .conf que Terraform acepta sin chistar y una pipeline que
+    # Logstash no puede compilar: el cluster queda vivo, vacío y sin un solo
+    # error a la vista. Un reintento con los problemas concretos como feedback
+    # —el camino que ya existía para el sandbox y que nadie llamaba— y si sigue
+    # roto, se dice en vez de devolverlo igual.
+    problemas = _problemas_del_filtro(filter_code)
+    if problemas:
+        print(f"[llm] el filter no pasó el lint ({problemas}); reintento con feedback")
+        try:
+            corregido = _regenerate_with_feedback(
+                sample_log=sample_log, namespace=ns, ecs_overlay=ecs_overlay,
+                feedback=("El filter no compila en Logstash 7.10. Corregí exactamente "
+                          "esto y devolvé el filter completo:\n" + problemas),
+                previous_filter=filter_code, input_type=input_type)
+        except RuntimeError as exc:
+            raise RuntimeError(f"El filter generado no es válido ({problemas}) y el "
+                               f"reintento falló: {exc}") from exc
+        restantes = _problemas_del_filtro(corregido["filter_code"])
+        if restantes:
+            raise RuntimeError(
+                "El modelo no logró generar un filter válido para este log. "
+                f"Lo que sigue mal: {restantes}")
+        corregido["multiline_hint"] = detect_multiline(lines)
+        return corregido
 
     return {
         "filter_code": filter_code.strip(),

@@ -17,7 +17,10 @@ un contador ingenuo, ese `{` descuadra el archivo entero.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+
+import logstash_catalogo as catalogo
 
 CODIGO = "c"
 STRING = "s"
@@ -133,8 +136,14 @@ def bloques(conf: str, mascara: str | None = None) -> list[Bloque]:
             nombre = conf[j + 1:fin_ident]
             # Sin nombre pegado a la llave es un hash (`match => { … }`) o un
             # bloque anónimo: entra en la pila para que las llaves cuadren, pero
-            # no se reporta como bloque.
-            pila.append((nombre, j + 1, i) if nombre else ("", i, i))
+            # no se reporta como bloque. Un "nombre" que empieza con un dígito
+            # tampoco es un bloque: es el final de una condición, como en
+            # `if [code] >= 400 {` — sin esto el lint lo reportaba como un
+            # plugin llamado `400` y frenaba el deploy del caso SIEM.
+            if nombre and not nombre[0].isdigit():
+                pila.append((nombre, j + 1, i))
+            else:
+                pila.append(("", i, i))
         elif ch == "}":
             if pila:
                 nombre, inicio, abre = pila.pop()
@@ -241,3 +250,201 @@ def escribir_setting(conf: str, bloque: Bloque, clave: str, valor: str,
             sangria = linea[:len(linea) - len(linea.lstrip())] or sangria
             break
     return f'{conf[:ini]}\n{sangria}{clave} => "{escapado}"{conf[ini:]}'
+
+
+# ── Lint ─────────────────────────────────────────────────────────────────────
+# Un `.conf` que Logstash no puede compilar deja la pipeline caída, y eso no se
+# ve desde acá: Terraform crea la configuración igual, el cluster queda vivo y
+# vacío, y el único síntoma es que no entra un solo documento. Como el LLM que
+# arma el filter no garantiza nada de esto —lo único que se chequeaba de su
+# respuesta era que fuera un string no vacío— las reglas van antes del deploy.
+
+ERROR = "error"
+AVISO = "aviso"
+
+_MARCADOR_HOSTS = "hosts => []"
+_SECCIONES = ("input", "filter", "output")
+_GROK_REF = re.compile(r"%\{(\w+)(?::[^}]*)?\}")
+_SOLO_MAYUS = re.compile(r"^[A-Z0-9_]+$")
+
+
+@dataclass(frozen=True)
+class Problema:
+    nivel: str           # ERROR corta el deploy; AVISO se muestra y sigue
+    linea: int
+    mensaje: str
+
+    def __str__(self) -> str:
+        return f"línea {self.linea}: {self.mensaje}"
+
+
+def _linea(conf: str, i: int) -> int:
+    return conf.count("\n", 0, i) + 1
+
+
+def _balance(conf: str, m: str) -> list[Problema]:
+    """Llaves, corchetes y comillas. Lo primero que rompe una pipeline."""
+    problemas: list[Problema] = []
+    pares = {"}": "{", "]": "[", ")": "("}
+    pila: list[tuple[str, int]] = []
+    for i, ch in enumerate(conf):
+        if m[i] != CODIGO:
+            continue
+        if ch in "{[(":
+            pila.append((ch, i))
+        elif ch in pares:
+            if not pila:
+                problemas.append(Problema(ERROR, _linea(conf, i), f"`{ch}` de más: no hay nada abierto."))
+            elif pila[-1][0] != pares[ch]:
+                abre, j = pila.pop()
+                problemas.append(Problema(
+                    ERROR, _linea(conf, i),
+                    f"`{ch}` cierra un `{abre}` abierto en la línea {_linea(conf, j)}."))
+            else:
+                pila.pop()
+    for abre, i in pila:
+        problemas.append(Problema(ERROR, _linea(conf, i), f"`{abre}` sin cerrar."))
+    # Un string sin cerrar se come el resto del archivo y el error que da
+    # Logstash apunta a cualquier lado menos acá.
+    i = 0
+    while i < len(conf):
+        if m[i] == STRING:
+            j = i
+            while j < len(conf) and m[j] == STRING:
+                j += 1
+            if j - i < 2 or conf[j - 1] != conf[i]:
+                problemas.append(Problema(ERROR, _linea(conf, i), "comilla sin cerrar."))
+            i = j
+        else:
+            i += 1
+    return problemas
+
+
+def _seccion_de(bloque: Bloque, secs: list[Bloque]) -> str:
+    for s in secs:
+        if s.abre < bloque.abre < s.cierra:
+            return s.nombre
+    return ""
+
+
+def _grok_desconocidos(conf: str, m: str, bloque: Bloque) -> list[str]:
+    """Patrones `%{NOMBRE}` que no existen ni en el core ni definidos ahí mismo."""
+    ini, fin = bloque.cuerpo
+    if leer_setting(conf, bloque, "patterns_dir", m) is not None:
+        return []                       # trae su propio directorio de patrones
+    definidos = set()
+    for texto in _strings_en(conf, m, ini, fin):
+        if _SOLO_MAYUS.match(texto):
+            definidos.add(texto)        # clave de `pattern_definitions`
+    faltan = []
+    for texto in _strings_en(conf, m, ini, fin):
+        for nombre in _GROK_REF.findall(texto):
+            if nombre in catalogo.GROK_CORE or nombre in definidos:
+                continue
+            faltan.append(nombre)
+    return faltan
+
+
+def _strings_en(conf: str, m: str, ini: int, fin: int) -> list[str]:
+    fuera, i = [], ini
+    while i < fin:
+        if m[i] == STRING:
+            j = i
+            while j < fin and m[j] == STRING:
+                j += 1
+            fuera.append(conf[i + 1:j - 1])
+            i = j
+        else:
+            i += 1
+    return fuera
+
+
+def lint(conf: str, *, marcador_hosts: bool = False) -> list[Problema]:
+    """Revisa un `.conf` entero. `marcador_hosts`: es el que va a Terraform.
+
+    Terraform inyecta el cluster con un `replace` literal de `hosts => []`
+    (main.tf). Si ese marcador exacto no está —porque el front mandó hosts, o
+    porque el espaciado cambió—, el reemplazo no matchea y la pipeline queda
+    apuntando a cualquier cosa. Por eso es una regla y no un detalle.
+    """
+    problemas: list[Problema] = []
+    if not (conf or "").strip():
+        return [Problema(ERROR, 1, "el configuration file está vacío.")]
+    m = scan(conf)
+    problemas += _balance(conf, m)
+    if any(p.nivel == ERROR for p in problemas):
+        return problemas                # con las llaves rotas, lo demás es ruido
+
+    secs = secciones(conf, m)
+    nombres = [s.nombre for s in secs]
+    for s in secs:
+        if s.nombre not in _SECCIONES:
+            problemas.append(Problema(
+                ERROR, _linea(conf, s.inicio),
+                f"`{s.nombre}` no es una sección: arriba de todo solo van "
+                f"`input`, `filter` y `output`. Un bloque de filtros suelto "
+                f"(sin el `filter {{ … }}` que lo envuelve) es un .conf roto."))
+    for req in ("input", "output"):
+        if req not in nombres:
+            problemas.append(Problema(ERROR, 1, f"falta la sección `{req}`."))
+    for nombre in _SECCIONES:
+        if nombres.count(nombre) > 1:
+            problemas.append(Problema(ERROR, 1, f"la sección `{nombre}` está {nombres.count(nombre)} veces."))
+
+    for b in plugins(conf, None, m):
+        seccion = _seccion_de(b, secs)
+        permitidos = catalogo.POR_SECCION.get(seccion, set()) | catalogo.CODECS
+        if b.nombre in catalogo.NO_EN_CSS:
+            problemas.append(Problema(
+                ERROR, _linea(conf, b.inicio),
+                f"el plugin `{b.nombre}` no está instalado en la Logstash de CSS. "
+                f"Reemplazalo (ej. translate → condicionales `mutate`)."))
+        elif seccion and b.nombre not in permitidos:
+            problemas.append(Problema(
+                ERROR, _linea(conf, b.inicio),
+                f"`{b.nombre}` no es un plugin de `{seccion}` de Logstash 7.10: "
+                f"la pipeline no va a arrancar."))
+        if b.nombre == "grok":
+            for pat in _grok_desconocidos(conf, m, b):
+                problemas.append(Problema(
+                    AVISO, _linea(conf, b.inicio),
+                    f"el patrón `%{{{pat}}}` no está entre los del core: si no existe, "
+                    f"la pipeline no arranca. Definilo con `pattern_definitions` "
+                    f"o usá uno del core."))
+        if b.nombre == "s3" and seccion == "input":
+            if not (leer_setting(conf, b, "bucket", m) or "").strip():
+                problemas.append(Problema(
+                    ERROR, _linea(conf, b.inicio),
+                    "el input `s3` no dice de qué bucket leer: Logstash arranca igual "
+                    "y se queda poleando la nada."))
+
+    if marcador_hosts:
+        es = [b for b in plugins(conf, None, m)
+              if b.nombre == "elasticsearch" and _seccion_de(b, secs) == "output"]
+        if es and _MARCADOR_HOSTS not in conf:
+            problemas.append(Problema(
+                ERROR, _linea(conf, es[0].inicio),
+                f"el output `elasticsearch` no trae el marcador `{_MARCADOR_HOSTS}`: "
+                f"es el texto exacto que Terraform reemplaza por el cluster real, "
+                f"así que la pipeline escribiría en otro lado."))
+    return problemas
+
+
+def lint_filtro(filter_code: str) -> list[Problema]:
+    """Revisa SOLO el `filter { … }` que devuelve el LLM.
+
+    Se valida antes de armar el `.conf`, así el reintento con feedback tiene algo
+    concreto que corregir. El caso más común y más silencioso: el modelo devuelve
+    el cuerpo (`grok { … } date { … }`) sin el `filter { }` que lo envuelve.
+    """
+    if not (filter_code or "").strip():
+        return [Problema(ERROR, 1, "el filter vino vacío.")]
+    armado = f"input {{ stdin {{ }} }}\n\n{filter_code}\n\noutput {{ stdout {{ }} }}\n"
+    desplazamiento = armado.index(filter_code)
+    fuera = []
+    for p in lint(armado):
+        if "falta la sección" in p.mensaje:
+            continue
+        linea = max(1, p.linea - armado.count("\n", 0, desplazamiento))
+        fuera.append(Problema(p.nivel, linea, p.mensaje))
+    return fuera

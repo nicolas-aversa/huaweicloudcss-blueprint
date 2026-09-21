@@ -508,25 +508,26 @@ def _conf_s3(bucket_line):
     return ("input {\n  s3 {\n    access_key_id => \"AK\"\n    secret_access_key => \"SK\"\n"
             f"    {bucket_line}\n    region => \"la-south-2\"\n    codec => plain\n  }}\n}}\n\n"
             "filter {\n  csv { separator => \",\" }\n}\n\n"
-            "output {\n  elasticsearch {\n    hosts => [\"http://x:9200\"]\n    index => \"sp500-%{+YYYY.MM}\"\n  }\n}\n")
+            "output {\n  elasticsearch {\n    hosts => []\n    index => \"sp500-%{+YYYY.MM}\"\n  }\n}\n")
 
 
 def test_un_conf_con_bucket_vacio_corta_antes_de_terraform():
     with pytest.raises(main.HTTPException) as exc:
-        main._check_conf_reads_from_a_bucket(_deploy_req_unico("sp500", pipeline_conf=_conf_s3('bucket => ""')))
+        main._check_conf_compila(_deploy_req_unico("sp500", pipeline_conf=_conf_s3('bucket => ""')))
     assert exc.value.status_code == 400
     assert exc.value.detail["stage"] == "pipeline_conf"
     assert "sp500" in exc.value.detail["message"]
 
     # Sin la línea `bucket` directamente, mismo resultado.
     with pytest.raises(main.HTTPException):
-        main._check_conf_reads_from_a_bucket(_deploy_req_unico("sp500", pipeline_conf=_conf_s3("interval => 60")))
+        main._check_conf_compila(_deploy_req_unico("sp500", pipeline_conf=_conf_s3("interval => 60")))
 
 
 def test_un_conf_con_bucket_pasa_y_uno_sin_s3_tambien():
-    main._check_conf_reads_from_a_bucket(_deploy_req_unico("sp500", pipeline_conf=_conf_s3('bucket => "demos"')))
-    kafka = 'input {\n  kafka {\n    bootstrap_servers => "b:9092"\n    topics => ["t"]\n  }\n}\n\nfilter {}\n\noutput { stdout {} }\n'
-    main._check_conf_reads_from_a_bucket(_deploy_req_unico("acme", pipeline_conf=kafka))
+    main._check_conf_compila(_deploy_req_unico("sp500", pipeline_conf=_conf_s3('bucket => "demos"')))
+    kafka = ('input {\n  kafka {\n    bootstrap_servers => "b:9092"\n    topics => ["t"]\n  }\n}\n\n'
+             'filter {}\n\noutput { elasticsearch { hosts => [] } }\n')
+    main._check_conf_compila(_deploy_req_unico("acme", pipeline_conf=kafka))
 
 
 def test_con_cases_el_bucket_sale_del_request_y_los_live_no_cuentan(store, monkeypatch):
@@ -554,15 +555,16 @@ def test_con_cases_el_bucket_sale_del_request_y_los_live_no_cuentan(store, monke
     main._check_conf_reads_from_a_bucket(req)
 
 
-def test_los_dos_endpoints_de_deploy_pasan_por_el_guard_del_bucket():
+def test_los_dos_endpoints_de_deploy_pasan_por_los_guards():
     """Hay dos entradas al deploy (stream y job) y las dos tienen que cortar
     antes de Terraform, o el error vuelve por la que quedó afuera."""
     import inspect
     for fn in (main.terraform_deploy_stream, main.terraform_deploy_job):
         src = inspect.getsource(fn)
-        assert "_check_conf_reads_from_a_bucket(request)" in src, fn.__name__
-        assert src.index("_check_conf_reads_from_a_bucket(request)") < src.index("_deploy_lock_for_current()"), \
-            f"{fn.__name__}: el guard tiene que correr antes de tomar el lock"
+        for guard in ("_check_conf_compila(request)", "_check_conf_reads_from_a_bucket(request)"):
+            assert guard in src, f"{fn.__name__}: falta {guard}"
+            assert src.index(guard) < src.index("_deploy_lock_for_current()"), \
+                f"{fn.__name__}: {guard} tiene que correr antes de tomar el lock"
 
 
 def test_dataset_case_never_stores_the_creators_bucket(store):

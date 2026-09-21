@@ -289,6 +289,25 @@ def test_generate_pipeline_without_filter_or_log_422():
     assert res.status_code == 422
 
 
+def test_generate_pipeline_rechaza_un_conf_que_no_compila():
+    """Por acá pasan TODOS los caminos que arman un .conf (el LLM, los
+    generadores determinísticos, el catálogo de formatos y el ejemplo cacheado
+    en el navegador): lo que salga roto llega intacto a Terraform, que lo acepta
+    igual, y la pipeline nunca arranca."""
+    res = client.post("/api/v1/onboarding/generate-pipeline", json={
+        # Al filter le falta una llave: el editor del paso 3 lo permite.
+        "filter_code": 'filter { mutate { add_field => { "a" => "b" } }',
+        "input_config": {"plugin_type": "s3", "s3": {"bucket": "b", "access_key": "AK", "secret_key": "SK"}},
+        "output_config": {"plugin_type": "elasticsearch",
+                          "elasticsearch": {"hosts": "http://x:9200", "index": "logs"}},
+    })
+
+    assert res.status_code == 422
+    detalle = res.json()["detail"]
+    assert detalle["stage"] == "pipeline_conf"
+    assert "sin cerrar" in detalle["message"]
+
+
 # --- /generate-pipeline (compat: cliente viejo que manda raw_log) -----------
 
 def test_generate_pipeline_legacy_raw_log_triggers_llm(monkeypatch):
@@ -1235,26 +1254,132 @@ def test_deploy_guard_demo_datasets_missing(monkeypatch):
     assert "transacciones-alyc" in detail["message"] and "siem" not in detail["message"].split("`")[2]
 
 
+_CONF_OK = ('input { s3 { bucket => "b" } }\nfilter { %s }\n'
+            'output { elasticsearch { hosts => [] index => "logs-%%{+YYYY.MM}" } }\n')
+
+
 def test_deploy_rejects_unavailable_plugins(monkeypatch):
     """La Logstash de CSS no trae `translate` (el cluster no puede instalar
     plugins). El deploy corta con 400 accionable ANTES del apply — el sandbox
     local NO lo detecta porque su imagen sí lo trae."""
     monkeypatch.setattr(main, "_read_pipelines_registry", lambda _dir: {})
     body = {
-        "pipeline_conf": 'filter { translate { source => "code" target => "desc" } }',
+        "pipeline_conf": _CONF_OK % 'translate { source => "code" target => "desc" }',
         "opensearch_password": "pw", "opensearch_index": "logs-%{+YYYY.MM}",
     }
     res = client.post("/api/v1/terraform/deploy-stream", json=body)
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["stage"] == "unavailable_plugins"
+    assert detail["stage"] == "pipeline_conf"
     assert "translate" in detail["message"]
 
     # Un conf sin plugins vetados NO debe disparar este 400 (puede fallar
     # después por otras cosas, pero no en este gate).
     ok_req = main.TerraformDeployRequest(
-        pipeline_conf='filter { mutate { add_field => { "translated" => "x" } } }')
-    assert main._check_unavailable_plugins(ok_req) is None
+        pipeline_conf=_CONF_OK % 'mutate { add_field => { "translated" => "x" } }')
+    assert main._check_conf_compila(ok_req) is None
+
+
+def test_el_deploy_no_arranca_con_un_conf_que_logstash_no_compila(monkeypatch):
+    """Lo que motivó el chequeo: Terraform acepta cualquier texto, crea la
+    configuración y da "success". Logstash ni siquiera levanta la pipeline y el
+    cluster queda vivo, vacío y sin un error a la vista."""
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda _dir: {})
+
+    # El modo de falla clásico del LLM: el cuerpo del filter, sin envolver.
+    roto = ('input { s3 { bucket => "b" } }\n'
+            'grok { match => { "message" => "%{GREEDYDATA:m}" } }\n'
+            'output { elasticsearch { hosts => [] } }\n')
+    res = client.post("/api/v1/terraform/deploy-stream", json={
+        "pipeline_conf": roto, "opensearch_password": "pw"})
+    assert res.status_code == 400
+    assert "no es una sección" in res.json()["detail"]["message"]
+
+    # Y una llave de menos, que es lo que deja el editor del paso 3.
+    res = client.post("/api/v1/terraform/deploy-stream", json={
+        "pipeline_conf": 'input { s3 { bucket => "b" }\nfilter { }\noutput { stdout {} }\n',
+        "opensearch_password": "pw"})
+    assert res.status_code == 400
+    assert "sin cerrar" in res.json()["detail"]["message"]
+
+
+def test_el_marcador_de_hosts_es_obligatorio_en_el_deploy():
+    """Terraform inyecta el cluster con un `replace` literal de `hosts => []`.
+    Sin ese texto exacto la pipeline escribe donde diga el .conf — típicamente
+    el endpoint viejo que quedó del preview."""
+    req = main.TerraformDeployRequest(
+        pipeline_conf=('input { s3 { bucket => "b" } }\nfilter { }\n'
+                       'output { elasticsearch { hosts => ["http://viejo:9200"] } }\n'))
+
+    with pytest.raises(main.HTTPException) as exc:
+        main._check_conf_compila(req)
+    assert "marcador" in exc.value.detail["message"]
+
+
+def test_el_filter_del_llm_se_valida_y_se_reintenta_con_feedback(monkeypatch):
+    """Lo único que se exigía de la respuesta del modelo era que `filter_code`
+    fuera un string no vacío. Un filter con una llave de menos, o el cuerpo sin
+    el `filter { }` que lo envuelve, llegaba intacto a Terraform: la
+    configuración se crea, Logstash no compila la pipeline y el cluster queda
+    vivo y vacío. Ahora se revisa y se reintenta UNA vez con los problemas
+    concretos como feedback — el camino correctivo que ya existía y que nadie
+    llamaba."""
+    import types
+    import maas_integrator as mi
+
+    def _respuesta(contenido):
+        msg = types.SimpleNamespace(content=contenido)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    # El modelo devuelve el CUERPO del filter, sin envolver.
+    roto = '{"filter_code": "grok { match => { \\"message\\" => \\"%{GREEDYDATA:m}\\" } }", "fields": []}'
+    creado = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(
+            create=lambda **kw: _respuesta(roto))))
+    monkeypatch.setattr(mi, "_build_client", lambda: creado)
+    monkeypatch.setattr(mi, "get_pipeline_model", lambda: "glm")
+
+    visto = {}
+
+    def fake_regen(sample_log, namespace, ecs_overlay, feedback, previous_filter, input_type=""):
+        visto.update(feedback=feedback, previous=previous_filter)
+        return {"filter_code": 'filter { grok { match => { "message" => "%{GREEDYDATA:m}" } } }',
+                "fields": []}
+
+    monkeypatch.setattr(mi, "_regenerate_with_feedback", fake_regen)
+
+    res = mi.generate_logstash_filter("esto es una linea rara sin formato conocido 12345")
+
+    assert res["filter_code"].startswith("filter {"), "devolvió el filter roto igual"
+    assert "no es una sección" in visto["feedback"], visto.get("feedback")
+    assert visto["previous"].startswith("grok {"), "el reintento no vio el filter anterior"
+
+    # Si el reintento tampoco sirve, se dice en vez de devolver algo que no anda.
+    monkeypatch.setattr(mi, "_regenerate_with_feedback",
+                        lambda **kw: {"filter_code": "grok { }", "fields": []})
+    with pytest.raises(RuntimeError, match="no logró generar un filter válido"):
+        mi.generate_logstash_filter("otra linea rara sin formato conocido 678")
+
+
+def test_un_filter_sano_del_llm_no_dispara_el_reintento(monkeypatch):
+    import types
+    import maas_integrator as mi
+
+    bueno = '{"filter_code": "filter { json { source => \\"message\\" } }", "fields": []}'
+    msg = types.SimpleNamespace(content=bueno)
+    creado = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(
+        create=lambda **kw: types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=msg)]))))
+    monkeypatch.setattr(mi, "_build_client", lambda: creado)
+    monkeypatch.setattr(mi, "get_pipeline_model", lambda: "glm")
+
+    def no_llamar(**kw):
+        raise AssertionError("reintentó con un filter que estaba bien")
+
+    monkeypatch.setattr(mi, "_regenerate_with_feedback", no_llamar)
+
+    res = mi.generate_logstash_filter("otra linea rara sin formato conocido 999")
+    assert "json" in res["filter_code"]
 
 
 def test_generate_filter_feedback_goes_straight_to_llm(monkeypatch):
