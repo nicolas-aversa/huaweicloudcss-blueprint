@@ -302,16 +302,21 @@ def test_el_empty_state_de_infra_dice_la_verdad():
     assert vista.index("if (data && data.state_error) {") < vista.index("No tenés ningún entorno levantado")
 
 
-def test_guardar_y_desplegar_rearma_el_conf_con_el_slug():
-    """El .conf del paso 4 se arma antes de guardar el caso: sin bucket ni
-    prefijo (con archivo el paso 3 no los pide) y con el índice genérico.
-    "Guardar y desplegar" lo mandaba tal cual y Logstash arrancaba con
-    `bucket => ""`. Con el slug ya conocido se rearma como el de una card del
-    grid (`fetchCaseConf`) ANTES de lanzar el deploy."""
+def test_crear_un_caso_solo_lo_guarda():
+    """Crear un caso y desplegarlo son dos gestos distintos: el deploy sale de la
+    card, ya en el grid, por el mismo camino que cualquier otro caso. Había un
+    "Guardar y desplegar" que encadenaba las dos cosas y necesitaba rearmar el
+    .conf con un slug que recién se conocía al guardar: un camino más, con sus
+    propios bugs (Logstash arrancó con `bucket => ""`), para algo que el grid ya
+    hace bien."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("async function submitSaveCase(e, deployAfter)")
+    assert "Guardar y desplegar</button>" not in html, "volvió el botón que encadena guardar + desplegar"
+    assert 'id="save-case-only"' not in html, "un solo botón: guardar"
+
+    i = html.index("async function submitSaveCase(")
     fn = html[i:html.index("document.getElementById('save-case-submit')", i)]
-    assert "state.pipelineCode = await fetchCaseConf(slug)" in fn, "el deploy sale con el .conf viejo"
-    assert fn.index("fetchCaseConf(slug)") < fn.index("await runDeploy("), "se rearma DESPUÉS de desplegar"
+    assert "runDeploy(" not in fn, "guardar el caso volvió a desplegar"
+    assert "fetchCaseConf(" not in fn
+    assert "goToStep(1)" in fn, "tras guardar se vuelve al grid, que es desde donde se despliega"
     # El archivo ya está en el store: no viaja en cada request de la puesta en marcha.
     assert "state.logFileContent = ''" in fn

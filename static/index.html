@@ -2903,7 +2903,7 @@
         <button id="save-case-close" class="btn btn-secondary btn-sm"><svg class="icon" style="width:13px;height:13px;"><use href="#ic-x"/></svg> Cerrar</button>
       </div>
       <div style="padding:20px 24px; overflow-y:auto; flex:1;">
-        <p class="form-hint" style="margin:0 0 16px;">Queda como una card en el grid del paso 1, para vos y para el resto de los usuarios de esta instancia.</p>
+        <p class="form-hint" style="margin:0 0 16px;">Queda como una card en el grid del paso 1, para vos y para el resto de los usuarios de esta instancia. Desde esa card se despliega, como cualquier otro caso.</p>
         <div class="form-group">
           <label class="form-label" for="save-case-label">Nombre del dataset</label>
           <input type="text" class="form-input settings-field" id="save-case-label" maxlength="60" placeholder="Ej: Firewall de ACME">
@@ -2924,8 +2924,9 @@
       </div>
       <div style="padding:16px 24px; border-top:1px solid var(--border-subtle); display:flex; gap:8px; align-items:center;">
         <div id="save-case-status" style="flex:1; font-size:var(--fs-sm);"></div>
-        <button id="save-case-only" class="btn btn-secondary">Solo guardar</button>
-        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-rocket"/></svg> Guardar y desplegar</button>
+        <!-- Solo guardar. Crear un caso y desplegarlo son dos gestos distintos:
+             el deploy sale de la card, ya creada, igual que para el resto. -->
+        <button id="save-case-submit" class="btn btn-primary"><svg class="icon"><use href="#ic-check"/></svg> Guardar dataset</button>
       </div>
     </div>
   </div>
@@ -3945,7 +3946,12 @@
       if (e.target.id === 'save-case-modal') _closeSaveCase();
     });
 
-    async function submitSaveCase(e, deployAfter) {
+    // Guarda el caso. Solo eso: el deploy sale de la card, una vez que existe en
+    // el grid, por el mismo camino que cualquier otro caso. Antes había un
+    // "Guardar y desplegar" que encadenaba las dos cosas y necesitaba rearmar el
+    // .conf con un slug que recién se conocía al guardar — un camino más, con
+    // sus propios bugs, para algo que el grid ya hace bien.
+    async function submitSaveCase(e) {
       if (!validateRequired([{ id: 'save-case-label', label: 'el nombre del dataset' }])) return;
       const btn = e.currentTarget;
       const statusEl = document.getElementById('save-case-status');
@@ -3985,46 +3991,21 @@
         // qué seguir viajando en el body del deploy —y de ahí en el de cada paso
         // de la puesta en marcha— hasta 50 MB por request.
         state.logFileContent = '';
-        // El dataset ya es una card del grid; se deja seleccionada en los dos casos.
+        // El .conf que quedó en el paso 4 era el del caso sin nombre (sin bucket
+        // ni prefijo): se descarta. Al elegir la card, el wizard arma el suyo.
+        state.pipelineCode = '';
+        // El dataset ya es una card del grid: se vuelve al paso 1 con la card
+        // seleccionada, que es desde donde se despliega.
         switchExampleMode('demo');
         if (slug) {
           state.selectedExamples = [slug];
           _applySelectionState();
         }
-
-        if (deployAfter) {
-          if (!data.uploaded && state.sourceMode === 'file') {
-            // Sin los datos en el bucket el deploy arranca y falla en el guard:
-            // mejor decirlo acá que a los 20 minutos.
-            goToStep(1);
-            toast(`Dataset "${data.case.label}" guardado, pero no se pudieron subir los datos a tu bucket${data.upload_error ? ` (${data.upload_error})` : ''}. Corregilo en ⚙ Configuración y desplegalo desde el grid.`, 'error', 9000);
-            return;
-          }
-          // El .conf del paso 4 se armó ANTES de guardar: sin bucket ni prefijo
-          // (con archivo el paso 3 no los pide) y con el índice genérico. Ahora
-          // que el caso existe se rearma como el de cualquier card del grid
-          // —bucket de demos, `<slug>-logs/`, lectura read-only—, que es lo que
-          // el resto del body ya describe. Sin esto Logstash arrancaba con
-          // `bucket => ""` y poleaba la nada.
-          if (slug) {
-            try {
-              state.pipelineCode = await fetchCaseConf(slug);
-            } catch (err) {
-              goToStep(1);
-              toast(`Dataset "${data.case.label}" guardado, pero no pude rearmar el configuration file (${err.message}). Desplegalo desde el grid.`, 'error', 9000);
-              return;
-            }
-          }
-          toast(`Dataset "${data.case.label}" guardado. Desplegando…`, 'success');
-          await runDeploy({ btn: document.getElementById('deploy-provision-btn') });
-          return;
-        }
-
         goToStep(1);
         toast(data.uploaded
-          ? `Dataset "${data.case.label}" guardado y cargado en tu bucket. Ya lo podés desplegar.`
-          : `Dataset "${data.case.label}" guardado. Para desplegarlo, subí los datos con ⚙ Configuración → Preparar bucket${data.upload_error ? ` (${data.upload_error})` : ''}.`,
-          data.uploaded ? 'success' : 'info', data.uploaded ? 5000 : 8000);
+          ? `Dataset "${data.case.label}" guardado y cargado en tu bucket. Ya está en el grid: desplegalo desde su card.`
+          : `Dataset "${data.case.label}" guardado. Para desplegarlo, subí los datos con ⚙ Configuración → Preparar${data.upload_error ? ` (${data.upload_error})` : ''}.`,
+          data.uploaded ? 'success' : 'info', data.uploaded ? 6000 : 8000);
       } catch (err) {
         statusEl.style.color = 'var(--accent-red)';
         statusEl.textContent = err.message;
@@ -4033,8 +4014,7 @@
       }
     }
 
-    document.getElementById('save-case-submit')?.addEventListener('click', (e) => submitSaveCase(e, true));
-    document.getElementById('save-case-only')?.addEventListener('click', (e) => submitSaveCase(e, false));
+    document.getElementById('save-case-submit')?.addEventListener('click', submitSaveCase);
 
     // Borrar un caso creado (✕ en la card). Solo aparece para casos custom que
     // el usuario puede borrar; el backend revalida creador/admin.
