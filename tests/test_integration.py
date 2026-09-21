@@ -4442,9 +4442,10 @@ def test_spec_from_fields_uses_role_entity_for_metric():
 # Registro declarativo de verticales (verticals/)
 # ===========================================================================
 def test_verticals_registry_wellformed():
-    """Cada VERTICAL tiene las keys mínimas; los 8 visibles traen card+specs y
-    fraud/cts son hidden (sin card visible). Los agregadores producen exactamente
-    los sets que el resto del backend espera (13 capabilities, 13 industry, 8 datasets)."""
+    """Cada VERTICAL tiene las keys mínimas; los visibles traen card+specs y
+    fraud-detection es el único hidden (sin card). Los agregadores producen
+    exactamente los sets que el resto del backend espera (13 capabilities,
+    13 industry, 8 datasets — cts no tiene dataset: lee su propio bucket)."""
     import verticals as V
 
     vs = V.all_verticals()
@@ -5056,6 +5057,98 @@ def test_el_upload_nunca_escribe_en_el_bucket_de_un_caso(monkeypatch):
 
     assert subidas == [], "escribio en un bucket ajeno: %r" % (subidas,)
     assert borrados == [], "borro un prefijo ajeno: %r" % (borrados,)
+
+
+# ── El origen propio no depende de lo que mande el navegador ────────────────
+# El bucket de CTS viajaba correcto del backend al front y el front lo perdía
+# (`applyVerticalsPayload` no lo copiaba a LOG_EXAMPLES), así que el deploy salía
+# contra el bucket de demos: Logstash arranca, no encuentra nada y nadie avisa.
+# El front ya está arreglado; esto es lo que hace que no dependa de él.
+_CONF_CTS = '''input {
+  s3 {
+    access_key_id => "AK"
+    bucket => "demoscss"
+    prefix => "cts-logs/"
+    codec => plain
+  }
+}
+
+filter {
+  # El operador editó esto en el paso 3 y no se puede perder.
+  mutate { add_field => { "marca" => "mia" } }
+}
+
+output {
+  elasticsearch {
+    hosts => []
+    index => "cts-%{+YYYY.MM}"
+  }
+}
+'''
+
+
+def _req_unico_cts(conf=_CONF_CTS, bucket="demoscss", prefix="cts-logs/"):
+    return main.TerraformDeployRequest(
+        pipeline_conf=conf, pipeline_slug="cts", obs_bucket=bucket, obs_prefix=prefix,
+        obs_access_key="AK", obs_secret_key="SK", opensearch_index="cts-%{+YYYY.MM}",
+        obs_endpoint="https://obs.la-south-2.myhuaweicloud.com", read_existing_bucket=True)
+
+
+def test_el_backend_corrige_el_origen_de_un_caso_propio_en_single():
+    """Con una sola tarjeta el `.conf` viaja armado desde el navegador y el
+    backend no lo rearma: es el único camino donde un bucket equivocado llegaba
+    entero a Terraform."""
+    req = _req_unico_cts()
+
+    notas = main._force_case_own_source(req)
+
+    assert notas == ["cts → obs://mi-tracker-cts/CloudTraces/"]
+    assert req.obs_bucket == "mi-tracker-cts" and req.obs_prefix == "CloudTraces/"
+    assert 'bucket => "mi-tracker-cts"' in req.pipeline_conf
+    assert 'prefix => "CloudTraces/"' in req.pipeline_conf
+    assert "demoscss" not in req.pipeline_conf
+    # Se reescriben dos líneas, no el archivo: la edición del paso 3 sobrevive.
+    assert 'add_field => { "marca" => "mia" }' in req.pipeline_conf
+    assert 'index => "cts-%{+YYYY.MM}"' in req.pipeline_conf
+
+
+def test_corregir_el_origen_es_idempotente_y_no_toca_a_los_demas():
+    ya = _req_unico_cts(conf=_CONF_CTS.replace("demoscss", "mi-tracker-cts")
+                        .replace("cts-logs/", "CloudTraces/"),
+                        bucket="mi-tracker-cts", prefix="CloudTraces/")
+    assert main._force_case_own_source(ya) == []
+
+    otro = main.TerraformDeployRequest(
+        pipeline_conf=_CONF_CTS, pipeline_slug="siem", obs_bucket="demoscss",
+        obs_prefix="siem-logs/", obs_access_key="AK", obs_secret_key="SK")
+    assert main._force_case_own_source(otro) == []
+    assert otro.obs_bucket == "demoscss", "un caso sin origen propio no se toca"
+
+
+def test_corregir_el_origen_tambien_cubre_el_deploy_multi_caso():
+    """Una pestaña vieja manda `obs_bucket: ''` para CTS y el backend caía al
+    bucket del request."""
+    req = _deploy_req_b(_case_b("cts", "", ""), _case_b("siem", "siem-logs/"))
+
+    notas = main._force_case_own_source(req)
+
+    assert notas == ["cts → obs://mi-tracker-cts/CloudTraces/"]
+    assert req.cases[0].obs_bucket == "mi-tracker-cts"
+    assert req.cases[0].obs_prefix == "CloudTraces/"
+    assert req.cases[1].obs_bucket == "", "el caso sin origen propio queda como estaba"
+    assert 'bucket => "mi-tracker-cts"' in main._build_pipeline_conf_for_case(req.cases[0], req)
+
+
+def test_el_deploy_corrige_el_origen_antes_de_escribir_nada(monkeypatch):
+    """La corrección tiene que correr antes de `_prepare_deploy_tfvars` y del
+    upload a OBS: es `case.obs_bucket` lo que hace que el upload NO escriba
+    encima de las trazas reales de la cuenta."""
+    import inspect
+    src = inspect.getsource(main._deploy_stream_gen_raw)
+
+    assert "_force_case_own_source(request)" in src
+    assert src.index("_force_case_own_source(request)") < src.index("_prepare_deploy_tfvars(request"), \
+        "se corrige después de escribir el tfvars: demasiado tarde"
 
 
 def test_preparar_bucket_sigue_sin_incluir_cts():

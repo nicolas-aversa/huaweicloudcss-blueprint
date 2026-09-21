@@ -1,19 +1,25 @@
-"""`caseMeta` del front, ejercitada de verdad en node.
+"""El origen de cada caso, del backend al `.conf`, ejercitado de verdad en node.
 
-Es la única función que decide **de qué bucket y con qué prefijo lee cada caso**,
-y la comparten el preview del paso 4 y el body del deploy. Si se equivoca, el
-wizard muestra una cosa y despliega otra — o manda CTS a buscar sus trazas al
-bucket de demos, donde no están, y la pipeline no ingiere nada.
+`caseMeta` es la única función que decide **de qué bucket y con qué prefijo lee
+cada caso**, y la comparten el preview del paso 4 y el body del deploy. Si se
+equivoca, el wizard muestra una cosa y despliega otra — o manda CTS a buscar sus
+trazas al bucket de demos, donde no están, y la pipeline no ingiere nada.
 
-El resto del front no tiene tests: esta función los merece porque el error es
-silencioso y apunta a datos reales. Se extrae del `index.html` y se corre con
-node stubbeando lo poco que toca (el DOM, `LOG_EXAMPLES`, `demoBucket`).
+Este test ya existía y **no atrapó exactamente ese bug**: stubeaba `LOG_EXAMPLES`
+a mano, con un comentario que decía "tal como los emite `front_payload()`", e
+incluía el `obsBucket` que el front en realidad perdía al proyectar el payload.
+El stub reemplazaba justo la pieza rota. Ahora el arnés corre la cadena
+completa: el payload REAL de `verticals.front_payload()` → el
+`applyVerticalsPayload` REAL extraído del HTML → `caseMeta`.
 """
+import json
 import pathlib
 import shutil
 import subprocess
 
 import pytest
+
+import verticals
 
 _RAIZ = pathlib.Path(__file__).resolve().parent.parent
 _INDEX = _RAIZ / "static" / "index.html"
@@ -25,21 +31,28 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None,
 _ARNES = r"""
 const DOM = {};
 const document = { getElementById: id => DOM[id] || null };
-const state = { fields: [] };
+const state = { fields: [], selectedExamples: [], obsCreds: { ak: 'AK' }, osPassword: '' };
+const window = { __VERTICALS__: PAYLOAD };
 function demoBucket() { return 'demos-del-sa'; }
-
-// Tal como los emite `front_payload()`: solo CTS trae origen propio.
-const LOG_EXAMPLES = [
-  { id: 'cts', label: 'Traces de CTS', indexBase: 'cts',
-    obsBucket: 'mi-tracker-cts', obsPrefix: 'CloudTraces/' },
-  { id: 'siem', label: 'SIEM', indexBase: 'siem', obsBucket: '', obsPrefix: '' },
-];
-const EXAMPLE_DATA = { cts: { fields: [1, 2, 3] }, siem: { fields: [1] } };
+function hwRegion() { return 'la-south-2'; }
+function secretFieldValue() { return ''; }
 
 const fallos = [];
 const check = (nombre, cond, extra) => {
   if (!cond) fallos.push(nombre + (extra === undefined ? '' : ' -> ' + extra));
 };
+
+// La proyección del payload no puede perder campos: perdió `obsBucket`/
+// `obsPrefix` (CTS leyendo del bucket equivocado) y `caseType`/`inputPlugin`
+// (un caso Kafka mostrando el form de OBS), las dos veces en silencio.
+const visibles = PAYLOAD.verticals.filter(v => !v.hidden);
+const perdidos = [];
+for (const v of visibles) {
+  const e = LOG_EXAMPLES.find(x => x.id === v.slug) || {};
+  for (const k of Object.keys(v)) if (!(k in e)) perdidos.push(v.slug + '.' + k);
+}
+check('proyeccion sin perdida', perdidos.length === 0, perdidos.join(', '));
+check('cts tiene card', !!LOG_EXAMPLES.find(e => e.id === 'cts'));
 
 // Un vertical con origen propio gana sobre todo lo demás.
 let m = caseMeta('cts');
@@ -62,9 +75,51 @@ check('siem respeta el input',
       caseMeta('siem').bucket === 'lo-que-escribio-el-operador',
       caseMeta('siem').bucket);
 
+// `casoConOrigenPropio` es de donde sale el origen en el camino de UN caso,
+// que viaja sin `cases[]` y antes leía el `<input>` del paso 3 — un re-render
+// (guardar ⚙ Configuración) bastaba para devolverlo al bucket de demos.
+state.selectedExamples = ['cts'];
+check('single cts', (casoConOrigenPropio() || {}).bucket === 'mi-tracker-cts',
+      JSON.stringify(casoConOrigenPropio()));
+check('single cts prefix', (casoConOrigenPropio() || {}).prefix === 'CloudTraces/');
+state.selectedExamples = ['siem'];
+check('single siem sin origen propio', casoConOrigenPropio() === null);
+state.selectedExamples = ['custom'];
+check('custom sin origen propio', casoConOrigenPropio() === null);
+state.selectedExamples = [];
+check('sin seleccion', casoConOrigenPropio() === null);
+
+// `collectInputConfig` arma el input del `.conf` que se despliega. Con CTS
+// seleccionado tiene que ignorar lo que haya en el form —que es justamente lo
+// que quedaba mal tras cualquier re-render— y usar el origen del caso.
+state.deployMode = 'demo';
+state.inputPlugin = 'obs';
+state.readExistingMode = true;
+DOM['input-bucket'] = { value: 'demos-del-sa' };
+DOM['input-prefix'] = { value: 'cts-logs/' };
+state.selectedExamples = ['cts'];
+let cfg = collectInputConfig();
+check('conf de cts: bucket', cfg.bucket === 'mi-tracker-cts', cfg.bucket);
+check('conf de cts: prefix', cfg.prefix === 'CloudTraces/', cfg.prefix);
+check('conf de cts: read-only', cfg.delete === false && cfg.watch_for_new_files === false);
+state.selectedExamples = ['siem'];
+cfg = collectInputConfig();
+check('conf de siem: bucket del form', cfg.bucket === 'demos-del-sa', cfg.bucket);
+check('conf de siem: prefix del form', cfg.prefix === 'cts-logs/', cfg.prefix);
+
+// El redeploy tras un F5 se rearma desde /terraform/status, sin el form: el
+// bucket estaba fijo en el de demos y mandaba a CTS a buscar sus trazas ahí.
+state.selectedExamples = [];
+let body = buildDeployBodyFromStatus({ pipelines: [{ slug: 'cts', index: 'cts-%{+YYYY.MM}', obs_prefix: 'CloudTraces/' }] });
+check('redeploy de cts: bucket', body.obs_bucket === 'mi-tracker-cts', body.obs_bucket);
+check('redeploy de cts: prefix', body.obs_prefix === 'CloudTraces/', body.obs_prefix);
+body = buildDeployBodyFromStatus({ pipelines: [{ slug: 'siem', index: 'siem-%{+YYYY.MM}', obs_prefix: 'siem-logs/' }] });
+check('redeploy de siem: bucket de demos', body.obs_bucket === 'demos-del-sa', body.obs_bucket);
+
 // Custom sigue leyendo del form y nunca trae bucket propio.
 DOM['input-prefix'] = { value: 'mis-logs/' };
 DOM['output-index'] = { value: 'custom-%{+YYYY.MM}' };
+state.selectedExamples = [];
 m = caseMeta('custom');
 check('custom prefix del form', m.prefix === 'mis-logs/', m.prefix);
 check('custom sin bucket propio', m.ownBucket === '', JSON.stringify(m.ownBucket));
@@ -75,19 +130,47 @@ process.exit(fallos.length ? 1 : 0);
 """
 
 
-def _extraer_case_meta() -> str:
-    """El cuerpo de `caseMeta` tal como está en el index.html."""
+def _trozo(html: str, desde: str, hasta: str) -> str:
+    ini = html.index(desde)
+    return html[ini:html.index(hasta, ini)]
+
+
+def _fuente_del_front() -> str:
+    """El catálogo y todo lo que resuelve el origen, tal cual está en el HTML.
+
+    Son las cuatro piezas de la cadena, y cada una falló por su cuenta alguna
+    vez: la proyección del payload, `caseMeta`, el input que termina en el
+    `.conf` y el body que se rearma tras un refresh.
+    """
     html = _INDEX.read_text(encoding="utf-8")
-    ini = html.index("    function caseMeta(id) {")
-    # Hasta el cierre de la función, anclado en su return.
-    ret = html.index("return { bucket, prefix, index, fieldsCount, ownBucket,", ini)
-    return html[ini:html.index("\n    }", ret) + 6]
+    partes = [
+        # Las declaraciones + applyVerticalsPayload (hasta su invocación al boot).
+        _trozo(html, "    let _VDATA = ", "    applyVerticalsPayload(window.__VERTICALS__);"),
+        _trozo(html, "    function caseMeta(id) {", "    // Configuration file REAL de un tipo"),
+        _trozo(html, "    // Collect input config", "    // Collect output config"),
+        _trozo(html, "    function buildDeployBodyFromStatus(data) {",
+               "    // Paso: aplica index template"),
+    ]
+    return "\n".join(partes)
 
 
 def test_case_meta_resuelve_el_origen_de_cada_caso(tmp_path):
     js = tmp_path / "case_meta.mjs"
-    js.write_text(_extraer_case_meta() + _ARNES, encoding="utf-8")
+    # El payload REAL del backend, no un stub: si el front deja de copiar un
+    # campo, o el backend deja de emitirlo, este test se entera.
+    payload = json.dumps(verticals.front_payload(), ensure_ascii=False)
+    js.write_text(f"const PAYLOAD = {payload};\n" + _fuente_del_front()
+                  + "\napplyVerticalsPayload(PAYLOAD);\n" + _ARNES, encoding="utf-8")
 
     res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
 
     assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
+
+
+def test_el_backend_declara_el_origen_propio_de_cts():
+    """La otra mitad del contrato: si esto cambia, el test de arriba miente."""
+    cts = next(v for v in verticals.front_payload()["verticals"] if v["slug"] == "cts")
+
+    assert cts["obsBucket"] == "mi-tracker-cts"
+    assert cts["obsPrefix"] == "CloudTraces/"
+    assert not cts["hidden"], "sin card, el caso no se puede desplegar desde el grid"

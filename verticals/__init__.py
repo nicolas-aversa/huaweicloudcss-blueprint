@@ -14,7 +14,8 @@ Convenciones del shape de `VERTICAL`:
   dataset_files (list)                                            -> archivos a pre-cargar en OBS
   capability, dashboard                                           -> specs de OpenSearch
   extra_capabilities/extra_dashboards                             -> sub-specs backend-only
-  hidden (bool)                                                   -> sin card ni grupo (ej. cts legacy)
+  obs_bucket, obs_prefix                                          -> origen propio (solo cts)
+  hidden (bool)                                                   -> sin card ni grupo (ej. fraud-detection)
 """
 from __future__ import annotations
 

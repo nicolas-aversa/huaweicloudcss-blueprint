@@ -123,6 +123,8 @@ import custom_cases  # noqa: E402
 import runs  # noqa: E402
 
 import tfstate  # noqa: E402  (lectura del state de Terraform, local o en OBS)
+# Lectura del .conf de Logstash sin regex (bloques, settings, máscara de strings).
+import conf_lint  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -2733,6 +2735,14 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     yield _sse({"type": "progress", "percent": 1, "phase": "Preparando",
                 "message": "Escribiendo configuración…"})
 
+    # Antes de escribir nada: un caso con origen propio lee de SU bucket, diga lo
+    # que diga el body. Va acá —y no en el endpoint— porque también corre para el
+    # deploy como job, y porque `_do_obs_upload`, más abajo, decide qué NO subir
+    # mirando `case.obs_bucket`.
+    for nota in _force_case_own_source(request):
+        print(f"[deploy-stream] origen propio corregido: {nota}")
+        yield _sse({"type": "log", "message": f"Origen del caso corregido: {nota}"})
+
     # ── Setup: pipeline.conf + registry + tfvars ──────────────────────────────
     try:
         _prepare_deploy_tfvars(request, terraform_dir)
@@ -3189,8 +3199,60 @@ def _check_unavailable_plugins(request: "TerraformDeployRequest") -> None:
         )
 
 
-_S3_BLOCK_RE = re.compile(r"\bs3\s*\{(.*?)\n\s*\}", re.S)
-_S3_BUCKET_RE = re.compile(r'\bbucket\s*=>\s*"([^"]*)"')
+def _origen_propio(slug: str) -> tuple[str, str]:
+    """`(bucket, prefijo)` propios de un vertical, o `("", "")` si lee del del SA.
+
+    Solo lo declara un caso cuyo dato NO sube la plataforma: hoy CTS, con las
+    trazas de auditoría reales de la cuenta en `mi-tracker-cts/CloudTraces/`.
+    """
+    v = verticals.get_vertical((slug or "").strip()) or {}
+    return str(v.get("obs_bucket") or ""), str(v.get("obs_prefix") or "")
+
+
+def _force_case_own_source(request: "TerraformDeployRequest") -> list[str]:
+    """Un caso con origen propio lee de SU bucket, venga como venga el body.
+
+    El bucket propio viajaba del backend al navegador y el navegador lo perdía,
+    así que CTS terminaba desplegado contra el bucket de demos —donde no hay una
+    sola traza— y Logstash arrancaba a poleer la nada sin un solo error. El front
+    ya está arreglado, pero esto es lo que hace que el arreglo no dependa de él:
+    una pestaña vieja cacheada, o una regresión futura, se corrigen acá.
+
+    Corrige en vez de rechazar, a propósito: lo que el operador eligió es el
+    CASO, y el origen de ese caso no es una opinión suya. Devuelve una nota por
+    corrección, para dejar constancia en el log del deploy.
+    """
+    notas: list[str] = []
+    if request.cases:
+        for case in request.cases:
+            if case.input_config:
+                continue                      # caso live: su fuente es propia y ya viene
+            bucket, prefijo = _origen_propio(case.slug)
+            if not bucket or (case.obs_bucket == bucket and case.obs_prefix == prefijo):
+                continue
+            case.obs_bucket, case.obs_prefix = bucket, prefijo
+            notas.append(f"{case.slug} → obs://{bucket}/{prefijo}")
+        return notas
+
+    slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+    bucket, prefijo = _origen_propio(slug)
+    if not bucket:
+        return notas
+    conf = request.pipeline_conf or ""
+    s3 = conf_lint.buscar_plugin(conf, "s3", "input")
+    ya_esta = (request.obs_bucket == bucket and request.obs_prefix == prefijo
+               and (s3 is None or conf_lint.leer_setting(conf, s3, "bucket") == bucket))
+    if ya_esta:
+        return notas
+    request.obs_bucket, request.obs_prefix = bucket, prefijo
+    if s3 is not None:
+        # Se reescriben las dos líneas, no el `.conf`: lo que el operador haya
+        # editado en el paso 3 (el filter, sobre todo) se conserva entero.
+        conf = conf_lint.escribir_setting(conf, s3, "bucket", bucket)
+        s3 = conf_lint.buscar_plugin(conf, "s3", "input")
+        request.pipeline_conf = conf_lint.escribir_setting(conf, s3, "prefix", prefijo)
+    notas.append(f"{slug} → obs://{bucket}/{prefijo}")
+    return notas
 
 
 def _check_conf_reads_from_a_bucket(request: "TerraformDeployRequest") -> None:
@@ -3220,9 +3282,8 @@ def _check_conf_reads_from_a_bucket(request: "TerraformDeployRequest") -> None:
                                     "falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.")})
         return
     conf = request.pipeline_conf or ""
-    for bloque in _S3_BLOCK_RE.findall(conf):
-        m = _S3_BUCKET_RE.search(bloque)
-        if m and m.group(1).strip():
+    for bloque in (b for b in conf_lint.plugins(conf) if b.nombre == "s3"):
+        if (conf_lint.leer_setting(conf, bloque, "bucket") or "").strip():
             continue
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
         raise HTTPException(

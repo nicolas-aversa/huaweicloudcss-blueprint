@@ -3615,6 +3615,26 @@
         return;
       }
 
+      // Un caso con ORIGEN PROPIO no elige de dónde lee: sus datos ya viven en
+      // un bucket que la plataforma no llenó (CTS: las trazas de auditoría
+      // reales de la cuenta). Mientras esto fue un form editable, cualquier
+      // re-render lo devolvía al bucket de demos —donde ese caso no tiene
+      // nada— y el deploy terminaba con la pipeline leyendo un prefijo vacío,
+      // sin un solo error: Logstash arranca igual y se queda poleando.
+      const propio = casoConOrigenPropio();
+      if (plugin === 'obs' && propio) {
+        container.innerHTML = `
+          <div class="how-sample" id="case-origin">
+            <span class="how-sample__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
+            <div class="how-sample__body">
+              <div class="how-sample__title">${escapeHtml(propio.label)} lee de su propio bucket</div>
+              <code class="how-sample__cmd">obs://${escapeHtml(propio.bucket)}/${escapeHtml(propio.prefix)}</code>
+              <div class="how-sample__note">Los datos de este caso ya están ahí y no los sube la plataforma, así que el origen es fijo y “Preparar” no lo toca: se lee sin borrar ni modificar nada. El acceso usa las credenciales de tu cuenta (⚙ Configuración), así que ese bucket tiene que ser tuyo o estar compartido con vos.</div>
+            </div>
+          </div>`;
+        return;
+      }
+
       const configs = {
         'obs': `
           <div class="form-row" style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -3811,13 +3831,16 @@
       _VVIS = _VDATA.verticals.filter(v => !v.hidden);
 
       // LOG_EXAMPLES = verticales visibles (mismo shape de card) + 'custom' (UI-only).
+      // La entrada es el vertical TAL CUAL lo emitió el backend, con `id` como
+      // alias de `slug`. Antes se copiaba campo por campo y la lista se quedó
+      // corta dos veces sin que nada avisara: faltaban `obsBucket`/`obsPrefix`
+      // —así que `caseMeta` creía que NINGÚN caso tiene origen propio y mandaba
+      // las trazas de CTS al bucket de demos— y `caseType`/`inputPlugin`, con lo
+      // que un caso live (Kafka) mostraba el form de OBS en el paso 3. Copiar
+      // todo es lo único que hace que agregar un campo al payload no requiera
+      // acordarse de esta línea.
       LOG_EXAMPLES = [
-        ..._VVIS.map(v => {
-          const e = { id: v.slug, label: v.label, icon: v.icon, indexBase: v.indexBase, description: v.description };
-          if (v.dedupId) e.dedupId = v.dedupId;
-          if (v.custom) { e.custom = true; e.createdBy = v.createdBy || ''; }
-          return e;
-        }),
+        ..._VVIS.map(v => ({ ...v, id: v.slug })),
         { id: 'custom', label: 'Dataset nuevo', icon: 'plus', indexBase: 'logs', description: 'Subí tu propio log: el LLM arma el pipeline y lo guardás como un dataset más' },
       ];
 
@@ -3825,7 +3848,7 @@
       DEMO_VERTICALS = _VDATA.groups.map(g => ({ id: g.id, label: g.label, icon: g.icon, members: g.members.slice() }));
 
       // EXAMPLE_DATA = {slug: {sample, filterCode, fields}} de TODOS los verticales
-      // (incluye los hidden, ej. cts, que no tienen card) + 'custom' vacío.
+      // (incluye los hidden, ej. fraud-detection, que no tienen card) + 'custom' vacío.
       EXAMPLE_DATA = Object.assign(
         {},
         ..._VDATA.verticals.map(v => ({ [v.slug]: { sample: v.sample, filterCode: v.filterCode, fields: v.fields } })),
@@ -4277,6 +4300,17 @@
                label: meta?.label || 'Tu log', isCustom };
     }
 
+    // El caso primario si declara ORIGEN PROPIO: un bucket que no es el del SA,
+    // con datos que la plataforma no subió (hoy solo CTS, con las trazas de
+    // auditoría reales de la cuenta). Para esos casos el origen no se elige ni
+    // se escribe: el paso 3 lo muestra fijo y todo lo demás lo lee de acá.
+    function casoConOrigenPropio() {
+      const id = (state.selectedExamples || [])[0];
+      if (!id || id === 'custom') return null;
+      const cm = caseMeta(id);
+      return cm.ownBucket ? cm : null;
+    }
+
     // Configuration file REAL de un tipo: lo arma el backend (/generate-pipeline),
     // que incluye todos los defaults de plataforma (codec, watch_for_new_files,
     // ssl, manage_template, etc.) — no solo lo que cargó el usuario. Para custom
@@ -4624,6 +4658,16 @@
           config.endpoint = document.getElementById('input-endpoint')?.value || '';
           config.region = document.getElementById('input-region')?.value || '';
           config.prefix = document.getElementById('input-prefix')?.value || '';
+        }
+        // Un caso con origen propio NO se lee del form: el paso 3 ni siquiera
+        // lo muestra editable, y mientras se leía de ahí bastaba un re-render
+        // —guardar ⚙ Configuración, por ejemplo— para que `#input-bucket`
+        // volviera al bucket de demos y CTS terminara leyendo un prefijo vacío.
+        // `caseMeta` es la única fuente de verdad del origen de un caso.
+        const propio = casoConOrigenPropio();
+        if (propio) {
+          config.bucket = propio.bucket;
+          config.prefix = propio.prefix;
         }
         // Decisión de plataforma, no del operador: no hay campos para esto en la UI.
         config.interval = 60;
@@ -5650,8 +5694,11 @@
         document_id: (LOG_EXAMPLES.find(e => e.id === primary.slug)?.dedupId) || '',
         obs_prefix: primary.obs_prefix || '',
         // Bucket + creds de la config: garantizan que la ingesta (re)armada tras un
-        // reload use el mismo bucket que se preparó en ⚙ Configuración.
-        obs_bucket: demoBucket(),
+        // reload use el mismo bucket que se preparó en ⚙ Configuración. Salvo que
+        // el caso declare origen propio: acá estaba fijo en el bucket de demos y
+        // un redeploy de CTS tras un F5 lo mandaba a buscar sus trazas ahí, tres
+        // líneas debajo del comentario que promete justamente lo contrario.
+        obs_bucket: (LOG_EXAMPLES.find(e => e.id === primary.slug)?.obsBucket) || demoBucket(),
         obs_access_key: (state.obsCreds || {}).ak || '',
         obs_secret_key: '',   // lo completa el servidor con el de la cuenta
 
