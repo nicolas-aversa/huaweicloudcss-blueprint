@@ -5276,6 +5276,165 @@ def test_el_deploy_corrige_el_origen_antes_de_escribir_nada(monkeypatch):
         "se corrige después de escribir el tfvars: demasiado tarde"
 
 
+# ── La prueba de que la pipeline ingiere ────────────────────────────────────
+# Terraform "success" solo dice que la configuración se creó: Logstash puede no
+# compilar la pipeline, o compilarla y quedarse poleando un prefijo vacío, y el
+# cluster queda igual de vacío. El 9600 de Logstash no está expuesto (VPC
+# privada), así que la señal honesta es el `_count` del índice.
+class _RespFalsa:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = str(self._payload)
+
+    def json(self):
+        return self._payload
+
+
+def test_el_conteo_de_documentos_distingue_vacio_de_inalcanzable(monkeypatch):
+    llamadas = []
+
+    def fake_req(method, url, user, password, json_body=None, timeout=30):
+        llamadas.append(url)
+        return {
+            "vacio": _RespFalsa(200, {"count": 0}),
+            "lleno": _RespFalsa(200, {"count": 501}),
+            "nada": None,
+            "404": _RespFalsa(404, {}),
+        }[url.split("/")[-2]]
+
+    monkeypatch.setattr(main, "_os_req", fake_req)
+
+    assert main._index_doc_count("http://x:9200", "admin", "pw", "lleno/_count".split("/")[0]) == 501
+    assert main._index_doc_count("http://x:9200", "admin", "pw", "vacio") == 0
+    assert main._index_doc_count("http://x:9200", "admin", "pw", "404") == 0, \
+        "un índice que todavía no existe son cero documentos, no un error"
+    assert main._index_doc_count("http://x:9200", "admin", "pw", "nada") is None, \
+        "no poder preguntar NO es lo mismo que cero"
+
+
+def test_la_verificacion_de_ingesta_espera_y_reporta(monkeypatch):
+    """Arranca vacío (el input s3 poléa cada 60 s) y después entran documentos:
+    el paso tiene que esperar en vez de cantar fracaso en el primer intento."""
+    import json as _json
+    respuestas = iter([0, 0, 501])
+    monkeypatch.setattr(main, "_index_doc_count", lambda *a, **k: next(respuestas, 501))
+    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+
+    req = main.TerraformDeployRequest(
+        pipeline_conf="x", pipeline_slug="sp500", opensearch_index="sp500-%{+YYYY.MM}",
+        opensearch_password="pw", start_ingestion=True)
+    eventos = list(main._verificar_ingesta(req, {"public_endpoint": "1.2.3.4:9200"}))
+
+    pasos = [_json.loads(e[6:]) for e in eventos if '"type": "step"' in e]
+    assert len(pasos) == 1
+    assert pasos[0]["ok"] is True
+    assert "501" in pasos[0]["reason"]
+
+
+def test_sin_documentos_el_paso_dice_donde_mirar(monkeypatch):
+    import json as _json
+    monkeypatch.setattr(main, "_index_doc_count", lambda *a, **k: 0)
+    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+
+    req = main.TerraformDeployRequest(
+        pipeline_conf="x", pipeline_slug="sp500", opensearch_index="sp500-%{+YYYY.MM}",
+        opensearch_password="pw", start_ingestion=True)
+    pasos = [_json.loads(e[6:]) for e in main._verificar_ingesta(req, {"public_endpoint": "1.2.3.4:9200"})
+             if '"type": "step"' in e]
+
+    assert pasos[0]["ok"] is False
+    for pista in ("prefijo", "filtro", "consola de CSS"):
+        assert pista in pasos[0]["reason"], pasos[0]["reason"]
+
+
+def test_el_endpoint_de_salud_reporta_documentos_por_pipeline(monkeypatch, tmp_path):
+    td = tmp_path / "terraform"
+    td.mkdir()
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: td)
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda _d: {
+        "sp500": {"index": "sp500-%{+YYYY.MM}", "start_ingestion": True},
+        "siem": {"index": "siem-%{+YYYY.MM}", "start_ingestion": False}})
+    monkeypatch.setattr(main, "_cluster_with_public_access",
+                        lambda _d: {"public_endpoint": "1.2.3.4:9200"})
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda _d: "pw")
+    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda _d: False)
+    monkeypatch.setattr(main, "_index_doc_count",
+                        lambda base, u, p, patron: 501 if patron.startswith("sp500") else 0)
+
+    data = client.get("/api/v1/pipelines/health").json()
+
+    assert data["reachable"] is True
+    por_slug = {p["slug"]: p for p in data["pipelines"]}
+    assert por_slug["sp500"]["docs"] == 501
+    assert por_slug["siem"]["docs"] == 0
+    assert por_slug["sp500"]["index"] == "sp500-*", "se consulta el patrón, no el nombre con date-math"
+
+    # Sin contraseña del cluster no se inventa un cero: se dice que no se pudo.
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda _d: "")
+    data = client.get("/api/v1/pipelines/health").json()
+    assert data["reachable"] is False
+    assert all(p["docs"] is None for p in data["pipelines"])
+
+
+def test_la_ingesta_se_verifica_solo_en_la_fase_2():
+    """En la fase 1 (aprovisionar) la pipeline todavía no arrancó: esperar
+    documentos ahí sería esperar de gusto."""
+    import inspect
+    src = inspect.getsource(main._deploy_stream_gen_raw)
+
+    assert "if request.start_ingestion:\n        yield from _verificar_ingesta(request, cluster)" in src
+    assert src.index("_verificar_ingesta(request, cluster)") < src.index('"type": "complete"'), \
+        "se verifica después de dar el deploy por terminado"
+
+
+def test_el_estado_prefiere_las_pipelines_que_activo_terraform(monkeypatch, tmp_path):
+    """`pipelines[].active` salía del registro local — lo que PEDIMOS. Cuando un
+    apply falla a medias, la tarjeta decía "Ingestando" igual. El output
+    `active_pipeline_names` dice lo que Terraform activó de verdad."""
+    import json as _json
+
+    fake_main, _ = _write_fake_state_with_cluster(tmp_path)
+    (tmp_path / "terraform" / main._PIPELINES_REGISTRY_NAME).write_text(_json.dumps({
+        "sp500": {"index": "sp500-%{+YYYY.MM}", "start_ingestion": True},
+        "siem": {"index": "siem-%{+YYYY.MM}", "start_ingestion": True},
+    }))
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+        stdout = _json.dumps({"active_pipeline_names": {"value": ["pipeline-sp500"]}})
+
+    monkeypatch.setattr(main, "__file__", str(fake_main))
+    monkeypatch.setattr(main.subprocess, "run", lambda *a, **kw: _Proc())
+
+    por_slug = {p["slug"]: p for p in client.get("/api/v1/terraform/status").json()["pipelines"]}
+
+    assert por_slug["sp500"]["active"] is True
+    assert por_slug["siem"]["active"] is False, "el registro decía que sí; Terraform, que no"
+
+
+def test_sin_el_output_de_terraform_el_estado_cae_al_registro(monkeypatch, tmp_path):
+    """Si `terraform output` no está disponible (CLI ausente, state ilegible) se
+    sigue mostrando lo que pedimos, que es mejor que mostrar todo en pausa."""
+    import json as _json
+
+    fake_main, _ = _write_fake_state_with_cluster(tmp_path)
+    (tmp_path / "terraform" / main._PIPELINES_REGISTRY_NAME).write_text(_json.dumps({
+        "sp500": {"index": "sp500-%{+YYYY.MM}", "start_ingestion": True}}))
+
+    class _Proc:
+        returncode = 1
+        stdout = ""
+        stderr = "no terraform"
+
+    monkeypatch.setattr(main, "__file__", str(fake_main))
+    monkeypatch.setattr(main.subprocess, "run", lambda *a, **kw: _Proc())
+
+    pipelines = client.get("/api/v1/terraform/status").json()["pipelines"]
+    assert pipelines[0]["active"] is True
+
+
 def test_preparar_bucket_sigue_sin_incluir_cts():
     """CTS no declara `dataset_files`, y de eso depende que la pre-carga lo
     ignore. Si alguien le agregara uno, "Preparar bucket" le subiria sinteticos

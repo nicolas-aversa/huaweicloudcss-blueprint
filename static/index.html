@@ -5651,6 +5651,37 @@
       return null;
     }
 
+    // ¿Entró algún dato? Es la única prueba de que la pipeline funciona: que
+    // Terraform diga "success" solo significa que creó la configuración, y una
+    // pipeline puede arrancar y quedarse poleando un prefijo vacío sin que nada
+    // lo diga. El backend pregunta el `_count` del índice de cada pipeline.
+    async function verificarIngesta(btn) {
+      const original = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = icon('refresh') + ' Verificando…';
+      try {
+        const res = await fetch('/api/v1/pipelines/health');
+        const data = await res.json();
+        if (!res.ok) throw new Error(detailMsg(data));
+        state.pipelineHealth = Object.fromEntries((data.pipelines || []).map(p => [p.slug, p]));
+        if (!data.reachable) {
+          toast('No pude preguntarle al cluster (¿endpoint o contraseña?). Reingresá por Pipeline → Desplegar.', 'error', 7000);
+        } else {
+          const vacias = (data.pipelines || []).filter(p => !p.docs);
+          toast(vacias.length
+            ? `Sin documentos en: ${vacias.map(p => p.slug).join(', ')}. Revisá que el prefijo del bucket tenga objetos y que el filtro matchee las líneas.`
+            : 'Todas las pipelines tienen documentos.',
+            vacias.length ? 'info' : 'success', vacias.length ? 9000 : 4000);
+        }
+        renderInfraView(state.lastStatus);
+      } catch (err) {
+        toast('No pude verificar la ingesta: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    }
+
     function buildDeployBodyFromStatus(data) {
       const pipelines = Array.isArray(data.pipelines) ? data.pipelines : [];
       const primary = pipelines[0] || {};
@@ -6233,15 +6264,31 @@
       if (navEnvProject) navEnvProject.textContent = project;
       if (navEnvMeta) navEnvMeta.textContent = `${pipelines.length} pipeline${pipelines.length === 1 ? '' : 's'}`;
 
+      // Documentos por pipeline: lo único que prueba que la ingesta funciona.
+      // Terraform "success" solo dice que la configuración se creó; una pipeline
+      // puede arrancar y quedarse poleando un prefijo vacío sin un solo error.
+      // Se piden a demanda (botón Verificar), no en cada refresco del estado.
+      const salud = state.pipelineHealth || {};
+      const chipDocs = (p) => {
+        const h = salud[p.slug];
+        if (!h || h.docs === null || h.docs === undefined) return '';
+        return h.docs > 0
+          ? `<span class="pipe-row__prefix" title="documentos en ${escapeHtml(h.index || '')}">${icon('database')} ${h.docs.toLocaleString('es')} docs</span>`
+          : `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="${escapeHtml(h.index || '')}">${icon('database')} sin documentos</span>`;
+      };
       const pipeRows = pipelines.length
         ? pipelines.map(p => `
             <div class="pipe-row">
               <span class="pipe-row__dot ${p.active ? 'is-active' : ''}"></span>
               <code class="pipe-row__idx">${escapeHtml(p.index || p.slug || '—')}</code>
               ${p.obs_prefix ? `<span class="pipe-row__prefix">${icon('cloud')} ${escapeHtml(p.obs_prefix)}</span>` : ''}
+              ${chipDocs(p)}
               ${p.dashboards_imported ? `<span class="status-pill" style="font-size:var(--fs-xs);padding:2px 8px;"><span class="status-pill__dot"></span>Dashboards</span>` : ''}
               <span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>
             </div>`).join('')
+          + `<div style="display:flex;justify-content:flex-end;">
+               <button class="btn btn-secondary btn-sm" id="infra-verify-btn">${icon('check')} Verificar ingesta</button>
+             </div>`
         : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;
 
       // Un paso de la secuencia de puesta en marcha (número/check + label + botón).
@@ -6361,6 +6408,8 @@
         infraStartIngestion(e.currentTarget));
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, capsDone));
+      body.querySelector('#infra-verify-btn')?.addEventListener('click', (e) =>
+        verificarIngesta(e.currentTarget));
 
       // Contador en vivo (el span #infra-age recién existe ahora).
       startActiveEnvTicker(data.deployed_seconds_ago || 0);

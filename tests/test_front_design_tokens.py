@@ -271,6 +271,22 @@ def test_con_archivo_el_paso_3_muestra_el_destino_en_vez_de_pedirlo():
     assert fn.index("state.sourceMode === 'file'") < fn.index("'obs': `")
 
 
+def test_la_tarjeta_del_entorno_muestra_si_entraron_documentos():
+    """Que Terraform diga "success" solo significa que creó la configuración:
+    una pipeline puede arrancar y quedarse poleando un prefijo vacío sin un solo
+    error. El contador de documentos es la única prueba de que ingiere."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("const pipeRows = pipelines.length")
+    fila = html[i:html.index("// Un paso de la secuencia de puesta en marcha", i)]
+
+    assert "${chipDocs(p)}" in fila, "la fila de la pipeline no muestra los documentos"
+    assert 'id="infra-verify-btn"' in fila
+    assert "sin documentos" in html, "una pipeline vacía tiene que decirlo"
+    # Y el botón tiene que estar cableado, no solo dibujado.
+    assert "'#infra-verify-btn')?.addEventListener('click'" in html
+    assert "fetch('/api/v1/pipelines/health')" in html
+
+
 def test_guardar_y_desplegar_rearma_el_conf_con_el_slug():
     """El .conf del paso 4 se arma antes de guardar el caso: sin bucket ni
     prefijo (con archivo el paso 3 no los pide) y con el índice genérico.

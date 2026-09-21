@@ -2989,6 +2989,12 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         except Exception as exc:  # noqa: BLE001
             print(f"[deploy-stream] security-analytics falló (best-effort): {exc!r}")
 
+    # Fase 2: la pipeline quedó activa. Antes de cantar victoria, mirar si entró
+    # algo — es lo único que distingue una pipeline que anda de una que arrancó y
+    # se quedó poleando la nada.
+    if request.start_ingestion:
+        yield from _verificar_ingesta(request, cluster)
+
     yield _sse({"type": "complete", "result": {
         "opensearch_endpoint": tf_outputs.get("opensearch_endpoint", {}).get("value", ""),
         "logstash_endpoint": tf_outputs.get("logstash_endpoint", {}).get("value", ""),
@@ -4102,6 +4108,74 @@ def _delete_indices(endpoint: str, pattern: str, password: str,
     if deleted:
         print(f"[clear-index] borré {deleted} índice(s) de '{pattern}'")
     return deleted
+
+
+def _index_doc_count(base: str, user: str, password: str, index_pattern: str) -> int | None:
+    """Documentos que hay en el índice, o None si no se pudo preguntar."""
+    r = _os_req("GET", f"{base}/{index_pattern}/_count", user, password, timeout=15)
+    if r is None or r.status_code == 404:
+        return 0 if r is not None else None
+    if r.status_code not in (200, 201):
+        return None
+    try:
+        return int(r.json().get("count", 0))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+# Cuánto esperar a que aparezca el primer documento. El input s3 de Logstash
+# poléa cada 60 s (`interval => 60`), así que antes del minuto no hay nada que
+# ver; con dos vueltas y media alcanza para distinguir "todavía no" de "no va a
+# pasar". Se cuenta en intentos y no en reloj: así un test que anula el sleep
+# termina en el acto en vez de girar en vacío los mismos minutos.
+_INGESTA_INTENTOS = 10
+_INGESTA_PASO_S = 15
+
+
+def _verificar_ingesta(request: "TerraformDeployRequest", cluster: dict[str, str]):
+    """¿Entró algún documento? Es la única prueba de que la pipeline funciona.
+
+    Terraform diciendo "success" no significa nada: crea la configuración y se
+    va. Logstash puede no compilar la pipeline, o compilarla y quedarse poleando
+    un prefijo vacío —"No files found in bucket" cada 60 s— y el resultado es el
+    mismo cluster vacío sin un solo error a la vista. El 9600 de Logstash no está
+    expuesto (vive en la VPC privada; el NAT publica 9200 y Kibana), así que la
+    señal honesta es el contador de documentos del índice.
+
+    Generador de eventos SSE. Nunca hace fallar el deploy: informa.
+    """
+    base = _os_base(cluster, request.https_enabled)
+    user = request.opensearch_user or "admin"
+    if not base.rsplit("//", 1)[-1] or not request.opensearch_password:
+        return
+    if request.cases:
+        objetivos = [(c.slug, index_pattern_from_name(c.index_name)) for c in request.cases]
+    else:
+        slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+        objetivos = [(slug, index_pattern_from_name(request.opensearch_index))]
+
+    yield _sse({"type": "progress", "percent": 97, "phase": "Verificando ingesta",
+                "message": "Esperando los primeros documentos…"})
+    pendientes = dict(objetivos)
+    vistos: dict[str, int] = {}
+    for _ in range(_INGESTA_INTENTOS):
+        if not pendientes:
+            break
+        time.sleep(_INGESTA_PASO_S)
+        for slug, patron in list(pendientes.items()):
+            n = _index_doc_count(base, user, request.opensearch_password, patron)
+            if n:
+                vistos[slug] = n
+                del pendientes[slug]
+                yield _sse({"type": "step", "name": f"Ingesta · {slug}", "ok": True,
+                            "reason": f"{n:,} documentos en {patron}".replace(",", ".")})
+    for slug, patron in pendientes.items():
+        yield _sse({"type": "step", "name": f"Ingesta · {slug}", "ok": False,
+                    "reason": (f"sin documentos en {patron} después de "
+                               f"{_INGESTA_INTENTOS * _INGESTA_PASO_S // 60} min. Mirá, en este "
+                               f"orden: que el prefijo del bucket tenga objetos, que el filtro "
+                               f"matchee las líneas, y el log de la pipeline en la consola de CSS.")})
+    print(f"[deploy-stream] ingesta verificada: {vistos or 'sin documentos'}")
 
 
 def _clear_case_indices(request: "TerraformDeployRequest", cluster: dict[str, str]) -> None:
@@ -6168,12 +6242,21 @@ def terraform_status() -> TerraformStatusResponse:
     registry = _read_pipelines_registry(terraform_dir)
     import capabilities as _caps
     _curated_slugs = set(_caps.get_capability_slugs())
+    # Qué pipelines activó Terraform de verdad. El registro local dice lo que
+    # PEDIMOS; este output dice lo que quedó. Divergen cuando un apply falló a
+    # medias, y hasta ahora ganaba el registro: la tarjeta decía "Ingestando"
+    # igual. Si el output no está (terraform degradado), se usa el registro.
+    activas_tf = None
+    crudo = outputs.get("active_pipeline_names", {})
+    if isinstance(crudo, dict) and isinstance(crudo.get("value"), list):
+        activas_tf = {str(n) for n in crudo["value"]}
     pipelines = [
         {
             "slug": slug,
             "index": entry.get("index", ""),
             "obs_prefix": entry.get("obs_prefix", ""),
-            "active": bool(entry.get("start_ingestion", False)),
+            "active": (f"pipeline-{slug}"[:32] in activas_tf) if activas_tf is not None
+                      else bool(entry.get("start_ingestion", False)),
             "dashboards_imported": bool(entry.get("dashboards_imported", False)),
             # has_capabilities: el slug tiene spec curado (demo) O fields persistidos
             # (productivo) → el backend es la única fuente de verdad para el gate del
@@ -6211,6 +6294,35 @@ def terraform_status() -> TerraformStatusResponse:
         capabilities=_read_capabilities(terraform_dir),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
+
+
+@app.get("/api/v1/pipelines/health", tags=["terraform"],
+         summary="¿Entraron documentos por cada pipeline?")
+def pipelines_health() -> dict:
+    """Documentos por pipeline: la prueba de que la ingesta funciona.
+
+    Terraform "success" solo dice que la configuración se creó. Una pipeline
+    puede no compilar, o compilar y quedarse poleando un prefijo vacío, y el
+    resultado es el mismo cluster sin datos. El 9600 de Logstash no está
+    expuesto (VPC privada), así que lo que se pregunta es el `_count` del índice.
+
+    A demanda y no dentro de `/terraform/status`: ese endpoint se poléa y esto
+    es una llamada de red por pipeline contra el cluster.
+    """
+    terraform_dir = _active_terraform_dir()
+    registry = _read_pipelines_registry(terraform_dir)
+    cluster = _cluster_with_public_access(terraform_dir)
+    password = _cluster_admin_password(terraform_dir)
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    alcanzable = bool(base.rsplit("//", 1)[-1]) and bool(password)
+
+    fuera = []
+    for slug, entry in registry.items():
+        patron = index_pattern_from_name(entry.get("index") or f"{slug}-*")
+        docs = _index_doc_count(base, "admin", password, patron) if alcanzable else None
+        fuera.append({"slug": slug, "index": patron, "docs": docs,
+                      "active": bool(entry.get("start_ingestion", False))})
+    return {"pipelines": fuera, "reachable": alcanzable}
 
 
 @app.post(
