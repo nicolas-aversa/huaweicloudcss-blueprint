@@ -6284,15 +6284,21 @@
           ? `<span class="pipe-row__prefix" title="documentos en ${escapeHtml(h.index || '')}">${icon('database')} ${h.docs.toLocaleString('es')} docs</span>`
           : `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="${escapeHtml(h.index || '')}">${icon('database')} sin documentos</span>`;
       };
+      // CSS valida el .conf al crear la configuración y la deja `available` o
+      // `unavailable`. Una que no compila no ingiere NADA, y hasta ahora se veía
+      // igual que una en pausa: es lo primero que hay que poder distinguir.
+      const rota = (p) => p.config_status && p.config_status !== 'available';
       const pipeRows = pipelines.length
         ? pipelines.map(p => `
             <div class="pipe-row">
-              <span class="pipe-row__dot ${p.active ? 'is-active' : ''}"></span>
+              <span class="pipe-row__dot ${p.active && !rota(p) ? 'is-active' : ''}"></span>
               <code class="pipe-row__idx">${escapeHtml(p.index || p.slug || '—')}</code>
               ${p.obs_prefix ? `<span class="pipe-row__prefix">${icon('cloud')} ${escapeHtml(p.obs_prefix)}</span>` : ''}
               ${chipDocs(p)}
               ${p.dashboards_imported ? `<span class="status-pill" style="font-size:var(--fs-xs);padding:2px 8px;"><span class="status-pill__dot"></span>Dashboards</span>` : ''}
-              <span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>
+              ${rota(p)
+                ? `<span class="pipe-row__state" style="background:var(--accent-tint);color:var(--accent-hover);" title="Logstash no pudo compilar el configuration file (${escapeHtml(p.config_status)}): revisá el log de la pipeline en la consola de CSS.">Configuración inválida</span>`
+                : `<span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>`}
             </div>`).join('')
           + `<div style="display:flex;justify-content:flex-end;">
                <button class="btn btn-secondary btn-sm" id="infra-verify-btn">${icon('check')} Verificar ingesta</button>

@@ -2099,7 +2099,8 @@ def test_terraform_status_builds_console_url_from_state(monkeypatch, tmp_path):
     assert body["pipeline_conf"] == "filter { kv { source => \"message\" } }"
     # La lista de pipelines en paralelo viene del registro.
     assert body["pipelines"] == [
-        {"slug": "logs", "index": "logs-%{+YYYY.MM}", "obs_prefix": "logs/", "active": True, "dashboards_imported": False, "has_capabilities": False}
+        {"slug": "logs", "index": "logs-%{+YYYY.MM}", "obs_prefix": "logs/", "active": True,
+         "config_status": "", "dashboards_imported": False, "has_capabilities": False}
     ]
     # Derivado de "demo-cliente-x-opensearch" → strip "-opensearch".
     assert body["project_name"] == "demo-cliente-x"
@@ -5581,6 +5582,99 @@ def test_el_endpoint_de_salud_reporta_documentos_por_pipeline(monkeypatch, tmp_p
     data = client.get("/api/v1/pipelines/health").json()
     assert data["reachable"] is False
     assert all(p["docs"] is None for p in data["pipelines"])
+
+
+# ── Lo que CSS dice de cada configuration file ─────────────────────────────
+# CSS valida el .conf al crear la configuración y la deja `available` o
+# `unavailable`. Ese estado viaja al state de Terraform y no lo miraba nadie: un
+# .conf que no compila daba "Apply complete!" igual, y el SA se enteraba mirando
+# la consola de CSS o, peor, viendo que no entraba un documento.
+def _state_con_configuraciones(tmp_path, *pares):
+    import json as _json
+
+    td = tmp_path / "terraform"
+    td.mkdir(exist_ok=True)
+    (td / "terraform.tfstate").write_text(_json.dumps({
+        "version": 4,
+        "resources": [{
+            "mode": "managed", "type": "huaweicloud_css_logstash_configuration",
+            "name": "pipeline",
+            "instances": [
+                {"index_key": slug,
+                 "attributes": {"name": f"pipeline-{slug}", "status": estado}}
+                for slug, estado in pares
+            ],
+        }],
+    }))
+    return td
+
+
+def test_el_estado_de_cada_configuracion_sale_del_state(tmp_path):
+    td = _state_con_configuraciones(tmp_path, ("sp500", "available"), ("siem", "unavailable"))
+
+    assert main._estado_configuraciones(td) == {"sp500": "available", "siem": "unavailable"}
+
+
+def test_resource_instances_devuelve_todas_y_no_solo_la_primera(tmp_path):
+    """`resource_attributes` devuelve la primera instancia: con cuatro pipelines
+    desplegadas leía siempre la misma."""
+    import tfstate as _tf
+
+    td = _state_con_configuraciones(tmp_path, ("a", "available"), ("b", "unavailable"))
+    estado = _tf.read_state(td)
+
+    assert len(_tf.resource_instances(estado, "huaweicloud_css_logstash_configuration")) == 2
+    assert _tf.resource_instances(estado, "no_existe") == []
+
+
+def test_una_configuracion_que_no_compila_se_reporta_como_paso_fallido(tmp_path):
+    import json as _json
+
+    td = _state_con_configuraciones(tmp_path, ("sp500", "available"), ("telemetria", "unavailable"))
+    pasos = [_json.loads(e[6:]) for e in main._verificar_configuraciones(td)]
+
+    por_nombre = {p["name"]: p for p in pasos}
+    assert por_nombre["Configuración · sp500"]["ok"] is True
+    malo = por_nombre["Configuración · telemetria"]
+    assert malo["ok"] is False
+    assert "no pudo compilar" in malo["reason"]
+    assert "consola de CSS" in malo["reason"]
+
+
+def test_el_estado_devuelve_si_cada_configuracion_compila(monkeypatch, tmp_path):
+    """Y llega a la tarjeta del entorno: una pipeline que no compila se veía
+    igual que una en pausa."""
+    import json as _json
+
+    fake_main, tfstate_path = _write_fake_state_with_cluster(tmp_path)
+    estado = _json.loads(tfstate_path.read_text(encoding="utf-8"))
+    estado["resources"].append({
+        "mode": "managed", "type": "huaweicloud_css_logstash_configuration", "name": "pipeline",
+        "instances": [{"index_key": "logs",
+                       "attributes": {"name": "pipeline-logs", "status": "unavailable"}}],
+    })
+    tfstate_path.write_text(_json.dumps(estado))
+    (tmp_path / "terraform" / main._PIPELINES_REGISTRY_NAME).write_text(_json.dumps({
+        "logs": {"index": "logs-%{+YYYY.MM}", "start_ingestion": True}}))
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+        stdout = "{}"
+
+    monkeypatch.setattr(main, "__file__", str(fake_main))
+    monkeypatch.setattr(main.subprocess, "run", lambda *a, **kw: _Proc())
+
+    pipelines = client.get("/api/v1/terraform/status").json()["pipelines"]
+    assert pipelines[0]["config_status"] == "unavailable"
+
+
+def test_las_configuraciones_se_revisan_apenas_termina_el_apply():
+    import inspect
+    src = inspect.getsource(main._deploy_stream_gen_raw)
+
+    assert "_verificar_configuraciones(terraform_dir)" in src
+    assert src.index("_verificar_configuraciones(terraform_dir)") < src.index('"type": "complete"')
 
 
 def test_la_ingesta_se_verifica_solo_en_la_fase_2():

@@ -276,11 +276,16 @@ def test_la_tarjeta_del_entorno_muestra_si_entraron_documentos():
     una pipeline puede arrancar y quedarse poleando un prefijo vacío sin un solo
     error. El contador de documentos es la única prueba de que ingiere."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("const pipeRows = pipelines.length")
+    i = html.index("const salud = state.pipelineHealth")
     fila = html[i:html.index("// Un paso de la secuencia de puesta en marcha", i)]
 
     assert "${chipDocs(p)}" in fila, "la fila de la pipeline no muestra los documentos"
     assert 'id="infra-verify-btn"' in fila
+    # Y una configuración que Logstash no pudo compilar no se ve como "En pausa".
+    assert "Configuración inválida" in fila
+    assert "p.config_status && p.config_status !== 'available'" in fila, \
+        "el chip está pero el estado no se mira"
+    assert "${rota(p)" in fila
     assert "sin documentos" in html, "una pipeline vacía tiene que decirlo"
     # Y el botón tiene que estar cableado, no solo dibujado.
     assert "'#infra-verify-btn')?.addEventListener('click'" in html

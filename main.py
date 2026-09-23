@@ -3004,6 +3004,11 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         except Exception as exc:  # noqa: BLE001
             print(f"[deploy-stream] security-analytics falló (best-effort): {exc!r}")
 
+    # Lo primero que hay que saber de un apply: si CSS pudo COMPILAR cada
+    # configuration file. Un `.conf` que no compila da "Apply complete!" igual y
+    # deja la pipeline muerta sin que nada lo diga.
+    yield from _verificar_configuraciones(terraform_dir)
+
     # Fase 2: la pipeline quedó activa. Antes de cantar victoria, mirar si entró
     # algo — es lo único que distingue una pipeline que anda de una que arrancó y
     # se quedó poleando la nada.
@@ -4147,6 +4152,46 @@ def _delete_indices(endpoint: str, pattern: str, password: str,
     if deleted:
         print(f"[clear-index] borré {deleted} índice(s) de '{pattern}'")
     return deleted
+
+
+_CONF_OK = "available"
+
+
+def _estado_configuraciones(terraform_dir: Path) -> dict[str, str]:
+    """`slug -> status` de cada configuración de Logstash, según el state.
+
+    CSS valida el `.conf` al crear la configuración (corre el equivalente a
+    `--config.test_and_exit`) y la deja en `available` o `unavailable`. Ese
+    estado viaja al state de Terraform y hasta ahora no lo miraba nadie: un
+    `.conf` que no compila daba "Apply complete!" igual, y el SA se enteraba
+    mirando la consola de CSS o, peor, viendo que no entraba un documento.
+    """
+    try:
+        estado = tfstate.read_state(terraform_dir)
+    except Exception:  # noqa: BLE001 — best-effort, no rompe el deploy
+        return {}
+    fuera: dict[str, str] = {}
+    for clave, attrs in tfstate.resource_instances(
+            estado, "huaweicloud_css_logstash_configuration"):
+        slug = clave or str(attrs.get("name", "")).removeprefix("pipeline-")
+        fuera[slug] = str(attrs.get("status", "") or "")
+    return fuera
+
+
+def _verificar_configuraciones(terraform_dir: Path):
+    """Un `step` por configuración: `available` o el problema, dicho."""
+    estados = _estado_configuraciones(terraform_dir)
+    for slug, estado in sorted(estados.items()):
+        if estado == _CONF_OK:
+            yield _sse({"type": "step", "name": f"Configuración · {slug}", "ok": True,
+                        "reason": estado})
+        else:
+            yield _sse({"type": "step", "name": f"Configuración · {slug}", "ok": False,
+                        "reason": (f"CSS la dejó en `{estado or 'sin estado'}`: Logstash no pudo "
+                                   f"compilar el configuration file, así que esa pipeline no "
+                                   f"va a ingerir nada. Revisá el log de la pipeline en la "
+                                   f"consola de CSS.")})
+    print(f"[deploy-stream] configuraciones: {estados or 'sin datos'}")
 
 
 def _index_doc_count(base: str, user: str, password: str, index_pattern: str) -> int | None:
@@ -6329,11 +6374,15 @@ def terraform_status() -> TerraformStatusResponse:
     crudo = outputs.get("active_pipeline_names", {})
     if isinstance(crudo, dict) and isinstance(crudo.get("value"), list):
         activas_tf = {str(n) for n in crudo["value"]}
+    # `available` / `unavailable`: lo que CSS dice de cada configuration file.
+    # Una pipeline que no compila se veía igual que una en pausa.
+    conf_estados = _estado_configuraciones(terraform_dir)
     pipelines = [
         {
             "slug": slug,
             "index": entry.get("index", ""),
             "obs_prefix": entry.get("obs_prefix", ""),
+            "config_status": conf_estados.get(slug, ""),
             "active": (f"pipeline-{slug}"[:32] in activas_tf) if activas_tf is not None
                       else bool(entry.get("start_ingestion", False)),
             "dashboards_imported": bool(entry.get("dashboards_imported", False)),

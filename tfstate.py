@@ -193,6 +193,24 @@ def resource_attributes(state: dict, resource_type: str) -> dict:
     return {}
 
 
+def resource_instances(state: dict, resource_type: str) -> list[tuple[str, dict]]:
+    """`(index_key, atributos)` de TODAS las instancias de `resource_type`.
+
+    Un recurso con `for_each` —las configuraciones de Logstash, una por
+    pipeline— tiene una instancia por clave, y `resource_attributes` devuelve
+    solo la primera: con cuatro pipelines desplegadas, leía siempre la misma.
+    """
+    fuera: list[tuple[str, dict]] = []
+    for res in (state or {}).get("resources", []) or []:
+        if res.get("type") != resource_type:
+            continue
+        for inst in res.get("instances") or []:
+            clave = inst.get("index_key")
+            fuera.append((str(clave) if clave is not None else "",
+                          inst.get("attributes") or {}))
+    return fuera
+
+
 # ── Backend remoto en OBS ────────────────────────────────────────────────────
 # Prefijo bajo el que vive el estado dentro del bucket de demos. Convive con los
 # `<slug>-logs/` de los datasets sin tocarse: el input s3 de Logstash lista por
