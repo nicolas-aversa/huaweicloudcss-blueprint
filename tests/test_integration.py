@@ -1293,7 +1293,7 @@ def test_el_deploy_no_arranca_con_un_conf_que_logstash_no_compila(monkeypatch):
     res = client.post("/api/v1/terraform/deploy-stream", json={
         "pipeline_conf": roto, "opensearch_password": "pw"})
     assert res.status_code == 400
-    assert "no es una sección" in res.json()["detail"]["message"]
+    assert "sin el `filter" in res.json()["detail"]["message"]
 
     # Y una llave de menos, que es lo que deja el editor del paso 3.
     res = client.post("/api/v1/terraform/deploy-stream", json={
@@ -1351,7 +1351,7 @@ def test_el_filter_del_llm_se_valida_y_se_reintenta_con_feedback(monkeypatch):
     res = mi.generate_logstash_filter("esto es una linea rara sin formato conocido 12345")
 
     assert res["filter_code"].startswith("filter {"), "devolvió el filter roto igual"
-    assert "no es una sección" in visto["feedback"], visto.get("feedback")
+    assert "sin el `filter" in visto["feedback"], visto.get("feedback")
     assert visto["previous"].startswith("grok {"), "el reintento no vio el filter anterior"
 
     # Si el reintento tampoco sirve, se dice en vez de devolver algo que no anda.

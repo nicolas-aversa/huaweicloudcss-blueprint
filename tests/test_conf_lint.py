@@ -1,10 +1,13 @@
-"""El `.conf` de Logstash leído en serio, no adivinado con regex.
+"""El `.conf` de Logstash leído con su gramática, no adivinado con regex.
 
-Los casos de este archivo son los que rompían a las expresiones regulares que
-había antes: un bloque con sub-bloques multilínea (el `_S3_BLOCK_RE` lo cortaba
-en el primer `\\n  }`), un regex sin comillas con llaves adentro (descuadraba
-cualquier contador de llaves) y una palabra clave dentro de un comentario.
+Los casos de este archivo son los que rompían a lo que había antes: las
+expresiones regulares sueltas (un bloque con sub-bloques multilínea, un regex
+sin comillas con llaves adentro, una palabra clave dentro de un comentario) y
+después el lint de llaves y plugins, que no veía la coma de más en un hash —
+la que dejó una pipeline entera en `unavailable`.
 """
+import pytest
+
 import conf_lint
 
 
@@ -145,7 +148,7 @@ def test_el_filter_sin_envolver_es_el_error_silencioso_del_llm():
     envuelve, el .conf resultante es inválido y Terraform lo acepta igual."""
     problemas = conf_lint.lint_filtro('grok { match => { "message" => "%{GREEDYDATA:m}" } }')
 
-    assert any("no es una sección" in m for m in _errores(problemas)), problemas
+    assert any("sin el `filter" in m for m in _errores(problemas)), problemas
 
 
 def test_un_filter_bien_envuelto_pasa():
@@ -153,10 +156,79 @@ def test_un_filter_bien_envuelto_pasa():
 
 
 def test_las_llaves_y_las_comillas_desbalanceadas_cortan():
-    assert any("sin cerrar" in m for m in _errores(conf_lint.lint('input { s3 { bucket => "b" }\n')))
-    assert any("de más" in m for m in _errores(conf_lint.lint('input { } }\noutput { stdout {} }\n')))
-    assert any("comilla sin cerrar" in m
+    """Y la llave que falta cerrar se señala DONDE SE ABRIÓ. Con un `}` de menos
+    el parser sigue leyendo y se queja veinte líneas más abajo, en el `output`
+    que ya no entiende; el error útil es el de arriba."""
+    faltante = _errores(conf_lint.lint('input {\n  s3 { bucket => "b" }\nfilter { }\noutput { stdout {} }\n'))
+    assert any("quedó sin cerrar" in m for m in faltante), faltante
+    assert any("línea 1" in m for m in faltante), faltante
+
+    assert any("sobra un `}`" in m
+               for m in _errores(conf_lint.lint('input { } }\noutput { stdout {} }\n')))
+    assert any("falta la comilla que cierra" in m
                for m in _errores(conf_lint.lint('input { s3 { bucket => "b } }\noutput { stdout {} }\n')))
+
+
+# ── La coma que dejó una pipeline en unavailable ────────────────────────────
+# El modelo escribió `convert => { "a" => "integer", "b" => "float" }` y CSS
+# dejó la configuración `unavailable`: en la gramática de Logstash las entradas
+# de un hash se separan con ESPACIO, y las comas son solo de los arrays. Es el
+# error que ninguna heurística de llaves/plugins iba a ver, y el que obligó a
+# portar la gramática de verdad.
+_CONF_TELEMETRIA = '''input {
+  s3 {
+    bucket => "demoscss"
+    prefix => "telemetria-logs/"
+    codec => plain
+  }
+}
+
+filter {
+  if [message] =~ /^Fecha y Hora/ {
+    drop {}
+  }
+
+  csv {
+    separator => ","
+    columns => ["fecha_hora", "id_trabajo", "paginas_totales"]
+    target => "data"
+  }
+
+  mutate {
+    convert => {
+      "[data][paginas_totales]" => "integer",
+      "[data][velocidad_ppm]" => "integer"
+    }
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => []
+    index => "telemetria-%{+YYYY.MM}"
+  }
+}
+'''
+
+
+def test_la_coma_en_un_hash_se_reporta_donde_la_reporta_logstash():
+    with pytest.raises(conf_lint.ErrorDeSintaxis) as exc:
+        conf_lint.parse(_CONF_TELEMETRIA)
+
+    # La coma de la primera entrada de `convert`, igual que el error de Logstash
+    # ("Expected one of [ \\t\\r\\n], "#", "{", "}" at line 51, column 45").
+    linea = _CONF_TELEMETRIA.split("\n")[exc.value.linea - 1]
+    assert linea[exc.value.columna - 1] == ","
+    assert "separadas por espacio" in exc.value.mensaje
+    assert "solo para los arrays" in exc.value.mensaje
+
+
+def test_sin_las_comas_el_mismo_conf_parsea():
+    """Y la prueba de que no estamos rechazando algo válido: el mismo .conf, con
+    las entradas separadas por salto de línea, pasa."""
+    sano = _CONF_TELEMETRIA.replace('"integer",', '"integer"')
+
+    assert conf_lint.lint(sano, marcador_hosts=True) == []
 
 
 def test_un_plugin_que_no_existe_o_que_css_no_tiene():
@@ -169,6 +241,36 @@ def test_un_plugin_que_no_existe_o_que_css_no_tiene():
     # muere al crear la configuración. Se descubrió desplegando.
     css = _errores(conf_lint.lint(base % 'translate { field => "a" }'))
     assert any("no está instalado en la Logstash de CSS" in m for m in css), css
+
+
+def test_dos_atributos_pegados_no_pasan():
+    """`attribute (whitespace _ attribute)*`: entre dos settings va un espacio o
+    un salto de línea, sí o sí. Pegados, Logstash no compila."""
+    pegados = 'input { s3 { bucket => "b"prefix => "p/" } }\noutput { stdout {} }\n'
+
+    assert any("`}`" in m or "sin cerrar" in m for m in _errores(conf_lint.lint(pegados))), \
+        conf_lint.lint(pegados)
+    # Con el espacio, el mismo .conf pasa.
+    assert conf_lint.lint(pegados.replace('"b"prefix', '"b" prefix')) == []
+
+
+def test_un_valor_sin_comillas_de_una_sola_letra_no_es_valido():
+    """`bareword = [A-Za-z_][A-Za-z0-9_]+`: dos caracteres o más. `codec => p`
+    no compila, y es el tipo de cosa que un modelo escribe al abreviar."""
+    corto = 'input { s3 { bucket => "b" codec => p } }\noutput { stdout {} }\n'
+
+    assert _errores(conf_lint.lint(corto)), "aceptó un bareword de un carácter"
+    assert conf_lint.lint(corto.replace("=> p ", "=> plain ")) == []
+
+
+def test_un_codec_con_opciones_tambien_se_revisa():
+    """`codec => multiline { … }` es un plugin anidado como valor: si el nombre
+    no existe, la pipeline no arranca igual que con cualquier otro plugin."""
+    base = 'input { file { path => "/x" codec => %s { pattern => "^%%{TIMESTAMP_ISO8601}" } } }\noutput { stdout {} }\n'
+
+    assert conf_lint.lint(base % "multiline") == []
+    malo = _errores(conf_lint.lint(base % "inventado"))
+    assert any("`inventado`" in m for m in malo), malo
 
 
 def test_una_condicion_numerica_no_es_un_plugin():
