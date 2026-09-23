@@ -506,6 +506,10 @@ def get_pipeline_model() -> str:
 # modelo anterior, así que se cae al anterior y se avisa fuerte (una vez).
 MODELO_FALLBACK = "glm-5.2"
 _sin_acceso: set[str] = set()
+# Modelos que no aceptan que se les configure el thinking. glm-5.3 razona
+# siempre: mandarle `disabled` da 400 `ModelArts.81001` y deja a la plataforma
+# sin generar pipelines, que es un precio absurdo por una preferencia.
+_sin_switch_de_thinking: set[str] = set()
 
 
 def _sin_acceso_a(exc: Exception) -> bool:
@@ -515,6 +519,11 @@ def _sin_acceso_a(exc: Exception) -> bool:
     return "81004" in texto or "do not have access" in texto
 
 
+def _thinking_rechazado(exc: Exception) -> bool:
+    texto = str(exc)
+    return "unsupported thinking type" in texto or ("81001" in texto and "thinking" in texto)
+
+
 def modelo_efectivo() -> str:
     """El modelo con el que se va a generar de verdad, fallback incluido."""
     modelo = get_pipeline_model()
@@ -522,14 +531,23 @@ def modelo_efectivo() -> str:
 
 
 def _chat(client: OpenAI, **kwargs):
-    """`chat.completions.create` con el fallback de modelo sin acceso."""
+    """`chat.completions.create`, esquivando las dos formas en que el MaaS dice
+    que no: el modelo no habilitado para la key y el `thinking` que ese modelo
+    no admite. Las dos dejaban a la plataforma sin generar pipelines."""
     modelo = kwargs.get("model")
     if modelo in _sin_acceso:
-        kwargs["model"] = MODELO_FALLBACK
-        return client.chat.completions.create(**kwargs)
+        kwargs["model"] = modelo = MODELO_FALLBACK
+    if modelo in _sin_switch_de_thinking:
+        kwargs.pop("extra_body", None)
     try:
         return client.chat.completions.create(**kwargs)
     except OpenAIError as exc:
+        if _thinking_rechazado(exc) and kwargs.get("extra_body"):
+            _sin_switch_de_thinking.add(modelo)
+            print(f"[maas] `{modelo}` no admite configurar el thinking "
+                  f"({kwargs['extra_body']}): razona siempre. Sigo sin mandarlo.")
+            kwargs.pop("extra_body", None)
+            return client.chat.completions.create(**kwargs)
         if modelo == MODELO_FALLBACK or not _sin_acceso_a(exc):
             raise
         _sin_acceso.add(modelo)

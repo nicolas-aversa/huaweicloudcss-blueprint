@@ -1504,6 +1504,43 @@ def test_si_la_key_no_tiene_habilitado_el_modelo_se_sigue_con_el_anterior(monkey
         mi._chat(cliente_roto, model="glm-5.3", messages=[])
 
 
+def test_un_modelo_que_razona_siempre_no_se_queda_sin_generar(monkeypatch):
+    """glm-5.3 no admite que le configuren el thinking: `disabled` da 400
+    ModelArts.81001. Con `MAAS_PIPELINE_THINKING=disabled` en el entorno, ESO
+    dejaba a la plataforma sin generar un solo pipeline. Se manda sin el
+    parámetro (el modelo razona igual, es su modo nativo) y se avisa."""
+    import types
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_sin_switch_de_thinking", set())
+    monkeypatch.setattr(mi, "_sin_acceso", set())
+    pedidos = []
+
+    def _create(**kw):
+        pedidos.append(kw.get("extra_body"))
+        if kw.get("extra_body"):
+            raise mi.OpenAIError(
+                "Error code: 400 - {'error_code': 'ModelArts.81001', 'error_msg': "
+                "'request param validation error, Value error, unsupported thinking "
+                "type for the current model: disabled'}")
+        msg = types.SimpleNamespace(content="ok")
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    cliente = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_create)))
+
+    r = mi._chat(cliente, model="glm-5.3", messages=[],
+                 extra_body={"thinking": {"type": "disabled"}})
+
+    assert r.choices[0].message.content == "ok"
+    assert pedidos == [{"thinking": {"type": "disabled"}}, None]
+
+    # La segunda vez ya ni lo intenta.
+    pedidos.clear()
+    mi._chat(cliente, model="glm-5.3", messages=[], extra_body={"thinking": {"type": "disabled"}})
+    assert pedidos == [None]
+
+
 def test_el_prompt_explica_la_sintaxis_que_el_modelo_rompe():
     """El prompt tenía reglas de parseo pero ni una palabra de sintaxis, y los
     pocos hashes que mostraba eran de UNA entrada: el modelo nunca veía cómo se
