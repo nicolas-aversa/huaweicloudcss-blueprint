@@ -1653,8 +1653,10 @@ def get_maas_settings() -> dict:
         "problem": _mi.maas_key_problem(),
         # Modelo que usa cada consumo (solo lectura — se configuran por env var).
         "models": {
-            # Paso 2 del wizard: análisis del log + generación del filter.
-            "pipeline": _mi.get_pipeline_model(),
+            # Paso 2 del wizard: análisis del log + generación del filter. El
+            # EFECTIVO: si la key no tiene habilitado el configurado (403 del
+            # MaaS), se generó con el de fallback y decir otra cosa sería mentir.
+            "pipeline": _mi.modelo_efectivo(),
             # Chatbot de OpenSearch (capabilities): razonador + generador PPL.
             "chatbot_llm": caps.maas_llm_model(),
             "chatbot_ppl": caps.maas_ppl_model(),

@@ -1392,6 +1392,157 @@ def test_el_filter_del_llm_se_valida_y_se_reintenta_con_feedback(monkeypatch):
     assert len(intentos) == mi._REINTENTOS_DEL_FILTRO == 2, "se rinde en el primer intento"
 
 
+def test_el_pipeline_se_genera_con_glm_5_3_y_thinking(monkeypatch):
+    """El .conf tiene que compilar a la primera: cada punto de fidelidad
+    sintáctica se paga en deploys de 10 minutos que terminan en `unavailable`."""
+    import types
+    import maas_integrator as mi
+
+    monkeypatch.delenv("MAAS_PIPELINE_MODEL", raising=False)
+    assert mi.get_pipeline_model() == "glm-5.3"
+
+    visto = {}
+    bueno = '{"filter_code": "filter { json { source => \\"message\\" } }", "fields": []}'
+
+    def _create(**kw):
+        visto.update(kw)
+        msg = types.SimpleNamespace(content=bueno)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    monkeypatch.setattr(mi, "_build_client", lambda: types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_create))))
+
+    mi.generate_logstash_filter("una linea rara sin formato conocido 31337")
+
+    assert visto["model"] == "glm-5.3"
+    assert visto["extra_body"] == {"thinking": {"type": "enabled"}}
+
+    # Y lo que de verdad viaja: el prompt armado, sin placeholders colgados.
+    system = visto["messages"][0]["content"]
+    for hueco in ("{ejemplo_filter}", "{plugin_context}", "{namespace}"):
+        assert hueco not in system, f"el prompt salió con {hueco} sin resolver"
+    assert "SINTAXIS de Logstash" in system
+    assert mi._ejemplo_filter() in system, "el ejemplo no llegó al modelo"
+
+    # Y el override por entorno sigue mandando (una instancia puede pinchar otro).
+    monkeypatch.setenv("MAAS_PIPELINE_MODEL", "glm-5.2")
+    assert mi.get_pipeline_model() == "glm-5.2"
+
+
+def test_el_reintento_tambien_manda_las_reglas_y_el_ejemplo(monkeypatch):
+    """El camino correctivo usa el mismo prompt: si ahí faltara la sección de
+    sintaxis, el reintento repetiría el mismo error que vino a corregir."""
+    import types
+    import maas_integrator as mi
+
+    visto = {}
+
+    def _create(**kw):
+        visto.update(kw)
+        msg = types.SimpleNamespace(
+            content='{"filter_code": "filter { json { source => \\"message\\" } }", "fields": []}')
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    monkeypatch.setattr(mi, "_build_client", lambda: types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_create))))
+    monkeypatch.setattr(mi, "get_pipeline_model", lambda: "glm-5.3")
+
+    mi._regenerate_with_feedback(
+        sample_log="una linea", namespace="data", ecs_overlay=False,
+        feedback="sobra una coma", previous_filter="filter { }")
+
+    system = visto["messages"][0]["content"]
+    assert "{ejemplo_filter}" not in system
+    assert "SINTAXIS de Logstash" in system
+    assert mi._ejemplo_filter() in system
+
+
+def test_si_la_key_no_tiene_habilitado_el_modelo_se_sigue_con_el_anterior(monkeypatch):
+    """Un modelo puede estar LISTADO en el MaaS y no estar habilitado para la
+    key: el endpoint contesta 403 ModelArts.81004. Pasó al pasar a glm-5.3.
+    Quedarse sin generación de pipelines por eso es peor que seguir con el
+    anterior — pero tiene que decirse, no taparse."""
+    import types
+    import maas_integrator as mi
+
+    monkeypatch.setattr(mi, "_sin_acceso", set())
+    pedidos = []
+
+    def _create(**kw):
+        pedidos.append(kw["model"])
+        if kw["model"] == "glm-5.3":
+            raise mi.OpenAIError(
+                "Error code: 403 - {'error_code': 'ModelArts.81004', "
+                "'error_msg': 'Invalid request because you do not have access to it.'}")
+        msg = types.SimpleNamespace(content="ok")
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    cliente = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_create)))
+
+    r = mi._chat(cliente, model="glm-5.3", messages=[])
+
+    assert r.choices[0].message.content == "ok"
+    assert pedidos == ["glm-5.3", "glm-5.2"]
+    assert mi.modelo_efectivo() == "glm-5.2", "la UI tiene que decir con cuál generó"
+    assert client.get("/api/v1/settings/maas").json()["models"]["pipeline"] == "glm-5.2", \
+        "⚙ Configuración muestra el modelo configurado, no el que se usó"
+
+    # La segunda vez ni se intenta: ya sabemos que no hay acceso.
+    pedidos.clear()
+    mi._chat(cliente, model="glm-5.3", messages=[])
+    assert pedidos == ["glm-5.2"]
+
+    # Un error que NO es de acceso se propaga tal cual.
+    def _otro(**kw):
+        raise mi.OpenAIError("connection reset")
+
+    cliente_roto = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_otro)))
+    monkeypatch.setattr(mi, "_sin_acceso", set())
+    with pytest.raises(mi.OpenAIError, match="connection reset"):
+        mi._chat(cliente_roto, model="glm-5.3", messages=[])
+
+
+def test_el_prompt_explica_la_sintaxis_que_el_modelo_rompe():
+    """El prompt tenía reglas de parseo pero ni una palabra de sintaxis, y los
+    pocos hashes que mostraba eran de UNA entrada: el modelo nunca veía cómo se
+    separan dos. De ahí salió la coma que dejó una pipeline en `unavailable`."""
+    import maas_integrator as mi
+
+    for prompt in (mi.SYSTEM_PROMPT_BASE, mi.SYSTEM_PROMPT_JDBC):
+        assert "SINTAXIS de Logstash" in prompt
+        assert "se separan con ESPACIO" in prompt, "falta la regla que rompió la pipeline"
+        assert "la coma es solo para los arrays" in prompt
+        assert 'BIEN:  convert => { "a" => "integer"  "b" => "float" }' in prompt
+        assert 'MAL:   convert => { "a" => "integer", "b" => "float" }' in prompt
+        assert "La asignación es `=>`" in prompt
+
+
+def test_el_prompt_lleva_un_filter_de_verdad_como_ejemplo():
+    """Sale del catálogo y no de un literal en el prompt: así es necesariamente
+    uno que hoy corre en CSS, y el test del lint sobre todo el catálogo lo
+    mantiene sano."""
+    import conf_lint
+    import maas_integrator as mi
+    import verticals
+
+    ejemplo = mi._ejemplo_filter()
+
+    assert ejemplo in [v.get("filter_code", "").strip() for v in verticals.all_verticals()]
+    assert conf_lint.lint_filtro(ejemplo) == []
+    assert "convert => {" in ejemplo and "remove_field => [" in ejemplo
+    # La forma que el modelo tiene que copiar: hash sin comas, array con comas.
+    hash_convert = ejemplo.split("convert => {", 1)[1].split("}", 1)[0]
+    assert "," not in hash_convert, hash_convert
+    assert hash_convert.count("=>") >= 2, "un hash de una entrada no enseña nada"
+
+    armado = (mi.SYSTEM_PROMPT_BASE.replace("{ejemplo_filter}", ejemplo)
+              .replace("{plugin_context}", "").replace("{namespace}", "data"))
+    assert "{ejemplo_filter}" not in armado
+    assert ejemplo in armado
+
+
 def test_la_coma_del_hash_del_llm_se_corrige_sin_gastar_un_reintento(monkeypatch):
     """600 s de reintento para algo que sabemos cómo se escribe, no: la coma
     entre entradas de un hash se arregla en el acto."""

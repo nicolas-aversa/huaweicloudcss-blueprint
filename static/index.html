@@ -2734,7 +2734,7 @@
 
             <div id="mapping-loading" class="hidden">
               <div class="status status-loading">
-                Analizando log con GLM-5.2... (puede tardar hasta 1 minuto)
+                Analizando log con GLM-5.3... (puede tardar hasta 1 minuto)
               </div>
             </div>
             <div id="mapping-error" class="hidden"></div>
@@ -4194,7 +4194,7 @@
         // algún motivo no está (ej. el usuario saltó al step 5 directo via
         // stepper sin pasar por el 2), lo generamos ahora como fallback.
         if (!state.filterCode) {
-          showStatus(elements.pipelineStatus, 'Parseando log con GLM-5.2...', 'loading');
+          showStatus(elements.pipelineStatus, 'Parseando log con GLM-5.3...', 'loading');
           const result = await transformLog();
           if (!result.ok) {
             showStatus(elements.pipelineStatus, `Error al transformar log: ${result.error}`, 'error');
@@ -7116,7 +7116,7 @@
     // Botones Atrás / Siguiente dentro de cada step-pane.
     document.querySelectorAll('[data-go-next]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        // Builder, paso 1: "Siguiente" ES el análisis. Si pegaste log, GLM-5.2
+        // Builder, paso 1: "Siguiente" ES el análisis. Si pegaste log, GLM-5.3
         // arma la estructura del texto. Si falla, el error queda inline y NO se
         // avanza. Si ya se analizó, sigue derecho.
         if (currentStep === 1 && state.deployMode === 'custom' && !state.rawLog) {
@@ -7135,7 +7135,7 @@
               if (errEl) errEl.textContent = 'Pegá 2-3 líneas de tu log para detectar la estructura.';
               ok = false;
             } else {
-              btn.innerHTML = 'Analizando con GLM-5.2…';
+              btn.innerHTML = 'Analizando con GLM-5.3…';
               const rawLogEl = document.getElementById('raw-log');
               if (rawLogEl) rawLogEl.value = pasted;
               const r = await transformLog();

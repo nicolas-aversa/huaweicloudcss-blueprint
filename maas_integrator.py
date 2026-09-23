@@ -9,7 +9,7 @@ MaaS es compatible con la API de OpenAI, por lo que se reutiliza la librería
 oficial `openai` apuntando el `base_url` del cliente al endpoint de MaaS.
 
 Responsabilidad única de este módulo: dado un log de muestra (ya anonimizado
-por el cliente), pedirle al modelo `glm-5.2` que genere EXCLUSIVAMENTE el
+por el cliente), pedirle al modelo `glm-5.3` que genere EXCLUSIVAMENTE el
 bloque `filter {}` de Logstash, normalizando los campos al estándar ECS
 (Elastic Common Schema).
 
@@ -51,17 +51,21 @@ def _load_mappings() -> dict:
 # MAAS_API_KEY        -> API Key del servicio MaaS (obligatoria).
 # MAAS_BASE_URL       -> URL base del endpoint MaaS compatible con OpenAI.
 # MAAS_PIPELINE_MODEL -> Modelo para generar el filter de Logstash
-#                       (por defecto: glm-5.2).
+#                       (por defecto: glm-5.3).
 # MAAS_TIMEOUT        -> Timeout en segundos para la llamada al modelo
 #                       (por defecto 240; subir si seguís viendo timeouts
-#                       bajo carga, glm-5.2 a veces tarda >2min en CSS).
+#                       bajo carga, GLM a veces tarda >2min en CSS).
 # ---------------------------------------------------------------------------
 
 DEFAULT_BASE_URL = "https://api-ap-southeast-1.modelarts-maas.com/openai/v1"
-DEFAULT_MODEL = "glm-5.2"
-# Modo de razonamiento de GLM-5.2 para la generación del pipeline. El modelo
-# razona el parseo (qué plugin usar, namespacing, @timestamp, tipos) antes de
-# emitir el JSON final. Se desactiva con MAAS_PIPELINE_THINKING=disabled.
+# El MaaS sirve hoy glm-5.1, glm-5.2 y glm-5.3. La generación del filter va con
+# el más nuevo: el .conf tiene que compilar a la primera, y ahí cada punto de
+# fidelidad sintáctica se paga en deploys de 10 minutos que terminan en
+# `unavailable`.
+DEFAULT_MODEL = "glm-5.3"
+# Modo de razonamiento de GLM para la generación del pipeline. El modelo razona
+# el parseo (qué plugin usar, namespacing, @timestamp, tipos) antes de emitir el
+# JSON final. Se desactiva con MAAS_PIPELINE_THINKING=disabled.
 DEFAULT_THINKING = "enabled"
 
 
@@ -142,7 +146,26 @@ REGLAS para `filter_code`:
    campo numérico/date del index template rompe la indexación del documento
    ENTERO en OpenSearch). Después borrá `message` y los temporales con
    `remove_field`.
-8. Sintaxis válida para Logstash 7.10/8.x.
+8. Sintaxis válida para Logstash 7.10/8.x. Ver SINTAXIS más abajo: no es JSON y
+   la diferencia rompe la pipeline.
+
+SINTAXIS de Logstash (lo que más se rompe; el .conf NO es JSON):
+  * Las entradas de un HASH se separan con ESPACIO o salto de línea. NUNCA con
+    coma — la coma es solo para los arrays. Este es EL error más común:
+      BIEN:  convert => { "a" => "integer"  "b" => "float" }
+      BIEN:  convert => {
+               "a" => "integer"
+               "b" => "float"
+             }
+      MAL:   convert => { "a" => "integer", "b" => "float" }
+    Vale igual para `add_field`, `rename`, `replace`, `update`, `match` y
+    `pattern_definitions`.
+  * Los ARRAYS sí van con coma, y sin coma al final:
+      BIEN:  remove_field => ["message", "@version"]
+      MAL:   remove_field => ["message", "@version", ]
+  * La asignación es `=>`, nunca `=` ni `:`.
+  * Todo texto va entre comillas, incluidas las claves de un hash.
+  * Nada de comentarios `#`.
 
 REGLAS para `fields`:
 1. Incluí los campos visibles en el evento indexado (no los temporales).
@@ -189,7 +212,7 @@ Filter:
   grok extrae el envelope y deja el payload kv en `kv_payload`
   -> kv { source => "kv_payload" field_split => "|" value_split => "=" target => "{namespace}" }
   -> json anidado: json { source => "[{namespace}][trxl_tech_detail]" target => "[{namespace}][trxl_tech_detail]" skip_on_invalid_json => true }
-  -> mutate convert { "[{namespace}][trxl_msg_typ]" => "integer" }
+  -> mutate { convert => { "[{namespace}][trxl_amount]" => "float" } }
   -> date { match => ["[{namespace}][trxl_entry_tim]", "yyyyMMddHHmmssSSS"] target => "@timestamp" }
   -> mutate { remove_field => ["message", "kv_payload"] }
 
@@ -198,6 +221,11 @@ Medida con moneda/miles (regla 5b) — limpiar ANTES de convertir:
 Filter:
   -> mutate { gsub => ["[{namespace}][precio]", "[^0-9.\\-]", ""] }
   -> mutate { convert => { "[{namespace}][precio]" => "float" } }
+
+FILTER COMPLETO que hoy corre en producción (copiá ESTA forma, sobre todo el
+hash de `convert` y el array de `remove_field`):
+
+{ejemplo_filter}
 
 {plugin_context}
 """
@@ -251,7 +279,19 @@ REGLAS para `filter_code`:
    latencias). NO conviertas IDs, códigos, status, versiones.
 4. Limpiá con `ruby` los campos cuyo valor sea "null", "" o whitespace.
 5. Remové `message` y temporales con `mutate remove_field`.
-6. Sintaxis válida para Logstash 7.10/8.x.
+6. Sintaxis válida para Logstash 7.10/8.x. Ver SINTAXIS más abajo.
+
+SINTAXIS de Logstash (lo que más se rompe; el .conf NO es JSON):
+  * Las entradas de un HASH se separan con ESPACIO o salto de línea. NUNCA con
+    coma — la coma es solo para los arrays:
+      BIEN:  convert => { "a" => "integer"  "b" => "float" }
+      MAL:   convert => { "a" => "integer", "b" => "float" }
+    Vale igual para `add_field`, `rename`, `replace`, `update` y `match`.
+  * Los ARRAYS sí van con coma, y sin coma al final:
+      BIEN:  remove_field => ["message", "@version"]
+  * La asignación es `=>`, nunca `=` ni `:`.
+  * Todo texto va entre comillas, incluidas las claves de un hash.
+  * Nada de comentarios `#`.
 
 REGLAS para `fields`:
 1. Incluí todas las columnas visibles del result set.
@@ -458,6 +498,45 @@ def maas_key_problem() -> str:
 def get_pipeline_model() -> str:
     """Modelo del análisis/generación de pipeline (MAAS_PIPELINE_MODEL o default)."""
     return os.getenv("MAAS_PIPELINE_MODEL", DEFAULT_MODEL)
+
+
+# Un modelo puede estar LISTADO en el MaaS y no estar habilitado para la key: el
+# endpoint contesta 403 `ModelArts.81004`. Pasó justo con glm-5.3. Dejar la
+# plataforma sin generación de pipelines por eso sería peor que seguir con el
+# modelo anterior, así que se cae al anterior y se avisa fuerte (una vez).
+MODELO_FALLBACK = "glm-5.2"
+_sin_acceso: set[str] = set()
+
+
+def _sin_acceso_a(exc: Exception) -> bool:
+    if getattr(exc, "status_code", None) == 403:
+        return True
+    texto = str(exc)
+    return "81004" in texto or "do not have access" in texto
+
+
+def modelo_efectivo() -> str:
+    """El modelo con el que se va a generar de verdad, fallback incluido."""
+    modelo = get_pipeline_model()
+    return MODELO_FALLBACK if modelo in _sin_acceso else modelo
+
+
+def _chat(client: OpenAI, **kwargs):
+    """`chat.completions.create` con el fallback de modelo sin acceso."""
+    modelo = kwargs.get("model")
+    if modelo in _sin_acceso:
+        kwargs["model"] = MODELO_FALLBACK
+        return client.chat.completions.create(**kwargs)
+    try:
+        return client.chat.completions.create(**kwargs)
+    except OpenAIError as exc:
+        if modelo == MODELO_FALLBACK or not _sin_acceso_a(exc):
+            raise
+        _sin_acceso.add(modelo)
+        print(f"[maas] la API key NO tiene habilitado `{modelo}` (403 ModelArts.81004). "
+              f"Sigo con `{MODELO_FALLBACK}`; habilitalo en ModelArts Studio para usarlo.")
+        kwargs["model"] = MODELO_FALLBACK
+        return client.chat.completions.create(**kwargs)
 
 
 # ── Cuenta Huawei Cloud del SA (⚙ Configuración) ────────────────────────────
@@ -710,7 +789,7 @@ _THINK_TAG_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
 def _thinking_param() -> dict:
-    """`extra_body` que activa el modo thinking de GLM-5.2 en MaaS.
+    """`extra_body` que activa el modo thinking de GLM-5.3 en MaaS.
 
     GLM expone el razonamiento vía `thinking: {type: enabled|disabled}`
     (convención ZhipuAI que el endpoint OpenAI-compatible de MaaS replica). El
@@ -1648,6 +1727,34 @@ def _detect_log_format(line: str) -> str:
 _REINTENTOS_DEL_FILTRO = 2
 
 
+_EJEMPLO_CACHE: str | None = None
+
+
+def _ejemplo_filter() -> str:
+    """Un filter REAL del catálogo, para que el modelo copie la forma.
+
+    El prompt tenía reglas pero ningún ejemplo completo, y los pocos hashes que
+    mostraba eran de UNA entrada: el modelo nunca veía cómo se separan dos. Este
+    sale del registro de verticales y no de un literal acá, así que es
+    necesariamente uno que hoy corre en CSS — si alguien lo rompe, lo agarra el
+    test que pasa el lint sobre todo el catálogo.
+
+    Se elige el más corto que tenga un `convert` con varias entradas y un
+    `remove_field`: es la forma exacta donde el modelo mete la coma.
+    """
+    global _EJEMPLO_CACHE
+    if _EJEMPLO_CACHE is None:
+        import verticals
+
+        candidatos = [
+            (v.get("filter_code") or "").strip() for v in verticals.all_verticals()
+        ]
+        utiles = [c for c in candidatos
+                  if c.count("=>") > 4 and "convert => {" in c and "remove_field => [" in c]
+        _EJEMPLO_CACHE = min(utiles, key=len) if utiles else ""
+    return _EJEMPLO_CACHE
+
+
 def _normalizar_filtro(filter_code: str) -> str:
     """Corrige los tics mecánicos del modelo (la coma del hash, sobre todo)."""
     import conf_lint
@@ -1688,6 +1795,7 @@ def _regenerate_with_feedback(
     base_prompt = SYSTEM_PROMPT_JDBC if is_jdbc else SYSTEM_PROMPT_BASE
     system_prompt = (
         base_prompt
+        .replace("{ejemplo_filter}", _ejemplo_filter())
         .replace("{plugin_context}", get_plugin_context(sample_log))
         .replace("{namespace}", ns)
     )
@@ -1704,7 +1812,8 @@ def _regenerate_with_feedback(
         f"LOG DE MUESTRA:\n{sample_log[:4000]}"
     )
     try:
-        response = client.chat.completions.create(
+        response = _chat(
+            client,
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1898,13 +2007,14 @@ def generate_logstash_filter(
 
     client = _build_client()
     model = get_pipeline_model()
-    timeout = 600  # 10 minutos hardcodeado: glm-5.2 en CSS a veces tarda >2min.
+    timeout = 600  # 10 minutos hardcodeado: glm-5.3 en CSS a veces tarda >2min.
 
     plugin_context = get_plugin_context(sample_log)
     ns = (namespace or "data").strip() or "data"
     base_prompt = SYSTEM_PROMPT_JDBC if is_jdbc else SYSTEM_PROMPT_BASE
     system_prompt = (
         base_prompt
+        .replace("{ejemplo_filter}", _ejemplo_filter())
         .replace("{plugin_context}", plugin_context)
         .replace("{namespace}", ns)
     )
@@ -1917,7 +2027,8 @@ def generate_logstash_filter(
     )
 
     try:
-        response = client.chat.completions.create(
+        response = _chat(
+            client,
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
