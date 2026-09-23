@@ -1642,6 +1642,22 @@ def _detect_log_format(line: str) -> str:
     return "unknown"
 
 
+# Cuántas veces se le pide al modelo que corrija un filter que no compila. Dos:
+# la primera suele alcanzar, y una tercera pasada de 600 s no se la cobramos al
+# SA que está esperando la pantalla.
+_REINTENTOS_DEL_FILTRO = 2
+
+
+def _normalizar_filtro(filter_code: str) -> str:
+    """Corrige los tics mecánicos del modelo (la coma del hash, sobre todo)."""
+    import conf_lint
+
+    sano, notas = conf_lint.normalizar(filter_code or "")
+    for nota in notas:
+        print(f"[llm] {nota}")
+    return sano
+
+
 def _problemas_del_filtro(filter_code: str) -> str:
     """Los errores de un `filter { … }`, en una línea, o "" si está sano.
 
@@ -1986,17 +2002,24 @@ def generate_logstash_filter(
     # step 5). Por eso `strip_logstash_comments` es top-level y exportada.
     filter_code = strip_logstash_comments(filter_code)
 
+    # Los tics mecánicos se arreglan solos: la coma entre entradas de un hash
+    # (el modelo viene de escribir JSON) no tiene nada de ambiguo, y corregirla
+    # acá evita 600 s de reintento para algo que sabemos cómo se escribe.
+    filter_code = _normalizar_filtro(filter_code)
+
     # Y recién ahora se revisa lo que devolvió: hasta acá lo único que se
     # exigía era que fuera un string no vacío. Un filter con una llave de menos,
     # un plugin que CSS no tiene o el cuerpo sin el `filter { }` que lo envuelve
     # produce un .conf que Terraform acepta sin chistar y una pipeline que
     # Logstash no puede compilar: el cluster queda vivo, vacío y sin un solo
-    # error a la vista. Un reintento con los problemas concretos como feedback
-    # —el camino que ya existía para el sandbox y que nadie llamaba— y si sigue
-    # roto, se dice en vez de devolverlo igual.
+    # error a la vista. Hasta DOS reintentos con los problemas concretos como
+    # feedback —el camino que ya existía para el sandbox y que nadie llamaba— y
+    # si sigue roto, se dice en vez de devolverlo igual.
     problemas = _problemas_del_filtro(filter_code)
-    if problemas:
-        print(f"[llm] el filter no pasó el lint ({problemas}); reintento con feedback")
+    intentos = 0
+    while problemas and intentos < _REINTENTOS_DEL_FILTRO:
+        intentos += 1
+        print(f"[llm] el filter no compila ({problemas}); reintento {intentos} con feedback")
         try:
             corregido = _regenerate_with_feedback(
                 sample_log=sample_log, namespace=ns, ecs_overlay=ecs_overlay,
@@ -2006,13 +2029,17 @@ def generate_logstash_filter(
         except RuntimeError as exc:
             raise RuntimeError(f"El filter generado no es válido ({problemas}) y el "
                                f"reintento falló: {exc}") from exc
-        restantes = _problemas_del_filtro(corregido["filter_code"])
-        if restantes:
-            raise RuntimeError(
-                "El modelo no logró generar un filter válido para este log. "
-                f"Lo que sigue mal: {restantes}")
-        corregido["multiline_hint"] = detect_multiline(lines)
-        return corregido
+        corregido["filter_code"] = _normalizar_filtro(corregido["filter_code"])
+        problemas = _problemas_del_filtro(corregido["filter_code"])
+        if not problemas:
+            corregido["multiline_hint"] = detect_multiline(lines)
+            return corregido
+        filter_code = corregido["filter_code"]
+        normalized_fields = corregido.get("fields") or normalized_fields
+    if problemas:
+        raise RuntimeError(
+            "El modelo no logró generar un filter válido para este log. "
+            f"Lo que sigue mal: {problemas}")
 
     return {
         "filter_code": filter_code.strip(),

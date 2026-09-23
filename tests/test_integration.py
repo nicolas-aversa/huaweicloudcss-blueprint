@@ -1303,6 +1303,31 @@ def test_el_deploy_no_arranca_con_un_conf_que_logstash_no_compila(monkeypatch):
     assert "sin cerrar" in res.json()["detail"]["message"]
 
 
+def test_el_deploy_corrige_la_coma_del_hash_en_vez_de_rechazarla(monkeypatch):
+    """La coma entre entradas de un hash es un tic del modelo (viene de escribir
+    JSON) y no tiene nada de ambiguo: se corrige y el deploy sigue. Es el error
+    que dejó la pipeline de telemetría en `unavailable`."""
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda _dir: {})
+    con_coma = (_CONF_OK % 'mutate { convert => { "[data][a]" => "integer", "[data][b]" => "float" } }')
+    req = main.TerraformDeployRequest(pipeline_conf=con_coma, opensearch_password="pw")
+
+    notas = main._normalizar_conf(req)
+
+    assert any("coma entre entradas de un hash" in n for n in notas), notas
+    assert '"[data][a]" => "integer"  "[data][b]"' in req.pipeline_conf
+    assert main._check_conf_compila(req) is None, "después de corregirla tiene que pasar"
+
+
+def test_los_dos_endpoints_normalizan_antes_de_revisar():
+    """Corregir después del guard no sirve de nada: el guard ya cortó."""
+    import inspect
+    for fn in (main.terraform_deploy_stream, main.terraform_deploy_job):
+        src = inspect.getsource(fn)
+        assert "_normalizar_conf(request)" in src, fn.__name__
+        assert src.index("_normalizar_conf(request)") < src.index("_check_conf_compila(request)"), \
+            f"{fn.__name__}: normaliza después de revisar"
+
+
 def test_el_marcador_de_hosts_es_obligatorio_en_el_deploy():
     """Terraform inyecta el cluster con un `replace` literal de `hosts => []`.
     Sin ese texto exacto la pipeline escribe donde diga el .conf — típicamente
@@ -1354,11 +1379,41 @@ def test_el_filter_del_llm_se_valida_y_se_reintenta_con_feedback(monkeypatch):
     assert "sin el `filter" in visto["feedback"], visto.get("feedback")
     assert visto["previous"].startswith("grok {"), "el reintento no vio el filter anterior"
 
-    # Si el reintento tampoco sirve, se dice en vez de devolver algo que no anda.
-    monkeypatch.setattr(mi, "_regenerate_with_feedback",
-                        lambda **kw: {"filter_code": "grok { }", "fields": []})
+    # Si los reintentos tampoco sirven, se dice en vez de devolver algo que no anda.
+    intentos = []
+
+    def _sigue_roto(**kw):
+        intentos.append(kw["feedback"])
+        return {"filter_code": "grok { }", "fields": []}
+
+    monkeypatch.setattr(mi, "_regenerate_with_feedback", _sigue_roto)
     with pytest.raises(RuntimeError, match="no logró generar un filter válido"):
         mi.generate_logstash_filter("otra linea rara sin formato conocido 678")
+    assert len(intentos) == mi._REINTENTOS_DEL_FILTRO == 2, "se rinde en el primer intento"
+
+
+def test_la_coma_del_hash_del_llm_se_corrige_sin_gastar_un_reintento(monkeypatch):
+    """600 s de reintento para algo que sabemos cómo se escribe, no: la coma
+    entre entradas de un hash se arregla en el acto."""
+    import types
+    import maas_integrator as mi
+
+    con_coma = ('{"filter_code": "filter { mutate { convert => { \\"a\\" => \\"integer\\", '
+                '\\"b\\" => \\"float\\" } } }", "fields": []}')
+    msg = types.SimpleNamespace(content=con_coma)
+    creado = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(
+        create=lambda **kw: types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)]))))
+    monkeypatch.setattr(mi, "_build_client", lambda: creado)
+    monkeypatch.setattr(mi, "get_pipeline_model", lambda: "glm")
+
+    def no_llamar(**kw):
+        raise AssertionError("gastó un reintento en una coma")
+
+    monkeypatch.setattr(mi, "_regenerate_with_feedback", no_llamar)
+
+    res = mi.generate_logstash_filter("una linea rara sin formato conocido 4242")
+
+    assert '"a" => "integer"  "b" => "float"' in res["filter_code"]
 
 
 def test_un_filter_sano_del_llm_no_dispara_el_reintento(monkeypatch):

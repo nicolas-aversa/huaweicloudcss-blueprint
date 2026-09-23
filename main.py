@@ -1549,9 +1549,12 @@ def generate_pipeline(request: OnboardingRequest) -> PipelineResponse:
 
         # Único punto por el que pasan TODOS los caminos que arman un .conf (el
         # LLM, los generadores determinísticos, el catálogo de formatos y el
-        # ejemplo cacheado en el navegador), así que el chequeo va acá: lo que
-        # salga roto de acá llega intacto a Terraform, que lo acepta, y la
-        # pipeline no arranca sin que nada lo diga.
+        # ejemplo cacheado en el navegador), así que acá se normaliza y se
+        # chequea: lo que salga roto de acá llega intacto a Terraform, que lo
+        # acepta, y la pipeline no arranca sin que nada lo diga.
+        pipeline_code, notas = conf_lint.normalizar(pipeline_code)
+        for nota in notas:
+            print(f"[generate-pipeline] {nota}")
         errores = [str(p) for p in conf_lint.lint(pipeline_code) if p.nivel == conf_lint.ERROR]
         if errores:
             raise HTTPException(
@@ -3056,6 +3059,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
             detail={"stage": "pipeline_cap",
                     "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."},
         )
+    _normalizar_conf(request)
     _check_conf_compila(request)
     _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
@@ -3110,6 +3114,7 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
     if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
+    _normalizar_conf(request)
     _check_conf_compila(request)
     _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
@@ -3223,6 +3228,28 @@ def _avisos_de_conf(request: "TerraformDeployRequest") -> list[str]:
                 if p.nivel == conf_lint.AVISO]
     return [str(p) for p in conf_lint.lint(request.pipeline_conf or "")
             if p.nivel == conf_lint.AVISO]
+
+
+def _normalizar_conf(request: "TerraformDeployRequest") -> list[str]:
+    """Arregla los tics mecánicos del `.conf` antes de revisarlo.
+
+    Corre en el endpoint y no en el stream porque los guards son los que cortan:
+    de nada sirve corregir la coma de un hash si el guard ya rechazó el deploy
+    por esa misma coma. Solo toca lo inequívoco (ver `conf_lint.normalizar`).
+    """
+    notas: list[str] = []
+    if request.pipeline_conf:
+        request.pipeline_conf, n = conf_lint.normalizar(request.pipeline_conf)
+        notas += n
+    for caso in (request.cases or []):
+        if caso.filter_code:
+            caso.filter_code, n = conf_lint.normalizar(caso.filter_code)
+            notas += [f"{caso.slug}: {x}" for x in n]
+    for nota in notas:
+        print(f"[deploy] configuration file corregido — {nota}")
+    if notas:
+        audit.record("conf_normalizado", "; ".join(notas)[:300])
+    return notas
 
 
 def _check_conf_compila(request: "TerraformDeployRequest") -> None:

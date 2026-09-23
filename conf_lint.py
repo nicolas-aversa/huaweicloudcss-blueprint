@@ -373,9 +373,14 @@ class ErrorDeSintaxis(Exception):
         super().__init__(f"línea {self.linea}, columna {self.columna}: {mensaje}")
 
 
-def _pila_en(conf: str, pos: int) -> list[str]:
+# Una `{` abre un hash (y no un bloque de plugin) cuando viene como VALOR:
+# después de `=>`, o adentro de un array.
+_ABREN_HASH = (">", "[", ",")
+
+
+def _pila_en(conf: str, pos: int, mascara: str | None = None) -> list[str]:
     """Qué quedó abierto en `pos`: hashes, arrays y bloques, de afuera hacia adentro."""
-    m = scan(conf)
+    m = mascara or scan(conf)
     pila: list[str] = []
     previo = ""
     for i in range(min(pos, len(conf))):
@@ -385,7 +390,7 @@ def _pila_en(conf: str, pos: int) -> list[str]:
             continue
         ch = conf[i]
         if ch == "{":
-            pila.append("hash" if previo == ">" else "bloque")
+            pila.append("hash" if previo in _ABREN_HASH else "bloque")
         elif ch == "[":
             pila.append("array")
         elif ch in "}]" and pila:
@@ -393,6 +398,55 @@ def _pila_en(conf: str, pos: int) -> list[str]:
         if not ch.isspace():
             previo = ch
     return pila
+
+
+def normalizar(conf: str) -> tuple[str, list[str]]:
+    """Corrige los tics mecánicos del modelo y devuelve `(conf, notas)`.
+
+    Solo lo inequívoco, que es todo lo que se puede arreglar sin adivinar:
+
+      * la coma entre entradas de un hash, que es el error que dejó una pipeline
+        en `unavailable` (en Logstash van separadas por espacio);
+      * la coma de más antes de un `]` o un `}`;
+      * los saltos de línea de Windows.
+
+    Lo ambiguo —un `=` en vez de `=>`, una comilla que falta— no se toca: eso va
+    al reintento con el modelo, que es el único que sabe qué quiso escribir.
+    """
+    notas: list[str] = []
+    if "\r\n" in conf:
+        conf = conf.replace("\r\n", "\n")
+        notas.append("pasé los saltos de línea a formato Unix")
+
+    m = scan(conf)
+    chars = list(conf)
+    pila: list[str] = []
+    previo = ""
+    for i, ch in enumerate(conf):
+        if m[i] != CODIGO:
+            if m[i] == STRING:
+                previo = '"'
+            continue
+        if ch == "{":
+            pila.append("hash" if previo in _ABREN_HASH else "bloque")
+        elif ch == "[":
+            pila.append("array")
+        elif ch in "}]":
+            if pila:
+                pila.pop()
+        elif ch == ",":
+            siguiente = next((conf[j] for j in range(i + 1, len(conf))
+                              if m[j] != CODIGO or not conf[j].isspace()), "")
+            dentro = pila[-1] if pila else ""
+            if dentro == "hash":
+                chars[i] = " "
+                notas.append(f"línea {_linea(conf, i)}: saqué una coma entre entradas de un hash")
+            elif dentro == "array" and siguiente == "]":
+                chars[i] = " "
+                notas.append(f"línea {_linea(conf, i)}: saqué la coma final de un array")
+        if not ch.isspace():
+            previo = ch
+    return "".join(chars), notas
 
 
 def _diagnostico(conf: str, pos: int, esperados: set) -> str:

@@ -231,6 +231,64 @@ def test_sin_las_comas_el_mismo_conf_parsea():
     assert conf_lint.lint(sano, marcador_hosts=True) == []
 
 
+# ── El normalizador ─────────────────────────────────────────────────────────
+# La coma del hash es un tic mecánico: el modelo viene de escribir JSON. Antes
+# de pedirle que lo corrija —600 s de reintento— se arregla acá, porque no hay
+# nada que adivinar: en un hash la coma nunca es válida.
+def test_normalizar_arregla_la_coma_del_hash():
+    sano, notas = conf_lint.normalizar(_CONF_TELEMETRIA)
+
+    assert conf_lint.lint(sano, marcador_hosts=True) == []
+    assert len(notas) == 1 and "coma entre entradas de un hash" in notas[0]
+    assert "línea 22" in notas[0], notas         # la del `=> "integer",`
+
+
+def test_normalizar_no_toca_las_comas_de_un_array():
+    """Ahí la coma es obligatoria: sacarla rompería el .conf en vez de arreglarlo."""
+    sano, notas = conf_lint.normalizar(_CONF_TELEMETRIA)
+
+    assert '"fecha_hora", "id_trabajo", "paginas_totales"' in sano
+    assert conf_lint.normalizar('filter { mutate { remove_field => ["a", "b"] } }')[1] == []
+
+
+def test_normalizar_saca_la_coma_final_de_un_array():
+    conf = 'input { s3 { bucket => "b" } }\nfilter { mutate { remove_field => ["a", "b", ] } }\noutput { stdout {} }\n'
+
+    sano, notas = conf_lint.normalizar(conf)
+
+    assert conf_lint.lint(sano) == []
+    assert any("coma final de un array" in n for n in notas)
+
+
+def test_normalizar_un_conf_sano_no_cambia_nada():
+    for texto in (CONF_S3_ANIDADO, _CONF_TELEMETRIA.replace('"integer",', '"integer"')):
+        sano, notas = conf_lint.normalizar(texto)
+        assert sano == texto and notas == []
+
+
+def test_normalizar_es_idempotente():
+    una, _ = conf_lint.normalizar(_CONF_TELEMETRIA)
+    dos, notas = conf_lint.normalizar(una)
+
+    assert dos == una and notas == []
+
+
+def test_normalizar_no_toca_lo_que_esta_dentro_de_un_texto():
+    """Una coma dentro de un `ruby { code => '…' }` o de un regex es parte del
+    dato: tocarla cambiaría lo que hace la pipeline."""
+    conf = ('input { s3 { bucket => "b" } }\n'
+            'filter {\n'
+            '  if [m] =~ /^a,b/ { drop {} }\n'
+            '  ruby { code => \'event.set("x", [1, 2])\' }\n'
+            '  mutate { add_field => { "lista" => "a, b, c" } }\n'
+            '}\n'
+            'output { stdout {} }\n')
+
+    sano, notas = conf_lint.normalizar(conf)
+
+    assert sano == conf and notas == []
+
+
 def test_un_plugin_que_no_existe_o_que_css_no_tiene():
     base = 'input { s3 { bucket => "b" } }\nfilter { %s }\noutput { stdout {} }\n'
 
