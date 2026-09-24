@@ -125,6 +125,8 @@ import runs  # noqa: E402
 import tfstate  # noqa: E402  (lectura del state de Terraform, local o en OBS)
 # Lectura del .conf de Logstash sin regex (bloques, settings, máscara de strings).
 import conf_lint  # noqa: E402
+# Coordenadas de un dataset nuevo → un campo geo_point que se pueda mapear.
+import geo_fields  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -908,7 +910,7 @@ class FieldMapping(BaseModel):
         default=None,
         description="Si el overlay ECS está activo y el campo mapea, su path ECS (ej. source.ip).",
     )
-    type: str = Field(..., description="Tipo: string | integer | float | boolean | date | ip.")
+    type: str = Field(..., description="Tipo: string | integer | float | boolean | date | ip | geo_point.")
     business_label: str = Field(..., description="Etiqueta amigable en español.")
     unit: str | None = Field(default=None, description="Unidad si aplica (ms, USD, ...) o null.")
     is_ecs: bool = Field(
@@ -1439,16 +1441,35 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     for f in result.get("fields", []):
         if f.get("is_ecs"):
             info = classify_field(f.get("ecs_path", ""))
+            # ECS ya sabe que `source.geo.location` y sus siete hermanos son
+            # `geo_point`; ese dato se venía tirando y el campo terminaba como
+            # keyword, o sea sin mapa posible.
+            tipo = f.get("type")
+            if info["ecs_type"] == "geo_point":
+                tipo = "geo_point"
             enriched_fields.append({
                 **f,
+                "type": tipo,
                 "is_ecs": info["is_ecs"],
                 "ecs_type_official": info["ecs_type"],
                 "normalized_path": info["normalized"],
             })
         else:
             enriched_fields.append(f)
+
+    # Coordenadas: si el log trae latitud y longitud, se arma acá el campo
+    # `geo_point` que las junta. Va en el endpoint y no adentro del generador
+    # porque por acá pasan TODOS los caminos —el LLM y los tres detectores
+    # determinísticos, que retornan antes de cualquier post-proceso—, y porque
+    # el campo tiene que existir ya en el paso 2 para viajar en el body del
+    # deploy hasta el index template y el dashboard.
+    filter_code, enriched_fields, nota = geo_fields.aplicar(
+        result["filter_code"], enriched_fields, request.namespace)
+    if nota:
+        print(f"[geo] {nota}")
+
     return GenerateFilterResponse(
-        filter_code=result["filter_code"],
+        filter_code=filter_code,
         fields=enriched_fields,
     )
 

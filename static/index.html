@@ -3232,7 +3232,9 @@
           'float': 'rgba(34, 197, 94, 0.12)',
           'date': 'rgba(168, 85, 247, 0.12)',
           'ip': 'rgba(168, 85, 247, 0.12)',
-          'boolean': 'rgba(249, 115, 22, 0.12)'
+          'boolean': 'rgba(249, 115, 22, 0.12)',
+          // Coordenadas: el único tipo que se dibuja en un mapa.
+          'geo_point': 'rgba(20, 184, 166, 0.14)'
         };
         const typeColor = typeColors[f.type] || 'rgba(59, 130, 246, 0.12)';
         const groupAttr = f.group ? ` data-group-row="${escapeHtml(f.group)}"` : '';
@@ -3267,6 +3269,7 @@
                 <option value="date" ${f.type === 'date' ? 'selected' : ''}>date</option>
                 <option value="ip" ${f.type === 'ip' ? 'selected' : ''}>ip</option>
                 <option value="boolean" ${f.type === 'boolean' ? 'selected' : ''}>boolean</option>
+                <option value="geo_point" ${f.type === 'geo_point' ? 'selected' : ''}>geo_point</option>
               </select>
             </td>
             <td>

@@ -102,7 +102,7 @@ Respondé EXCLUSIVAMENTE con un objeto JSON:
     {
       "raw_name": "<nombre del campo en el log original>",
       "field_path": "<{namespace}.<nombre>, ej: {namespace}.trxl_resp>",
-      "type": "<string | integer | float | boolean | date | ip>",
+      "type": "<string | integer | float | boolean | date | ip | geo_point>",
       "business_label": "<etiqueta amigable en español>",
       "unit": "<unidad si aplica: ms, USD, bytes; o null>",
       "dimension": <true | false>,
@@ -261,7 +261,7 @@ Respondé EXCLUSIVAMENTE con un objeto JSON:
     {
       "raw_name": "<nombre de la columna SQL>",
       "field_path": "<{namespace}.<nombre>",
-      "type": "<string | integer | float | boolean | date | ip>",
+      "type": "<string | integer | float | boolean | date | ip | geo_point>",
       "business_label": "<etiqueta amigable en español>",
       "unit": "<unidad si aplica: ms, USD, bytes; o null>",
       "dimension": <true | false>,
@@ -657,8 +657,10 @@ def is_dimension(field_path: str, ftype: str, llm_flag: Any = None) -> bool:
         return llm_flag
     if isinstance(llm_flag, str) and llm_flag.strip().lower() in ("true", "false"):
         return llm_flag.strip().lower() == "true"
-    # Las medidas se suman, no se agrupan; date/ip tienen sus propios paneles.
-    if (ftype or "").lower() in ("integer", "float", "long", "double", "date", "ip"):
+    # Las medidas se suman, no se agrupan; date/ip/geo_point tienen sus propios
+    # paneles. Un punto en el mapa agrupado como categoría da una barra por
+    # coordenada: tantas barras como documentos.
+    if (ftype or "").lower() in ("integer", "float", "long", "double", "date", "ip", "geo_point"):
         return False
     return not _NON_DIMENSION_RE.search(field_path or "")
 

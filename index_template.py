@@ -62,7 +62,11 @@ _FIELD_TYPE_TO_OS: dict[str, dict[str, Any]] = {
     "float": {"type": "double"},
     "ip": {"type": "ip"},
     "boolean": {"type": "boolean"},
-    "geo_point": {"type": "geo_point"},
+    # `ignore_malformed` va acá adentro a propósito: el del índice (más abajo,
+    # en `settings`) NO cubre geo_point, y sin esto una sola coordenada basura
+    # —un "N/D", un (0,0) mal armado— rechaza el documento ENTERO en vez del
+    # campo. Es la diferencia entre perder una columna y perder la fila.
+    "geo_point": {"type": "geo_point", "ignore_malformed": True},
     # Format lenient, COMPACTO PRIMERO. El orden importa: OpenSearch prueba los
     # formatos en orden y usa el primero que matchea. Un timestamp compacto de
     # 17 dígitos (`20251004235759139`) es un long válido, así que si `epoch_millis`
