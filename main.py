@@ -135,6 +135,8 @@ import semantica  # noqa: E402
 import preguntas  # noqa: E402
 # Los campos de un dataset nuevo van a la raíz, como en los casos de ejemplo.
 import raiz  # noqa: E402
+# El progreso del `terraform apply`, por componente y global, que solo avanza.
+import progreso_tf  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -2659,55 +2661,18 @@ def _unmask_against(conf: str, request, refs: list[str]) -> str:
 # ── Deploy con progreso streaming (SSE) ──────────────────────────────────────
 # El endpoint /terraform/deploy bloquea 5-25 min sin feedback. Esta versión
 # corre el mismo terraform apply pero con Popen + lectura línea por línea,
-# emitiendo eventos SSE con % de progreso real (fase + mensaje) para que el
-# frontend muestre una barra incremental.
-
-_TF_PHASES: dict[str, tuple[str, float, float, float]] = {
-    "huaweicloud_nat_gateway":               ("NAT gateway",            3,  5,  20),
-    "huaweicloud_vpc_eip":                   ("EIP pública",            5,  7,  15),
-    "huaweicloud_nat_dnat_rule":             ("DNAT (acceso público)",  7,  8,  10),
-    "huaweicloud_nat_snat_rule":             ("SNAT (salida a MaaS)",   8,  9,  10),
-    "huaweicloud_networking_secgroup_rule":  ("Security groups",        9, 10,  10),
-    "huaweicloud_css_cluster":               ("OpenSearch cluster",    10, 55, 900),
-    "huaweicloud_css_logstash_cluster":      ("Logstash cluster",      55, 85, 600),
-    "huaweicloud_css_logstash_configuration":("Configurando pipeline", 85, 92,  30),
-    "huaweicloud_css_logstash_pipeline":     ("Activando ingesta",     92, 95,  15),
-}
+# emitiendo eventos SSE de progreso: uno global y uno por componente (red,
+# cluster de OpenSearch, de Logstash, cada pipeline). Cómo se calcula —y por
+# qué ya no baja— está en `progreso_tf`.
+#
+# Tramos del porcentaje global. El apply ocupa casi todo: es lo que tarda.
+_PCT_APPLY_DESDE, _PCT_APPLY_HASTA = 5.0, 92.0
+_PCT_OUTPUTS, _PCT_FINALIZANDO, _PCT_SECURITY = 93.0, 94.0, 95.0
+_PCT_INGESTA_DESDE, _PCT_INGESTA_HASTA = 96.0, 99.0
 
 
-def _parse_tf_line(line: str, completed: set[str]) -> dict | None:
-    """Parsea una línea de stdout de `terraform apply` → evento de progreso.
-
-    Terraform emite líneas como::
-        huaweicloud_css_cluster.opensearch_cluster: Creating...
-        huaweicloud_css_cluster.opensearch_cluster: Still creating... [30s elapsed]
-        huaweicloud_css_cluster.opensearch_cluster: Creation complete after 5m30s [id=...]
-        Apply complete! Resources: 12 added, 0 changed, 0 destroyed.
-
-    Cada recurso se mapea a una fase con rango de % y duración estimada; el %
-    avanza dentro del rango según el elapsed time reportado.
-    """
-    line = line.strip()
-    if not line:
-        return None
-    if "Apply complete!" in line:
-        return {"percent": 96, "phase": "Finalizando", "message": "Apply completo", "key": "apply", "done": True}
-    for res_type, (label, start, end, est) in _TF_PHASES.items():
-        if res_type not in line:
-            continue
-        if "Creation complete" in line or "Modifications complete" in line:
-            completed.add(res_type)
-            return {"percent": end, "phase": label, "message": f"{label} ✓", "key": res_type, "done": True}
-        if "Still creating" in line or "Still modifying" in line:
-            # El % avanza según el elapsed reportado, pero NO lo mostramos (evita "(0s)").
-            m = re.search(r"\[(\d+)s elapsed\]", line)
-            elapsed = int(m.group(1)) if m else 0
-            frac = min(elapsed / est, 0.95) if est > 0 else 0
-            pct = round(start + (end - start) * frac, 1)
-            return {"percent": pct, "phase": label, "message": f"{label}…", "key": res_type, "done": False}
-        if "Creating..." in line or "Modifying..." in line:
-            return {"percent": start, "phase": label, "message": f"{label}…", "key": res_type, "done": False}
-    return None
+def _pct_apply(fraccion: float) -> float:
+    return round(_PCT_APPLY_DESDE + (_PCT_APPLY_HASTA - _PCT_APPLY_DESDE) * fraccion, 1)
 
 
 # ── Credenciales en las respuestas ──────────────────────────────────────────
@@ -2837,10 +2802,25 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     (creds + IDs de infra) vive en `destroy.auto.tfvars.json`.
     """
     secrets = _deploy_secret_literals(request)
+    # El porcentaje global nunca baja, lo emita quien lo emita. Los tramos de
+    # cada paso ya están en orden (`_PCT_*`), pero esto es lo que garantiza que
+    # un paso nuevo con un número a mano no vuelva a hacer bailar la barra.
+    maximo = 0.0
     try:
         for raw in _deploy_stream_gen_raw(request, terraform_dir, logstash_flavor,
                                           opensearch_flavor, secrets):
-            yield _mask_sse(raw, secrets)
+            ev = _mask_sse(raw, secrets)
+            if ev.startswith('data: {"type": "progress"'):
+                try:
+                    d = json.loads(ev[len("data: "):])
+                except ValueError:
+                    d = None
+                if d and isinstance(d.get("percent"), (int, float)):
+                    if d["percent"] < maximo:
+                        d["percent"] = maximo
+                        ev = _sse(d)
+                    maximo = max(maximo, float(d["percent"]))
+            yield ev
     finally:
         try:
             (terraform_dir / "deploy.auto.tfvars.json").unlink(missing_ok=True)
@@ -2965,7 +2945,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     yield _sse({"type": "progress", "percent": 5, "phase": "Terraform apply",
                 "message": "Aplicando infraestructura…"})
 
-    completed_resources: set[str] = set()
+    progreso = progreso_tf.ProgresoApply()
     tf_lines: list[str] = []
     process = subprocess.Popen(
         ["terraform", "apply", "-auto-approve", "-input=false", "-no-color"],
@@ -2985,9 +2965,12 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
             stripped = line.rstrip()
             if stripped:
                 yield _sse({"type": "log", "source": "terraform apply", "message": stripped})
-            progress = _parse_tf_line(line, completed_resources)
-            if progress:
-                yield _sse({"type": "progress", **progress})
+            for ev in progreso.linea(line):
+                if ev["type"] == "apply":
+                    yield _sse({"type": "progress", "percent": _pct_apply(ev["fraccion"]),
+                                "phase": ev["phase"], "message": ev["message"]})
+                else:   # `plan` (los componentes, una vez) e `item` (uno que cambió)
+                    yield _sse(ev)
     except Exception as exc:
         yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
         return
@@ -3006,7 +2989,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     # Se lee INCLUSO si el apply falló: un apply parcial igual guarda estado, así
     # detectamos si el cluster se creó a pesar del error (típ. falló solo una regla
     # de SG que ya existía) y no descartamos un entorno que quedó levantado.
-    yield _sse({"type": "progress", "percent": 97, "phase": "Outputs",
+    yield _sse({"type": "progress", "percent": _PCT_OUTPUTS, "phase": "Outputs",
                 "message": "Obteniendo endpoints…"})
     output_result = subprocess.run(
         ["terraform", "output", "-json"],
@@ -3030,7 +3013,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         # El cluster SÍ se creó: el apply falló en algo secundario (típicamente una
         # regla de security group que YA existía). Registramos el entorno y avisamos,
         # en vez de tirar todo abajo y dejar recursos huérfanos.
-        yield _sse({"type": "progress", "percent": 97, "phase": "Aviso",
+        yield _sse({"type": "progress", "percent": _PCT_OUTPUTS, "phase": "Aviso",
                     "message": "El entorno se creó, pero una regla de security group falló "
                                "(probablemente ya existía). Si no accedés a 9200/Kibana desde "
                                "afuera, revisá esa regla en tu SG."})
@@ -3049,7 +3032,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         obs_executor.shutdown()
 
     # ── Post-deploy: marker + artifact ───────────────────────────────────
-    yield _sse({"type": "progress", "percent": 99, "phase": "Finalizando",
+    yield _sse({"type": "progress", "percent": _PCT_FINALIZANDO, "phase": "Finalizando",
                 "message": "Guardando estado del deploy…"})
     _write_platform_marker(terraform_dir, _effective_project_name(request, terraform_dir))
     _write_index_template_artifact(terraform_dir, request)
@@ -3100,7 +3083,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     if not request.cases and request.pipeline_slug:
         target_slugs = {request.pipeline_slug}
     if "siem" in target_slugs and not request.start_ingestion:
-        yield _sse({"type": "progress", "percent": 98, "phase": "Security Analytics",
+        yield _sse({"type": "progress", "percent": _PCT_SECURITY, "phase": "Security Analytics",
                     "message": "Provisionando Sigma rules + detector…"})
         try:
             sa_result = _provision_security_analytics(
@@ -4395,14 +4378,20 @@ def _verificar_ingesta(request: "TerraformDeployRequest", cluster: dict[str, str
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
         objetivos = [(slug, index_pattern_from_name(request.opensearch_index))]
 
-    yield _sse({"type": "progress", "percent": 97, "phase": "Verificando ingesta",
+    yield _sse({"type": "progress", "percent": _PCT_INGESTA_DESDE, "phase": "Verificando ingesta",
                 "message": "Esperando los primeros documentos…"})
     pendientes = dict(objetivos)
     vistos: dict[str, int] = {}
-    for _ in range(_INGESTA_INTENTOS):
+    for intento in range(_INGESTA_INTENTOS):
         if not pendientes:
             break
         time.sleep(_INGESTA_PASO_S)
+        # La espera puede durar minutos: la barra avanza con cada consulta en
+        # vez de quedarse clavada en el mismo número.
+        yield _sse({"type": "progress", "phase": "Verificando ingesta",
+                    "percent": round(_PCT_INGESTA_DESDE + (_PCT_INGESTA_HASTA - _PCT_INGESTA_DESDE)
+                                     * (intento + 1) / _INGESTA_INTENTOS, 1),
+                    "message": "Esperando los primeros documentos…"})
         for slug, patron in list(pendientes.items()):
             n = _index_doc_count(base, user, request.opensearch_password, patron)
             if n:
