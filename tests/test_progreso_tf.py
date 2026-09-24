@@ -133,9 +133,9 @@ def test_el_plan_anuncia_los_componentes_antes_de_empezar():
     # regla DNAT con su fila: son las que dan acceso al cluster privado.
     assert [c["label"] for c in plan["items"]] == [
         "CSS OpenSearch cluster", "CSS Logstash cluster", "NAT gateway", "EIP pública",
-        "DNAT → OpenSearch Dashboards", "DNAT :9200 → OpenSearch",
-        "Reglas de security group",
-        "Pipeline · fintech", "Pipeline · siem", "Activación de pipelines"]
+        "DNAT :5601 · Dashboards", "DNAT :9200 · OpenSearch",
+        "Reglas de SG",
+        "Pipeline · fintech", "Pipeline · siem", "Activar pipelines"]
     assert all(c["percent"] == 0 and not c["done"] and c["estado"] == "En espera"
                for c in plan["items"])
     # El data source no es un recurso que se cree.
@@ -288,8 +288,24 @@ def test_cada_regla_dnat_es_su_propia_fila():
               "huaweicloud_nat_dnat_rule.logstash_beats[0]", "huaweicloud_nat_dnat_rule.otra[0]"):
         p._registrar(d, "crear")
     assert [(c["key"], c["label"]) for c in p.componentes()] == [
-        ("dnat:kibana", "DNAT → OpenSearch Dashboards"),
-        ("dnat:logstash_beats", "DNAT → Logstash (Beats)"),
-        ("dnat:opensearch", "DNAT :9200 → OpenSearch"),
+        ("dnat:kibana", "DNAT :5601 · Dashboards"),
+        ("dnat:logstash_beats", "DNAT · Logstash Beats"),
+        ("dnat:opensearch", "DNAT :9200 · OpenSearch"),
         ("dnat:otra", "DNAT · otra"),
     ]
+
+
+def test_las_etiquetas_entran_en_una_columna_y_las_dnat_dicen_su_puerto():
+    """La lista va en dos columnas: "DNAT → OpenSearch Dashboards" se cortaba
+    ("DNAT → OpenSearch Das…"), y era la única DNAT sin puerto."""
+    fijas = list(progreso_tf._ETIQUETAS.values()) + list(progreso_tf._DNAT.values())
+    largas = [e for e in fijas if len(e) > 23]
+    assert not largas, largas
+    assert ":9200" in progreso_tf._DNAT["opensearch"]
+    assert ":5601" in progreso_tf._DNAT["kibana"]
+    # 5601 es el default de `kibana_port`, y el backend no lo cambia.
+    tf = (progreso_tf.__file__.rsplit("progreso_tf.py", 1)[0] + "terraform/main.tf")
+    bloque = open(tf, encoding="utf-8").read()
+    bloque = bloque[bloque.index('variable "kibana_port"'):]
+    assert "default     = 5601" in bloque[:bloque.index("}")]
+    assert "kibana_port" not in open(main.__file__, encoding="utf-8").read()

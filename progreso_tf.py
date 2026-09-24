@@ -49,17 +49,20 @@ _ETIQUETAS = {
     "logstash": "CSS Logstash cluster",
     "nat": "NAT gateway",
     "eip": "EIP pública",
-    "snat": "SNAT · salida a internet",
-    "sg": "Reglas de security group",
-    "activar": "Activación de pipelines",
+    "snat": "SNAT (salida)",
+    "sg": "Reglas de SG",
+    "activar": "Activar pipelines",
     "otros": "Otros recursos",
 }
 # Una fila por regla DNAT: son las que dan acceso al cluster privado, y cuando
-# falta una conviene verlo en la lista.
+# falta una conviene verlo en la lista. Cada una con su puerto. Las etiquetas
+# son cortas a propósito: la lista va en dos columnas y "DNAT → OpenSearch
+# Dashboards" se cortaba. 5601 es `kibana_port`, que el backend no cambia; el
+# de Beats sí varía, así que ese no se nombra.
 _DNAT = {
-    "opensearch": "DNAT :9200 → OpenSearch",
-    "kibana": "DNAT → OpenSearch Dashboards",
-    "logstash_beats": "DNAT → Logstash (Beats)",
+    "opensearch": "DNAT :9200 · OpenSearch",
+    "kibana": "DNAT :5601 · Dashboards",
+    "logstash_beats": "DNAT · Logstash Beats",
 }
 # Orden en pantalla: los clusters, la red que les da acceso y la ingesta.
 _ORDEN = ["opensearch", "logstash", "nat", "eip", "dnat", "snat", "sg",

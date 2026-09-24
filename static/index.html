@@ -5211,6 +5211,9 @@
       li.classList.toggle('is-done', !!c.done);
       li.classList.toggle('is-waiting', esperando);
       li.querySelector('.deploy-progress__label').textContent = c.label || c.key;
+      // Si igual no entra (el slug de una pipeline puede ser largo), el nombre
+      // completo queda al pasar el mouse.
+      li.querySelector('.deploy-progress__label').title = c.label || c.key;
       li.querySelector('.deploy-progress__estado').textContent =
         c.done ? 'Listo' : esperando ? 'En espera' : `${c.estado || 'Aplicando'} · ${pct}%`;
       li.querySelector('.deploy-progress__minifill').style.width = `${c.done ? 100 : pct}%`;

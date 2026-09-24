@@ -55,6 +55,8 @@ progresoEvento(raiz, { type: 'plan', items: [
 check('plan: tres filas', raiz.querySelector('.deploy-progress__list').children.length === 3);
 check('plan: en espera', fila('opensearch').classList.contains('is-waiting'));
 check('plan: texto', texto('opensearch', '.deploy-progress__estado') === 'En espera');
+check('plan: nombre completo al pasar el mouse',
+      fila('opensearch').querySelector('.deploy-progress__label').title === 'CSS OpenSearch cluster');
 
 // Un componente que avanza.
 progresoEvento(raiz, { type: 'item', key: 'opensearch', label: 'CSS OpenSearch cluster',
