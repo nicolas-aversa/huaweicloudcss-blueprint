@@ -29,6 +29,7 @@ class El {
   }
   set innerHTML(h) { this.children = [...String(h).matchAll(/class="([^"]+)"/g)].map(m => new El(m[1])); }
   appendChild(e) { this.children.push(e); return e; }
+  insertBefore(e, ref) { this.children.splice(this.children.indexOf(ref), 0, e); return e; }
   _todos() { return this.children.flatMap(c => [c, ...c._todos()]); }
   querySelector(sel) { return this._todos().find(e => e._cls.has(sel.slice(1))) || null; }
   querySelectorAll(sel) { return this._todos().filter(e => e._cls.has(sel.slice(1))); }
@@ -43,23 +44,32 @@ const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -
 
 const raiz = new El();
 raiz.innerHTML = progresoHTML('Iniciando…');
-const fila = key => raiz.querySelector('.deploy-progress__list').children.find(li => li.dataset.key === key);
+const fila = key => raiz.querySelectorAll('.deploy-progress__item').find(li => li.dataset.key === key);
+const grupos = el => el.querySelector('.deploy-progress__list').children.map(g => g.dataset.grupo).join(',');
+const grupo = key => raiz.querySelector('.deploy-progress__list').children.find(g => g.dataset.grupo === key);
 const texto = (key, cls) => fila(key).querySelector(cls).textContent;
 
-// El plan: todos los componentes de entrada, en espera.
+// El plan: todos los componentes de entrada, en espera, agrupados por
+// servicio (aunque lleguen mezclados, los grupos van en su orden).
 progresoEvento(raiz, { type: 'plan', items: [
-  { key: 'nat', label: 'NAT gateway', percent: 0, done: false, estado: 'En espera' },
-  { key: 'opensearch', label: 'CSS OpenSearch cluster', percent: 0, done: false, estado: 'En espera' },
-  { key: 'pipeline:fintech', label: 'Pipeline · fintech', percent: 0, done: false, estado: 'En espera' },
+  { key: 'nat', grupo: 'nat', label: 'Gateway', percent: 0, done: false, estado: 'En espera' },
+  { key: 'opensearch', grupo: 'css', label: 'OpenSearch cluster', percent: 0, done: false, estado: 'En espera' },
+  { key: 'pipeline:fintech', grupo: 'css', label: 'Pipeline · fintech', percent: 0, done: false, estado: 'En espera' },
+  { key: 'rutas:maas', grupo: 'css', label: 'Rutas → MaaS', percent: 0, done: false, estado: 'En espera' },
 ]});
-check('plan: tres filas', raiz.querySelector('.deploy-progress__list').children.length === 3);
+check('plan: cuatro filas', raiz.querySelectorAll('.deploy-progress__item').length === 4);
+check('plan: por servicio, en orden', grupos(raiz) === 'css,nat', grupos(raiz));
+check('plan: tres bajo CSS', grupo('css').querySelectorAll('.deploy-progress__item').length === 3);
+check('plan: el logo del servicio', /deploy-progress__logo/.test(
+  grupo('css').children.map(c => c.className).join(' ')));
+check('plan: cuenta', grupo('css').querySelector('.deploy-progress__cuenta').textContent === '0/3');
 check('plan: en espera', fila('opensearch').classList.contains('is-waiting'));
 check('plan: texto', texto('opensearch', '.deploy-progress__estado') === 'En espera');
 check('plan: nombre completo al pasar el mouse',
-      fila('opensearch').querySelector('.deploy-progress__label').title === 'CSS OpenSearch cluster');
+      fila('opensearch').querySelector('.deploy-progress__label').title === 'OpenSearch cluster');
 
 // Un componente que avanza.
-progresoEvento(raiz, { type: 'item', key: 'opensearch', label: 'CSS OpenSearch cluster',
+progresoEvento(raiz, { type: 'item', key: 'opensearch', grupo: 'css', label: 'OpenSearch cluster',
                        percent: 34.4, done: false, estado: 'Creando' });
 check('item: ya no espera', !fila('opensearch').classList.contains('is-waiting'));
 check('item: qué hace y cuánto', texto('opensearch', '.deploy-progress__estado') === 'Creando · 34%',
@@ -67,15 +77,31 @@ check('item: qué hace y cuánto', texto('opensearch', '.deploy-progress__estado
 check('item: su barra', fila('opensearch').querySelector('.deploy-progress__minifill').style.width === '34%');
 
 // Otro que termina.
-progresoEvento(raiz, { type: 'item', key: 'nat', label: 'NAT gateway',
+progresoEvento(raiz, { type: 'item', key: 'nat', grupo: 'nat', label: 'Gateway',
                        percent: 100, done: true, estado: 'listo' });
 check('listo: tilde', fila('nat').classList.contains('is-done'));
 check('listo: texto', texto('nat', '.deploy-progress__estado') === 'Listo');
+check('listo: cuenta', grupo('nat').querySelector('.deploy-progress__cuenta').textContent === '1/1');
+
+// Una ruta que falla: roja, y sigue fallida aunque el deploy termine bien.
+progresoEvento(raiz, { type: 'item', key: 'rutas:maas', grupo: 'css', label: 'Rutas → MaaS',
+                       percent: 0, done: false, error: true, estado: 'Falló' });
+check('error: marcado', fila('rutas:maas').classList.contains('is-error'));
+check('error: texto', texto('rutas:maas', '.deploy-progress__estado') === 'Falló');
+check('error: no espera', !fila('rutas:maas').classList.contains('is-waiting'));
+
+// Un grupo que llega después va en su lugar, no al final.
+progresoEvento(raiz, { type: 'item', key: 'eip', grupo: 'eip', label: 'IP pública',
+                       percent: 0, done: false, estado: 'Creando' });
+progresoEvento(raiz, { type: 'item', key: 'sg', grupo: 'vpc', label: 'Reglas de entrada',
+                       percent: 0, done: false, estado: 'Creando' });
+check('orden: eip antes de vpc', grupos(raiz) === 'css,nat,eip,vpc', grupos(raiz));
 
 // Un componente que el plan no traía aparece igual.
 progresoEvento(raiz, { type: 'item', key: 'otros', label: 'Otros recursos',
                        percent: 10, done: false, estado: 'Creando' });
 check('nuevo: aparece', !!fila('otros'));
+check('nuevo: sin grupo va a Otros, al final', grupos(raiz) === 'css,nat,eip,vpc,otros', grupos(raiz));
 
 // El global.
 progresoEvento(raiz, { type: 'progress', percent: 41.6, phase: 'CSS OpenSearch cluster',
@@ -98,7 +124,7 @@ reuso.innerHTML = progresoHTML();
 progresoEvento(reuso, { type: 'plan', items: [{ key: 'x', label: 'X', percent: 0, done: false, estado: 'En espera' },
                                               { key: 'y', label: 'Y', percent: 0, done: false, estado: 'En espera' }] });
 progresoEvento(reuso, { type: 'plan', items: [{ key: 'z', label: 'Z', percent: 0, done: false, estado: 'En espera' }] });
-const keys = reuso.querySelector('.deploy-progress__list').children.map(li => li.dataset.key).join(',');
+const keys = reuso.querySelectorAll('.deploy-progress__item').map(li => li.dataset.key).join(',');
 check('plan nuevo: reemplaza', keys === 'z', keys);
 
 // Termina bien: todo listo y al 100%.
@@ -108,6 +134,18 @@ progresoEvento(otra, { type: 'plan', items: [{ key: 'a', label: 'A', percent: 50
 progresoFin(otra, true);
 check('fin: 100%', otra.querySelector('.deploy-progress__pct').textContent === '100%');
 check('fin: listo', otra.querySelector('.deploy-progress__item').classList.contains('is-done'));
+
+// Termina bien con una ruta fallida: la ruta NO se tilda.
+const conError = new El();
+conError.innerHTML = progresoHTML();
+progresoEvento(conError, { type: 'plan', items: [
+  { key: 'a', grupo: 'css', label: 'A', percent: 50, done: false, estado: 'Creando' },
+  { key: 'r', grupo: 'css', label: 'R', percent: 0, done: false, error: true, estado: 'Falló' }] });
+progresoFin(conError, true);
+const r = conError.querySelectorAll('.deploy-progress__item').find(li => li.dataset.key === 'r');
+check('fin: el error sigue', r.classList.contains('is-error') && !r.classList.contains('is-done'));
+check('fin: cuenta', conError.querySelector('.deploy-progress__cuenta').textContent === '1/2',
+      conError.querySelector('.deploy-progress__cuenta').textContent);
 
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
@@ -121,8 +159,11 @@ def _funcion(html: str, firma: str) -> str:
 
 def test_la_barra_global_y_las_de_cada_componente(tmp_path):
     html = _INDEX.read_text(encoding="utf-8")
-    fuente = "\n".join(_funcion(html, f"    function {f}(") for f in (
-        "progresoHTML", "_progresoItem", "progresoEvento", "progresoFin"))
+    grupos = html[html.index("    // Los servicios de Huawei Cloud que levanta"):
+                  html.index("    function progresoEvento(")]
+    fuente = "\n".join([_funcion(html, "    function progresoHTML("), grupos,
+                        _funcion(html, "    function progresoEvento("),
+                        _funcion(html, "    function progresoFin(")])
     js = tmp_path / "progreso.mjs"
     js.write_text(_DOM + fuente + "\n" + _ARNES, encoding="utf-8")
 

@@ -96,7 +96,7 @@ def test_el_primer_apply_no_activa_y_el_segundo_si(monkeypatch, tmp_path):
     original = ruta.read_text(encoding="utf-8")
     vistos = []
 
-    def _fake(terraform_dir, args, desde, hasta, tf_lines):
+    def _fake(terraform_dir, args, desde, hasta, tf_lines, **_):
         vistos.append((args, json.loads(ruta.read_text(encoding="utf-8"))["pipelines"]))
         return 0
         yield  # noqa: unreachable — lo vuelve generador
@@ -118,7 +118,7 @@ def test_si_el_primer_apply_falla_no_se_activa_nada(monkeypatch, tmp_path):
     original = ruta.read_text(encoding="utf-8")
     llamados = []
 
-    def _fake(terraform_dir, args, desde, hasta, tf_lines):
+    def _fake(terraform_dir, args, desde, hasta, tf_lines, **_):
         llamados.append(args)
         return 1
         yield  # noqa

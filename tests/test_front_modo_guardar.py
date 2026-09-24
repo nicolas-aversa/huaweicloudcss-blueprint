@@ -235,7 +235,9 @@ def test_provisionando_es_compacto_y_la_lista_va_en_columnas():
     css = html[:html.index("</style>")]
     lista = css[css.index("    .deploy-progress__list {"):]
     lista = lista[:lista.index("}")]
-    assert "grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))" in lista
+    assert "columns: 280px" in lista
+    grupo = css[css.index("    .deploy-progress__grupo {"):]
+    assert "break-inside: avoid" in grupo[:grupo.index("}")]
     prov = css[css.index("    .infra-empty.is-provisioning {"):]
     prov = prov[:prov.index("}")]
     assert "grid-template-columns: auto minmax(0, 1fr)" in prov and "text-align: left" in prov

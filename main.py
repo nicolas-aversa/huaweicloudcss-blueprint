@@ -2839,17 +2839,44 @@ def _tfvars_sin_activar(terraform_dir: Path, slugs: list[str]) -> str:
     return original
 
 
-def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str]):
+# ── Las Cluster Routes, en la lista del progreso ────────────────────────────
+# No son de Terraform (el provider no las expone): el backend las agrega por la
+# API del CSS después del apply. Igual van en la lista, bajo CSS, desde el
+# principio: sin la ruta a MaaS el agente conversacional no llega al modelo, y
+# era el único paso del deploy que no se veía.
+def _item_ruta(key: str, label: str, estado: str = "En espera", done: bool = False,
+               error: bool = False) -> dict:
+    item = {"key": key, "grupo": "css", "label": label, "percent": 100 if done else 0,
+            "done": done, "estado": estado}
+    if error:
+        item["error"] = True
+    return item
+
+
+def _items_de_rutas(request: "TerraformDeployRequest") -> list[dict]:
+    """Las rutas que va a agregar este deploy (solo la fase 1), en espera."""
+    if request.start_ingestion:
+        return []
+    items = [_item_ruta("rutas:maas", "Rutas → MaaS")]
+    if _case_source_ips(request):
+        items.append(_item_ruta("rutas:fuentes", "Rutas → fuentes"))
+    return items
+
+
+def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
+                   extras: list[dict] | None = None):
     """Corre los applies de `_pasos_del_apply` en orden; devuelve el código del
     último que corrió (None si se cortó la lectura). Si uno falla no sigue: no
-    se activa una pipeline cuya configuración no quedó bien."""
+    se activa una pipeline cuya configuración no quedó bien. `extras`: filas
+    que no son de Terraform y van en la lista desde el plan."""
     returncode = 0
     for paso in pasos:
         original = (_tfvars_sin_activar(terraform_dir, paso["sin_activar"])
                     if paso["sin_activar"] else None)
         try:
             returncode = yield from _correr_apply(terraform_dir, paso["args"],
-                                                  paso["desde"], paso["hasta"], tf_lines)
+                                                  paso["desde"], paso["hasta"], tf_lines,
+                                                  extras=extras)
         finally:
             # Pase lo que pase, el tfvars vuelve a decir lo que pidió el deploy.
             if original is not None:
@@ -2860,7 +2887,7 @@ def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str]):
 
 
 def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
-                  tf_lines: list[str], plan: bool = True):
+                  tf_lines: list[str], plan: bool = True, extras: list[dict] | None = None):
     """Un `terraform apply`, streameado: eventos SSE mientras corre y, al
     final, el código de salida (None si se cortó la lectura). Con `plan=False`
     no reemplaza la lista de componentes de la pantalla (un apply dirigido que
@@ -2889,8 +2916,11 @@ def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: flo
                     yield _sse({"type": "progress",
                                 "percent": round(desde + (hasta - desde) * ev["fraccion"], 1),
                                 "phase": ev["phase"], "message": ev["message"]})
-                elif plan or ev["type"] != "plan":
-                    # `plan` (los componentes, una vez) e `item` (uno que cambió)
+                elif ev["type"] == "plan":
+                    # Los componentes, una vez (más lo que no es de Terraform).
+                    if plan:
+                        yield _sse({**ev, "items": ev["items"] + list(extras or [])})
+                else:   # `item`: uno que cambió
                     yield _sse(ev)
     except Exception as exc:  # noqa: BLE001
         yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
@@ -3187,7 +3217,8 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
             "y después se activan.")})
 
     tf_lines: list[str] = []
-    returncode = yield from _aplicar_pasos(terraform_dir, pasos, tf_lines)
+    returncode = yield from _aplicar_pasos(terraform_dir, pasos, tf_lines,
+                                           extras=_items_de_rutas(request))
     if returncode is None:
         return                # la lectura se cortó: el error ya salió
 
@@ -3274,6 +3305,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     # provisión (cluster nuevo). Best-effort. (Este es el path REAL del deploy —
     # el frontend usa /deploy-stream, no /terraform/deploy.)
     if not request.start_ingestion:
+        yield _sse({"type": "item", **_item_ruta("rutas:maas", "Rutas → MaaS", "Configurando")})
         try:
             cluster_id = (tf_outputs.get("opensearch_cluster_id") or {}).get("value", "")
             r = _add_css_cluster_routes(
@@ -3281,18 +3313,23 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                 get_huawei_project_id(),
             )
             print(f"[css-routes] resultado: {r}")
-            yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
-                        "ok": not r.get("error"), "reason": str(r.get("error") or "")})
+            ok_maas, motivo_maas = not r.get("error"), str(r.get("error") or "")
         except Exception as exc:  # noqa: BLE001
             print(f"[css-routes] fallo agregando cluster routes (best-effort): {exc!r}")
-            yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
-                        "ok": False, "reason": repr(exc)[:300]})
+            ok_maas, motivo_maas = False, repr(exc)[:300]
+        yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
+                    "ok": ok_maas, "reason": motivo_maas})
+        yield _sse({"type": "item", **_item_ruta(
+            "rutas:maas", "Rutas → MaaS", "listo" if ok_maas else "Falló",
+            done=ok_maas, error=not ok_maas)})
 
         # Rutas del cluster de LOGSTASH hacia las fuentes del cliente (broker
         # Kafka, base de datos). Sin esto el Logstash no alcanza el origen aunque
         # el SNAT esté puesto. Solo si hay algún caso con fuente externa.
         source_ips = _case_source_ips(request)
         if source_ips:
+            yield _sse({"type": "item", **_item_ruta("rutas:fuentes", "Rutas → fuentes",
+                                                     "Configurando")})
             try:
                 ls_id = (tf_outputs.get("logstash_cluster_id") or {}).get("value", "")
                 r2 = _add_css_cluster_routes(
@@ -3300,12 +3337,16 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                     get_huawei_project_id(), ips=source_ips,
                 )
                 print(f"[css-routes] logstash → fuentes {source_ips}: {r2}")
-                yield _sse({"type": "step", "name": f"Rutas del Logstash → {', '.join(source_ips)}",
-                            "ok": not r2.get("error"), "reason": str(r2.get("error") or "")})
+                ok_f, motivo_f = not r2.get("error"), str(r2.get("error") or "")
+                nombre_f = f"Rutas del Logstash → {', '.join(source_ips)}"
             except Exception as exc:  # noqa: BLE001
                 print(f"[css-routes] rutas del logstash fallaron (best-effort): {exc!r}")
-                yield _sse({"type": "step", "name": "Rutas del Logstash → fuentes del cliente",
-                            "ok": False, "reason": repr(exc)[:300]})
+                ok_f, motivo_f = False, repr(exc)[:300]
+                nombre_f = "Rutas del Logstash → fuentes del cliente"
+            yield _sse({"type": "step", "name": nombre_f, "ok": ok_f, "reason": motivo_f})
+            yield _sse({"type": "item", **_item_ruta(
+                "rutas:fuentes", "Rutas → fuentes", "listo" if ok_f else "Falló",
+                done=ok_f, error=not ok_f)})
 
     # Security Analytics (Sigma rules + detector) para SIEM.
     # Best-effort: si el plugin no está o falla, no rompe el deploy.

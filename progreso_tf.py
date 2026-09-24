@@ -44,15 +44,34 @@ _TIPOS: dict[str, tuple[str, float, float]] = {
     "huaweicloud_networking_secgroup_rule":   ("sg",           5,   5),
 }
 _POR_DEFECTO = ("otros", 30, 20)
+# La pantalla agrupa por servicio de Huawei Cloud (CSS, NAT Gateway, EIP, VPC),
+# cada uno con su logo: `grupo` dice bajo cuál va cada componente. Adentro de
+# un grupo el nombre no repite el servicio ("OpenSearch cluster" bajo CSS).
+_GRUPO = {
+    "opensearch": "css", "logstash": "css", "pipeline": "css", "activar": "css",
+    "nat": "nat", "dnat": "nat", "snat": "nat",
+    "eip": "eip",
+    "sg": "vpc",
+}
 _ETIQUETAS = {
+    "opensearch": "OpenSearch cluster",
+    "logstash": "Logstash cluster",
+    "nat": "Gateway",
+    "eip": "IP pública",
+    "snat": "SNAT (salida)",
+    "sg": "Reglas de entrada",
+    "activar": "Activar pipelines",
+    "otros": "Otros recursos",
+}
+# Para el mensaje de fase, que va solo, sin el grupo arriba.
+_LARGAS = {
     "opensearch": "CSS OpenSearch cluster",
     "logstash": "CSS Logstash cluster",
     "nat": "NAT gateway",
-    "eip": "EIP pública",
-    "snat": "SNAT (salida)",
-    "sg": "Reglas de SG",
-    "activar": "Activar pipelines",
-    "otros": "Otros recursos",
+    "eip": "EIP",
+    "snat": "SNAT",
+    "sg": "reglas del security group",
+    "activar": "la activación de pipelines",
 }
 # Una fila por regla DNAT: son las que dan acceso al cluster privado, y cuando
 # falta una conviene verlo en la lista. Cada una con su puerto. Las etiquetas
@@ -64,9 +83,10 @@ _DNAT = {
     "kibana": "DNAT :5601 · Dashboards",
     "logstash_beats": "DNAT · Logstash Beats",
 }
-# Orden en pantalla: los clusters, la red que les da acceso y la ingesta.
-_ORDEN = ["opensearch", "logstash", "nat", "eip", "dnat", "snat", "sg",
-          "pipeline", "activar", "otros"]
+# Orden en pantalla (adentro de cada grupo): los clusters y su ingesta, y
+# después la red que les da acceso.
+_ORDEN = ["opensearch", "logstash", "pipeline", "activar", "nat", "dnat", "snat",
+          "eip", "sg", "otros"]
 
 _PLAN = re.compile(
     r"^\s*# (?P<dir>\S+) (?P<acc>will be created|will be updated in-place|must be replaced|"
@@ -198,6 +218,15 @@ class ProgresoApply:
             return _DNAT.get(nombre, f"DNAT · {nombre}")
         return _ETIQUETAS.get(componente, componente)
 
+    @classmethod
+    def larga(cls, componente: str) -> str:
+        """El nombre para leer suelto, sin el grupo arriba."""
+        return _LARGAS.get(componente, cls.etiqueta(componente))
+
+    @staticmethod
+    def grupo(componente: str) -> str:
+        return _GRUPO.get(componente.split(":", 1)[0], "otros")
+
     def componentes(self) -> list[dict]:
         grupos: dict[str, list[_Recurso]] = {}
         for r in self.recursos.values():
@@ -216,7 +245,8 @@ class ProgresoApply:
             empezado = any(r.empezado for r in rs) or listo
             accion = max(rs, key=lambda r: r.peso).accion
             estado = "listo" if listo else (_VERBO.get(accion, "Aplicando") if empezado else "En espera")
-            fuera.append({"key": k, "label": self.etiqueta(k), "percent": round(100 * avance, 1),
+            fuera.append({"key": k, "grupo": self.grupo(k), "label": self.etiqueta(k),
+                          "percent": round(100 * avance, 1),
                           "done": listo, "estado": estado, "peso": round(peso, 1)})
         return fuera
 
@@ -240,7 +270,8 @@ class ProgresoApply:
             return "Terraform apply", "Aplicando infraestructura…"
         if len(activos) == 1:
             c = activos[0]
-            return c["label"], f"{c['estado']} {c['label']}…"
+            nombre = self.larga(c["key"])
+            return nombre, f"{c['estado']} {nombre}…"
         listos = sum(1 for c in comps if c["done"])
         return ("En paralelo",
                 f"{len(activos)} servicios en paralelo · {listos} de {len(comps)} listos")

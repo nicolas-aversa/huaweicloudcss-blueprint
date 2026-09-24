@@ -129,13 +129,15 @@ def test_el_plan_anuncia_los_componentes_antes_de_empezar():
     _, eventos = _correr()
     plan = eventos[0]
     assert plan["type"] == "plan"
-    # Cada servicio por separado (no "la red" como una caja cerrada), y cada
-    # regla DNAT con su fila: son las que dan acceso al cluster privado.
-    assert [c["label"] for c in plan["items"]] == [
-        "CSS OpenSearch cluster", "CSS Logstash cluster", "NAT gateway", "EIP pública",
-        "DNAT :5601 · Dashboards", "DNAT :9200 · OpenSearch",
-        "Reglas de SG",
-        "Pipeline · fintech", "Pipeline · siem", "Activar pipelines"]
+    # Agrupados por servicio de Huawei Cloud (no "la red" como una caja
+    # cerrada), y cada regla DNAT con su fila: son las que dan acceso al
+    # cluster privado.
+    assert [(c["grupo"], c["label"]) for c in plan["items"]] == [
+        ("css", "OpenSearch cluster"), ("css", "Logstash cluster"),
+        ("css", "Pipeline · fintech"), ("css", "Pipeline · siem"), ("css", "Activar pipelines"),
+        ("nat", "Gateway"), ("nat", "DNAT :5601 · Dashboards"), ("nat", "DNAT :9200 · OpenSearch"),
+        ("eip", "IP pública"),
+        ("vpc", "Reglas de entrada")]
     assert all(c["percent"] == 0 and not c["done"] and c["estado"] == "En espera"
                for c in plan["items"])
     # El data source no es un recurso que se cree.

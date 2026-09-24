@@ -1950,12 +1950,30 @@
       height: 100%; background: linear-gradient(90deg, var(--accent-green), #34d399);
       border-radius: var(--radius-pill); transition: width 0.6s var(--ease); width: 0%;
     }
-    /* En columnas: un deploy son once servicios o más, y en una sola columna
-       la lista empujaba todo lo demás fuera de la pantalla. */
+    /* Agrupado por servicio de Huawei Cloud (CSS, NAT Gateway, EIP, VPC), cada
+       uno con su logo, y los grupos en columnas: en una sola columna la lista
+       empujaba todo lo demás fuera de la pantalla. */
     .deploy-progress__list {
       list-style: none; margin: 14px 0 0; padding: 12px 0 0;
       border-top: 1px solid var(--border-subtle);
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 22px;
+      columns: 280px; column-gap: 28px;
+    }
+    /* Columnas balanceadas y no grilla: los grupos chicos (EIP, VPC) se apilan
+       en vez de dejar un hueco al lado del grande. */
+    .deploy-progress__grupo { min-width: 0; break-inside: avoid; margin-bottom: 16px; }
+    .deploy-progress__grupo:last-child { margin-bottom: 0; }
+    .deploy-progress__servicio {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+      font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary);
+    }
+    .deploy-progress__logo { width: 20px; height: 20px; flex: none; border-radius: var(--radius-sm); }
+    .deploy-progress__cuenta {
+      margin-left: auto; color: var(--text-muted); font-weight: var(--fw-normal);
+      font-variant-numeric: tabular-nums;
+    }
+    .deploy-progress__items {
+      list-style: none; margin: 0; padding: 0;
+      display: flex; flex-direction: column; gap: 10px;
     }
     .deploy-progress__list:empty { display: none; }
     /* Un componente: estado a la izquierda, nombre, qué está haciendo y su %,
@@ -1992,6 +2010,9 @@
     }
     .deploy-progress__item.is-done .deploy-progress__estado { color: var(--accent-green); }
     .deploy-progress__item.is-stalled { opacity: .6; }
+    /* Falló (una ruta del cluster, p. ej.): rojo, y no se tilda al terminar. */
+    .deploy-progress__item.is-error .deploy-progress__ico { animation: none; border-color: var(--accent-red); }
+    .deploy-progress__item.is-error .deploy-progress__estado { color: var(--accent-red); }
     .deploy-progress__item.is-stalled .deploy-progress__ico { animation: none; border-color: var(--text-muted); }
     /* Adentro de un status (ingesta, reconexión) no lleva marco propio. */
     .status .deploy-progress, .setup-step__status .deploy-progress { margin: 0; max-width: none; }
@@ -5192,11 +5213,55 @@
         </div>`;
     }
 
+    // Los servicios de Huawei Cloud que levanta un deploy, con su logo. El
+    // backend dice en qué `grupo` va cada componente.
+    const PROGRESO_GRUPOS = {
+      css: { nombre: 'CSS', logo: '/static/css.png' },
+      nat: { nombre: 'NAT Gateway', logo: '/static/servicios/nat.svg' },
+      eip: { nombre: 'EIP', logo: '/static/servicios/eip.svg' },
+      vpc: { nombre: 'VPC · Security group', logo: '/static/servicios/vpc.svg' },
+      otros: { nombre: 'Otros', logo: '' },
+    };
+    const PROGRESO_ORDEN = ['css', 'nat', 'eip', 'vpc', 'otros'];
+    const _ordenGrupo = (k) => {
+      const i = PROGRESO_ORDEN.indexOf(k);
+      return i < 0 ? PROGRESO_ORDEN.length : i;
+    };
+
+    function _progresoGrupo(list, key) {
+      let g = [...list.children].find(el => el.dataset.grupo === key);
+      if (g) return g;
+      const info = PROGRESO_GRUPOS[key] || PROGRESO_GRUPOS.otros;
+      g = document.createElement('li');
+      g.className = 'deploy-progress__grupo';
+      g.dataset.grupo = key;
+      g.innerHTML = `<div class="deploy-progress__servicio">`
+        + (info.logo ? `<img class="deploy-progress__logo" src="${info.logo}" alt="" width="20" height="20">` : '')
+        + `<span class="deploy-progress__nombre">${escapeHtml(info.nombre)}</span>`
+        + `<span class="deploy-progress__cuenta"></span></div>`;
+      const items = document.createElement('ul');
+      items.className = 'deploy-progress__items';
+      g.appendChild(items);
+      // En su lugar, aunque su primer componente llegue después.
+      const siguiente = [...list.children].find(el => _ordenGrupo(el.dataset.grupo) > _ordenGrupo(key));
+      if (siguiente) list.insertBefore(g, siguiente); else list.appendChild(g);
+      return g;
+    }
+
+    // "2/4": cuántos componentes del servicio están listos.
+    function _progresoCuenta(g) {
+      const items = g.querySelectorAll('.deploy-progress__item');
+      const listos = [...items].filter(li => li.classList.contains('is-done')).length;
+      const cuenta = g.querySelector('.deploy-progress__cuenta');
+      if (cuenta) cuenta.textContent = `${listos}/${items.length}`;
+    }
+
     function _progresoItem(root, c) {
       const list = root.querySelector('.deploy-progress__list');
       if (!list || !c || !c.key) return;
-      let li = [...list.children].find(el => el.dataset.key === c.key);
+      let li = [...root.querySelectorAll('.deploy-progress__item')].find(el => el.dataset.key === c.key);
       if (!li) {
+        const g = _progresoGrupo(list, c.grupo || 'otros');
         li = document.createElement('li');
         li.className = 'deploy-progress__item';
         li.dataset.key = c.key;
@@ -5204,19 +5269,23 @@
           <span class="deploy-progress__label"></span>
           <span class="deploy-progress__estado"></span>
           <span class="deploy-progress__minibar"><span class="deploy-progress__minifill"></span></span>`;
-        list.appendChild(li);
+        g.querySelector('.deploy-progress__items').appendChild(li);
       }
       const pct = Math.max(0, Math.min(100, Math.round(c.percent || 0)));
-      const esperando = !c.done && c.estado === 'En espera';
+      const esperando = !c.done && !c.error && c.estado === 'En espera';
       li.classList.toggle('is-done', !!c.done);
+      li.classList.toggle('is-error', !!c.error);
       li.classList.toggle('is-waiting', esperando);
       li.querySelector('.deploy-progress__label').textContent = c.label || c.key;
       // Si igual no entra (el slug de una pipeline puede ser largo), el nombre
       // completo queda al pasar el mouse.
       li.querySelector('.deploy-progress__label').title = c.label || c.key;
       li.querySelector('.deploy-progress__estado').textContent =
-        c.done ? 'Listo' : esperando ? 'En espera' : `${c.estado || 'Aplicando'} · ${pct}%`;
+        c.done ? 'Listo' : c.error ? (c.estado || 'Falló') : esperando ? 'En espera'
+          : `${c.estado || 'Aplicando'} · ${pct}%`;
       li.querySelector('.deploy-progress__minifill').style.width = `${c.done ? 100 : pct}%`;
+      const g = [...list.children].find(el => el.dataset.grupo === (c.grupo || 'otros'));
+      if (g) _progresoCuenta(g);
     }
 
     function progresoEvento(root, d) {
@@ -5250,7 +5319,8 @@
         if (pctEl) pctEl.textContent = '100%';
       }
       root.querySelectorAll('.deploy-progress__item').forEach(li => {
-        if (li.classList.contains('is-done')) return;
+        // Lo que falló sigue fallido aunque el deploy termine bien.
+        if (li.classList.contains('is-done') || li.classList.contains('is-error')) return;
         if (ok) {
           li.classList.remove('is-waiting');
           li.classList.add('is-done');
@@ -5262,6 +5332,7 @@
           li.querySelector('.deploy-progress__estado').textContent = 'Interrumpido';
         }
       });
+      root.querySelectorAll('.deploy-progress__grupo').forEach(_progresoCuenta);
       const fase = root.querySelector('.deploy-progress__phase');
       if (fase) fase.textContent = ok ? 'Listo' : 'Interrumpido — mirá Actividad para ver dónde';
     }
