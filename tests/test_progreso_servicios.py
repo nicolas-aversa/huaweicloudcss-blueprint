@@ -131,3 +131,95 @@ def test_cada_apply_recibe_las_filas_extra(monkeypatch, tmp_path):
              {"args": [main._TARGET_ACTIVACION], "desde": 50, "hasta": 92, "sin_activar": []}]
     assert _correr(main._aplicar_pasos(tmp_path, pasos, [], extras=extra))[0] == 0
     assert vistas == [extra, extra]
+
+
+# ── La vista previa (?preview=deploy) ───────────────────────────────────────
+def test_la_vista_previa_reproduce_un_deploy_real_sin_terraform(monkeypatch):
+    """El mismo parser y los mismos eventos que el deploy, sin tocar la nube."""
+    from fastapi.testclient import TestClient
+
+    def _sin_terraform(*a, **k):
+        raise AssertionError("la vista previa no corre procesos")
+    monkeypatch.setattr(main.subprocess, "Popen", _sin_terraform)
+    monkeypatch.setattr(main.subprocess, "run", _sin_terraform)
+
+    res = TestClient(main.app).get("/api/v1/dev/deploy-preview?paso=0")
+    eventos = [json.loads(b[len("data: "):]) for b in res.text.split("\n\n") if b.startswith("data: ")]
+
+    plan = next(e for e in eventos if e["type"] == "plan")
+    assert {c["grupo"] for c in plan["items"]} == {"css", "nat", "eip", "vpc"}
+    assert "rutas:maas" in [c["key"] for c in plan["items"]]
+    pcts = [e["percent"] for e in eventos if e["type"] == "progress"]
+    assert pcts == sorted(pcts) and pcts[-1] >= main._PCT_APPLY_HASTA
+    ultimo = {}
+    for e in eventos:
+        if e["type"] == "item":
+            ultimo[e["key"]] = e
+    assert set(ultimo) == {c["key"] for c in plan["items"]}, "cada fila avanza"
+    assert all(e["done"] for e in ultimo.values()), [k for k, e in ultimo.items() if not e["done"]]
+    assert eventos[-1]["type"] == "complete"
+
+
+def test_la_muestra_no_trae_datos_de_la_cuenta():
+    texto = main._MUESTRA_APPLY.read_text(encoding="utf-8")
+    assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-", texto), "un UUID de la cuenta"
+    assert not re.search(r"\b[0-9a-f]{32}\b", texto), "un project id"
+    assert "myhuaweicloud.com" not in texto
+
+
+def test_preview_deploy_muestra_la_pantalla_real():
+    html = (_STATIC / "index.html").read_text(encoding="utf-8")
+    i = html.index("function renderInfraView(")
+    vista = html[i:html.index("if (!active) {", i)]
+    assert "provisioningAnimationHTML();\n          return;" not in vista, "volvió la animación sola"
+    j = html.index("async function _vistaPreviaDeploy(paso)")
+    previa = html[j:html.index("(function maybePreviewDeployAnim()", j)]
+    assert "/api/v1/dev/deploy-preview?paso=" in previa
+    assert "updateDeployProgress(d)" in previa and "finishDeployProgress(ok)" in previa
+
+
+def test_el_total_cuenta_las_filas_que_no_son_de_terraform():
+    """La pantalla mostraba 10 filas (con "Rutas → MaaS") y el mensaje decía
+    "de 9 listos"."""
+    p = progreso_tf.ProgresoApply(adicionales=1)
+    for d in ("huaweicloud_vpc_eip.nat_eip", "huaweicloud_nat_gateway.nat"):
+        p._registrar(d, "crear")
+    for linea in ("Plan: 2 to add, 0 to change, 0 to destroy.\n",
+                  "huaweicloud_vpc_eip.nat_eip: Creating...\n",
+                  "huaweicloud_nat_gateway.nat: Creating...\n"):
+        eventos = p.linea(linea)
+    assert eventos[-1]["message"] == "2 servicios en paralelo · 0 de 3 listos"
+
+
+def test_la_vista_previa_cuenta_las_rutas():
+    from fastapi.testclient import TestClient
+    texto = TestClient(main.app).get("/api/v1/dev/deploy-preview?paso=0").text
+    assert "de 10 listos" in texto and "de 9 listos" not in texto
+
+
+def test_el_deploy_cuenta_las_filas_extra_en_el_total(monkeypatch, tmp_path):
+    salida = ("  # huaweicloud_vpc_eip.nat_eip will be created\n"
+              "  # huaweicloud_nat_gateway.nat will be created\n"
+              "Plan: 2 to add, 0 to change, 0 to destroy.\n"
+              "huaweicloud_vpc_eip.nat_eip: Creating...\n"
+              "huaweicloud_nat_gateway.nat: Creating...\n")
+
+    class _Proc:
+        def __init__(self, *a, **k):
+            self.stdout = io.StringIO(salida)
+            self.returncode = 0
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(main.subprocess, "Popen", _Proc)
+    extra = main._item_ruta("rutas:maas", "Rutas → MaaS")
+    _, eventos = _correr(main._correr_apply(tmp_path, [], 5, 92, [], extras=[extra]))
+    assert [e for e in eventos if e["type"] == "progress"][-1]["message"] == \
+        "2 servicios en paralelo · 0 de 3 listos"
+
+
+def test_preview_deploy_arranca_la_reproduccion():
+    html = (_STATIC / "index.html").read_text(encoding="utf-8")
+    i = html.index("(function maybePreviewDeployAnim()")
+    assert "_vistaPreviaDeploy(params.get('paso')" in html[i:html.index("})();", i)]

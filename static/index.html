@@ -6744,11 +6744,6 @@
       if (state.provisioning) {
         stopActiveEnvTicker();
         const isReuse = state.provisioning === 'reuse';
-        if (state.previewMode) {
-          // Harness de dev (?preview=deploy): solo la animacion de aprovisionamiento.
-          body.innerHTML = provisioningAnimationHTML();
-          return;
-        }
         body.innerHTML = `
           <div class="infra-empty is-provisioning">
             <div class="infra-empty__tile">${icon('rocket')}</div>
@@ -7047,15 +7042,46 @@
       }
     }
 
-    // Harness de dev: ?preview=deploy muestra la animacion de aprovisionamiento sin
-    // desplegar (reusa el render real → WYSIWYG). Inofensivo en prod (requiere el param).
+    // Vista previa del deploy: ?preview=deploy pinta la pantalla REAL de
+    // "Provisionando" y la alimenta con un apply real reproducido por el
+    // backend (/api/v1/dev/deploy-preview: el mismo parser y los mismos
+    // eventos, sin Terraform ni nube). Al terminar, vuelve a empezar.
+    // `&paso=0.1` lo acelera. Inofensivo en prod: requiere el parámetro.
+    async function _vistaPreviaDeploy(paso) {
+      for (;;) {
+        renderInfraView(null);   // la pantalla de "Provisionando", de cero
+        let ok = false;
+        try {
+          const res = await fetch('/api/v1/dev/deploy-preview?paso=' + encodeURIComponent(paso));
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          let buf = '';
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const evs = buf.split('\n\n');
+            buf = evs.pop();
+            for (const e of evs) {
+              if (!e.startsWith('data: ')) continue;
+              let d; try { d = JSON.parse(e.slice(6)); } catch (_) { continue; }
+              if (d.type === 'progress' || d.type === 'plan' || d.type === 'item') updateDeployProgress(d);
+              else if (d.type === 'complete') ok = true;
+            }
+          }
+        } catch (_) { /* sin backend: se reintenta en la próxima vuelta */ }
+        finishDeployProgress(ok);
+        await new Promise(r => setTimeout(r, 6000));
+      }
+    }
+
     (function maybePreviewDeployAnim() {
       const params = new URLSearchParams(location.search);
       if (params.get('preview') !== 'deploy') { hydrateActiveEnv(); return; }
       state.previewMode = true;
       state.provisioning = 'new';
       showView('infra');
-      renderInfraView(null);   // la rama preview pinta la animacion de aprovisionamiento
+      _vistaPreviaDeploy(params.get('paso') || '0.2');
     })();
 
     // Show status

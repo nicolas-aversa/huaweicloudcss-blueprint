@@ -2909,13 +2909,31 @@ def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
     return returncode
 
 
+def _eventos_de_linea(progreso: "progreso_tf.ProgresoApply", line: str, desde: float,
+                      hasta: float, plan: bool = True, extras: list[dict] | None = None):
+    """Los eventos SSE de una línea del apply: el global (`progress`), los
+    componentes (`plan`, una vez) y el que cambió (`item`). Lo usan el deploy
+    real y la vista previa, así la vista previa muestra exactamente esto."""
+    for ev in progreso.linea(line):
+        if ev["type"] == "apply":
+            yield _sse({"type": "progress",
+                        "percent": round(desde + (hasta - desde) * ev["fraccion"], 1),
+                        "phase": ev["phase"], "message": ev["message"]})
+        elif ev["type"] == "plan":
+            # Los componentes, una vez (más lo que no es de Terraform).
+            if plan:
+                yield _sse({**ev, "items": ev["items"] + list(extras or [])})
+        else:   # `item`: uno que cambió
+            yield _sse(ev)
+
+
 def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
                   tf_lines: list[str], plan: bool = True, extras: list[dict] | None = None):
     """Un `terraform apply`, streameado: eventos SSE mientras corre y, al
     final, el código de salida (None si se cortó la lectura). Con `plan=False`
     no reemplaza la lista de componentes de la pantalla (un apply dirigido que
     completa otro: sus recursos se actualizan en la lista que ya está)."""
-    progreso = progreso_tf.ProgresoApply()
+    progreso = progreso_tf.ProgresoApply(adicionales=len(extras or []))
     process = subprocess.Popen(
         ["terraform", "apply", "-auto-approve", "-input=false", "-no-color", *args],
         cwd=terraform_dir,
@@ -2934,17 +2952,7 @@ def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: flo
             stripped = line.rstrip()
             if stripped:
                 yield _sse({"type": "log", "source": "terraform apply", "message": stripped})
-            for ev in progreso.linea(line):
-                if ev["type"] == "apply":
-                    yield _sse({"type": "progress",
-                                "percent": round(desde + (hasta - desde) * ev["fraccion"], 1),
-                                "phase": ev["phase"], "message": ev["message"]})
-                elif ev["type"] == "plan":
-                    # Los componentes, una vez (más lo que no es de Terraform).
-                    if plan:
-                        yield _sse({**ev, "items": ev["items"] + list(extras or [])})
-                else:   # `item`: uno que cambió
-                    yield _sse(ev)
+            yield from _eventos_de_linea(progreso, line, desde, hasta, plan, extras)
     except Exception as exc:  # noqa: BLE001
         yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
         return None
@@ -3503,6 +3511,42 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
             lock.release()
 
     return StreamingResponse(_guarded_stream(), media_type="text/event-stream")
+
+
+# ── Vista previa del progreso del deploy ────────────────────────────────────
+# Reproduce un `terraform apply` real (docs/muestras/terraform_apply.log, sin
+# IDs) por el MISMO parser y los MISMOS eventos que el deploy, acelerado. Sirve
+# para ver y ajustar la pantalla de "Provisionando" sin levantar un entorno de
+# 25 minutos en Huawei Cloud. No corre Terraform ni toca la nube.
+_MUESTRA_APPLY = Path(__file__).resolve().parent / "docs" / "muestras" / "terraform_apply.log"
+
+
+def _vista_previa_deploy(paso: float):
+    """Los eventos del deploy de muestra. `paso`: segundos entre líneas."""
+    extras = [_item_ruta("rutas:maas", "Rutas → MaaS")]
+    progreso = progreso_tf.ProgresoApply(adicionales=len(extras))
+    yield _sse({"type": "progress", "percent": 1, "phase": "Preparando",
+                "message": "Vista previa: reproduciendo un deploy real…"})
+    for linea in _MUESTRA_APPLY.read_text(encoding="utf-8").splitlines(keepends=True):
+        eventos = list(_eventos_de_linea(progreso, linea, _PCT_APPLY_DESDE, _PCT_APPLY_HASTA,
+                                         extras=extras))
+        yield from eventos
+        if paso and any('"progress"' in e for e in eventos):
+            time.sleep(paso)
+    yield _sse({"type": "item", **_item_ruta("rutas:maas", "Rutas → MaaS", "Configurando")})
+    if paso:
+        time.sleep(paso * 4)
+    yield _sse({"type": "item", **_item_ruta("rutas:maas", "Rutas → MaaS", "listo", done=True)})
+    yield _sse({"type": "progress", "percent": _PCT_FINALIZANDO, "phase": "Finalizando",
+                "message": "Guardando estado del deploy…"})
+    yield _sse({"type": "complete", "result": {"status": "preview"}})
+
+
+@app.get("/api/v1/dev/deploy-preview", tags=["dev"],
+         summary="Vista previa del progreso del deploy (reproduce un apply real, sin Terraform)")
+def deploy_preview(paso: float = 0.2):
+    return StreamingResponse(_vista_previa_deploy(max(0.0, min(paso, 2.0))),
+                             media_type="text/event-stream")
 
 
 # ── Cola de jobs de deploy (reconectable) ────────────────────────────────────

@@ -1,0 +1,117 @@
+# Un `terraform apply` real de un entorno nuevo (la-south-2, 2026-09-24), sin IDs
+# ni datos de la cuenta: solo lo que lee el parser del progreso. Lo reproduce
+# `GET /api/v1/dev/deploy-preview` (la app en ?preview=deploy). El original
+# terminó con la configuración rechazada por CSS (`call(`); acá termina bien.
+Terraform will perform the following actions:
+  # data.huaweicloud_networking_port.os_node[0] will be read during apply
+  # huaweicloud_css_cluster.opensearch_cluster[0] will be created
+  # huaweicloud_css_logstash_cluster.logstash_cluster will be created
+  # huaweicloud_css_logstash_configuration.pipeline["reviews-ordenes"] will be created
+  # huaweicloud_nat_dnat_rule.kibana[0] will be created
+  # huaweicloud_nat_dnat_rule.opensearch[0] will be created
+  # huaweicloud_nat_gateway.nat will be created
+  # huaweicloud_nat_snat_rule.maas_egress will be created
+  # huaweicloud_networking_secgroup_rule.kibana_public[0] will be created
+  # huaweicloud_networking_secgroup_rule.opensearch_public_9200[0] will be created
+  # huaweicloud_vpc_eip.nat_eip will be created
+Plan: 10 to add, 0 to change, 0 to destroy.
+huaweicloud_vpc_eip.nat_eip: Creating...
+huaweicloud_networking_secgroup_rule.kibana_public[0]: Creating...
+huaweicloud_networking_secgroup_rule.opensearch_public_9200[0]: Creating...
+huaweicloud_nat_gateway.nat: Creating...
+huaweicloud_css_logstash_cluster.logstash_cluster: Creating...
+huaweicloud_css_cluster.opensearch_cluster[0]: Creating...
+huaweicloud_networking_secgroup_rule.opensearch_public_9200[0]: Creation complete after 1s [id=sg-9200]
+huaweicloud_networking_secgroup_rule.kibana_public[0]: Creation complete after 1s [id=sg-5601]
+huaweicloud_nat_gateway.nat: Creation complete after 7s [id=nat-1]
+huaweicloud_vpc_eip.nat_eip: Creation complete after 9s [id=eip-1]
+huaweicloud_nat_snat_rule.maas_egress: Creating...
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [10s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [10s elapsed]
+huaweicloud_nat_snat_rule.maas_egress: Creation complete after 4s [id=snat-1]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [20s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [30s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [40s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [50s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [1m0s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [1m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [1m10s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [1m10s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [1m20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [1m20s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [1m30s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [1m30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [1m40s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [1m40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [1m50s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [1m50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [2m0s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [2m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [2m10s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [2m10s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [2m20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [2m20s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [2m30s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [2m30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [2m40s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [2m40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [2m50s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [2m50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [3m0s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [3m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [3m10s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [3m10s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [3m20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [3m20s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [3m30s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [3m30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [3m40s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [3m40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [3m50s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [3m50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [4m0s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [4m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [4m10s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [4m10s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [4m20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [4m20s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [4m30s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [4m30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [4m40s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [4m40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [4m50s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [4m50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m0s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [5m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m10s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [5m10s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [5m20s elapsed]
+huaweicloud_css_cluster.opensearch_cluster[0]: Creation complete after 5m25s [id=os-1]
+data.huaweicloud_networking_port.os_node[0]: Reading...
+data.huaweicloud_networking_port.os_node[0]: Read complete after 1s [id=port-1]
+huaweicloud_nat_dnat_rule.kibana[0]: Creating...
+huaweicloud_nat_dnat_rule.opensearch[0]: Creating...
+huaweicloud_nat_dnat_rule.kibana[0]: Creation complete after 3s [id=dnat-5601]
+huaweicloud_nat_dnat_rule.opensearch[0]: Creation complete after 3s [id=dnat-9200]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [6m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [6m10s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [6m20s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [6m30s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [6m40s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [6m50s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [7m0s elapsed]
+huaweicloud_css_logstash_cluster.logstash_cluster: Creation complete after 7m4s [id=ls-1]
+huaweicloud_css_logstash_configuration.pipeline["reviews-ordenes"]: Creating...
+huaweicloud_css_logstash_configuration.pipeline["reviews-ordenes"]: Still creating... [10s elapsed]
+huaweicloud_css_logstash_configuration.pipeline["reviews-ordenes"]: Still creating... [20s elapsed]
+huaweicloud_css_logstash_configuration.pipeline["reviews-ordenes"]: Creation complete after 26s [id=conf-1]
+
+Apply complete! Resources: 10 added, 0 changed, 0 destroyed.

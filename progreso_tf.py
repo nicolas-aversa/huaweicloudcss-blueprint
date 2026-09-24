@@ -184,6 +184,9 @@ class ProgresoApply:
     recursos: dict[str, _Recurso] = field(default_factory=dict)
     plan_listo: bool = False
     global_: float = 0.0
+    # Filas de la pantalla que no son de Terraform (las rutas del CSS): cuentan
+    # en el total de "N de M listos", y durante el apply están pendientes.
+    adicionales: int = 0
     _ultimo: dict[str, tuple] = field(default_factory=dict)
 
     # ── Componentes ──────────────────────────────────────────────────────
@@ -274,7 +277,7 @@ class ProgresoApply:
             return nombre, f"{c['estado']} {nombre}…"
         listos = sum(1 for c in comps if c["done"])
         return ("En paralelo",
-                f"{len(activos)} servicios en paralelo · {listos} de {len(comps)} listos")
+                f"{len(activos)} servicios en paralelo · {listos} de {len(comps) + self.adicionales} listos")
 
     # ── Entrada ──────────────────────────────────────────────────────────
     def linea(self, linea: str) -> list[dict]:
