@@ -674,7 +674,9 @@ def test_build_index_template_typing():
     _fmt = ns_props["event_dt"]["format"]
     assert "yyyyMMddHHmmssSSS" in _fmt and "epoch_millis" in _fmt
     assert _fmt.index("yyyyMMddHHmmssSSS") < _fmt.index("epoch_millis")
-    assert ns_props["geo_loc"] == {"type": "geo_point"}
+    # `ignore_malformed` va DENTRO del mapping: el de `settings` no cubre
+    # geo_point, y sin esto una coordenada basura rechaza el documento entero.
+    assert ns_props["geo_loc"] == {"type": "geo_point", "ignore_malformed": True}
     # text → multi-field text + keyword (full-text Y aggregatable).
     assert ns_props["err_msg"]["type"] == "text"
     assert ns_props["err_msg"]["fields"]["keyword"]["type"] == "keyword"
@@ -4527,6 +4529,208 @@ def test_spec_from_fields_dimension_false_excluded_from_topn():
     all_text = str(spec["panels"])
     assert "data.status" in all_text   # dimension=True → Top-N
     assert "data.review" not in all_text  # dimension=False → excluido
+
+
+# ── La visualización que le corresponde a cada campo ───────────────────────
+# El generador automático decidía casi todo por el tipo de ES y usaba tres de
+# los seis `role` detectados: un booleano salía como ranking de dos barras, una
+# latencia se graficaba sumada, y "éxitos vs fallos" —el gráfico que mira
+# primero cualquiera que opera esto— no existía.
+def _campo(path, tipo, **kw):
+    base = {"field_path": path, "type": tipo, "business_label": path.rsplit(".", 1)[-1],
+            "dimension": tipo in ("keyword", "text", "boolean")}
+    base.update(kw)
+    return base
+
+
+def _paneles(fields, slug="my-log"):
+    from dashboards import _spec_from_fields
+    return _spec_from_fields(slug, "logs-%{+YYYY.MM}", fields)["panels"]
+
+
+def test_un_dataset_con_coordenadas_sale_en_un_mapa():
+    paneles = _paneles([
+        _campo("data.geo_location", "geo_point", dimension=False),
+        _campo("data.estado", "keyword"),
+    ])
+
+    mapa = [p for p in paneles if p["type"] == "map"]
+    assert len(mapa) == 1, [p["type"] for p in paneles]
+    assert mapa[0]["field"] == "data.geo_location"
+    # Y no se cuela además como una categoría más para agrupar.
+    barras = [p for p in paneles if p.get("field") == "data.geo_location" and p["type"] != "map"]
+    assert not barras, barras
+
+
+def test_un_booleano_va_a_torta_y_no_a_barras():
+    """Dos valores no son un ranking."""
+    paneles = _paneles([_campo("data.exitosa", "boolean"), _campo("data.canal", "keyword")])
+
+    del_bool = [p for p in paneles if p.get("field") == "data.exitosa"]
+    assert del_bool and all(p["type"] == "pie" for p in del_bool), del_bool
+
+
+def test_una_medida_de_tiempo_se_promedia_en_vez_de_sumarse():
+    """"Las latencias suman 40 segundos" no significa nada; el promedio sí."""
+    con_ms = _paneles([
+        _campo("data.fecha", "date", dimension=False),
+        _campo("data.latencia", "float", dimension=False, role="measure", unit="ms"),
+        _campo("data.canal", "keyword", role="primary_dimension"),
+    ])
+    aggs = {p.get("agg") or p.get("metric") for p in con_ms if p.get("field") == "data.latencia"}
+    assert "avg" in aggs and "sum" not in aggs, aggs
+
+    # Una medida de dinero, en cambio, se suma.
+    con_usd = _paneles([
+        _campo("data.fecha", "date", dimension=False),
+        _campo("data.monto", "float", dimension=False, role="measure", unit="USD"),
+        _campo("data.canal", "keyword", role="primary_dimension"),
+    ])
+    aggs = {p.get("agg") or p.get("metric") for p in con_usd if p.get("field") == "data.monto"}
+    assert "sum" in aggs and "avg" not in aggs, aggs
+
+
+def test_el_indicador_de_exito_parte_la_serie_en_el_tiempo():
+    paneles = _paneles([
+        _campo("data.fecha", "date", dimension=False),
+        _campo("data.resultado", "keyword", role="success_indicator"),
+    ])
+
+    partidas = [p for p in paneles if p["type"] == "area" and p.get("split") == "data.resultado"]
+    assert partidas, [p for p in paneles if p["type"] == "area"]
+
+
+def test_el_indicador_critico_sale_como_metrica_y_como_barras():
+    """Es el campo que SOLO aparece cuando algo salió mal: cuántos fallaron y
+    dónde fallan."""
+    paneles = _paneles([
+        _campo("data.error_code", "keyword", role="critical_indicator"),
+        _campo("data.canal", "keyword", role="primary_dimension"),
+    ])
+
+    metrica = [p for p in paneles if p["type"] == "metric" and p.get("query") == "data.error_code:*"]
+    barras = [p for p in paneles if p["type"] == "bar" and p.get("field") == "data.error_code"]
+    assert metrica, [p for p in paneles if p["type"] == "metric"]
+    assert barras, [p["type"] for p in paneles]
+
+
+def test_una_entidad_sale_como_tabla_y_no_como_torta():
+    """Un id de cliente tiene miles de valores: una torta de eso es ilegible."""
+    paneles = _paneles([
+        _campo("data.cliente_id", "keyword", role="entity_id"),
+        _campo("data.canal", "keyword", role="primary_dimension"),
+    ])
+
+    de_entidad = [p for p in paneles if p.get("field") == "data.cliente_id"]
+    assert any(p["type"] == "table" for p in de_entidad), de_entidad
+    assert not any(p["type"] == "pie" for p in de_entidad), de_entidad
+    assert any(p["type"] == "metric" and p.get("agg") == "cardinality" for p in paneles)
+
+
+def test_ningun_campo_se_grafica_dos_veces():
+    """El primer categórico salía en la torta Y otra vez en los breakdowns; solo
+    se notaba porque `_uniq` le cambiaba el título al segundo."""
+    paneles = _paneles([
+        _campo("data.canal", "keyword", role="primary_dimension"),
+        _campo("data.estado", "keyword"),
+        _campo("data.tipo", "keyword"),
+    ])
+
+    for campo in ("data.canal", "data.estado", "data.tipo"):
+        usos = [p for p in paneles
+                if p.get("field") == campo and p["type"] in ("pie", "bar", "table")
+                and not p.get("agg_field")]     # el cross-tab es otra pregunta
+        assert len(usos) == 1, f"{campo} graficado {len(usos)} veces: {usos}"
+
+
+def test_la_serie_temporal_sobrevive_a_que_la_fecha_se_haya_ido_a_timestamp():
+    """El prompt le pide al modelo que mande la fecha a `@timestamp` y borre el
+    campo original. Cuando lo hacía, el dashboard perdía el área y la línea
+    aunque el índice tuviera una serie temporal perfecta."""
+    paneles = _paneles([
+        _campo("data.ts", "keyword", dimension=False, role="timestamp"),
+        _campo("data.monto", "float", dimension=False, role="measure"),
+    ])
+
+    tipos = [p["type"] for p in paneles]
+    assert "area" in tipos and "line" in tipos, tipos
+
+
+def test_de_las_coordenadas_al_mapa_de_punta_a_punta(monkeypatch):
+    """La cadena completa: el LLM devuelve lat y lon sueltas, el endpoint arma el
+    `geo_point`, el index template lo mapea y el dashboard lo dibuja. Cada
+    eslabón existía por separado; lo que no existía era la cadena."""
+    import json as _json
+
+    import conf_lint
+    from dashboards import build_ndjson_from_fields
+    from index_template import build_index_template
+
+    def _fake(raw_log, namespace="data", ecs_overlay=False, feedback="", previous_filter="", input_type=""):
+        return {
+            "filter_code": 'filter {\n  csv { columns => ["a"] target => "data" }\n}',
+            "fields": [
+                {"raw_name": "lat", "field_path": "data.lat", "type": "float",
+                 "business_label": "Latitud", "dimension": False, "role": None},
+                {"raw_name": "lon", "field_path": "data.lon", "type": "float",
+                 "business_label": "Longitud", "dimension": False, "role": None},
+                {"raw_name": "estado", "field_path": "data.estado", "type": "string",
+                 "business_label": "Estado", "dimension": True, "role": "primary_dimension"},
+            ],
+        }
+
+    monkeypatch.setattr(main, "generate_logstash_filter", _fake)
+
+    res = client.post("/api/v1/onboarding/generate-filter", json={"raw_log": "x", "namespace": "data"})
+    assert res.status_code == 200
+    body = res.json()
+
+    # 1. El filter fusiona las dos columnas, y sigue compilando.
+    assert "[data][geo_location]" in body["filter_code"]
+    assert conf_lint.lint_filtro(body["filter_code"]) == []
+
+    # 2. El campo viaja al paso 2 como geo_point.
+    geo = [f for f in body["fields"] if f["type"] == "geo_point"]
+    assert len(geo) == 1 and geo[0]["field_path"] == "data.geo_location"
+
+    # 3. El index template lo mapea (con ignore_malformed, o una coordenada
+    #    basura tira el documento entero).
+    props = build_index_template(body["fields"], "data", "logs-%{+YYYY.MM}")["template"]["mappings"]["properties"]
+    assert props["data"]["properties"]["geo_location"] == {"type": "geo_point", "ignore_malformed": True}
+
+    # 4. Y el dashboard lo dibuja en un mapa.
+    objetos = [_json.loads(l) for l in build_ndjson_from_fields("mi-log", "logs-*", body["fields"]).splitlines() if l.strip()]
+    tipos = [_json.loads(o["attributes"]["visState"])["type"]
+             for o in objetos if o["type"] == "visualization"]
+    assert "tile_map" in tipos, tipos
+
+
+def test_un_campo_geo_de_ecs_se_tipa_solo(monkeypatch):
+    """La spec ECS ya sabe que `source.geo.location` y sus siete hermanos son
+    `geo_point`; ese dato se venía tirando y el campo terminaba como keyword, o
+    sea sin mapa posible."""
+    def _fake(raw_log, namespace="data", ecs_overlay=False, feedback="", previous_filter="", input_type=""):
+        return {
+            "filter_code": "filter { }",
+            "fields": [{"raw_name": "loc", "ecs_path": "source.geo.location", "field_path": "source.geo.location",
+                        "type": "string", "business_label": "Ubicación", "is_ecs": True, "dimension": True}],
+        }
+
+    monkeypatch.setattr(main, "generate_logstash_filter", _fake)
+
+    campo = client.post("/api/v1/onboarding/generate-filter",
+                        json={"raw_log": "x"}).json()["fields"][0]
+
+    assert campo["type"] == "geo_point", campo
+
+
+def test_los_dashboards_curados_no_pasan_por_la_heuristica():
+    """La mejora de visualizaciones es SOLO para los datasets nuevos: los diez
+    verticales eligen sus paneles a mano y no se tocan."""
+    from dashboards import build_ndjson, get_available_slugs
+
+    for slug in get_available_slugs():
+        assert "Dashboard auto-generado" not in build_ndjson(slug), slug
 
 
 def test_provision_capabilities_productive_slug(monkeypatch, tmp_path):

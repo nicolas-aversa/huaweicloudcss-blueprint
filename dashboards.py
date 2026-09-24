@@ -593,14 +593,22 @@ def _field_path(f: dict[str, Any]) -> str:
     return (f.get("field_path") or f.get("ecs_path") or f.get("raw_name") or "").strip()
 
 
+# Unidades que se PROMEDIAN, no se suman. "Las latencias suman 40 segundos" no
+# es una frase que signifique algo; "el promedio es 87 ms" sí.
+_UNIDADES_DE_PROMEDIO = frozenset({
+    "ms", "milisegundos", "s", "sec", "seg", "segundos", "min", "minutos",
+    "h", "hs", "horas", "%", "pct", "porcentaje", "rate", "ratio",
+})
+
+
 def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
     """Arma un spec rich (title/ip_id/index_fields/panels) a partir de los campos
     detectados, eligiendo viz por tipo y calculando el layout en la grilla de 48."""
     from index_template import index_pattern_from_name
 
     index_fields: list[tuple[str, str]] = [("@timestamp", "date")]
-    # (path, es, agg_path, label, dimension, role)
-    typed: list[tuple[str, str, str, str, bool, "str | None"]] = []
+    # (path, es, agg_path, label, dimension, role, unit)
+    typed: list[tuple[str, str, str, str, bool, "str | None", "str | None"]] = []
     has_event_date = False
     for f in fields or []:
         path = _field_path(f)
@@ -608,7 +616,14 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
             continue
         wiz_type = (f.get("type") or "").strip()
         es = _WIZ_TO_ES.get(wiz_type, "keyword")
-        if es == "date":
+        role = (f.get("role") or "").strip() or None
+        # Que el log traiga SU fecha es lo que decide si una serie temporal
+        # significa algo (si no, `@timestamp` es la hora de ingesta y el gráfico
+        # es un pico en el momento del deploy). Vale también `role: timestamp`:
+        # el prompt le pide al modelo que mande la fecha a `@timestamp` y borre
+        # el campo original, y cuando lo hacía el dashboard perdía el área y la
+        # línea aunque el índice tuviera una serie temporal perfecta.
+        if es == "date" or role == "timestamp":
             has_event_date = True
         index_fields.append((path, es))
         agg_path = path
@@ -622,27 +637,51 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
                 dim = is_dimension(path, wiz_type)
             except Exception:  # noqa: BLE001
                 dim = es in ("keyword", "text", "boolean")
-        role = (f.get("role") or "").strip() or None
-        typed.append((path, es, agg_path, (f.get("business_label") or path), bool(dim), role))
+        unit = f.get("unit")
+        typed.append((path, es, agg_path, (f.get("business_label") or path), bool(dim), role,
+                      unit if isinstance(unit, str) else None))
 
-    ip_fields = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r) in typed if es == "ip"]
-    num_fields = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r) in typed if es in ("long", "double")]
-    cat_fields = [(p, ap, lbl) for (p, es, ap, lbl, d, _r) in typed
-                  if es in ("keyword", "text", "boolean") and d]
+    # Selección por role. Va ANTES de los buckets porque el rol le gana al tipo:
+    # un `entity_id` es un keyword como cualquier otro, pero tiene miles de
+    # valores distintos y su panel es una tabla de los top, no una torta ni un
+    # ranking de barras con una barra por documento.
+    def _con_role(nombre: str):
+        t = next((t for t in typed if t[5] == nombre), None)
+        return (t[0], t[2], t[3]) if t else None
 
-    # Selección por role (fallback a primer campo del tipo).
-    primary_cat = next((t for t in typed if t[5] == "primary_dimension"), None)
-    primary_cat = (primary_cat[0], primary_cat[2], primary_cat[3]) if primary_cat else (cat_fields[0] if cat_fields else None)
-    primary_num = next((t for t in typed if t[5] == "measure"), None)
-    primary_num = (primary_num[0], primary_num[2], primary_num[3]) if primary_num else (num_fields[0] if num_fields else None)
-    entity_field = next((t for t in typed if t[5] == "entity_id"), None)
-    entity_field = (entity_field[0], entity_field[2], entity_field[3]) if entity_field else None
+    entity_field = _con_role("entity_id")
+    exito_field = _con_role("success_indicator")
+    critico_field = _con_role("critical_indicator")
+    _con_panel_propio = {entity_field[0]} if entity_field else set()
+
+    ip_fields = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed if es == "ip"]
+    num_fields = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed if es in ("long", "double")]
+    # Los booleanos salen de acá: son dos valores, y eso es una torta, no un
+    # ranking de barras con dos barras.
+    cat_fields = [(p, ap, lbl) for (p, es, ap, lbl, d, _r, _u) in typed
+                  if es in ("keyword", "text") and d and p not in _con_panel_propio]
+    bool_fields = [(p, ap, lbl) for (p, es, ap, lbl, d, _r, _u) in typed if es == "boolean" and d]
+    geo_campos = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed if es == "geo_point"]
+
+    primary_cat = _con_role("primary_dimension") or (cat_fields[0] if cat_fields else None)
+    primary_num = _con_role("measure") or (num_fields[0] if num_fields else None)
+    # Sumar latencias o porcentajes no dice nada: de 200 ms y 300 ms lo que
+    # importa es que el promedio es 250, no que "suman 500".
+    unidad_medida = next((u for (p, _e, _a, _l, _d, _r, u) in typed
+                          if primary_num and p == primary_num[0]), None)
+    agg_medida = "avg" if (unidad_medida or "").strip().lower() in _UNIDADES_DE_PROMEDIO else "sum"
+    verbo_medida = "Promedio" if agg_medida == "avg" else "Suma"
 
     _seen: set[str] = set()
     def _uniq(base: str, path: str) -> str:  # noqa: E306 — títulos únicos (ids = uuid5(título))
         t = base if base not in _seen else f"{base} ({path})"
         _seen.add(t)
         return t
+
+    # Un campo que ya tiene su panel no se repite más abajo en los breakdowns:
+    # antes el primer categórico salía dos veces (torta y barras), y solo se
+    # notaba porque `_uniq` le cambiaba el título al segundo.
+    graficados: set[str] = set()
 
     title = slug.replace("-", " ").replace("_", " ").title()
     panels: list[dict[str, Any]] = [
@@ -651,7 +690,7 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
     ]
 
     # Fila de métricas (w12 h8, hasta 4): Total + cardinality de entity_id +
-    # cardinality de IP + suma de la medida principal.
+    # cardinality de IP + los eventos críticos + la medida principal.
     mx = 0
     panels.append({"type": "metric", "title": "Total", "agg": "count", "grid": [mx, 4, 12, 8]})
     mx += 12
@@ -665,10 +704,18 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
         panels.append({"type": "metric", "title": _uniq(f"Únicos {lbl}", p), "agg": "cardinality",
                        "field": ap, "label": f"Únicos {lbl}", "grid": [mx, 4, 12, 8]})
         mx += 12
+    # `critical_indicator` es el campo que SOLO aparece cuando algo salió mal
+    # (un código de error, un motivo de cancelación): contar los documentos que
+    # lo traen es "cuántos fallaron", el número que se mira primero.
+    if critico_field and mx < 36:
+        p, ap, lbl = critico_field
+        panels.append({"type": "metric", "title": _uniq(f"Con {lbl}", p), "agg": "count",
+                       "label": f"Con {lbl}", "query": f"{p}:*", "grid": [mx, 4, 12, 8]})
+        mx += 12
     if primary_num and mx < 36:
         p, ap, lbl = primary_num
-        panels.append({"type": "metric", "title": _uniq(f"Suma {lbl}", p), "agg": "sum",
-                       "field": p, "label": f"Suma {lbl}", "grid": [mx, 4, 12, 8]})
+        panels.append({"type": "metric", "title": _uniq(f"{verbo_medida} {lbl}", p), "agg": agg_medida,
+                       "field": p, "label": f"{verbo_medida} {lbl}", "grid": [mx, 4, 12, 8]})
         mx += 12
 
     # Serie temporal SOLO si el log trae su propia fecha.
@@ -677,31 +724,59 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
         panels.append({"type": "area", "title": "Eventos en el tiempo", "metric": "count",
                        "grid": [0, y, 48, 12]})
         y += 12
+        # `success_indicator` partiendo la serie: éxitos contra fallos en el
+        # tiempo, que es el gráfico que mira primero cualquiera que opera esto.
+        if exito_field:
+            p, ap, lbl = exito_field
+            panels.append({"type": "area", "title": _uniq(f"{lbl} en el tiempo", p),
+                           "metric": "count", "split": ap, "grid": [0, y, 48, 12]})
+            graficados.add(p)
+            y += 12
+
+    # El mapa: un log con coordenadas se entiende acá y en ningún otro lado.
+    for (p, ap, lbl) in geo_campos[:1]:
+        panels.append({"type": "map", "title": _uniq(f"Mapa · {lbl}", p),
+                       "field": p, "grid": [0, y, 48, 18]})
+        graficados.add(p)
+        y += 18
 
     # Pie chart de la dimensión primaria (role → primer cat_fields).
     if primary_cat:
         p0, ap0, lbl0 = primary_cat
         panels.append({"type": "pie", "title": _uniq(f"Distribución por {lbl0}", p0),
                        "field": ap0, "grid": [0, y, 24, 12]})
-        if len(cat_fields) > 1:
-            p1, ap1, lbl1 = cat_fields[1] if cat_fields[0] == primary_cat else cat_fields[0]
+        graficados.add(p0)
+        restantes = [c for c in cat_fields if c[0] not in graficados]
+        if restantes:
+            p1, ap1, lbl1 = restantes[0]
             panels.append({"type": "bar", "title": _uniq(f"Top {lbl1}", p1),
                            "field": ap1, "horizontal": True, "grid": [24, y, 24, 12]})
-        y += 12
-    elif cat_fields:
-        p0, ap0, lbl0 = cat_fields[0]
-        panels.append({"type": "pie", "title": _uniq(f"Distribución por {lbl0}", p0),
-                       "field": ap0, "grid": [0, y, 24, 12]})
-        if len(cat_fields) > 1:
-            p1, ap1, lbl1 = cat_fields[1]
-            panels.append({"type": "bar", "title": _uniq(f"Top {lbl1}", p1),
-                           "field": ap1, "horizontal": True, "grid": [24, y, 24, 12]})
+            graficados.add(p1)
         y += 12
 
-    # Breakdowns: categóricos (horizontal_bar top-N) + IPs (table). 2 por fila, w24 h15.
+    # Los booleanos, a torta: dos valores no son un ranking.
+    for (p, ap, lbl) in bool_fields[:2]:
+        if p in graficados:
+            continue
+        panels.append({"type": "pie", "title": _uniq(f"Distribución por {lbl}", p),
+                       "field": ap, "grid": [0, y, 24, 12]})
+        graficados.add(p)
+        y += 12
+
+    # Breakdowns: categóricos (horizontal_bar top-N) + IPs y entidades (table,
+    # que es lo que sirve cuando los valores son casi únicos). 2 por fila.
     breakdowns: list[dict[str, Any]] = []
-    for (p, ap, lbl) in cat_fields[:8]:
+    for (p, ap, lbl) in [c for c in cat_fields if c[0] not in graficados][:8]:
         breakdowns.append({"type": "bar", "title": _uniq(f"Top {lbl}", p), "field": ap, "horizontal": True})
+    if critico_field and critico_field[0] not in graficados:
+        p, ap, lbl = critico_field
+        breakdowns.append({"type": "bar", "title": _uniq(f"Dónde aparece {lbl}", p),
+                           "field": ap, "horizontal": True})
+        graficados.add(p)
+    if entity_field and entity_field[0] not in graficados:
+        p, ap, lbl = entity_field
+        breakdowns.append({"type": "table", "title": _uniq(f"Top {lbl}", p), "field": ap})
+        graficados.add(p)
     for (p, ap, lbl) in ip_fields[:2]:
         breakdowns.append({"type": "table", "title": _uniq(f"Top {lbl}", p), "field": ap})
     col = 0
@@ -718,7 +793,7 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
     # Numérico over time: role measure → primer numérico. Solo con fecha real.
     if primary_num and has_event_date:
         p, ap, lbl = primary_num
-        panels.append({"type": "line", "title": _uniq(f"{lbl} en el tiempo", p), "metric": "sum",
+        panels.append({"type": "line", "title": _uniq(f"{lbl} en el tiempo", p), "metric": agg_medida,
                        "field": p, "grid": [0, y, 48, 12]})
         y += 12
 
@@ -727,7 +802,7 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
         p_cat, ap_cat, lbl_cat = primary_cat
         p_num, ap_num, lbl_num = primary_num
         panels.append({"type": "bar", "title": _uniq(f"Top {lbl_cat} por {lbl_num}", p_cat),
-                       "field": ap_cat, "horizontal": True, "metric": "sum", "agg_field": p_num,
+                       "field": ap_cat, "horizontal": True, "metric": agg_medida, "agg_field": p_num,
                        "grid": [0, y, 48, 15]})
         y += 15
 
