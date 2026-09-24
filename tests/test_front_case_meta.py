@@ -172,6 +172,25 @@ check('redeploy multi: bucket compartido', body.obs_bucket === 'demos-del-sa', b
 check('redeploy multi: cts con el suyo', body.cases[0].obs_bucket === 'mi-tracker-cts');
 check('redeploy multi: siem sin propio', body.cases[1].obs_bucket === '');
 
+// Dataset nuevo con archivo: el paso 3 ya no tiene campos de bucket (el
+// archivo va al bucket de demos). Leer el form vacío mandaba `bucket => ""` y
+// "Revisar y guardar" fallaba.
+state.selectedExamples = ['custom'];
+state.deployMode = 'custom';
+state.sourceMode = 'file';
+state.obsCreds = { ak: 'AK' };
+DOM['input-bucket'] = null;
+DOM['input-prefix'] = null;
+cfg = collectInputConfig();
+check('archivo: bucket de demos', cfg.bucket === 'demos-del-sa', cfg.bucket);
+check('archivo: prefijo del caso', cfg.prefix === '‹slug›-logs/', cfg.prefix);
+state.sourceMode = 'live';
+DOM['input-bucket'] = campo('bucket-del-cliente');
+DOM['input-prefix'] = campo('logs/');
+cfg = collectInputConfig();
+check('en la nube: lo del form', cfg.bucket === 'bucket-del-cliente', cfg.bucket);
+state.deployMode = 'demo';
+
 // Custom sigue leyendo del form y nunca trae bucket propio.
 state.selectedExamples = [];
 DOM['input-bucket'] = campo('demos-del-sa');

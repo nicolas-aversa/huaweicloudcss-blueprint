@@ -268,11 +268,13 @@
     }
     .card-title:focus { outline: none; }
 
+    /* Sin tope de caracteres: con `max-width: 68ch` una descripción de dos
+       oraciones se partía en la mitad aunque la card tuviera lugar de sobra
+       ("…La columna / Tipo define el index template"). El ancho lo pone la card. */
     .card-description {
       font-size: var(--fs-md);
       color: var(--text-secondary);
       margin-bottom: 24px;
-      max-width: 68ch;
     }
 
     /* Eyebrow: label corto en mayúscula espaciada, color acento (ref. teramot) */
@@ -3265,7 +3267,7 @@
         });
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+          throw new Error(detailMsg(err));   // el mensaje, no el JSON con el stage
         }
         const data = await res.json();
         state.filterCode = data.filter_code;
@@ -4481,7 +4483,7 @@
         });
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+          throw new Error(detailMsg(err));   // el mensaje, no el JSON con el stage
         }
         const data = await res.json();
         state.pipelineCode = data.pipeline_code || data.filter_code;
@@ -4908,6 +4910,15 @@
           config.endpoint = v('input-endpoint') || `https://obs.${hwRegion()}.myhuaweicloud.com`;
           config.region = v('input-region') || hwRegion();
           config.prefix = v('input-prefix');
+          // Con archivo, el paso 3 ya no tiene campos de bucket ni prefijo: el
+          // archivo va al bucket de demos bajo `<slug>-logs/` (lo que muestra la
+          // tarjeta del paso 3). Leer el form vacío mandaba `bucket => ""` y el
+          // servidor rechazaba el .conf. El slug recién existe al guardar: la
+          // vista previa lo muestra como ‹slug›, igual que la tarjeta.
+          if (state.sourceMode === 'file') {
+            config.bucket = demoBucket();
+            config.prefix = '‹slug›-logs/';
+          }
         } else {
           config.bucket = document.getElementById('input-bucket')?.value || '';
           config.access_key_id = document.getElementById('input-access-key-id')?.value || '';
@@ -7370,7 +7381,14 @@
         clearAllFieldErrors(document.getElementById('step-3'));
         const checks = [];
         const plugin = state.inputPlugin;
-        if (plugin === 'obs') {
+        // Dataset nuevo con archivo: no hay campos de origen que validar (va al
+        // bucket de demos), pero sin ese bucket el .conf sale sin de dónde leer.
+        if (state.deployMode === 'custom' && state.sourceMode === 'file' && plugin === 'obs') {
+          if (!demoBucket()) {
+            toast('Falta el bucket de demos: cargalo en ⚙ Configuración → Credenciales de la cuenta.', 'error');
+            return false;
+          }
+        } else if (plugin === 'obs') {
           checks.push(
             { id: 'input-bucket', label: 'el bucket OBS' },
             { id: 'input-access-key-id', label: 'el Access Key ID' },

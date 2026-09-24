@@ -76,6 +76,12 @@ VERTICAL = {
         {'raw_name': 'counting_c1', 'field_path': 'fraud.counting.c1', 'type': 'float', 'business_label': 'Count C1'},
         {'raw_name': 'timedelta_d1', 'field_path': 'fraud.timedelta.d1', 'type': 'float', 'business_label': 'Timedelta D1'},
         {'raw_name': 'timedelta_d15', 'field_path': 'fraud.timedelta.d15', 'type': 'float', 'business_label': 'Timedelta D15'},
+        # Los que trae la muestra y no estaban: el template declara todo lo que llega.
+        {'raw_name': 'counting_c2', 'field_path': 'fraud.counting.c2', 'type': 'float', 'business_label': 'Count C2'},
+        {'raw_name': 'counting_c3', 'field_path': 'fraud.counting.c3', 'type': 'float', 'business_label': 'Count C3'},
+        {'raw_name': 'counting_c4', 'field_path': 'fraud.counting.c4', 'type': 'float', 'business_label': 'Count C4'},
+        {'raw_name': 'timedelta_d4', 'field_path': 'fraud.timedelta.d4', 'type': 'float', 'business_label': 'Timedelta D4'},
+        {'raw_name': 'timedelta_d8', 'field_path': 'fraud.timedelta.d8', 'type': 'float', 'business_label': 'Timedelta D8'},
     ],
     'suggested_questions': [
         '¿Cuántas transacciones hay en total?',

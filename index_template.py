@@ -52,14 +52,21 @@ def index_pattern_from_name(index_name: str) -> str:
 
 
 # Tipo del campo (lo que el step 2 muestra) → mapping de OpenSearch.
-# Solo mapeamos explícito lo que NO debe caer al dynamic keyword; los strings,
-# códigos e IDs caen al dynamic template (keyword). Cubre TODO el vocabulario
-# que emite el detector (`field_mappings.json` → `_infer_field_type`):
-# integer/float/ip/boolean/date/text + geo_point (passthrough para edición
-# manual o el copiloto). Espeja los tipos de `docs/reference_index_template.json`.
+#
+# El template NOMBRA todos los campos que recibe, strings incluidos. Antes solo
+# declaraba números, IPs, fechas y booleanos, y el resto caía al dynamic
+# template: el resultado era el mismo keyword, pero el template no decía qué
+# campos tenía el índice, y un campo que llegaba como texto con cara de número
+# ("12") quedaba keyword sin que nada lo avisara. El dynamic template sigue,
+# como red para un campo que aparezca y nadie haya declarado.
+_KEYWORD: dict[str, Any] = {"type": "keyword", "ignore_above": 1024}
 _FIELD_TYPE_TO_OS: dict[str, dict[str, Any]] = {
+    "string": _KEYWORD,
+    "keyword": _KEYWORD,
     "integer": {"type": "long"},
+    "long": {"type": "long"},
     "float": {"type": "double"},
+    "double": {"type": "double"},
     "ip": {"type": "ip"},
     "boolean": {"type": "boolean"},
     # `ignore_malformed` va acá adentro a propósito: el del índice (más abajo,
@@ -110,9 +117,12 @@ def _mapping_de(f: dict[str, Any]) -> dict[str, Any] | None:
     mismo: si no, el filter lleva bien la fecha a `@timestamp` pero el campo
     original se indexa con un formato que no lo acepta y se descarta.
     """
-    base = _FIELD_TYPE_TO_OS.get(f.get("type"))
-    if not base:
+    tipo = (f.get("type") or "string").strip().lower()
+    # Un tipo que no conocemos va como keyword —lo mismo que haría el dynamic
+    # template—, pero declarado. Un objeto no: sus hijos se declaran solos.
+    if tipo in ("object", "nested"):
         return None
+    base = _FIELD_TYPE_TO_OS.get(tipo, _KEYWORD)
     mapping = copy.deepcopy(base)
     formato = (f.get("date_format") or "").strip()
     if mapping.get("type") == "date" and formato:
@@ -138,6 +148,12 @@ def _set_nested(props: dict[str, Any], dotted_path: str, mapping: dict[str, Any]
             child = {"properties": {}}
             node[part] = child
         node = child["properties"]
+    # Si ya hay un objeto con ese nombre (`user` con `user.name` adentro), gana
+    # el objeto: un keyword `user` encima lo borraría, y el documento —que trae
+    # `user` como objeto— rebotaría entero. Da lo mismo el orden de los campos.
+    actual = node.get(parts[-1])
+    if isinstance(actual, dict) and "properties" in actual:
+        return
     node[parts[-1]] = mapping
 
 

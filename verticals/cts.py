@@ -85,7 +85,24 @@ VERTICAL = {
             'field_path': 'user.domain.name',
             'type': 'keyword',
             'business_label': 'Domain',
-        }
+        },
+        # El resto de lo que trae cada traza: el template declara todos los
+        # campos que llegan al índice, no solo los que usa el dashboard.
+        {'raw_name': 'trace_id', 'field_path': 'trace_id', 'type': 'keyword', 'business_label': 'Trace ID'},
+        {'raw_name': 'tracker_name', 'field_path': 'tracker_name', 'type': 'keyword', 'business_label': 'Tracker'},
+        {'raw_name': 'api_version', 'field_path': 'api_version', 'type': 'keyword', 'business_label': 'API Version'},
+        {'raw_name': 'domain_id', 'field_path': 'domain_id', 'type': 'keyword', 'business_label': 'Domain ID'},
+        {'raw_name': 'project_id', 'field_path': 'project_id', 'type': 'keyword', 'business_label': 'Project ID'},
+        {'raw_name': 'resource_id', 'field_path': 'resource_id', 'type': 'keyword', 'business_label': 'Resource ID'},
+        {'raw_name': 'read_only', 'field_path': 'read_only', 'type': 'boolean', 'business_label': 'Read Only'},
+        {'raw_name': 'record_time', 'field_path': 'record_time', 'type': 'date', 'date_format': 'UNIX_MS',
+         'business_label': 'Record Time'},
+        {'raw_name': 'time', 'field_path': 'time', 'type': 'date', 'date_format': 'UNIX_MS',
+         'business_label': 'Operation Time'},
+        {'raw_name': 'user_agent', 'field_path': 'user_agent', 'type': 'keyword', 'business_label': 'User Agent'},
+        {'raw_name': 'name', 'field_path': 'user.name', 'type': 'keyword', 'business_label': 'User Name'},
+        {'raw_name': 'account_id', 'field_path': 'user.account_id', 'type': 'keyword', 'business_label': 'Account ID'},
+        {'raw_name': 'type', 'field_path': 'user.type', 'type': 'keyword', 'business_label': 'User Type'},
     ],
     'dashboard': {
         'title': 'Cloud Trace Service',

@@ -92,6 +92,61 @@ VERTICAL = {
             'field_path': 'day_of_week',
             'type': 'keyword',
             'business_label': 'Day of Week',
+        },
+        {
+            'raw_name': 'order_date',
+            'field_path': 'order_date',
+            'type': 'date',
+            'business_label': 'Fecha de la orden',
+            'date_format': 'ISO8601',
+        },
+        {
+            'raw_name': 'currency',
+            'field_path': 'currency',
+            'type': 'keyword',
+            'business_label': 'Moneda',
+        },
+        {
+            'raw_name': 'customer_full_name',
+            'field_path': 'customer_full_name',
+            'type': 'keyword',
+            'business_label': 'Cliente (nombre)',
+        },
+        {
+            'raw_name': 'region',
+            'field_path': 'geo.region',
+            'type': 'keyword',
+            'business_label': 'Región',
+        },
+        {
+            'raw_name': 'product_id',
+            'field_path': 'products.product_id',
+            'type': 'keyword',
+            'business_label': 'Producto (ID)',
+        },
+        {
+            'raw_name': 'sku',
+            'field_path': 'products.sku',
+            'type': 'keyword',
+            'business_label': 'Producto (SKU)',
+        },
+        {
+            'raw_name': 'category',
+            'field_path': 'products.category',
+            'type': 'keyword',
+            'business_label': 'Producto (categoría)',
+        },
+        {
+            'raw_name': 'price',
+            'field_path': 'products.price',
+            'type': 'float',
+            'business_label': 'Producto (precio)',
+        },
+        {
+            'raw_name': 'quantity',
+            'field_path': 'products.quantity',
+            'type': 'integer',
+            'business_label': 'Producto (cantidad)',
         }
     ],
     'suggested_questions': [

@@ -697,9 +697,10 @@ def test_build_index_template_typing():
     # text → multi-field text + keyword (full-text Y aggregatable).
     assert ns_props["err_msg"]["type"] == "text"
     assert ns_props["err_msg"]["fields"]["keyword"]["type"] == "keyword"
-    # Códigos string → NO están en properties (= keyword vía dynamic template).
-    assert "trxl_resp" not in ns_props
-    assert "trxl_account4" not in ns_props
+    # Códigos string → declarados como keyword: el template nombra TODOS los
+    # campos, no solo los que no son texto.
+    assert ns_props["trxl_resp"] == {"type": "keyword", "ignore_above": 1024}
+    assert ns_props["trxl_account4"] == {"type": "keyword", "ignore_above": 1024}
 
     # Pattern de índice estático (sin date math) → match exacto.
     assert index_pattern_from_name("transacciones") == "transacciones"
@@ -721,8 +722,8 @@ def test_build_index_template_top_level_namespace():
     assert props["review_score"] == {"type": "long"}
     assert props["source_ip"] == {"type": "ip"}
     assert props["@timestamp"] == {"type": "date"}
-    # string → keyword via dynamic template (ausente de properties).
-    assert "trace_name" not in props
+    # string → keyword declarado, en la raíz.
+    assert props["trace_name"] == {"type": "keyword", "ignore_above": 1024}
 
 
 def test_build_index_template_nested_field_path():
@@ -747,9 +748,39 @@ def test_build_index_template_nested_field_path():
     assert props["destination"]["properties"]["ip"] == {"type": "ip"}
     # NO debe existir la clave plana raw_name.
     assert "srcip" not in props and "dstip" not in props
-    # keyword → dynamic template (no explícito), incluso anidado.
-    assert "event" not in props  # event.action es keyword → no mapeado explícito
-    assert "geo" not in props.get("destination", {}).get("properties", {})
+    # keyword → declarado también, anidado en su path.
+    kw = {"type": "keyword", "ignore_above": 1024}
+    assert props["event"]["properties"]["action"] == kw
+    assert props["destination"]["properties"]["geo"]["properties"]["country_name"] == kw
+
+
+def test_el_template_nombra_todos_los_campos():
+    """Cada campo que llega en `fields` tiene su mapping explícito, sea del tipo
+    que sea: nada queda librado al dynamic template."""
+    from index_template import build_index_template
+    fields = [{"field_path": p, "type": t} for p, t in [
+        ("a", "keyword"), ("b", "string"), ("c", "integer"), ("d", "float"), ("e", "date"),
+        ("f", "ip"), ("g", "boolean"), ("h", "text"), ("i", "geo_point"), ("j", "long"),
+        ("k", "double"), ("l", "tipo_raro"), ("m", None)]]
+    props = build_index_template(fields, "", "x-%{+YYYY.MM}")["template"]["mappings"]["properties"]
+
+    faltan = [f["field_path"] for f in fields if f["field_path"] not in props]
+    assert faltan == [], faltan
+    # Un tipo desconocido o ausente es keyword, igual que el dynamic template.
+    assert props["l"]["type"] == props["m"]["type"] == "keyword"
+
+
+@pytest.mark.parametrize("orden", ["hoja_primero", "objeto_primero"])
+def test_un_nombre_que_es_hoja_y_padre_queda_objeto(orden):
+    """`user` como keyword y `user.name` adentro: si el keyword pisara al
+    objeto, un documento que trae `user` como objeto rebotaría entero."""
+    from index_template import build_index_template
+    campos = [{"field_path": "user", "type": "keyword"},
+              {"field_path": "user.name", "type": "keyword"}]
+    if orden == "objeto_primero":
+        campos.reverse()
+    props = build_index_template(campos, "", "x-%{+YYYY.MM}")["template"]["mappings"]["properties"]
+    assert props["user"]["properties"]["name"]["type"] == "keyword"
 
 
 def test_index_template_endpoint():

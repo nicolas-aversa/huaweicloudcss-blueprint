@@ -113,6 +113,18 @@ VERTICAL = {
             'field_path': 'downtime',
             'type': 'integer',
             'business_label': 'Downtime Flag',
+        },
+        {
+            'raw_name': 'avg_dht',
+            'field_path': 'avg_dht',
+            'type': 'float',
+            'business_label': 'Downhole Temp',
+        },
+        {
+            'raw_name': 'flow_kind',
+            'field_path': 'flow_kind',
+            'type': 'keyword',
+            'business_label': 'Flow Kind (production/injection)',
         }
     ],
     'suggested_questions': [

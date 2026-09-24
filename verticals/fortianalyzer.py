@@ -20,6 +20,14 @@ VERTICAL = {
   mutate { add_field => { "_ts" => "%{date} %{time}" } }
   date { match => ["_ts", "yyyy-MM-dd HH:mm:ss"] target => "@timestamp" }
   mutate {
+    gsub => [
+      "packetloss", "%", "",
+      "inbandwidth", "kbps", "",
+      "outbandwidth", "kbps", "",
+      "bibandwidth", "kbps", ""
+    ]
+  }
+  mutate {
     convert => {
       "srcport" => "integer"
       "dstport" => "integer"
@@ -30,6 +38,12 @@ VERTICAL = {
       "rcvdpkt" => "integer"
       "duration" => "integer"
       "policyid" => "integer"
+      "latency" => "float"
+      "jitter" => "float"
+      "packetloss" => "float"
+      "inbandwidth" => "float"
+      "outbandwidth" => "float"
+      "bibandwidth" => "float"
     }
     remove_field => ["message", "_ts", "date", "time", "eventtime", "tz", "vd", "logid"]
   }
@@ -148,6 +162,391 @@ VERTICAL = {
             'field_path': 'policyid',
             'type': 'integer',
             'business_label': 'Política',
+        },
+        {
+            'raw_name': 'proto',
+            'field_path': 'proto',
+            'type': 'integer',
+            'business_label': 'Protocolo IP (número)',
+        },
+        {
+            'raw_name': 'duration',
+            'field_path': 'duration',
+            'type': 'integer',
+            'business_label': 'Duración de la sesión',
+            'unit': 's',
+        },
+        {
+            'raw_name': 'sentpkt',
+            'field_path': 'sentpkt',
+            'type': 'integer',
+            'business_label': 'Paquetes enviados',
+        },
+        {
+            'raw_name': 'rcvdpkt',
+            'field_path': 'rcvdpkt',
+            'type': 'integer',
+            'business_label': 'Paquetes recibidos',
+        },
+        {
+            'raw_name': 'sentdelta',
+            'field_path': 'sentdelta',
+            'type': 'integer',
+            'business_label': 'Bytes enviados (delta)',
+        },
+        {
+            'raw_name': 'rcvddelta',
+            'field_path': 'rcvddelta',
+            'type': 'integer',
+            'business_label': 'Bytes recibidos (delta)',
+        },
+        {
+            'raw_name': 'sessionid',
+            'field_path': 'sessionid',
+            'type': 'keyword',
+            'business_label': 'ID de sesión',
+        },
+        {
+            'raw_name': 'srcintf',
+            'field_path': 'srcintf',
+            'type': 'keyword',
+            'business_label': 'Interfaz de origen',
+        },
+        {
+            'raw_name': 'srcintfrole',
+            'field_path': 'srcintfrole',
+            'type': 'keyword',
+            'business_label': 'Rol de la interfaz de origen',
+        },
+        {
+            'raw_name': 'dstintf',
+            'field_path': 'dstintf',
+            'type': 'keyword',
+            'business_label': 'Interfaz de destino',
+        },
+        {
+            'raw_name': 'dstintfrole',
+            'field_path': 'dstintfrole',
+            'type': 'keyword',
+            'business_label': 'Rol de la interfaz de destino',
+        },
+        {
+            'raw_name': 'srcmac',
+            'field_path': 'srcmac',
+            'type': 'keyword',
+            'business_label': 'MAC de origen',
+        },
+        {
+            'raw_name': 'transip',
+            'field_path': 'transip',
+            'type': 'ip',
+            'business_label': 'IP traducida (NAT)',
+        },
+        {
+            'raw_name': 'transport',
+            'field_path': 'transport',
+            'type': 'integer',
+            'business_label': 'Puerto traducido (NAT)',
+        },
+        {
+            'raw_name': 'trandisp',
+            'field_path': 'trandisp',
+            'type': 'keyword',
+            'business_label': 'Tipo de NAT',
+        },
+        {
+            'raw_name': 'policytype',
+            'field_path': 'policytype',
+            'type': 'keyword',
+            'business_label': 'Tipo de política',
+        },
+        {
+            'raw_name': 'direction',
+            'field_path': 'direction',
+            'type': 'keyword',
+            'business_label': 'Dirección',
+        },
+        {
+            'raw_name': 'appid',
+            'field_path': 'appid',
+            'type': 'keyword',
+            'business_label': 'ID de aplicación',
+        },
+        {
+            'raw_name': 'applist',
+            'field_path': 'applist',
+            'type': 'keyword',
+            'business_label': 'Perfil de control de apps',
+        },
+        {
+            'raw_name': 'apprisk',
+            'field_path': 'apprisk',
+            'type': 'keyword',
+            'business_label': 'Riesgo de la aplicación',
+        },
+        {
+            'raw_name': 'countapp',
+            'field_path': 'countapp',
+            'type': 'integer',
+            'business_label': 'Eventos de control de apps',
+        },
+        {
+            'raw_name': 'countips',
+            'field_path': 'countips',
+            'type': 'integer',
+            'business_label': 'Eventos IPS de la sesión',
+        },
+        {
+            'raw_name': 'osname',
+            'field_path': 'osname',
+            'type': 'keyword',
+            'business_label': 'Sistema operativo del cliente',
+        },
+        {
+            'raw_name': 'utmref',
+            'field_path': 'utmref',
+            'type': 'keyword',
+            'business_label': 'Referencia UTM',
+        },
+        {
+            'raw_name': 'attackid',
+            'field_path': 'attackid',
+            'type': 'integer',
+            'business_label': 'ID de firma IPS',
+        },
+        {
+            'raw_name': 'incidentserialno',
+            'field_path': 'incidentserialno',
+            'type': 'keyword',
+            'business_label': 'N° de incidente',
+        },
+        {
+            'raw_name': 'craction',
+            'field_path': 'craction',
+            'type': 'keyword',
+            'business_label': 'Acción de reputación',
+        },
+        {
+            'raw_name': 'crlevel',
+            'field_path': 'crlevel',
+            'type': 'keyword',
+            'business_label': 'Nivel de reputación',
+        },
+        {
+            'raw_name': 'crscore',
+            'field_path': 'crscore',
+            'type': 'integer',
+            'business_label': 'Puntaje de reputación',
+        },
+        {
+            'raw_name': 'eventtype',
+            'field_path': 'eventtype',
+            'type': 'keyword',
+            'business_label': 'Tipo de evento UTM',
+        },
+        {
+            'raw_name': 'profile',
+            'field_path': 'profile',
+            'type': 'keyword',
+            'business_label': 'Perfil de seguridad',
+        },
+        {
+            'raw_name': 'hostname',
+            'field_path': 'hostname',
+            'type': 'keyword',
+            'business_label': 'Host',
+        },
+        {
+            'raw_name': 'url',
+            'field_path': 'url',
+            'type': 'keyword',
+            'business_label': 'URL',
+        },
+        {
+            'raw_name': 'ref',
+            'field_path': 'ref',
+            'type': 'keyword',
+            'business_label': 'Referencia de la firma',
+        },
+        {
+            'raw_name': 'reqtype',
+            'field_path': 'reqtype',
+            'type': 'keyword',
+            'business_label': 'Tipo de pedido web',
+        },
+        {
+            'raw_name': 'cat',
+            'field_path': 'cat',
+            'type': 'keyword',
+            'business_label': 'Categoría web (ID)',
+        },
+        {
+            'raw_name': 'catdesc',
+            'field_path': 'catdesc',
+            'type': 'keyword',
+            'business_label': 'Categoría web',
+        },
+        {
+            'raw_name': 'method',
+            'field_path': 'method',
+            'type': 'keyword',
+            'business_label': 'Método',
+        },
+        {
+            'raw_name': 'agent',
+            'field_path': 'agent',
+            'type': 'keyword',
+            'business_label': 'User agent',
+        },
+        {
+            'raw_name': 'virus',
+            'field_path': 'virus',
+            'type': 'keyword',
+            'business_label': 'Virus',
+        },
+        {
+            'raw_name': 'virusid',
+            'field_path': 'virusid',
+            'type': 'integer',
+            'business_label': 'ID de virus',
+        },
+        {
+            'raw_name': 'dtype',
+            'field_path': 'dtype',
+            'type': 'keyword',
+            'business_label': 'Tipo de detección',
+        },
+        {
+            'raw_name': 'filename',
+            'field_path': 'filename',
+            'type': 'keyword',
+            'business_label': 'Archivo',
+        },
+        {
+            'raw_name': 'quarskip',
+            'field_path': 'quarskip',
+            'type': 'keyword',
+            'business_label': 'Cuarentena',
+        },
+        {
+            'raw_name': 'logdesc',
+            'field_path': 'logdesc',
+            'type': 'keyword',
+            'business_label': 'Descripción del evento',
+        },
+        {
+            'raw_name': 'msg',
+            'field_path': 'msg',
+            'type': 'keyword',
+            'business_label': 'Mensaje',
+        },
+        {
+            'raw_name': 'status',
+            'field_path': 'status',
+            'type': 'keyword',
+            'business_label': 'Estado',
+        },
+        {
+            'raw_name': 'reason',
+            'field_path': 'reason',
+            'type': 'keyword',
+            'business_label': 'Motivo',
+        },
+        {
+            'raw_name': 'user',
+            'field_path': 'user',
+            'type': 'keyword',
+            'business_label': 'Usuario',
+        },
+        {
+            'raw_name': 'ui',
+            'field_path': 'ui',
+            'type': 'keyword',
+            'business_label': 'Interfaz de administración',
+        },
+        {
+            'raw_name': 'path',
+            'field_path': 'path',
+            'type': 'keyword',
+            'business_label': 'Ruta de la REST API',
+        },
+        {
+            'raw_name': 'sn',
+            'field_path': 'sn',
+            'type': 'keyword',
+            'business_label': 'N° de serie del evento',
+        },
+        {
+            'raw_name': 'healthcheck',
+            'field_path': 'healthcheck',
+            'type': 'keyword',
+            'business_label': 'Health check SD-WAN',
+        },
+        {
+            'raw_name': 'interface',
+            'field_path': 'interface',
+            'type': 'keyword',
+            'business_label': 'Interfaz SD-WAN',
+        },
+        {
+            'raw_name': 'latency',
+            'field_path': 'latency',
+            'type': 'float',
+            'business_label': 'Latencia SD-WAN',
+            'unit': 'ms',
+        },
+        {
+            'raw_name': 'jitter',
+            'field_path': 'jitter',
+            'type': 'float',
+            'business_label': 'Jitter SD-WAN',
+            'unit': 'ms',
+        },
+        {
+            'raw_name': 'packetloss',
+            'field_path': 'packetloss',
+            'type': 'float',
+            'business_label': 'Pérdida de paquetes SD-WAN',
+            'unit': '%',
+        },
+        {
+            'raw_name': 'inbandwidth',
+            'field_path': 'inbandwidth',
+            'type': 'float',
+            'business_label': 'Ancho de banda de entrada',
+            'unit': 'kbps',
+        },
+        {
+            'raw_name': 'outbandwidth',
+            'field_path': 'outbandwidth',
+            'type': 'float',
+            'business_label': 'Ancho de banda de salida',
+            'unit': 'kbps',
+        },
+        {
+            'raw_name': 'bibandwidth',
+            'field_path': 'bibandwidth',
+            'type': 'float',
+            'business_label': 'Ancho de banda total',
+            'unit': 'kbps',
+        },
+        {
+            'raw_name': 'slatargetid',
+            'field_path': 'slatargetid',
+            'type': 'keyword',
+            'business_label': 'Objetivo de SLA',
+        },
+        {
+            'raw_name': 'slamap',
+            'field_path': 'slamap',
+            'type': 'keyword',
+            'business_label': 'Mapa de SLA',
+        },
+        {
+            'raw_name': 'metric',
+            'field_path': 'metric',
+            'type': 'keyword',
+            'business_label': 'Métrica del SLA',
         }
     ],
     'suggested_questions': [
@@ -550,7 +949,7 @@ Sesiones por acción, ancho de banda, top aplicaciones, firmas IPS y países de 
                 ('srcport', 'long'),
                 ('dstport', 'long'),
                 ('service', 'keyword'),
-                ('proto', 'keyword'),
+                ('proto', 'long'),
                 ('app', 'keyword'),
                 ('appcat', 'keyword'),
                 ('attack', 'keyword'),
@@ -609,7 +1008,7 @@ Vista de operaciones de seguridad: amenazas IPS, virus, web filter, tráfico blo
                 ('srcport', 'long'),
                 ('dstport', 'long'),
                 ('service', 'keyword'),
-                ('proto', 'keyword'),
+                ('proto', 'long'),
                 ('app', 'keyword'),
                 ('appcat', 'keyword'),
                 ('srccountry', 'keyword'),
@@ -710,11 +1109,11 @@ Unified Threat Management: IPS, web filter y virus. Firmas, categorías, URLs bl
                 ('reason', 'keyword'),
                 ('healthcheck', 'keyword'),
                 ('interface', 'keyword'),
-                ('latency', 'long'),
-                ('jitter', 'long'),
-                ('packetloss', 'long'),
-                ('inbandwidth', 'long'),
-                ('outbandwidth', 'long'),
+                ('latency', 'double'),
+                ('jitter', 'double'),
+                ('packetloss', 'double'),
+                ('inbandwidth', 'double'),
+                ('outbandwidth', 'double'),
                 ('slatargetid', 'keyword'),
                 ('slamap', 'keyword'),
                 ('metric', 'keyword')

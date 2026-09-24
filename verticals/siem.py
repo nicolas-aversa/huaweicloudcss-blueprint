@@ -368,6 +368,12 @@ VERTICAL = {
             'type': 'keyword',
             'business_label': 'Campaign Name',
             'group': 'MITRE ATT&CK',
+        },
+        {
+            'raw_name': 'iana_number',
+            'field_path': 'network.iana_number',
+            'type': 'integer',
+            'business_label': 'Protocolo IANA (número)',
         }
     ],
     'suggested_questions': [

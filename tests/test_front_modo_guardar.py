@@ -129,6 +129,30 @@ def test_el_chip_dice_quien_armo_el_conf():
     assert "sin LLM" in fn
 
 
+def test_sin_bucket_de_demos_el_paso_3_lo_dice_antes():
+    """Con archivo, el .conf lee del bucket de demos: sin él salía `bucket =>
+    ""` y el error llegaba del servidor, como JSON crudo."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("      if (s === 3) {")
+    paso3 = html[i:html.index("return validateRequired(checks);", i)]
+    assert "state.sourceMode === 'file'" in paso3 and "!demoBucket()" in paso3
+    assert "Falta el bucket de demos" in paso3
+
+
+def test_los_errores_del_analisis_y_del_pipeline_muestran_el_mensaje():
+    """Se mostraba `{"stage":"pipeline_conf","message":"…"}` tal cual."""
+    html = _INDEX.read_text(encoding="utf-8")
+    assert "JSON.stringify(err.detail)" not in html
+    assert html.count("throw new Error(detailMsg(err));") >= 2
+
+
+def test_la_descripcion_de_un_paso_no_se_corta_a_68_caracteres():
+    html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
+    regla = css[css.index("    .card-description {"):]
+    assert "max-width" not in regla[:regla.index("}")]
+
+
 def test_guardar_no_valida_el_destino():
     """La contraseña de OpenSearch era obligatoria aunque el campo no se usara."""
     html = _INDEX.read_text(encoding="utf-8")

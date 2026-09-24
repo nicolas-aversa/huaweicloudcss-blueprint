@@ -98,6 +98,12 @@ VERTICAL = {
             'field_path': 'error_code',
             'type': 'keyword',
             'business_label': 'Código de error',
+        },
+        {
+            'raw_name': 'content_id',
+            'field_path': 'content_id',
+            'type': 'keyword',
+            'business_label': 'ID de contenido',
         }
     ],
     'suggested_questions': [
