@@ -91,9 +91,13 @@ def slugify(text: str) -> str:
 def _clean_fields(fields: list) -> list[dict]:
     """Deja solo las claves que consume el resto de la app (index template,
     dashboards, capabilities), descartando basura del browser."""
+    # `date_format` viaja con el campo hasta el index template: sin él, una fecha
+    # como `2026-09-18 11:04:12` se indexa con el formato por defecto y, si no
+    # entra, se descarta en silencio. `frecuentes` son los valores más comunes
+    # de una dimensión: las preguntas de ejemplo los nombran entre paréntesis.
     keep = ("raw_name", "field_path", "ecs_path", "ecs_overlay_path", "type",
             "business_label", "unit", "dimension", "role", "is_ecs",
-            "ecs_type_official", "normalized_path")
+            "ecs_type_official", "normalized_path", "date_format", "frecuentes")
     out = []
     for f in fields or []:
         if not isinstance(f, dict):

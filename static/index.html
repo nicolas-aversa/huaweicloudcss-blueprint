@@ -3087,7 +3087,9 @@
         const res = await fetch('/api/v1/onboarding/generate-filter', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ raw_log: rawLog, namespace, ecs_overlay: false, input_type: state.inputPlugin || '' })
+          // Con un archivo va la muestra entera (header + filas); pegado u OBS,
+          // lo que haya en el textarea.
+          body: JSON.stringify({ raw_log: state.muestra || rawLog, namespace, ecs_overlay: false, input_type: state.inputPlugin || '' })
         });
         if (!res.ok) {
           const err = await res.json();
@@ -3096,6 +3098,8 @@
         const data = await res.json();
         state.filterCode = data.filter_code;
         state.fields = Array.isArray(data.fields) ? data.fields : [];
+        state.verificacion = data.verificacion || null;
+        state.preguntas = Array.isArray(data.questions) ? data.questions : [];
         state.generatedFromLog = rawLog;   // habilita el reuso sin re-llamar al LLM
         return { ok: true };
       } catch (err) {
@@ -3202,6 +3206,21 @@
       if (el) el.innerHTML = '';
     }
 
+    // Cuántas filas de la muestra se leen bien con el .conf que se armó. Cuando
+    // lo arma el perfilador, se simula en Python lo que va a hacer Logstash con
+    // cada fila: es la prueba, antes de desplegar, de que el .conf entiende tus
+    // datos.
+    function chipVerificacion(v) {
+      if (!v || v.fuente !== 'perfilador' || !v.filas) return '';
+      const completa = v.filas_ok === v.filas;
+      const estilo = completa
+        ? 'background:var(--accent-green-tint);color:var(--accent-green);'
+        : 'background:var(--accent-tint);color:var(--accent-hover);';
+      const detalle = (v.problemas || []).join(' · ');
+      return `<span class="mapping-header-count" style="${estilo}" title="${escapeHtml(detalle)}">
+        ${icon(completa ? 'check' : 'alert-triangle')} ${v.filas_ok}/${v.filas} filas verificadas</span>`;
+    }
+
     function renderMappingTable(fields) {
       const container = document.getElementById('mapping-table');
       if (!container) return;
@@ -3264,6 +3283,7 @@
               <span class="mapping-type-badge" id="type-display-${idx}" data-type="${escapeHtml(f.type || 'string')}">${escapeHtml(f.type || 'string')}</span>
               <select class="mapping-type-select hidden" id="type-input-${idx}" data-field="type">
                 <option value="string" ${f.type === 'string' ? 'selected' : ''}>string</option>
+                <option value="text" ${f.type === 'text' ? 'selected' : ''}>text</option>
                 <option value="integer" ${f.type === 'integer' ? 'selected' : ''}>integer</option>
                 <option value="float" ${f.type === 'float' ? 'selected' : ''}>float</option>
                 <option value="date" ${f.type === 'date' ? 'selected' : ''}>date</option>
@@ -3303,6 +3323,7 @@
             <div class="mapping-header-title">
               ${icon('database')} Campos detectados
               <span class="mapping-header-count">${fields.length} campos</span>
+              ${chipVerificacion(state.verificacion)}
             </div>
             <div class="mapping-actions">
               <button class="btn btn-secondary" id="mapping-edit-all-btn" style="padding:6px 12px;font-size:var(--fs-sm);">
@@ -6664,6 +6685,7 @@
         state.logFileContent = '';
         state.logFileName = '';
         state.logFileLines = 0;
+        state.muestra = '';
         const fileInput = document.getElementById('log-file-input');
         if (fileInput) fileInput.value = '';
         const pasteEl = document.getElementById('builder-paste');
@@ -6863,6 +6885,9 @@
     // alimenta la detección de campos (igual que los de ejemplo: el usuario solo
     // aporta el archivo).
     const _LOG_FILE_MAX = 50 * 1024 * 1024; // 50 MB
+    // Filas de datos que se mandan a analizar. Con 200 alcanza para ver el
+    // formato de cada fecha, el locale de cada número y qué columnas son ids.
+    const _MUESTRA_FILAS = 200;
     function _handleLogFile(file) {
       if (!file) return;
       if (file.size > _LOG_FILE_MAX) {
@@ -6876,6 +6901,10 @@
         state.logFileContent = text;
         state.logFileName = file.name;
         state.logFileLines = nonEmpty.length;
+        // Lo que se analiza es una MUESTRA de verdad: header + hasta 200 filas.
+        // Antes viajaba solo la primera línea —en un CSV, el header—, y los
+        // tipos salían de adivinar por el nombre, sin haber visto un valor.
+        state.muestra = nonEmpty.slice(0, _MUESTRA_FILAS + 1).join('\n');
         // Muestra para detectar campos: primera línea no vacía y no comentario.
         const sample = (nonEmpty.find(l => !l.trim().startsWith('#')) || nonEmpty[0] || '').trim();
         const rawLogEl = document.getElementById('raw-log');
@@ -7147,6 +7176,7 @@
               btn.innerHTML = 'Analizando con GLM-5.3…';
               const rawLogEl = document.getElementById('raw-log');
               if (rawLogEl) rawLogEl.value = pasted;
+              state.muestra = '';   // lo pegado ES la muestra
               const r = await transformLog();
               ok = r.ok;
               if (ok) { showSample(_firstLine(pasted), 'Pegada'); updateProductiveStep2(); }
@@ -7759,6 +7789,7 @@
         const rawLogEl = document.getElementById('raw-log');
         if (rawLogEl) rawLogEl.value = data.sample_line;
         state.rawLog = data.sample_line;
+        state.muestra = (data.sample_lines || []).join('\n');
         state.logFileContent = '';
         showSample(data.sample_line, `Leída de ${bucket}${prefix ? '/' + prefix : ''} · ${Number(data.total_objects || 0).toLocaleString('es')} objeto${data.total_objects === 1 ? '' : 's'}`);
         clearMapping();   // fuerza re-detectar los campos con la muestra nueva

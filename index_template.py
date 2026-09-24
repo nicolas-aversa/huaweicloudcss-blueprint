@@ -73,9 +73,18 @@ _FIELD_TYPE_TO_OS: dict[str, dict[str, Any]] = {
     # va antes lo parsea como epoch-millis → año 643698 (fuera de rango, rompe
     # Discover/visualizaciones). Espeja el orden de `_TS_DATE_PATTERNS`
     # (maas_integrator): compactos antes que epoch.
+    #
+    # Y con las variantes con ESPACIO y `dd/MM/yyyy`: `strict_date_optional_time`
+    # exige la `T`, así que `2026-09-18 11:04:12` —lo más común en un CSV— no
+    # entraba en ninguno de los formatos y el campo se descartaba en silencio
+    # (queda en `_source`, pero no se puede filtrar, agregar ni graficar). Esto es
+    # la red para un campo `date` sin formato conocido; cuando el perfilador lo
+    # detectó, `date_format` va primero (ver `_mapping_de`).
     "date": {
         "type": "date",
-        "format": "yyyyMMddHHmmssSSS||yyyyMMddHHmmss||strict_date_optional_time||epoch_millis",
+        "format": ("yyyyMMddHHmmssSSS||yyyyMMddHHmmss||strict_date_optional_time"
+                   "||yyyy-MM-dd HH:mm:ss.SSS||yyyy-MM-dd HH:mm:ss||yyyy-MM-dd HH:mm"
+                   "||dd/MM/yyyy HH:mm:ss||dd/MM/yyyy HH:mm||dd/MM/yyyy||epoch_millis"),
     },
     # Sub-campo keyword: full-text searchable (text) Y aggregatable (.keyword).
     "text": {
@@ -83,6 +92,34 @@ _FIELD_TYPE_TO_OS: dict[str, dict[str, Any]] = {
         "fields": {"keyword": {"type": "keyword", "ignore_above": 1024}},
     },
 }
+
+
+# Palabras clave del `date` filter de Logstash que OpenSearch no entiende. Los
+# patrones literales (`yyyy-MM-dd HH:mm:ss`, `dd/MM/yyyy`) valen igual en los dos.
+_JODA_A_OPENSEARCH = {
+    "ISO8601": "strict_date_optional_time",
+    "UNIX": "epoch_second",
+    "UNIX_MS": "epoch_millis",
+}
+
+
+def _mapping_de(f: dict[str, Any]) -> dict[str, Any] | None:
+    """El mapping de un campo, con el formato real de su fecha si se conoce.
+
+    El `date` filter del .conf y el `format` del template tienen que decir lo
+    mismo: si no, el filter lleva bien la fecha a `@timestamp` pero el campo
+    original se indexa con un formato que no lo acepta y se descarta.
+    """
+    base = _FIELD_TYPE_TO_OS.get(f.get("type"))
+    if not base:
+        return None
+    mapping = copy.deepcopy(base)
+    formato = (f.get("date_format") or "").strip()
+    if mapping.get("type") == "date" and formato:
+        propio = _JODA_A_OPENSEARCH.get(formato, formato)
+        resto = [x for x in mapping["format"].split("||") if x != propio]
+        mapping["format"] = "||".join([propio, *resto])
+    return mapping
 
 
 def _set_nested(props: dict[str, Any], dotted_path: str, mapping: dict[str, Any]) -> None:
@@ -130,7 +167,7 @@ def build_index_template(
     # es `source.ip` y el mapping tiene que ir ahí (anidado), no en `srcip`.
     properties: dict[str, Any] = {"@timestamp": {"type": "date"}}
     for f in fields or []:
-        os_mapping = _FIELD_TYPE_TO_OS.get(f.get("type"))
+        os_mapping = _mapping_de(f)
         if not os_mapping:
             continue
         # field_path/ecs_path ya incluyen el namespace cuando aplica (ej.
@@ -143,7 +180,7 @@ def build_index_template(
             if not raw:
                 continue
             path = f"{ns}.{raw}" if ns else raw
-        _set_nested(properties, path, copy.deepcopy(os_mapping))
+        _set_nested(properties, path, os_mapping)
 
     return {
         "index_patterns": [index_pattern_from_name(index_name)],

@@ -1741,6 +1741,9 @@ def _detect_log_format(line: str) -> str:
     return "unknown"
 
 
+# Líneas de muestra que ve el LLM cuando el log no tiene estructura de tabla.
+_LINEAS_PARA_EL_LLM = 5
+
 # Cuántas veces se le pide al modelo que corrija un filter que no compila. Dos:
 # la primera suele alcanzar, y una tercera pasada de 600 s no se la cobramos al
 # SA que está esperando la pantalla.
@@ -1998,19 +2001,15 @@ def generate_logstash_filter(
         )
         result["multiline_hint"] = detect_multiline(lines)
         return result
-    if fmt == "space_kv":
-        result = _generate_space_kv_filter(
-            first_line, namespace=namespace, ecs_overlay=ecs_overlay
-        )
-        result["multiline_hint"] = detect_multiline(lines)
-        return result
 
-    # 3) Formato no reconocido: cae al LLM. Truncamos agresivo para no quemar
-    # contexto: 1ra línea, capando los values de cada par k=v a 20 chars en
-    # logs pipe-separated muy anchos (típico de logs financieros con 50+
-    # campos) y a 1000 chars en logs estilo prosa.
+    # 3) Formato no reconocido: cae al LLM. Truncamos para no quemar contexto:
+    # capando los values de cada par k=v a 20 chars en logs pipe-separated muy
+    # anchos (típico de logs financieros con 50+ campos) y a 1000 chars en logs
+    # estilo prosa. Hasta CINCO líneas: con una sola el modelo tipaba adivinando
+    # —un campo que en esa línea venía vacío, o un código que casualmente era un
+    # número— y no tenía cómo ver qué partes del envoltorio cambian entre líneas.
     truncated_lines = []
-    for line in lines[:1]:
+    for line in [l for l in lines if l.strip()][:_LINEAS_PARA_EL_LLM]:
         if "|" in line and "=" in line:
             parts = line.split("|")[:30]
             truncated_parts = []

@@ -5111,9 +5111,33 @@ def test_obs_read_sample_handles_stream_folder_and_gz():
     line, total, key = client.read_sample("CloudTraces/")
     assert key == "CloudTraces/t1.json.gz"          # salteó el folder-marker
     assert total == 2                                # solo objetos reales
-    # gunzip + hasta 3 líneas no vacías
+    # gunzip + las líneas no vacías
     assert line.startswith('{"trace_name":"loginUser","code":200}')
     assert "otra linea" in line
+
+
+def test_obs_read_sample_trae_hasta_200_lineas():
+    """El perfilador decide tipos con las filas: con 3 no distingue un id de
+    una medida. Se leen hasta 200 (en memoria, nunca se guardan)."""
+    from types import SimpleNamespace as NS
+    from obs_client import OBSClient
+
+    payload = "".join(f"{i},valor-{i}\n" for i in range(500)).encode()
+
+    class _FakeSdk:
+        def listObjects(self, bucket, prefix=None, marker=None, max_keys=None):
+            return NS(status=200, body=NS(contents=[NS(key="datos/a.csv", size=len(payload))]))
+
+        def getObject(self, bucket, key, loadStreamInMemory=False, **kw):
+            return NS(status=200, body=NS(buffer=payload))
+
+    client = OBSClient.__new__(OBSClient)
+    client._bucket = "b"
+    client._client = _FakeSdk()
+
+    texto, _, _ = client.read_sample("datos/")
+    assert len(texto.splitlines()) == 200
+    assert texto.splitlines()[-1] == "199,valor-199"
 
 
 
@@ -5138,8 +5162,31 @@ def test_read_sample_devuelve_solo_la_muestra(monkeypatch):
         "access_key": "AK", "secret_key": "SK", "bucket": "b", "prefix": "logs/"})
     assert res.status_code == 200
     assert res.json() == {"sample_line": '{"event":{"action":"deny"}}',
+                          "sample_lines": ['{"event":{"action":"deny"}}'],
                           "total_objects": 7, "object_key": "logs/a.log"}
     assert not llamadas, "leer una muestra no tiene por qué llamar al LLM"
+
+
+def test_read_sample_muestra_tres_y_analiza_todas(monkeypatch):
+    """Tres líneas alcanzan para mirar; para decidir tipos y formatos el
+    perfilador necesita filas (con 3 no distingue un id de una medida)."""
+    filas = "\n".join(f"{i},{i * 10}" for i in range(50))
+
+    class _FakeObs:
+        def __init__(self, **kw):
+            pass
+        def read_sample(self, prefix=""):
+            return filas, 1, "logs/a.csv"
+        def close(self):
+            pass
+
+    monkeypatch.setattr("obs_client.OBSClient", _FakeObs)
+
+    body = client.post("/api/v1/obs/read-sample", json={
+        "access_key": "AK", "secret_key": "SK", "bucket": "b", "prefix": "logs/"}).json()
+
+    assert body["sample_line"].count("\n") == 2
+    assert len(body["sample_lines"]) == 50
 
 
 def test_read_sample_sin_bucket_es_400():

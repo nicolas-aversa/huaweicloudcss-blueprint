@@ -259,6 +259,21 @@ def _leer_kv(lineas: list[str], separador: str) -> list[dict]:
     return filas
 
 
+# Líneas de log que un separador parte en columnas "consistentes" sin ser una
+# tabla: el `,123` de los milisegundos de log4j (`2026-09-18 11:04:12,123 INFO
+# [main] …`), los `|` del encabezado CEF, el `<34>` de syslog. Van al LLM (o a
+# su generador curado), que las lee con grok.
+_LINEA_DE_LOG = re.compile(
+    r"^\s*(?:"
+    r"CEF:\d+\|"
+    r"|<\d{1,3}>"
+    r"|\[?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]?\s+\[?"
+    r"(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|SEVERE|CRITICAL|NOTICE)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def _elegir_separador(lineas: list[str]) -> tuple[str, list[list[str]]] | None:
     """El separador que parte TODAS las líneas en la misma cantidad de columnas.
 
@@ -539,6 +554,9 @@ def perfilar(lineas: list[str]) -> Perfil:
         perfil = _perfil_de_dicts("kv", _leer_kv(lineas, sep_kv), lineas)
         perfil.kv_separador = sep_kv
         return perfil
+
+    if sum(1 for l in lineas if _LINEA_DE_LOG.match(l)) * 2 >= len(lineas):
+        return Perfil("", [], 0)
 
     elegido = _elegir_separador(lineas)
     if elegido is None:

@@ -249,6 +249,7 @@ class OBSClient:
     # Cuántos bytes pedimos en el range read (sin descargar el archivo entero).
     # 512 KB alcanza para varias líneas de cualquier log, incluso JSON multiline.
     _SAMPLE_RANGE_BYTES = 512 * 1024
+    _SAMPLE_LINES = 200
 
     def read_sample(self, prefix: str = "") -> tuple[str, int, str]:
         """Lee el primer objeto REAL bajo ``prefix`` y devuelve su primera línea no vacía.
@@ -341,7 +342,10 @@ class OBSClient:
             if not is_gz and size > self._SAMPLE_RANGE_BYTES and len(lines) > 1:
                 lines = lines[:-1]
             if lines:
-                return "\n".join(lines[:3]), total, key
+                # Hasta 200: el perfilador necesita filas para decidir tipos y
+                # formatos (con 3 no distingue un id de una medida). Se analiza
+                # en memoria y no se guarda: este flujo no se puede volver caso.
+                return "\n".join(lines[:self._SAMPLE_LINES]), total, key
             raise OBSUploadError(f"Objeto '{key}' no tiene líneas no vacías.")
         except OBSUploadError:
             raise

@@ -307,6 +307,27 @@ def test_el_empty_state_de_infra_dice_la_verdad():
     assert vista.index("if (data && data.state_error) {") < vista.index("No tenés ningún entorno levantado")
 
 
+def test_se_analiza_una_muestra_y_no_una_linea():
+    """Viajaba solo la primera línea —en un CSV, el header— y los tipos salían
+    de adivinar por el nombre, sin haber visto un solo valor."""
+    html = _INDEX.read_text(encoding="utf-8")
+
+    i = html.index("function _handleLogFile(file)")
+    lectura = html[i:html.index("reader.onerror", i)]
+    assert "state.muestra = nonEmpty.slice(0, _MUESTRA_FILAS + 1)" in lectura
+
+    j = html.index("async function transformLog()")
+    envio = html[j:html.index("let generating = false;", j)]
+    assert "raw_log: state.muestra || rawLog" in envio
+    assert "state.verificacion = data.verificacion" in envio
+    assert "state.preguntas = " in envio
+
+    # OBS en vivo: también analiza varias líneas.
+    assert "state.muestra = (data.sample_lines || []).join('\\n');" in html
+    # Y el paso 2 muestra cuántas filas se verificaron.
+    assert "${chipVerificacion(state.verificacion)}" in html
+
+
 def test_crear_un_caso_solo_lo_guarda():
     """Crear un caso y desplegarlo son dos gestos distintos: el deploy sale de la
     card, ya en el grid, por el mismo camino que cualquier otro caso. Había un

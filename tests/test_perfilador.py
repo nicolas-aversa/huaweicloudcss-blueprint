@@ -367,6 +367,29 @@ def test_los_datasets_con_envoltorio_van_al_llm(nombre):
     assert not perfilador.perfilar(_primeras(nombre)).estructurado
 
 
+@pytest.mark.parametrize("lineas", [
+    ["2026-09-18 11:04:12,123 INFO [main] com.x.Y - arrancó, listo",
+     "2026-09-18 11:04:13,456 WARN [main] com.x.Y - lento, 3s"],
+    ["[2026-09-18T11:04:12.123] ERROR [pool-1] Bar - falló, reintento",
+     "[2026-09-18T11:04:13.456] INFO [pool-1] Bar - ok, 2 filas"],
+    ["CEF:0|Security|threatmanager|1.0|100|worm stopped|10|",
+     "CEF:0|Security|threatmanager|1.0|101|worm started|5|"],
+    ["<165>1 2026-09-18T11:04:12Z host app 1 ID47 - a|b|c",
+     "<165>1 2026-09-18T11:04:13Z host app 1 ID48 - d|e|f"],
+], ids=["log4j", "log4j-corchetes", "cef", "syslog"])
+def test_una_linea_de_log_no_es_una_tabla(lineas):
+    """Un separador las parte en columnas "consistentes" (la coma de los
+    milisegundos, los `|` de CEF) y el .conf saldría con columnas absurdas."""
+    assert not perfilador.perfilar(lineas).estructurado
+
+
+def test_una_tabla_con_fecha_y_nivel_sigue_siendo_tabla():
+    p = perfilador.perfilar(["fecha,nivel,mensaje",
+                             "2026-09-18 11:04:12,INFO,arrancó",
+                             "2026-09-18 11:04:13,WARN,lento"])
+    assert p.estructurado and p.formato == "delimitado"
+
+
 def test_los_campos_llevan_el_formato_de_fecha():
     """El formato tiene que viajar con el campo: es lo que le dice al index
     template cómo leer la fecha sin descartarla."""

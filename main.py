@@ -127,6 +127,8 @@ import tfstate  # noqa: E402  (lectura del state de Terraform, local o en OBS)
 import conf_lint  # noqa: E402
 # Coordenadas de un dataset nuevo → un campo geo_point que se pueda mapear.
 import geo_fields  # noqa: E402
+# Tipos, formatos y .conf de una tabla, decididos por las filas reales.
+import perfilador  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -925,6 +927,32 @@ class FieldMapping(BaseModel):
         default="",
         description="Path en forma dot (ej. transaction.id), normalizado por el backend.",
     )
+    # Estos cinco NO estaban declarados, y Pydantic descarta lo que el modelo no
+    # conoce: `dimension` y `role` se perdían en esta respuesta, así que el paso 2,
+    # el caso guardado, las capabilities y el dashboard de TODO dataset nuevo
+    # trabajaban sin los roles que el generador había detectado. Las reglas de
+    # visualización por rol nunca se disparaban para un dataset nuevo.
+    dimension: bool | None = Field(
+        default=None, description="¿Sirve para agrupar (Top-N, tortas, preguntas del chat)?")
+    role: str | None = Field(
+        default=None,
+        description="primary_dimension | success_indicator | critical_indicator | entity_id | measure | timestamp.")
+    date_format: str | None = Field(
+        default=None,
+        description="Patrón de la fecha (el del `date` filter). El index template lo usa para no descartarla.")
+    sample: str | None = Field(default=None, description="Un valor de ejemplo de la muestra.")
+    frecuentes: list[str] = Field(
+        default_factory=list, description="Valores más frecuentes (para las preguntas de ejemplo).")
+
+
+class Verificacion(BaseModel):
+    """Qué tan bien le va al .conf con las filas de muestra."""
+
+    fuente: str = Field(description="perfilador | catalogo | llm")
+    formato: str = Field(default="", description="delimitado | json | kv (si lo armó el perfilador).")
+    filas: int = 0
+    filas_ok: int = 0
+    problemas: list[str] = Field(default_factory=list)
 
 
 class GenerateFilterResponse(BaseModel):
@@ -932,6 +960,8 @@ class GenerateFilterResponse(BaseModel):
 
     filter_code: str
     fields: list[FieldMapping] = Field(default_factory=list)
+    verificacion: Verificacion | None = None
+    questions: list[str] = Field(default_factory=list)
 
 
 class IndexTemplateRequest(BaseModel):
@@ -1425,14 +1455,34 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     - **500**: error de configuración (p. ej. MAAS_API_KEY ausente).
     - **502**: la llamada al LLM falló o devolvió JSON inválido.
     """
-    result = _llm_filter(
-        request.raw_log,
-        namespace=request.namespace,
-        ecs_overlay=request.ecs_overlay,
-        feedback=request.feedback,
-        previous_filter=request.previous_filter,
-        input_type=request.input_type,
-    )
+    # Una tabla (CSV, TSV, JSONL, clave=valor) la arma el perfilador, mirando las
+    # filas reales: separador, tipos, formato de fecha y locale de los números
+    # salen de los datos y no de la imaginación de un modelo que veía solo el
+    # header. Lo demás —logs con envoltorio, texto libre— sigue yendo al LLM. Los
+    # formatos conocidos (CEF, syslog, Apache, log4j) el perfilador no los toma
+    # como tabla y mantienen sus generadores curados, y una muestra sin filas de
+    # datos (solo el header) también va al LLM: sin valores no hay nada que
+    # perfilar.
+    lineas = request.raw_log.splitlines()
+    perfil = None
+    if (request.input_type or "").strip().lower() != "jdbc" and not request.feedback:
+        perfil = perfilador.perfilar(lineas)
+    if perfil is not None and perfil.estructurado and perfil.filas > 0:
+        result = {"filter_code": perfilador.armar_filter(perfil, request.namespace),
+                  "fields": perfilador.campos(perfil, request.namespace)}
+        prueba = perfilador.verificar(perfil)
+        verificacion = Verificacion(fuente="perfilador", formato=perfil.formato,
+                                    filas=prueba.total, filas_ok=prueba.ok, problemas=prueba.problemas)
+    else:
+        result = _llm_filter(
+            request.raw_log,
+            namespace=request.namespace,
+            ecs_overlay=request.ecs_overlay,
+            feedback=request.feedback,
+            previous_filter=request.previous_filter,
+            input_type=request.input_type,
+        )
+        verificacion = Verificacion(fuente="llm")
     # En modo namespaced los campos NO son ECS (is_ecs=False, field_path bajo el
     # namespace). Solo enriquecemos con classify_field los campos que vienen
     # de un detector del catálogo (Apache/Syslog/CEF) — esos sí traen ecs_path
@@ -1471,6 +1521,7 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     return GenerateFilterResponse(
         filter_code=filter_code,
         fields=enriched_fields,
+        verificacion=verificacion,
     )
 
 
@@ -1646,8 +1697,11 @@ def obs_read_sample(request: dict) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         client.close()
-    return {"sample_line": sample_line, "total_objects": total_objects,
-            "object_key": object_key}
+    lineas = sample_line.split("\n")
+    # `sample_line` se muestra (tres líneas alcanzan para mirar); `sample_lines`
+    # se analiza: el perfilador necesita filas para decidir tipos y formatos.
+    return {"sample_line": "\n".join(lineas[:3]), "sample_lines": lineas,
+            "total_objects": total_objects, "object_key": object_key}
 
 
 @app.get(
