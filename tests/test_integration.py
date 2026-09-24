@@ -2187,7 +2187,7 @@ def test_terraform_status_builds_console_url_from_state(monkeypatch, tmp_path):
     # La lista de pipelines en paralelo viene del registro.
     assert body["pipelines"] == [
         {"slug": "logs", "index": "logs-%{+YYYY.MM}", "obs_prefix": "logs/", "active": True,
-         "config_status": "", "dashboards_imported": False, "has_capabilities": False}
+         "config_status": "", "config_error": "", "dashboards_imported": False, "has_capabilities": False}
     ]
     # Derivado de "demo-cliente-x-opensearch" → strip "-opensearch".
     assert body["project_name"] == "demo-cliente-x"

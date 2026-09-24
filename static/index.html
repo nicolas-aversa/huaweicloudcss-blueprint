@@ -6820,6 +6820,7 @@
       // `capabilities` (registro de las provisionadas).
       const schemaDone = pipelines.length > 0 && pipelines.every(p => p.dashboards_imported);
       const ingestDone = pipelines.length > 0 && pipelines.every(p => p.active);
+      const rechazadas = pipelines.filter(p => p.config_status === 'rechazada');
       const capsDone = !!(data.capabilities && Object.keys(data.capabilities).length);
       // Todo listo → banner de cierre "Entorno operativo" en vez del panel de pasos.
       const allDone = pipelines.length > 0 && schemaDone && ingestDone && (capsDone || !hasCapabilitySlug);
@@ -6860,7 +6861,10 @@
               ${chipDocs(p)}
               ${p.dashboards_imported ? `<span class="status-pill" style="font-size:var(--fs-xs);padding:2px 8px;"><span class="status-pill__dot"></span>Dashboards</span>` : ''}
               ${rota(p)
-                ? `<span class="pipe-row__state" style="background:var(--accent-tint);color:var(--accent-hover);" title="Logstash no pudo compilar el configuration file (${escapeHtml(p.config_status)}): revisá el log de la pipeline en la consola de CSS.">Configuración inválida</span>`
+                ? (p.config_status === 'rechazada'
+                  // CSS no la aceptó al crearla: no existe, no es que esté en pausa.
+                  ? `<span class="pipe-row__state" style="background:var(--accent-tint);color:var(--accent-hover);" title="${escapeHtml(p.config_error || 'CSS rechazó el configuration file.')}">Rechazada por CSS</span>`
+                  : `<span class="pipe-row__state" style="background:var(--accent-tint);color:var(--accent-hover);" title="Logstash no pudo compilar el configuration file (${escapeHtml(p.config_status)}): revisá el log de la pipeline en la consola de CSS.">Configuración inválida</span>`)
                 : `<span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>`}
             </div>`).join('')
           // Verificar recién tiene sentido con algo ingestando. Con todo en
@@ -6908,7 +6912,9 @@
             'Define los tipos en OpenSearch e importa los dashboards, antes de ingestar.',
             'infra-apply-schema-btn', icon('check') + ' Aplicar index template + dashboards')}
           ${setupStep(2, ingestDone, schemaDone && !ingestDone, 'Iniciar ingesta',
-            schemaDone ? 'Arranca Logstash: recién acá empiezan a entrar los datos.' : 'Aplicá primero el index template.',
+            !schemaDone ? 'Aplicá primero el index template.'
+              : rechazadas.length ? `CSS rechazó el configuration file de ${rechazadas.map(p => escapeHtml(p.slug)).join(', ')}: al reintentar se manda de nuevo.`
+              : 'Arranca Logstash: recién acá empiezan a entrar los datos.',
             'infra-ingest-btn', icon('play') + ' Iniciar ingesta con Logstash')}
           ${hasCapabilitySlug ? `
           <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border-subtle);">

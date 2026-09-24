@@ -2796,6 +2796,26 @@ def _errores_de_terraform(lineas: list[str]) -> dict[str, str]:
     return errores
 
 
+_CONF_CON_ERROR = re.compile(r'^huaweicloud_css_logstash_configuration\.pipeline\["([^"]+)"\]$')
+_EXTERNO = re.compile(r'"externalMessage":"(?:CSS\.\d+ : )?([^"]+)"')
+
+
+def _motivo_de_rechazo(mensaje: str) -> str:
+    """El error de CSS al crear una configuración, dicho para el SA."""
+    if "config is forbidden" in mensaje:
+        return ("CSS rechazó el configuration file por su contenido («config is forbidden»): "
+                "usa algo que CSS no permite. No es un error de sintaxis: Logstash nunca "
+                "llegó a verlo.")
+    m = _EXTERNO.search(mensaje)
+    return "CSS rechazó el configuration file: " + (m.group(1) if m else mensaje[:200])
+
+
+def _configuraciones_rechazadas(errores_tf: dict[str, str]) -> dict[str, str]:
+    """`{slug: motivo}` de las configuraciones que CSS no aceptó en este apply."""
+    return {m.group(1): _motivo_de_rechazo(msg) for d, msg in errores_tf.items()
+            if (m := _CONF_CON_ERROR.match(d))}
+
+
 def _asegurar_dnat(terraform_dir: Path, beats: bool, tf_lines: list[str]):
     """Crea las reglas DNAT que falten (apply dirigido). Generador: emite los
     eventos y devuelve las que siguen faltando ([] si están todas)."""
@@ -3235,6 +3255,23 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     # sin DNAT se repara solo la próxima vez que se toca.
     sin_dnat = yield from _asegurar_dnat(terraform_dir, _beats_port(request) > 0, tf_lines)
 
+    # Una configuración que CSS rechaza no llega a existir: se dice cuál y por
+    # qué, y queda anotada en el registro para que la tarjeta no la muestre
+    # "En pausa" como si solo faltara arrancarla.
+    rechazadas = _configuraciones_rechazadas(errores_tf)
+    for slug, motivo in rechazadas.items():
+        yield _sse({"type": "step", "name": f"Configuración · {slug}", "ok": False, "reason": motivo})
+    _anotar_rechazos(terraform_dir, rechazadas, list(registry))
+    if apply_failed and request.start_ingestion:
+        # En "Iniciar ingesta" el entorno ya existe: si el apply falló no
+        # arrancó nada. Antes se seguía y se esperaban documentos dos minutos,
+        # para terminar mandando a revisar el bucket y el filtro.
+        yield _sse({"type": "error", "message": (
+            "No se pudo iniciar la ingesta. " + " · ".join(f"{s}: {m}" for s, m in rechazadas.items())
+            if rechazadas else
+            "No se pudo iniciar la ingesta: terraform apply falló.\n" + "".join(tf_lines)[-1200:])})
+        return
+
     # ── terraform output ─────────────────────────────────────────────────
     # Se lee INCLUSO si el apply falló: un apply parcial igual guarda estado, así
     # detectamos si el cluster se creó a pesar del error (típ. falló solo una regla
@@ -3266,7 +3303,12 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         # de security group", y cuando lo que faltaba era una DNAT mandaba a
         # buscar en el lugar equivocado.
         reparadas = {f"huaweicloud_nat_dnat_rule.{n}[0]" for n in _DNAT_DE if n not in sin_dnat}
-        pendientes = [d for d in errores_tf if d not in reparadas]
+        pendientes = [d for d in errores_tf if d not in reparadas and not _CONF_CON_ERROR.match(d)]
+        if rechazadas:
+            yield _sse({"type": "progress", "percent": _PCT_OUTPUTS, "phase": "Aviso",
+                        "message": "Los clusters quedaron creados, pero CSS rechazó el "
+                                   "configuration file de " + ", ".join(rechazadas)
+                                   + ": esa pipeline no existe hasta corregirlo. Detalle en Actividad."})
         if pendientes:
             yield _sse({"type": "progress", "percent": _PCT_OUTPUTS, "phase": "Aviso",
                         "message": "El entorno se creó, pero fallaron: " + ", ".join(pendientes)
@@ -4171,6 +4213,26 @@ def _huawei_infra_tfvars() -> dict[str, str]:
     if values.get("region"):
         infra["region"] = values["region"]
     return infra
+
+
+def _anotar_rechazos(terraform_dir: Path, rechazadas: dict[str, str], slugs: list[str]) -> None:
+    """Anota en el registro el rechazo de CSS de cada configuración de este
+    deploy, o lo borra si esta vez no la rechazó."""
+    registry = _read_pipelines_registry(terraform_dir)
+    cambio = False
+    for slug in slugs:
+        entrada = registry.get(slug)
+        if not isinstance(entrada, dict):
+            continue
+        nuevo = rechazadas.get(slug)
+        if nuevo and entrada.get("config_rechazo") != nuevo:
+            entrada["config_rechazo"] = nuevo
+            cambio = True
+        elif not nuevo and "config_rechazo" in entrada:
+            del entrada["config_rechazo"]
+            cambio = True
+    if cambio:
+        _write_pipelines_registry(terraform_dir, registry)
 
 
 def _write_pipelines_registry(terraform_dir: Path, registry: dict[str, dict]) -> None:
@@ -6813,7 +6875,10 @@ def terraform_status() -> TerraformStatusResponse:
             "slug": slug,
             "index": entry.get("index", ""),
             "obs_prefix": entry.get("obs_prefix", ""),
-            "config_status": conf_estados.get(slug, ""),
+            # Sin configuración en el state y con el rechazo anotado: CSS no
+            # la aceptó (no es que esté en pausa).
+            "config_status": conf_estados.get(slug) or ("rechazada" if entry.get("config_rechazo") else ""),
+            "config_error": "" if conf_estados.get(slug) else entry.get("config_rechazo", ""),
             "active": (f"pipeline-{slug}"[:32] in activas_tf) if activas_tf is not None
                       else bool(entry.get("start_ingestion", False)),
             "dashboards_imported": bool(entry.get("dashboards_imported", False)),
