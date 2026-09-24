@@ -2542,8 +2542,11 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
         }
     _write_pipelines_registry(terraform_dir, registry)
 
+    # Normalizado también acá: las pipelines que ya corrían vuelven a Terraform
+    # con el `.conf` guardado en el registro, que puede ser de antes de una
+    # corrección (el `limpiar.call(…)` que CSS rechaza, p. ej.).
     pipelines_var = {
-        k: {"pipeline_conf": v.get("pipeline_conf", ""),
+        k: {"pipeline_conf": conf_lint.normalizar(v.get("pipeline_conf", "") or "")[0],
             "start_ingestion": bool(v.get("start_ingestion", False))}
         for k, v in registry.items()
     }

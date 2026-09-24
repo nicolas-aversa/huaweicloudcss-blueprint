@@ -400,6 +400,19 @@ def _pila_en(conf: str, pos: int, mascara: str | None = None) -> list[str]:
     return pila
 
 
+# CSS rechaza al crear la configuración ("CSS.0001 : Incorrect parameters.
+# (config is forbidden, change it.)") todo configuration file que contenga el
+# texto `call(`, esté donde esté: en el código de un `ruby`, dentro de un
+# string, en un comentario. Probado contra la API de CSS (la-south-2,
+# 2026-09-24): `f.call(1)`, `x.call(1)` y `a = "call("` se rechazan;
+# `f.call 1` y `f[1]` pasan. Lo destapó el ruby de limpieza de un dataset nuevo
+# (`limpiar.call(v)`), que CSS rechazó a los 7 minutos del apply.
+_PROHIBIDO_CSS = re.compile(r"call\(")
+# `x.call(args)` → `x[args]`: lo mismo en Ruby para un lambda o un proc. Solo
+# con argumentos sin paréntesis adentro: lo demás no se adivina.
+_LLAMADA = re.compile(r"\b([A-Za-z_]\w*)\.call\(([^()\n]*)\)")
+
+
 def normalizar(conf: str) -> tuple[str, list[str]]:
     """Corrige los tics mecánicos del modelo y devuelve `(conf, notas)`.
 
@@ -417,6 +430,9 @@ def normalizar(conf: str) -> tuple[str, list[str]]:
     if "\r\n" in conf:
         conf = conf.replace("\r\n", "\n")
         notas.append("pasé los saltos de línea a formato Unix")
+    conf, n = _LLAMADA.subn(r"\1[\2]", conf)
+    if n:
+        notas.append(f"reemplacé {n} `x.call(…)` por `x[…]`: CSS rechaza el texto `call(`")
 
     m = scan(conf)
     chars = list(conf)
@@ -1140,12 +1156,18 @@ def lint(conf: str, *, marcador_hosts: bool = False) -> list[Problema]:
     """
     if not (conf or "").strip():
         return [Problema(ERROR, 1, "el configuration file está vacío.")]
+    # Antes que la gramática: CSS lo rechaza aunque compile.
+    vetados = [Problema(
+        ERROR, _linea(conf, m.start()),
+        "CSS rechaza todo configuration file con el texto `call(` («config is forbidden»), "
+        "aunque esté en un string o un comentario: invocá con `x[…]` o `x.call …` sin paréntesis.")
+        for m in _PROHIBIDO_CSS.finditer(conf)]
     try:
         arbol = parse(conf)
     except ErrorDeSintaxis as exc:
-        return [Problema(ERROR, exc.linea, f"{exc.mensaje} (columna {exc.columna})")]
+        return vetados + [Problema(ERROR, exc.linea, f"{exc.mensaje} (columna {exc.columna})")]
 
-    problemas: list[Problema] = []
+    problemas: list[Problema] = vetados
     nombres = [s.tipo for s in arbol.secciones]
     for req in ("input", "output"):
         if req not in nombres:

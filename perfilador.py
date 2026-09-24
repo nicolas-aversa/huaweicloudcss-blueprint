@@ -735,6 +735,9 @@ def _condicion_linea(texto: str) -> str:
 
 
 def _ruby_limpieza(ns: str) -> list[str]:
+    # El lambda se invoca con `limpiar[x]` y no con `limpiar.call(x)`: CSS
+    # rechaza todo configuration file que contenga el texto `call(`
+    # ("config is forbidden"). Ver `conf_lint._PROHIBIDO_CSS`.
     vacios = ", ".join(f'"{v}"' for v in sorted(VACIOS))
     return [
         "  ruby {",
@@ -743,7 +746,7 @@ def _ruby_limpieza(ns: str) -> list[str]:
         "      limpiar = lambda do |h|",
         "        h.delete_if do |k, v|",
         "          if v.is_a?(Hash)",
-        "            limpiar.call(v)",
+        "            limpiar[v]",
         "            v.empty?",
         "          else",
         "            v.nil? || (v.is_a?(String) && vacios.include?(v.strip.downcase))",
@@ -752,7 +755,7 @@ def _ruby_limpieza(ns: str) -> list[str]:
         "      end",
         f'      d = event.get("{ns}")',
         "      if d.is_a?(Hash)",
-        "        limpiar.call(d)",
+        "        limpiar[d]",
         f'        event.set("{ns}", d)',
         "      end",
         "    '",
