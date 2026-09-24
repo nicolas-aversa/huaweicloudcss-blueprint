@@ -5489,6 +5489,35 @@
     };
     // CAPABILITY_SLUGS y SLUG_LABELS se derivan del registro en
     // applyVerticalsPayload() (se re-derivan al crear/borrar un caso).
+    // Las conversaciones del asistente, una por caso. Vivían solo en el DOM, y
+    // el asistente se rearma en cada render de la vista (volver a ella,
+    // Verificar, cada paso de la puesta en marcha): se borraban. Acá quedan
+    // como datos y cada render las repinta. Solo en memoria, a propósito: las
+    // respuestas traen datos del cluster del cliente y no van a disco
+    // (ni localStorage ni sessionStorage); un refresh empieza de cero.
+    const capChats = {};        // slug → [{id, who, html, result, err}]
+    let capChatSlug = '';       // la pestaña elegida
+    let capChatBusy = false;    // una pregunta a la vez, aunque el form se rearme
+    let capChatSeq = 0;
+
+    function capChatAgregar(slug, who, html) {
+      const entry = { id: `m${++capChatSeq}`, who, html, result: null, err: false };
+      (capChats[slug] = capChats[slug] || []).push(entry);
+      return entry;
+    }
+    function capChatLimpiar(slug) { capChats[slug] = []; }
+    function capChatFilaHTML(e) {
+      const avatar = e.who === 'bot' ? `<span class="cap-chat__avatar">${icon('spark')}</span>` : '';
+      return `<div class="cap-chat__row cap-chat__row--${e.who}" data-msg="${e.id}">${avatar}`
+        + `<div class="cap-chat__msg cap-chat__msg--${e.who}${e.err ? ' cap-chat__msg--err' : ''}">${e.html}</div></div>`;
+    }
+    function capChatLogHTML(slug, label) {
+      const msgs = capChats[slug] || [];
+      if (msgs.length) return msgs.map(capChatFilaHTML).join('');
+      return `<div class="cap-chat__empty"><span class="cap-chat__empty-ic">${icon('spark')}</span>`
+        + `<span class="cap-chat__empty-title">Preguntame sobre ${escapeHtml(label)}</span></div>`;
+    }
+
     function renderCapabilitiesResult(capsBySlug, anchor) {
       const statusEl = anchor || document.getElementById('infra-capabilities-result');
       if (!statusEl) return;
@@ -5571,26 +5600,24 @@
         }
         if (activeSlugs.length) {
           const showTabs = activeSlugs.length > 1;
+          // La pestaña elegida sobrevive al re-render (antes volvía a la primera).
+          const activa = Math.max(0, activeSlugs.indexOf(capChatSlug));
           const tabsHtml = activeSlugs.map((s, i) => {
             const label = SLUG_LABELS[s] || s.replace(/-/g, ' ');
-            return `<button type="button" role="tab" class="lp-tab-btn${i === 0 ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
+            return `<button type="button" role="tab" class="lp-tab-btn${i === activa ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
           }).join('');
           const panelsHtml = activeSlugs.map((s, i) => {
             const qs = _questionsFor(s).slice(0, 10);
-            return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
+            return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
           }).join('');
           // Selector de caso: banda propia, centrada y distintiva (arriba del chat).
           tabsBar = showTabs
             ? `<div class="cap-assistant__cases"><span class="cap-assistant__cases-lbl">Elegí el caso</span><div class="cap-chat__tabs" role="tablist">${tabsHtml}</div></div>`
             : '';
-          // Un log de chat por caso (conversación separada); se muestra el del slug activo.
+          // Un log de chat por caso (conversación separada), armado desde lo
+          // guardado: así un re-render devuelve la conversación como estaba.
           logsHtml = activeSlugs.map((s, i) =>
-            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === 0 ? 'flex' : 'none'};">
-              <div class="cap-chat__empty">
-                <span class="cap-chat__empty-ic">${icon('spark')}</span>
-                <span class="cap-chat__empty-title">Preguntame sobre ${escapeHtml(SLUG_LABELS[s] || 'tus datos')}</span>
-              </div>
-            </div>`).join('');
+            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos')}</div>`).join('');
           chipPanels = `<div class="cap-chat__suggest">${panelsHtml}</div>`;
         }
       }
@@ -5633,26 +5660,30 @@
       const chatForm = host.querySelector('#cap-chat-form');
       const _activeChatSlug = () =>
         (host.querySelector('.lp-tab-btn.lp-tab-active')?.dataset.slug) || activeSlugs[0];
-      // Chat separado por caso: cada slug tiene su propio log; escribimos en el activo.
-      const _activeLog = () =>
-        host.querySelector(`.cap-chat__log[data-slug="${_activeChatSlug()}"]`) || host.querySelector('.cap-chat__log');
+      // Se busca en el asistente que está en pantalla AHORA, no en `host`: si
+      // la vista se rearmó mientras llegaba una respuesta, `host` ya no está.
+      const _logDe = (slug) =>
+        document.querySelector(`#deploy-capabilities .cap-chat__log[data-slug="${slug}"]`);
+      const _msgDe = (entry) =>
+        document.querySelector(`#deploy-capabilities [data-msg="${entry.id}"] .cap-chat__msg`);
       const _scrollLog = (el) => { const l = el && el.closest('.cap-chat__log'); if (l) l.scrollTop = l.scrollHeight; };
       // Limpia el chat del caso activo → vuelve al estado vacío (por-caso).
       const _clearActiveLog = () => {
-        const log = _activeLog();
-        if (!log) return;
-        const label = SLUG_LABELS[_activeChatSlug()] || 'tus datos';
-        log.innerHTML = `<div class="cap-chat__empty"><span class="cap-chat__empty-ic">${icon('spark')}</span><span class="cap-chat__empty-title">Preguntame sobre ${escapeHtml(label)}</span></div>`;
+        const slug = _activeChatSlug();
+        capChatLimpiar(slug);
+        const log = _logDe(slug);
+        if (log) log.innerHTML = capChatLogHTML(slug, SLUG_LABELS[slug] || 'tus datos');
       };
-      const _bubble = (who, html) => {
-        const log = _activeLog();
-        log.querySelector('.cap-chat__empty')?.remove();
-        const row = document.createElement('div');
-        row.className = 'cap-chat__row cap-chat__row--' + who;
-        const avatar = who === 'bot' ? `<span class="cap-chat__avatar">${icon('spark')}</span>` : '';
-        row.innerHTML = `${avatar}<div class="cap-chat__msg cap-chat__msg--${who}">${html}</div>`;
-        log.appendChild(row); log.scrollTop = log.scrollHeight;
-        return row.querySelector('.cap-chat__msg');
+      // Un mensaje nuevo: se guarda en la conversación DE ESE CASO y se pinta.
+      const _agregar = (slug, who, html) => {
+        const entry = capChatAgregar(slug, who, html);
+        const log = _logDe(slug);
+        if (log) {
+          log.querySelector('.cap-chat__empty')?.remove();
+          log.insertAdjacentHTML('beforeend', capChatFilaHTML(entry));
+          log.scrollTop = log.scrollHeight;
+        }
+        return entry;
       };
       // ── Wow: visualización Vega-Lite (el motor del tipo "Vega" de OpenSearch
       // Dashboards) + typewriter de la respuesta ──
@@ -5870,12 +5901,20 @@
       }
       async function sendCapChat(question) {
         question = (question || '').trim();
-        if (!question || (chatForm && chatForm.dataset.busy)) return;
+        if (!question || capChatBusy) return;
+        // El caso de la PREGUNTA: la respuesta va a su conversación aunque
+        // mientras tanto se cambie de pestaña o se rearme la vista.
         const slug = _activeChatSlug();
-        _bubble('user', escapeHtml(question));
-        const pending = _bubble('bot', '<span class="cap-chat__dots">\u00b7\u00b7\u00b7</span>');
-        if (chatForm) chatForm.dataset.busy = '1';
+        _agregar(slug, 'user', escapeHtml(question));
+        const pend = _agregar(slug, 'bot', '<span class="cap-chat__dots">···</span>');
+        capChatBusy = true;
         if (chatInput) chatInput.value = '';
+        const _error = (html) => {
+          pend.err = true;
+          pend.html = html;
+          const el = _msgDe(pend);
+          if (el) { el.classList.add('cap-chat__msg--err'); el.innerHTML = html; }
+        };
         try {
           const res = await fetch('/api/v1/capabilities/ppl-chat', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5883,7 +5922,7 @@
               question, slug,
               opensearch_password: state.osPassword || '',
               opensearch_user: state.osUser || 'admin',
-              https_enabled: state.httpsEnabled,   // undefined \u2192 el backend lo deriva del state
+              https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del state
             }),
           });
           const data = await res.json();
@@ -5892,8 +5931,7 @@
             const msg = (typeof d === 'object' ? d.message : d) || 'No se pudo responder.';
             const ppl = (typeof d === 'object' && d.ppl)
               ? `<div class="cap-chat__ppl">PPL: <code>${escapeHtml(d.ppl)}</code></div>` : '';
-            pending.classList.add('cap-chat__msg--err');
-            pending.innerHTML = `${escapeHtml(msg)}${ppl}`;
+            _error(`${escapeHtml(msg)}${ppl}`);
             return;
           }
           const rows = (data.result && data.result.datarows) || [];
@@ -5904,19 +5942,24 @@
           const details = (data.ppl || table)
             ? `<details class="cap-chat__det"><summary>ver PPL / datos</summary>${data.ppl ? `<div class="cap-chat__ppl"><code>${escapeHtml(data.ppl)}</code></div>` : ''}${table}</details>`
             : '';
+          // Lo que queda guardado es la respuesta entera: el typewriter es solo
+          // la primera vez; un re-render la muestra completa, con su gráfico.
+          pend.html = `<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
+          pend.result = data.result || null;
+          const el = _msgDe(pend);
+          if (!el) return;   // el caso no está en pantalla: se pinta al volver
           // Visualización Vega-Lite (motor de OpenSearch) + respuesta con typewriter + details.
-          pending.innerHTML = `<div class="cap-chart-host"></div><span class="cap-chat__answer"></span>`;
-          _renderCapChartInto(pending.querySelector('.cap-chart-host'), data.result);
-          const answerEl = pending.querySelector('.cap-chat__answer');
+          el.innerHTML = `<div class="cap-chart-host"></div><span class="cap-chat__answer"></span>`;
+          _renderCapChartInto(el.querySelector('.cap-chart-host'), data.result);
+          const answerEl = el.querySelector('.cap-chat__answer');
           _typeInto(answerEl, data.answer || '', () => {
-            if (details) pending.insertAdjacentHTML('beforeend', details);
-            _scrollLog(pending);
+            if (details) el.insertAdjacentHTML('beforeend', details);
+            _scrollLog(el);
           });
         } catch (_err) {
-          pending.classList.add('cap-chat__msg--err');
-          pending.textContent = 'Error de red al consultar el chat.';
+          _error('Error de red al consultar el chat.');
         } finally {
-          if (chatForm) delete chatForm.dataset.busy;
+          capChatBusy = false;
         }
       }
       chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
@@ -5930,6 +5973,7 @@
       host.querySelectorAll('.lp-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const slug = btn.dataset.slug;
+          capChatSlug = slug;
           host.querySelectorAll('.lp-tab-btn').forEach(b => {
             const on = b === btn;
             b.classList.toggle('lp-tab-active', on);
@@ -5944,6 +5988,15 @@
           if (chatInput) chatInput.focus();
         });
       });
+      // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML
+      // guardado trae el lugar, no el SVG.
+      for (const s of activeSlugs) {
+        for (const e of capChats[s] || []) {
+          if (!e.result || e.err) continue;
+          const lugar = host.querySelector(`[data-msg="${e.id}"] .cap-chart-host`);
+          if (lugar && !lugar.childElementCount) _renderCapChartInto(lugar, e.result);
+        }
+      }
     }
 
     // Paso 3 (post-ingesta): provisiona capabilities sobre el cluster con datos ya
@@ -6298,6 +6351,9 @@
         state.pendingDeploy = null;   // el body cacheado ya no aplica
         state.lastStatus = null;
         state.provisioning = false;
+        // Las conversaciones eran con un cluster que ya no existe.
+        for (const k of Object.keys(capChats)) delete capChats[k];
+        capChatSlug = '';
         stopActiveEnvTicker();
         renderInfraView(null);
       } catch (err) {
