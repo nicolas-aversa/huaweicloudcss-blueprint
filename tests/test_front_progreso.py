@@ -136,10 +136,13 @@ def test_los_tres_lugares_usan_el_mismo_widget():
     assert "${progresoHTML('Iniciando…', 'deploy-progress')}" in html
 
     ingesta = _funcion(html, "    async function infraStartIngestion(")
+    reparar = _funcion(html, "    async function infraRepararDnat(")
     reconexion = _funcion(html, "    async function _reconnectDeployJob(")
-    for nombre, fn in (("ingesta", ingesta), ("reconexión", reconexion)):
+    seguir = _funcion(html, "    async function _seguirDeploy(")
+    assert "progresoEvento(prog, d)" in seguir
+    for nombre, fn in (("ingesta", ingesta), ("dnat", reparar), ("reconexión", reconexion)):
         assert "_progresoEnStatus(" in fn, nombre
-        assert "progresoEvento(prog, d)" in fn, nombre
+        assert "progresoEvento(prog, d)" in fn or "_seguirDeploy(" in fn, nombre
         assert "(${Math.round(d.percent)}%)" not in fn, f"{nombre}: volvió la línea con el %"
 
 

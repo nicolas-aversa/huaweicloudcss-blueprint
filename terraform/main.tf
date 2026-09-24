@@ -256,8 +256,14 @@ locals {
 }
 
 # Puerto (NIC) del nodo CSS, buscado por su IP privada. Solo cuando creamos OS.
+# `network_id` acota la búsqueda a la subred del deploy (en Huawei, el ID de la
+# subred de VPC es el network_id). Buscando solo por IP, una cuenta con otra
+# VPC que usa el mismo rango (192.168.0.0/24 es el de casi todas) tiene DOS
+# puertos con esa IP: el data source falla por ambiguo, las DNAT no se crean y
+# la plataforma queda sin acceso al cluster.
 data "huaweicloud_networking_port" "os_node" {
   count      = var.existing_opensearch_endpoint == "" ? 1 : 0
+  network_id = var.subnet_id
   fixed_ip   = local.os_private_ip
   depends_on = [huaweicloud_css_cluster.opensearch_cluster]
 }
@@ -366,6 +372,7 @@ locals {
 
 data "huaweicloud_networking_port" "logstash_node" {
   count      = local.expose_beats ? 1 : 0
+  network_id = var.subnet_id # ver os_node: por IP sola puede ser ambiguo
   fixed_ip   = local.logstash_private_ip
   depends_on = [huaweicloud_css_logstash_cluster.logstash_cluster]
 }

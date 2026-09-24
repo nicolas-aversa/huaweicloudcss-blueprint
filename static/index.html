@@ -6109,7 +6109,7 @@
           body: JSON.stringify(body),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(detailMsg(data));
+        if (!res.ok) throw detailError(data);
         if (!data.index_template_applied) {
           if (statusEl) showStatus(statusEl, '⚠ No se pudo aplicar el index template. Reintentá.', 'error');
           return;
@@ -6118,9 +6118,79 @@
         if (statusEl) showStatus(statusEl, `✓ Index template aplicado${dashMsg}.`, 'success');
         await hydrateActiveEnv();
       } catch (err) {
-        if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
+        if (err.stage === 'dnat_faltante' && statusEl) {
+          // El único error de este paso con arreglo de un click: sin las
+          // reglas DNAT la plataforma no llega al cluster privado.
+          showStatus(statusEl, `Error: ${err.message}`, 'error');
+          const fix = document.createElement('button');
+          fix.className = 'btn btn-primary btn-sm';
+          fix.style.marginTop = '8px';
+          fix.innerHTML = `${icon('refresh')} Crear reglas DNAT`;
+          fix.addEventListener('click', () => infraRepararDnat(fix));
+          statusEl.appendChild(document.createElement('br'));
+          statusEl.appendChild(fix);
+        } else if (statusEl) {
+          showStatus(statusEl, `Error: ${err.message}`, 'error');
+        }
       } finally {
         btn.disabled = false;
+      }
+    }
+
+    // Lee el SSE de un deploy y lo vuelca en el widget de progreso. Devuelve
+    // true si terminó con `complete`; tira el error del backend si no.
+    async function _seguirDeploy(res, prog) {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(detailMsg(errData));
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let ok = false;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop();
+        for (const evt of events) {
+          if (!evt.startsWith('data: ')) continue;
+          let d;
+          try { d = JSON.parse(evt.slice(6)); } catch { continue; }
+          if (d.type === 'progress' || d.type === 'plan' || d.type === 'item') {
+            progresoEvento(prog, d);
+          } else if (d.type === 'complete') {
+            ok = true;
+            progresoFin(prog, true);
+          } else if (d.type === 'error') {
+            progresoFin(prog, false);
+            throw new Error(d.message);
+          }
+        }
+      }
+      return ok;
+    }
+
+    // Crea las reglas DNAT que falten: reaplica la fase 1 (ingesta en pausa
+    // para lo nuevo; las pipelines que ya corren no se tocan, igual que en
+    // "Nuevo pipeline"). El deploy compara las DNAT con el state y crea las
+    // que falten. Después reintenta el index template solo.
+    async function infraRepararDnat(btn) {
+      const body = resolveDeployBody();
+      const statusEl = document.getElementById('infra-setup-status');
+      if (!body || !statusEl) return;
+      btn.disabled = true;
+      const prog = _progresoEnStatus(statusEl, 'Creando las reglas DNAT…');
+      try {
+        const ok = await _seguirDeploy(
+          await _openDeployStream({ ...body, start_ingestion: false, fresh_deploy: false }), prog);
+        if (!ok) throw new Error('El despliegue no completó.');
+        await hydrateActiveEnv();
+        const aplicar = document.getElementById('infra-apply-schema-btn');
+        if (aplicar) await infraApplySchema(aplicar);
+      } catch (err) {
+        showStatus(statusEl, `Error: ${err.message}`, 'error');
       }
     }
 
@@ -6136,36 +6206,8 @@
       const prog = _progresoEnStatus(statusEl, 'Iniciando ingesta con Logstash…');
       try {
         // La fase 2 corre siempre sobre un entorno que ya existe: nunca es "fresh".
-        const res = await _openDeployStream({ ...body, start_ingestion: true, fresh_deploy: false });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(detailMsg(errData));
-        }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let ok = false;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split('\n\n');
-          buffer = events.pop();
-          for (const evt of events) {
-            if (!evt.startsWith('data: ')) continue;
-            let d;
-            try { d = JSON.parse(evt.slice(6)); } catch { continue; }
-            if (d.type === 'progress' || d.type === 'plan' || d.type === 'item') {
-              progresoEvento(prog, d);
-            } else if (d.type === 'complete') {
-              ok = true;
-              progresoFin(prog, true);
-            } else if (d.type === 'error') {
-              progresoFin(prog, false);
-              throw new Error(d.message);
-            }
-          }
-        }
+        const ok = await _seguirDeploy(
+          await _openDeployStream({ ...body, start_ingestion: true, fresh_deploy: false }), prog);
         if (!ok) throw new Error('La ingesta no completó correctamente.');
         if (statusEl) showStatus(statusEl, '✓ Ingesta iniciada. Los datos empiezan a entrar (esperá ~1-2 min antes de provisionar capabilities).', 'success');
         await hydrateActiveEnv();

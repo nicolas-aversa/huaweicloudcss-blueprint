@@ -2689,9 +2689,8 @@ _TARGET_ACTIVACION = "-target=huaweicloud_css_logstash_pipeline.pipeline"
 _CONF_EN_STATE = re.compile(r'^huaweicloud_css_logstash_configuration\.pipeline\["([^"]+)"\]$')
 
 
-def _configuraciones_en_state(terraform_dir: Path) -> set[str] | None:
-    """Los slugs con su configuración de Logstash en el state, o None si no se
-    pudo leer (y entonces no se arriesga un arranque directo)."""
+def _direcciones_en_state(terraform_dir: Path) -> set[str] | None:
+    """Las direcciones de `terraform state list`, o None si no se pudo leer."""
     try:
         r = subprocess.run(["terraform", "state", "list", "-no-color"], cwd=terraform_dir,
                            env=tfstate.tf_env(), capture_output=True, text=True, timeout=90)
@@ -2700,8 +2699,16 @@ def _configuraciones_en_state(terraform_dir: Path) -> set[str] | None:
         return None
     if r.returncode != 0:
         return None
-    return {m.group(1) for ln in (r.stdout or "").splitlines()
-            if (m := _CONF_EN_STATE.match(ln.strip()))}
+    return {ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()}
+
+
+def _configuraciones_en_state(terraform_dir: Path) -> set[str] | None:
+    """Los slugs con su configuración de Logstash en el state, o None si no se
+    pudo leer (y entonces no se arriesga un arranque directo)."""
+    direcciones = _direcciones_en_state(terraform_dir)
+    if direcciones is None:
+        return None
+    return {m.group(1) for d in direcciones if (m := _CONF_EN_STATE.match(d))}
 
 
 def _pasos_del_apply(start_ingestion: bool, previo: dict, actual: dict,
@@ -2732,6 +2739,91 @@ def _pasos_del_apply(start_ingestion: bool, previo: dict, actual: dict,
     return [{"args": [], "desde": _PCT_APPLY_DESDE, "hasta": medio, "sin_activar": list(slugs)},
             {"args": [_TARGET_ACTIVACION], "desde": medio, "hasta": _PCT_APPLY_HASTA,
              "sin_activar": []}]
+
+
+# ── Las reglas DNAT, sí o sí ────────────────────────────────────────────────
+# El cluster es privado: la plataforma llega a OpenSearch (index template,
+# queries) y a Dashboards (import) SOLO por las reglas DNAT del NAT. Dependen
+# del cluster, así que se crean al final, y si fallaban el deploy igual salía
+# "operativo" (el cluster existía) con un aviso que culpaba a una regla de
+# security group: los imports fallaban después, sin pista de por qué. Tras cada
+# apply se compara lo esperado con el state y lo que falte se crea con un apply
+# dirigido; si ni así, el deploy lo dice con el error de Terraform.
+_OS_EN_STATE = "huaweicloud_css_cluster.opensearch_cluster[0]"
+_LS_EN_STATE = "huaweicloud_css_logstash_cluster.logstash_cluster"
+_DNAT_DE = {"opensearch": "OpenSearch (9200)", "kibana": "Dashboards",
+            "logstash_beats": "Logstash (Beats)"}
+
+
+def _dnat_faltantes(en_state: set[str], beats: bool) -> list[str]:
+    """Las reglas DNAT que tendrían que existir y no están en el state. Solo
+    con su cluster ya creado: un apply dirigido sin él crearía el cluster."""
+    esperadas = []
+    if _OS_EN_STATE in en_state:
+        esperadas += ["opensearch", "kibana"]
+    if beats and _LS_EN_STATE in en_state:
+        esperadas.append("logstash_beats")
+    return [n for n in esperadas if f"huaweicloud_nat_dnat_rule.{n}[0]" not in en_state]
+
+
+def _direcciones_del_state(state: dict) -> set[str]:
+    """Las direcciones de los recursos (no data sources) de un state en JSON,
+    como las escribe `terraform state list`. Para lo que no corre Terraform."""
+    direcciones: set[str] = set()
+    for res in (state or {}).get("resources", []) or []:
+        if res.get("mode") == "data" or not res.get("type") or not res.get("name"):
+            continue
+        for inst in res.get("instances") or []:
+            k = inst.get("index_key")
+            suf = "" if k is None else (f"[{k}]" if isinstance(k, int) else f'["{k}"]')
+            direcciones.add(f'{res["type"]}.{res["name"]}{suf}')
+    return direcciones
+
+
+_ERROR_TF = re.compile(r"^[│|\s]*Error: (?P<msg>.+?)\s*$")
+_CON_TF = re.compile(r"^[│|\s]*with (?P<dir>[^\s,]+),")
+
+
+def _errores_de_terraform(lineas: list[str]) -> dict[str, str]:
+    """{dirección del recurso: mensaje} de los bloques `Error:` de un apply."""
+    errores: dict[str, str] = {}
+    ultimo = ""
+    for ln in lineas:
+        if m := _ERROR_TF.match(ln):
+            ultimo = m.group("msg")
+        elif (m := _CON_TF.match(ln)) and ultimo:
+            errores.setdefault(m.group("dir"), ultimo)
+    return errores
+
+
+def _asegurar_dnat(terraform_dir: Path, beats: bool, tf_lines: list[str]):
+    """Crea las reglas DNAT que falten (apply dirigido). Generador: emite los
+    eventos y devuelve las que siguen faltando ([] si están todas)."""
+    # Sin state legible no hay cluster a la vista, y no se inventa un faltante.
+    faltan = _dnat_faltantes(_direcciones_en_state(terraform_dir) or set(), beats)
+    if not faltan:
+        return []
+    nombres = ", ".join(_DNAT_DE.get(n, n) for n in faltan)
+    yield _sse({"type": "progress", "percent": _PCT_APPLY_HASTA, "phase": "Reglas DNAT",
+                "message": f"Faltan las reglas DNAT de {nombres}: creándolas…"})
+    lineas: list[str] = []
+    rc = yield from _correr_apply(
+        terraform_dir, [f"-target=huaweicloud_nat_dnat_rule.{n}" for n in faltan],
+        _PCT_APPLY_HASTA, _PCT_APPLY_HASTA, lineas, plan=False)
+    tf_lines.extend(lineas)
+    if rc is None:
+        return faltan
+    despues = _direcciones_en_state(terraform_dir)
+    siguen = faltan if despues is None else _dnat_faltantes(despues, beats)
+    if not siguen:
+        yield _sse({"type": "step", "name": "Reglas DNAT (acceso público)", "ok": True,
+                    "reason": f"Faltaban las de {nombres}: se crearon."})
+        return []
+    errores = _errores_de_terraform(lineas)
+    motivo = "; ".join(f"{d}: {m}" for d, m in errores.items()) or "".join(lineas)[-300:]
+    yield _sse({"type": "step", "name": "Reglas DNAT (acceso público)", "ok": False,
+                "reason": motivo[:400]})
+    return siguen
 
 
 def _tfvars_sin_activar(terraform_dir: Path, slugs: list[str]) -> str:
@@ -2768,9 +2860,11 @@ def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str]):
 
 
 def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
-                  tf_lines: list[str]):
+                  tf_lines: list[str], plan: bool = True):
     """Un `terraform apply`, streameado: eventos SSE mientras corre y, al
-    final, el código de salida (None si se cortó la lectura)."""
+    final, el código de salida (None si se cortó la lectura). Con `plan=False`
+    no reemplaza la lista de componentes de la pantalla (un apply dirigido que
+    completa otro: sus recursos se actualizan en la lista que ya está)."""
     progreso = progreso_tf.ProgresoApply()
     process = subprocess.Popen(
         ["terraform", "apply", "-auto-approve", "-input=false", "-no-color", *args],
@@ -2795,7 +2889,8 @@ def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: flo
                     yield _sse({"type": "progress",
                                 "percent": round(desde + (hasta - desde) * ev["fraccion"], 1),
                                 "phase": ev["phase"], "message": ev["message"]})
-                else:   # `plan` (los componentes, una vez) e `item` (uno que cambió)
+                elif plan or ev["type"] != "plan":
+                    # `plan` (los componentes, una vez) e `item` (uno que cambió)
                     yield _sse(ev)
     except Exception as exc:  # noqa: BLE001
         yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
@@ -3097,11 +3192,17 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         return                # la lectura se cortó: el error ya salió
 
     apply_failed = returncode != 0
+    errores_tf = _errores_de_terraform(tf_lines) if apply_failed else {}
     yield _sse({"type": "step", "name": "terraform apply", "ok": not apply_failed,
-                "reason": ("".join(tf_lines)[-300:] if apply_failed else "")})
+                "reason": ("; ".join(f"{d}: {m}" for d, m in errores_tf.items())[:400]
+                           or "".join(tf_lines)[-300:]) if apply_failed else ""})
     if apply_failed:
         tail = "".join(tf_lines)[-3000:]
         print("[terraform apply FALLÓ]\n" + mask_text(tail, secrets), flush=True)   # docker compose logs
+
+    # Después de TODO apply (también "Iniciar ingesta"): así un entorno que quedó
+    # sin DNAT se repara solo la próxima vez que se toca.
+    sin_dnat = yield from _asegurar_dnat(terraform_dir, _beats_port(request) > 0, tf_lines)
 
     # ── terraform output ─────────────────────────────────────────────────
     # Se lee INCLUSO si el apply falló: un apply parcial igual guarda estado, así
@@ -3128,13 +3229,24 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         yield _sse({"type": "error", "message": "terraform apply falló:\n" + tail[-1500:]})
         return
     if apply_failed:
-        # El cluster SÍ se creó: el apply falló en algo secundario (típicamente una
-        # regla de security group que YA existía). Registramos el entorno y avisamos,
-        # en vez de tirar todo abajo y dejar recursos huérfanos.
+        # El cluster SÍ se creó: el apply falló en algo secundario. Registramos el
+        # entorno y avisamos, en vez de tirar todo abajo y dejar recursos
+        # huérfanos. El aviso nombra lo que falló: antes decía siempre "una regla
+        # de security group", y cuando lo que faltaba era una DNAT mandaba a
+        # buscar en el lugar equivocado.
+        reparadas = {f"huaweicloud_nat_dnat_rule.{n}[0]" for n in _DNAT_DE if n not in sin_dnat}
+        pendientes = [d for d in errores_tf if d not in reparadas]
+        if pendientes:
+            yield _sse({"type": "progress", "percent": _PCT_OUTPUTS, "phase": "Aviso",
+                        "message": "El entorno se creó, pero fallaron: " + ", ".join(pendientes)
+                                   + ". El detalle está en Actividad."})
+    if sin_dnat:
         yield _sse({"type": "progress", "percent": _PCT_OUTPUTS, "phase": "Aviso",
-                    "message": "El entorno se creó, pero una regla de security group falló "
-                               "(probablemente ya existía). Si no accedés a 9200/Kibana desde "
-                               "afuera, revisá esa regla en tu SG."})
+                    "message": "Faltan las reglas DNAT de "
+                               + ", ".join(_DNAT_DE.get(n, n) for n in sin_dnat)
+                               + ": la plataforma no llega al cluster, así que el index template "
+                                 "y los dashboards van a fallar. Volvé a desplegar o tocá "
+                                 "«Iniciar ingesta» para reintentarlas; el error está en Actividad."})
 
     # ── Verificar OBS upload (best-effort) ───────────────────────────────
     if obs_future is not None:
@@ -6052,6 +6164,20 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
             detail={
                 "stage": "apply_schema",
                 "message": "No hay un cluster alcanzable. ¿Provisionaste el entorno (paso 1)?",
+            },
+        )
+    # Sin las DNAT, la plataforma no llega al cluster privado: el template y el
+    # import terminaban en un timeout de conexión que no decía por qué.
+    faltan = _dnat_faltantes(_direcciones_del_state(tfstate.read_state(terraform_dir)), beats=False)
+    if faltan:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "stage": "dnat_faltante",
+                "message": "El entorno no tiene las reglas DNAT de "
+                           + ", ".join(_DNAT_DE.get(n, n) for n in faltan)
+                           + ": sin ellas la plataforma no llega al cluster (que es privado). "
+                             "Crealas con «Crear reglas DNAT» y volvé a aplicar.",
             },
         )
     # Tras un F5 el body se rearma desde /terraform/status, sin la password.
