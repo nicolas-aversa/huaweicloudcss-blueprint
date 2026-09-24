@@ -135,6 +135,8 @@ def test_los_tipos_y_el_conf_no_se_tocan():
     "[1, 2, 3]",
     '{"columnas": "cualquier cosa", "preguntas": "no es una lista"}',
     "```json\n{\"columnas\": {\"estado\": {\"rol\": \"success_indicator\"}}}\n```",
+    "<think>mmm {no}</think>Acá va el JSON:\n```json\n"
+    "{\"columnas\": {\"estado\": {\"rol\": \"success_indicator\"}}}\n```\nListo.",
 ])
 def test_una_respuesta_rota_no_rompe_nada(respuesta):
     p = _perfil(TELEMETRIA)
@@ -142,8 +144,40 @@ def test_una_respuesta_rota_no_rompe_nada(respuesta):
     r = semantica.enriquecer(p, lambda _: respuesta)
     assert perfilador.armar_filter(p, "data") == antes
     assert isinstance(r.preguntas, list)
-    if respuesta.startswith("```"):
+    if "```" in respuesta:
         assert r.fuente == "llm" and _col(p, "estado").rol == "success_indicator"
+    elif "{" not in respuesta:
+        assert r.fuente == "heuristica"
+    else:   # un objeto con basura adentro: se ignora la basura
+        assert r.preguntas == [] and all(c.rol is None for c in p.columnas)
+
+
+def test_la_semantica_va_con_un_modelo_rapido_sin_thinking_y_con_tope(monkeypatch):
+    """glm-5.3 razona siempre y tardaba ~95 s: el paso 2 no puede esperar
+    eso por etiquetas y preguntas."""
+    import maas_integrator
+
+    visto = {}
+
+    class _Cliente:
+        def with_options(self, **kw):
+            visto["opciones"] = kw
+            return self
+
+    def _chat(_cliente, **kw):
+        visto["pedido"] = kw
+        from types import SimpleNamespace as NS
+        return NS(choices=[NS(message=NS(content='{"columnas": {}}'))])
+
+    monkeypatch.setattr(maas_integrator, "_build_client", lambda: _Cliente())
+    monkeypatch.setattr(maas_integrator, "_chat", _chat)
+
+    r = semantica.enriquecer(_perfil(TELEMETRIA))
+    assert r.fuente == "llm"
+    assert visto["pedido"]["model"] == "glm-5.2"
+    assert visto["pedido"]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert visto["opciones"] == {"timeout": semantica._TIMEOUT_S, "max_retries": 0}
+    assert semantica._TIMEOUT_S <= 60
 
 
 def test_si_el_llm_falla_quedan_las_heuristicas():

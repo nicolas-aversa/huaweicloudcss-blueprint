@@ -24,9 +24,15 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+# El modelo de la semántica NO es el del .conf. glm-5.3 razona siempre y para
+# esto tardaba ~95 s (medido con la telemetría de 14 columnas); glm-5.2 sin
+# thinking contesta en ~25 s. Acá no hace falta razonar: son etiquetas, roles y
+# preguntas, todo validado después, y un error no rompe nada. La sintaxis del
+# .conf —lo que sí puede romper la pipeline— sigue con glm-5.3 y thinking.
+_MODELO = "glm-5.2"
 # Tope del llamado: el paso 1 → 2 no puede quedar colgado por la semántica. Si
 # el modelo no contesta en este tiempo, siguen las heurísticas.
-_TIMEOUT_S = 45
+_TIMEOUT_S = 60
 _FILAS_DE_MUESTRA = 5
 _MAX_ETIQUETA = 60
 _MAX_UNIDAD = 12
@@ -67,9 +73,11 @@ los tipos NO se discuten) y unas filas de muestra. Devolvé SOLO un JSON así:
 ASCII que diga qué son.
 - "preguntas": 10 preguntas en castellano que un analista le haría a estos datos. \
 Cada una se tiene que poder contestar con UNA agregación sobre el índice (contar, \
-sumar, promediar, máximo/mínimo, top N, por día), nombrar una columna por su \
-etiqueta y, cuando ayude, un valor real entre paréntesis. Nada de "por qué", \
-predicciones ni correlaciones.
+sumar, promediar, máximo/mínimo, top N, por día) y nombrar una columna por su \
+etiqueta. Podés usar un valor real para filtrar ("con Estado FALLIDO") o como \
+ejemplo de las categorías ("por Estado (COMPLETADO, FALLIDO)"), pero NUNCA \
+escribas la respuesta en la pregunta. Nada de "por qué", predicciones ni \
+correlaciones.
 
 Columnas:
 {columnas}
@@ -94,26 +102,29 @@ def _payload_columnas(perfil) -> str:
 
 
 def _llamar_al_llm(prompt: str) -> str:
-    from maas_integrator import (_THINK_TAG_RE, _build_client, _chat,
-                                 _thinking_param, get_pipeline_model)
+    from maas_integrator import _build_client, _chat
 
     client = _build_client().with_options(timeout=_TIMEOUT_S, max_retries=0)
     respuesta = _chat(
         client,
-        model=get_pipeline_model(),
+        model=_MODELO,
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
         temperature=0,
-        extra_body=_thinking_param(),
+        extra_body={"thinking": {"type": "disabled"}},
     )
-    return _THINK_TAG_RE.sub("", respuesta.choices[0].message.content or "")
+    return respuesta.choices[0].message.content or ""
 
 
 def _json_de(texto: str) -> dict:
-    texto = (texto or "").strip()
-    if texto.startswith("```"):
-        texto = re.sub(r"^```(?:json)?\s*|\s*```$", "", texto)
-    datos = json.loads(texto)
+    """El objeto JSON de la respuesta, aunque venga con `<think>`, entre
+    fences de Markdown o con una frase antes (glm-5.2 las usa pese al
+    `response_format`)."""
+    texto = re.sub(r"<think>.*?</think>", "", texto or "", flags=re.DOTALL)
+    inicio, fin = texto.find("{"), texto.rfind("}")
+    if inicio < 0 or fin < inicio:
+        raise ValueError("la respuesta no trae un objeto JSON")
+    datos = json.loads(texto[inicio:fin + 1])
     if not isinstance(datos, dict):
         raise ValueError("la respuesta no es un objeto JSON")
     return datos
