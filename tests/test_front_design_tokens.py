@@ -328,6 +328,36 @@ def test_se_analiza_una_muestra_y_no_una_linea():
     assert "${chipVerificacion(state.verificacion)}" in html
 
 
+def test_la_verificacion_se_lee_de_un_vistazo():
+    """Era una pastilla gris con estilos inline y el ícono de la cabecera
+    —16px y rojo— adentro: un check rojo sobre verde, sin centrar. Y "200/200"
+    hacía mirar dos veces para entender que estaba todo bien."""
+    html = _INDEX.read_text(encoding="utf-8")
+
+    i = html.index("function chipVerificacion(v)")
+    fn = html[i:html.index("function bloquePreguntas(", i)]
+    assert 'class="mapping-verify' in fn, "tiene su propia clase, no estilos inline"
+    assert "style=" not in fn
+    assert "Verificado con ${v.filas}" in fn, "con todas OK se dice cuántas, no la fracción"
+    assert "is-partial" in fn, "y si alguna falla se ve distinto"
+    assert "title=" in fn, "el detalle queda en el tooltip"
+
+    css = html[:html.index("</style>")]
+    assert ".mapping-header-title .mapping-verify .icon" in css, (
+        "sin esto el ícono hereda el rojo y los 16px de la cabecera")
+    assert "tabular-nums" in css[css.index(".mapping-verify {"):], (
+        "el número no tiene que bailar al pasar de 9 a 10 filas")
+
+
+def test_las_preguntas_del_paso_2_no_van_con_estilos_inline():
+    html = _INDEX.read_text(encoding="utf-8")
+
+    i = html.index("function bloquePreguntas(qs)")
+    fn = html[i:html.index("function renderMappingTable(", i)]
+    assert "style=" not in fn, "el estilo vive en .mapping-preguntas"
+    assert ".mapping-preguntas {" in html[:html.index("</style>")]
+
+
 def test_crear_un_caso_solo_lo_guarda():
     """Crear un caso y desplegarlo son dos gestos distintos: el deploy sale de la
     card, ya en el grid, por el mismo camino que cualquier otro caso. Había un

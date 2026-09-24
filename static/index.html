@@ -1015,10 +1015,75 @@
       padding: 2px 8px;
       border-radius: var(--radius-sm);
     }
+    /* "Verificado con N filas": la prueba, antes de desplegar, de que el .conf
+       entiende los datos. Se ganó su propia clase porque heredaba el ícono de
+       `.mapping-header-title` —16px y rojo— adentro de una pastilla verde, sin
+       centrar. Pastilla propia, ícono chico del color del texto y el número sin
+       bailar (`tabular-nums`, para que no salte al ir de 9/9 a 10/10). */
+    .mapping-verify {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: var(--fs-sm);
+      font-weight: var(--fw-semi);
+      line-height: 1;
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      font-variant-numeric: tabular-nums;
+      background: var(--accent-green-tint);
+      color: var(--accent-green);
+      border: 1px solid rgba(22, 163, 74, 0.22);
+      cursor: default;
+    }
+    .mapping-header-title .mapping-verify .icon {
+      width: 13px; height: 13px; color: currentColor; flex: none;
+    }
+    .mapping-verify.is-partial {
+      background: rgba(234, 179, 8, 0.12);
+      color: #a16207;
+      border-color: rgba(234, 179, 8, 0.35);
+    }
     .mapping-actions {
       display: flex;
       gap: 8px;
     }
+    /* Las preguntas que va a ofrecer el chat de este dataset, al pie de la
+       tabla: plegadas por defecto (son diez) y con el mismo aire que la tabla. */
+    .mapping-preguntas {
+      border-top: 1px solid var(--border-subtle);
+      background: var(--bg-subtle);
+      padding: 12px 20px;
+    }
+    .mapping-preguntas > summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      list-style: none;
+      font-size: var(--fs-md);
+      font-weight: var(--fw-semi);
+      color: var(--text-primary);
+    }
+    .mapping-preguntas > summary::-webkit-details-marker { display: none; }
+    .mapping-preguntas > summary .icon { width: 15px; height: 15px; color: var(--accent); flex: none; }
+    .mapping-preguntas > summary::after {
+      content: '';
+      width: 7px; height: 7px; margin-left: auto;
+      border-right: 1.5px solid var(--text-muted);
+      border-bottom: 1.5px solid var(--text-muted);
+      transform: rotate(45deg);
+      transition: transform var(--t-fast);
+    }
+    .mapping-preguntas[open] > summary::after { transform: rotate(-135deg); }
+    .mapping-preguntas ol {
+      margin: 10px 0 2px;
+      padding-left: 26px;
+      color: var(--text-secondary);
+      font-size: var(--fs-md);
+      line-height: 1.5;
+    }
+    .mapping-preguntas li { padding: 3px 0; }
+    .mapping-preguntas li::marker { color: var(--text-muted); font-size: var(--fs-sm); }
     /* ── Vista Configuración: dos columnas, todo en una pantalla (sin scroll) ── */
     /* Configuración entra entera en una pantalla: de acá en más los valores
        están dimensionados para eso (ver también .settings-fields).
@@ -3218,23 +3283,27 @@
     function chipVerificacion(v) {
       if (!v || v.fuente !== 'perfilador' || !v.filas) return '';
       const completa = v.filas_ok === v.filas;
-      const estilo = completa
-        ? 'background:var(--accent-green-tint);color:var(--accent-green);'
-        : 'background:var(--accent-tint);color:var(--accent-hover);';
-      const detalle = (v.problemas || []).join(' · ');
-      return `<span class="mapping-header-count" style="${estilo}" title="${escapeHtml(detalle)}">
-        ${icon(completa ? 'check' : 'alert-triangle')} ${v.filas_ok}/${v.filas} filas verificadas</span>`;
+      // Cuando salen todas, el número que importa es cuántas se probaron, no la
+      // fracción: "200/200" hace mirar dos veces para entender que está bien.
+      const texto = completa
+        ? `Verificado con ${v.filas} ${v.filas === 1 ? 'fila' : 'filas'}`
+        : `${v.filas_ok} de ${v.filas} filas verificadas`;
+      const detalle = (v.problemas || []).join(' · ')
+        || (completa
+            ? `Probamos el .conf contra ${v.filas} filas de tu muestra: todas se leen con los tipos y el formato de fecha detectados.`
+            : 'Algunas filas no se leen con los tipos detectados.');
+      return `<span class="mapping-verify${completa ? '' : ' is-partial'}" title="${escapeHtml(detalle)}">
+        ${icon(completa ? 'check' : 'alert-triangle')}${escapeHtml(texto)}</span>`;
     }
 
     // Las preguntas de ejemplo que va a ofrecer el chat de este dataset: se
     // guardan con el caso, así que se muestran acá, antes de guardarlo.
     function bloquePreguntas(qs) {
       if (!qs || !qs.length) return '';
-      return `<details class="mapping-preguntas" style="margin-top:12px;padding:10px 14px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
-        <summary style="cursor:pointer;font-weight:600;color:var(--text-primary);">${icon('chat')} Preguntas de ejemplo para el asistente (${qs.length})</summary>
-        <ol style="margin:8px 0 0 18px;color:var(--text-secondary);font-size:var(--fs-sm);line-height:1.6;">
-          ${qs.map(q => `<li>${escapeHtml(q)}</li>`).join('')}
-        </ol>
+      return `<details class="mapping-preguntas">
+        <summary>${icon('chat')}<span>Preguntas de ejemplo para el asistente</span>
+          <span class="mapping-header-count">${qs.length}</span></summary>
+        <ol>${qs.map(q => `<li>${escapeHtml(q)}</li>`).join('')}</ol>
       </details>`;
     }
 

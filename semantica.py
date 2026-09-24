@@ -41,6 +41,9 @@ _ROLES = ("primary_dimension", "success_indicator", "critical_indicator",
           "entity_id", "measure", "timestamp")
 _NUMERICOS = ("integer", "float")
 _NOMBRE_VALIDO = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+# "las facturas", "los trabajos de impresión": artículo (que da el género) más
+# una o dos palabras. Cualquier otra cosa se descarta y quedan "los registros".
+_FILAS = re.compile(r"^(los|las) [a-záéíóúüñ]{3,20}( (de|del|de la) [a-záéíóúüñ]{3,20})?$")
 _SIN_HEADER = re.compile(r"^columna_\d+$")
 
 
@@ -48,6 +51,7 @@ _SIN_HEADER = re.compile(r"^columna_\d+$")
 class Resultado:
     fuente: str                                   # "llm" | "heuristica"
     preguntas: list[str] = field(default_factory=list)
+    filas: str = ""                               # qué es cada fila: "las facturas"
     nota: str = ""                                # por qué no se usó el LLM
 
 
@@ -57,7 +61,7 @@ los tipos NO se discuten) y unas filas de muestra. Devolvé SOLO un JSON así:
 
 {{"columnas": {{"<nombre>": {{"etiqueta": "...", "rol": "...", "dimension": true, \
 "unidad": "..."}}}}, "nombres": {{"<columna_N>": "<nombre_snake_case>"}}, \
-"preguntas": ["..."]}}
+"filas": "las <cosas>", "preguntas": ["..."]}}
 
 - "etiqueta": cómo le diría una persona a la columna, en castellano, corta.
 - "rol" (o null), uno de:
@@ -71,13 +75,19 @@ los tipos NO se discuten) y unas filas de muestra. Devolvé SOLO un JSON así:
 - "unidad": solo para números, si se deduce (ml, kg, ms, ARS, %…); si no, null.
 - "nombres": SOLO para las columnas que se llaman columna_N, un nombre snake_case \
 ASCII que diga qué son.
-- "preguntas": 10 preguntas en castellano que un analista le haría a estos datos. \
-Cada una se tiene que poder contestar con UNA agregación sobre el índice (contar, \
-sumar, promediar, máximo/mínimo, top N, por día) y nombrar una columna por su \
-etiqueta. Podés usar un valor real para filtrar ("con Estado FALLIDO") o como \
-ejemplo de las categorías ("por Estado (COMPLETADO, FALLIDO)"), pero NUNCA \
-escribas la respuesta en la pregunta. Nada de "por qué", predicciones ni \
-correlaciones.
+- "filas": qué es cada fila, en plural y con artículo: "las facturas", "los \
+trabajos de impresión", "las transacciones". Si no se deduce, "los registros".
+- "preguntas": 10 preguntas en castellano, **como se las harías a un colega en \
+voz alta**, no como un título de reporte. Cada una tiene que poder contestarse \
+con UNA operación sobre los datos (contar, sumar, promediar, máximo/mínimo, top \
+N, por día) y mencionar una columna por su etiqueta. Podés filtrar por un valor \
+real ("¿Cuántos trabajos terminaron en FALLIDO?"). Nada de "por qué", \
+predicciones ni correlaciones, y nunca escribas la respuesta en la pregunta.
+
+  Así SÍ: "¿Cuántas facturas hubo en cada País?" · "¿Qué Cliente compró más?" · \
+"¿Cuánto vendimos por día?" · "¿Cuál es el promedio de Velocidad por Prensa?"
+  Así NO: "¿Cuál es el total de FacturacionTotal por Country?" · "Distribución \
+de registros por Estado" · "¿Cuál es el conteo de la dimensión Cliente?"
 
 Columnas:
 {columnas}
@@ -146,8 +156,22 @@ def enriquecer(perfil, llamar: Callable[[str], str] | None = None) -> Resultado:
         return Resultado("heuristica", nota=f"{type(exc).__name__}: {str(exc)[:160]}")
     aplicar(perfil, datos)
     preguntas = datos.get("preguntas")
-    return Resultado("llm", [str(p) for p in preguntas if isinstance(p, str)]
-                     if isinstance(preguntas, list) else [])
+    return Resultado("llm",
+                     [str(p) for p in preguntas if isinstance(p, str)]
+                     if isinstance(preguntas, list) else [],
+                     filas=_filas_validas(datos.get("filas")))
+
+
+def _filas_validas(filas: Any) -> str:
+    """"las facturas" si el LLM dijo algo usable, o "" si no.
+
+    Con artículo a propósito: es de donde sale el género para armar preguntas
+    que suenen bien ("¿Cuántas facturas…?" y no "¿Cuántos facturas…?").
+    """
+    if not isinstance(filas, str):
+        return ""
+    limpio = " ".join(filas.strip().lower().split())
+    return limpio if _FILAS.match(limpio) else ""
 
 
 # ── La validación ───────────────────────────────────────────────────────────

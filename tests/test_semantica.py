@@ -65,6 +65,23 @@ def test_aplica_roles_dimension_y_unidad_y_devuelve_las_preguntas():
     assert _col(p, "codigo_error").rol == "critical_indicator"
 
 
+@pytest.mark.parametrize("dice, queda", [
+    ("las facturas", "las facturas"),
+    ("los trabajos de impresión", "los trabajos de impresión"),
+    ("  Las Ventas  ", "las ventas"),
+    ("facturas", ""),                       # sin artículo no sabemos el género
+    ("cada fila es una factura de venta", ""),
+    ("los", ""),
+    ("", ""),
+    (42, ""),
+])
+def test_que_es_cada_fila_se_valida_antes_de_usarlo(dice, queda):
+    """El artículo es el que decide "¿Cuántas facturas?" o "¿Cuántos trabajos?":
+    sin uno usable, las filas son "registros"."""
+    r = semantica.enriquecer(_perfil(TELEMETRIA), _responde({"filas": dice}))
+    assert r.filas == queda
+
+
 def test_con_header_la_etiqueta_es_la_del_cliente():
     """"Páginas Totales" es cómo le dice el cliente: el LLM no la reescribe."""
     p = _perfil(TELEMETRIA)
@@ -281,6 +298,7 @@ client = TestClient(main.app)
 def test_el_endpoint_usa_la_semantica_y_devuelve_diez_preguntas(monkeypatch):
     monkeypatch.setattr(semantica, "_llamar_al_llm", _responde({
         "columnas": {"cliente": {"rol": "primary_dimension"}},
+        "filas": "los trabajos",
         "preguntas": ["¿Qué Cliente imprimió más Páginas Totales?", "¿Por qué fallan los trabajos?"],
     }))
     r = client.post("/api/v1/onboarding/generate-filter", json={"raw_log": TELEMETRIA})
@@ -293,6 +311,8 @@ def test_el_endpoint_usa_la_semantica_y_devuelve_diez_preguntas(monkeypatch):
     assert len(body["questions"]) == 10
     assert body["questions"][0] == "¿Qué Cliente imprimió más Páginas Totales?"
     assert not any("Por qué" in q for q in body["questions"])
+    # Y lo que el LLM dijo que es cada fila llega hasta las plantillas.
+    assert "¿Cuántos trabajos hay de cada Estado?" in body["questions"]
 
 
 def test_sin_api_key_el_endpoint_sigue_y_las_preguntas_salen_de_las_plantillas():
@@ -301,4 +321,7 @@ def test_sin_api_key_el_endpoint_sigue_y_las_preguntas_salen_de_las_plantillas()
     assert r.status_code == 200, body
     assert body["verificacion"]["semantica"] == "heuristica"
     assert len(body["questions"]) == 10
-    assert "¿Cuántos registros hay por Estado (COMPLETADO, FALLIDO)?" in body["questions"]
+    # Sin LLM no sabemos que cada fila es un trabajo: son "registros", pero
+    # siguen sonando a pregunta y no a título de reporte.
+    assert "¿Cuántos registros hay de cada Estado?" in body["questions"]
+    assert "¿Cuántos registros terminaron en FALLIDO?" in body["questions"]

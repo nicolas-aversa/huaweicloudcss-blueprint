@@ -1473,13 +1473,14 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     if (request.input_type or "").strip().lower() != "jdbc" and not request.feedback:
         perfil = perfilador.perfilar(lineas)
     candidatas: list[str] = []
+    filas_de = ""      # qué es cada fila ("las facturas"), para las preguntas
     if perfil is not None and perfil.estructurado and perfil.filas > 0:
         # La semántica va ANTES de armar el .conf: en un CSV sin header puede
         # renombrar `columna_7`, y el filter tiene que salir con ese nombre.
         sem = semantica.enriquecer(perfil)
         if sem.nota:
             print(f"[semantica] sin LLM, quedan las heurísticas: {sem.nota}")
-        candidatas = sem.preguntas
+        candidatas, filas_de = sem.preguntas, sem.filas
         result = {"filter_code": perfilador.armar_filter(perfil, request.namespace),
                   "fields": perfilador.campos(perfil, request.namespace)}
         prueba = perfilador.verificar(perfil)
@@ -1535,7 +1536,7 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         filter_code=filter_code,
         fields=enriched_fields,
         verificacion=verificacion,
-        questions=preguntas.armar(enriched_fields, candidatas),
+        questions=preguntas.armar(enriched_fields, candidatas, filas_de),
     )
 
 

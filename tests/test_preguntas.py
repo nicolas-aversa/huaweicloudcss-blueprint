@@ -83,22 +83,64 @@ def test_nunca_mas_de_diez():
 
 
 def test_las_plantillas_usan_los_roles_y_los_valores_reales():
-    qs = preguntas.armar(_campos(TELEMETRIA), [])
-    assert "¿Cuántos registros hay por Estado (COMPLETADO, FALLIDO)?" in qs
-    assert "¿Cuántos registros hay por día?" in qs
-    assert "¿Cuáles son los 10 valores de ID Trabajo con más registros?" in qs
-    assert "¿Cuántos registros tienen Código Error?" in qs
-    assert any("con Estado FALLIDO" in q for q in qs)
+    qs = preguntas.armar(_campos(TELEMETRIA), [], "los trabajos")
+    assert "¿Cuántos trabajos hay de cada Estado?" in qs
+    assert "¿Cuántos trabajos hubo por día?" in qs
+    assert "¿Cuáles son los 10 ID Trabajo que más se repiten?" in qs
+    assert "¿Cuántos trabajos tienen Código Error?" in qs
+    # El valor real del estado de falla, como lo diría una persona.
+    assert "¿Cuántos trabajos terminaron en FALLIDO?" in qs
+    assert "¿Qué Cliente tuvo más trabajos en FALLIDO?" in qs
     # "Cliente" también tiene rol de entidad, pero la entidad elegida es ID
     # Trabajo: Cliente agrupa, y es la torta principal del dashboard.
-    assert "¿Cuál es el total de Páginas Totales por Cliente?" in qs
+    assert "¿Cuánto suma Páginas Totales en cada Cliente?" in qs
+
+
+def test_las_preguntas_suenan_a_persona_y_no_a_titulo_de_reporte():
+    """Se leen en voz alta: nada de "total de X por Y" ni "registros" cuando
+    sabemos que cada fila es una factura."""
+    qs = preguntas.armar(_campos(VENTAS), [], "las facturas")
+
+    assert not any("¿Cuál es el total de" in q for q in qs), qs
+    assert not any("valores de" in q or "Distribución" in q for q in qs), qs
+    assert not any("registros" in q for q in qs), qs
+    assert "¿Cuántas facturas hubo por día?" in qs
+    assert "¿Cuánto suma Importe en cada Sucursal?" in qs
+
+
+@pytest.mark.parametrize("filas, esperada", [
+    ("las facturas", "¿Cuántas facturas hay en total?"),
+    ("los trabajos", "¿Cuántos trabajos hay en total?"),
+    # Basura o nada: las filas son "registros", que concuerda en masculino.
+    ("", "¿Cuántos registros hay en total?"),
+    ("facturas", "¿Cuántos registros hay en total?"),
+])
+def test_el_genero_sale_del_articulo(filas, esperada):
+    assert esperada in preguntas.plantillas(_campos(VENTAS), filas)
+
+
+def test_con_muchas_dimensiones_las_diez_no_son_la_misma_pregunta():
+    """Seis "¿… hay por X?" seguidas se leen como una lista de columnas. La
+    medida se intercala en las primeras, y después siguen los conteos."""
+    muchas = ("Fecha y Hora,Cliente,Prensa,Papel,Turno,Estado,Páginas\n"
+              "2026-09-18 11:04:12,Editorial Sur,PRENSA-03,Couché,Mañana,COMPLETADO,12000\n"
+              "2026-09-18 11:31:55,Gráfica Andes,PRENSA-01,Obra,Tarde,FALLIDO,8000\n"
+              "2026-09-18 12:02:10,Editorial Sur,PRENSA-03,Couché,Mañana,COMPLETADO,5000\n"
+              "2026-09-18 12:30:10,Imprenta Norte,PRENSA-02,Obra,Noche,COMPLETADO,3000\n")
+    qs = preguntas.armar(_campos(muchas), [], "los trabajos")
+
+    assert len(qs) == 10
+    # La medida acompaña a las primeras dimensiones, no a todas.
+    assert 2 <= sum(1 for q in qs if "en cada" in q) <= 3, qs
+    # Y ninguna dimensión se queda sin su conteo por culpa de eso.
+    assert "¿Cuántos trabajos hay por Turno?" in qs, qs
 
 
 def test_un_dataset_chico_llega_a_diez_con_las_variantes():
-    qs = preguntas.plantillas(_campos(VENTAS))
-    assert "¿Cuál es el mínimo de Importe?" in qs
-    assert "¿Cuál es el promedio de Importe?" in qs
-    assert "¿Qué Sucursal tiene más registros?" in qs
+    qs = preguntas.plantillas(_campos(VENTAS), "las facturas")
+    assert "¿Cuál es el valor más bajo de Importe?" in qs
+    assert "¿Qué Sucursal tiene más facturas?" in qs
+    assert "¿Cuántas facturas corresponden a Palermo?" in qs
 
 
 def test_una_velocidad_se_promedia_como_en_el_dashboard():
@@ -106,7 +148,8 @@ def test_una_velocidad_se_promedia_como_en_el_dashboard():
            "unit": "PPM", "role": "measure"},
           {"raw_name": "prensa", "business_label": "Prensa", "type": "string", "dimension": True}]
     qs = preguntas.plantillas(fs)
-    assert "¿Cuál es el promedio de Velocidad por Prensa?" in qs
+    assert "¿Cuál es el promedio de Velocidad en cada Prensa?" in qs
+    assert not any("suma Velocidad" in q for q in qs), "142 PPM y 118 PPM no suman 260"
 
 
 def test_dos_datasets_distintos_dan_preguntas_distintas():
@@ -118,6 +161,16 @@ def test_dos_datasets_distintos_dan_preguntas_distintas():
 
 def test_sin_campos_igual_hay_una_pregunta():
     assert preguntas.armar([], []) == ["¿Cuántos registros hay en total?"]
+
+
+def test_nombrar_las_filas_alcanza_para_que_una_pregunta_del_llm_entre():
+    """"¿Cuántas facturas hubo en cada País?" no cita ninguna columna con su
+    etiqueta (la columna se llama Sucursal), pero habla de estos datos."""
+    vocab = preguntas._vocabulario(_campos(VENTAS))
+    assert preguntas.validar("¿Cuántas facturas hubo?", vocab) is None
+
+    qs = preguntas.armar(_campos(VENTAS), ["¿Cuántas facturas hubo?"], "las facturas")
+    assert qs[0] == "¿Cuántas facturas hubo?"
 
 
 # ── El dashboard y las preguntas dicen lo mismo ─────────────────────────────

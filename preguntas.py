@@ -83,16 +83,28 @@ def validar(pregunta, vocab: set[str]) -> str | None:
 
 
 # ── Plantillas ──────────────────────────────────────────────────────────────
-def _valores(f: dict, cuantos: int = 2) -> str:
-    vals = [str(v)[:30] for v in (f.get("frecuentes") or [])[:cuantos] if str(v).strip()]
-    return f" ({', '.join(vals)})" if vals else ""
+def _valor(f: dict) -> str | None:
+    return next((str(v)[:30] for v in (f.get("frecuentes") or []) if str(v).strip()), None)
 
 
 def _con_rol(fields: list[dict], rol: str) -> dict | None:
     return next((f for f in fields if f.get("role") == rol), None)
 
 
-def plantillas(fields: list[dict]) -> list[str]:
+def _sujeto(filas: str) -> tuple[str, str]:
+    """`"las facturas"` → `("facturas", "Cuántas")`.
+
+    El artículo lo pide el prompt justamente para esto: sin él, la mitad de las
+    preguntas concuerdan mal ("¿Cuántos facturas hay?"). Sin nada usable, las
+    filas son "registros", que concuerda con todo en masculino.
+    """
+    partes = (filas or "").strip().lower().split()
+    if len(partes) >= 2 and partes[0] in ("los", "las"):
+        return " ".join(partes[1:]), ("Cuántas" if partes[0] == "las" else "Cuántos")
+    return "registros", "Cuántos"
+
+
+def plantillas(fields: list[dict], filas: str = "") -> list[str]:
     fields = [f for f in fields or [] if isinstance(f, dict) and _etiqueta(f)]
     exito = _con_rol(fields, "success_indicator")
     critico = _con_rol(fields, "critical_indicator")
@@ -117,61 +129,85 @@ def plantillas(fields: list[dict]) -> list[str]:
     def _agg(m: dict) -> str:
         return "promedio" if (m.get("unit") or "").strip().lower() in _UNIDADES_DE_PROMEDIO else "total"
 
+    # Las preguntas se leen en voz alta, así que están escritas como se las haría
+    # una persona: "¿Cuántas facturas hubo por país?" y no "Distribución de
+    # registros por dimensión País". Cada una sigue siendo UNA agregación — lo
+    # que cambia es cómo suena, no lo que el chat tiene que resolver.
+    cosas, cuantas = _sujeto(filas)
+
+    def _sumar_o_promediar(m: dict, donde: str) -> str:
+        if _agg(m) == "promedio":
+            return f"¿Cuál es el promedio de {_etiqueta(m)} {donde}?"
+        return f"¿Cuánto suma {_etiqueta(m)} {donde}?"
+
     qs: list[str] = []
     if exito:
-        qs.append(f"¿Cuántos registros hay por {_etiqueta(exito)}{_valores(exito)}?")
+        qs.append(f"¿{cuantas} {cosas} hay de cada {_etiqueta(exito)}?")
     if hay_fecha:
-        qs.append("¿Cuántos registros hay por día?")
+        qs.append(f"¿{cuantas} {cosas} hubo por día?")
     if medida and primaria:
-        qs.append(f"¿Cuál es el {_agg(medida)} de {_etiqueta(medida)} por {_etiqueta(primaria)}?")
+        qs.append(_sumar_o_promediar(medida, f"en cada {_etiqueta(primaria)}"))
     if entidad:
-        qs.append(f"¿Cuáles son los 10 valores de {_etiqueta(entidad)} con más registros?")
+        # "con más {cosas}" no sirve cuando la entidad ES la fila ("los 10 ID
+        # Trabajo con más trabajos"); "que más se repiten" vale en los dos casos.
+        qs.append(f"¿Cuáles son los 10 {_etiqueta(entidad)} que más se repiten?")
+    falla = next((str(v)[:30] for v in (exito or {}).get("frecuentes") or []
+                  if _PARECE_FALLA.search(str(v))), None) if exito else None
+    if falla:
+        qs.append(f"¿{cuantas} {cosas} terminaron en {falla}?")
     if critico:
-        qs.append(f"¿Cuántos registros tienen {_etiqueta(critico)}?")
-    if exito and primaria and primaria is not exito:
-        falla = next((v for v in exito.get("frecuentes") or [] if _PARECE_FALLA.search(str(v))), None)
-        if falla:
-            qs.append(f"¿Qué {_etiqueta(primaria)} tiene más registros con "
-                      f"{_etiqueta(exito)} {str(falla)[:30]}?")
+        qs.append(f"¿{cuantas} {cosas} tienen {_etiqueta(critico)}?")
+    if falla and primaria and primaria is not exito:
+        qs.append(f"¿Qué {_etiqueta(primaria)} tuvo más {cosas} en {falla}?")
+    # Una por dimensión, alternando con la medida en las dos primeras: seis
+    # "¿… hay por X?" seguidas se leen como una lista, no como preguntas.
+    otras = [d for d in dims if d is not exito]
+    for i, d in enumerate(otras):
+        qs.append(f"¿{cuantas} {cosas} hay por {_etiqueta(d)}?")
+        if medida and i < 2 and d is not primaria:
+            qs.append(_sumar_o_promediar(medida, f"en cada {_etiqueta(d)}"))
     if medida:
-        qs.append(f"¿Cuál es el máximo de {_etiqueta(medida)}?")
+        qs.append(f"¿Cuál es el valor más alto de {_etiqueta(medida)}?")
     if medida and hay_fecha:
-        qs.append(f"¿Cómo evolucionó el {_agg(medida)} de {_etiqueta(medida)} por día?")
+        qs.append(f"¿Cómo evolucionó {_etiqueta(medida)} día a día?")
     if critico:
-        qs.append(f"¿Cuáles son los valores de {_etiqueta(critico)} más frecuentes?")
-    for d in dims:
-        if d is not exito:
-            qs.append(f"¿Cuántos registros hay por {_etiqueta(d)}{_valores(d)}?")
+        qs.append(f"¿Qué {_etiqueta(critico)} aparece más veces?")
     if entidad:
-        qs.append(f"¿Cuántos valores distintos de {_etiqueta(entidad)} hay?")
+        qs.append(f"¿Cuántos {_etiqueta(entidad)} distintos hay?")
     if medida and primaria:
-        qs.append(f"¿Qué {_etiqueta(primaria)} tiene el mayor {_agg(medida)} de {_etiqueta(medida)}?")
+        verbo = "tiene el promedio más alto de" if _agg(medida) == "promedio" else "acumula más"
+        qs.append(f"¿Qué {_etiqueta(primaria)} {verbo} {_etiqueta(medida)}?")
     for m in medidas[1:]:
-        qs.append(f"¿Cuál es el {_agg(m)} de {_etiqueta(m)}?")
+        qs.append(_sumar_o_promediar(m, "en total"))
     # Más variantes, para que un dataset chico (cuatro columnas) también llegue
     # a diez sin repetir: todas siguen siendo una sola agregación.
-    for d in dims:
-        # "¿Qué X…?" y no "¿Cuál es el X…?": el artículo depende del género
-        # de la etiqueta ("el Cliente", "la Sucursal") y no lo sabemos.
-        qs.append(f"¿Qué {_etiqueta(d)} tiene más registros?")
-        top = next((str(v)[:30] for v in d.get("frecuentes") or [] if str(v).strip()), None)
+    for d in otras:
+        # "¿Qué X…?" y no "¿Cuál es el X…?": el artículo depende del género de
+        # la etiqueta ("el Cliente", "la Sucursal") y no lo sabemos.
+        qs.append(f"¿Qué {_etiqueta(d)} tiene más {cosas}?")
+        top = _valor(d)
         if top:
-            qs.append(f"¿Cuántos registros tienen {_etiqueta(d)} {top}?")
+            # "corresponden a" y no "hay en": sirve para un lugar (Palermo) y
+            # para lo que no lo es (Débito, PRENSA-03).
+            qs.append(f"¿{cuantas} {cosas} corresponden a {top}?")
         if medida and d is not primaria:
-            qs.append(f"¿Cuál es el {_agg(medida)} de {_etiqueta(medida)} por {_etiqueta(d)}?")
+            qs.append(_sumar_o_promediar(medida, f"en cada {_etiqueta(d)}"))
     if medida:
-        otra = "total" if _agg(medida) == "promedio" else "promedio"
-        qs.append(f"¿Cuál es el {otra} de {_etiqueta(medida)}?")
-        qs.append(f"¿Cuál es el mínimo de {_etiqueta(medida)}?")
+        qs.append(f"¿Cuál es el valor más bajo de {_etiqueta(medida)}?")
+        qs.append(_sumar_o_promediar(medida, "en total"))
     if hay_fecha:
-        qs.append("¿Qué día hubo más registros?")
-    qs.append("¿Cuántos registros hay en total?")
+        qs.append(f"¿Qué día hubo más {cosas}?")
+    qs.append(f"¿{cuantas} {cosas} hay en total?")
     return qs
 
 
-def armar(fields: list[dict], candidatas: list | None = None, cantidad: int = CANTIDAD) -> list[str]:
+def armar(fields: list[dict], candidatas: list | None = None, filas: str = "",
+          cantidad: int = CANTIDAD) -> list[str]:
     """Las del LLM que pasen la validación y, detrás, las plantillas."""
     vocab = _vocabulario(fields or [])
+    # Nombrar las filas ("¿Cuántas facturas hubo por país?") es hablar de estos
+    # datos aunque no se cite una columna: contar filas siempre se contesta.
+    vocab.update(w for w in _normal(filas).split() if len(w) >= 4 and w not in ("los", "las"))
     fuera: list[str] = []
     vistas: set[str] = set()
 
@@ -182,6 +218,6 @@ def armar(fields: list[dict], candidatas: list | None = None, cantidad: int = CA
 
     for c in candidatas or []:
         _sumar(validar(c, vocab))
-    for q in plantillas(fields or []):
+    for q in plantillas(fields or [], filas):
         _sumar(q)
     return fuera
