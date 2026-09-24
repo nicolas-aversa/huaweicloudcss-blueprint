@@ -553,7 +553,12 @@ output "pipeline_names" {
 
 output "active_pipeline_names" {
   description = "Configuraciones cuya ingesta está activa (fase 2)."
-  value       = local.active_pipeline_names
+  # Lee el recurso de la activación, NO el local. "Iniciar ingesta" aplica solo
+  # la activación (`-target`), y un output que no depende de ningún recurso
+  # dirigido no se actualiza en ese apply: las pipelines arrancaban y la vista
+  # seguía diciendo "En pausa" (probado con `terraform_data`). Leyendo el
+  # recurso, el output es lo que quedó aplicado de verdad.
+  value = length(huaweicloud_css_logstash_pipeline.pipeline) > 0 ? tolist(huaweicloud_css_logstash_pipeline.pipeline[0].names) : []
 }
 
 output "project_name" {

@@ -6006,11 +6006,21 @@
         if (!data.reachable) {
           toast('No pude preguntarle al cluster (¿endpoint o contraseña?). Reingresá por Pipeline → Desplegar.', 'error', 7000);
         } else {
+          // Una pipeline en pausa no tiene documentos porque no arrancó: el
+          // mensaje de antes mandaba a revisar el bucket y el filtro, que no
+          // tenían nada que ver.
+          const activa = Object.fromEntries(((state.lastStatus || {}).pipelines || [])
+            .map(p => [p.slug, !!p.active]));
           const vacias = (data.pipelines || []).filter(p => !p.docs);
-          toast(vacias.length
-            ? `Sin documentos en: ${vacias.map(p => p.slug).join(', ')}. Revisá que el prefijo del bucket tenga objetos y que el filtro matchee las líneas.`
-            : 'Todas las pipelines tienen documentos.',
-            vacias.length ? 'info' : 'success', vacias.length ? 9000 : 4000);
+          const enPausa = vacias.filter(p => activa[p.slug] === false).map(p => p.slug);
+          const sinDatos = vacias.filter(p => activa[p.slug] !== false).map(p => p.slug);
+          const partes = [];
+          if (enPausa.length) partes.push(
+            `${enPausa.join(', ')}: en pausa, la ingesta no arrancó. Tocá «Iniciar ingesta con Logstash» en Puesta en marcha.`);
+          if (sinDatos.length) partes.push(
+            `${sinDatos.join(', ')}: ingestando pero todavía sin documentos. Logstash lee el bucket cada 60 s: esperá un minuto y volvé a verificar; si sigue igual, revisá que el prefijo tenga objetos.`);
+          toast(partes.length ? partes.join(' · ') : 'Todas las pipelines tienen documentos.',
+            partes.length ? 'info' : 'success', partes.length ? 10000 : 4000);
         }
         renderInfraView(state.lastStatus);
       } catch (err) {
@@ -6638,9 +6648,13 @@
       const chipDocs = (p) => {
         const h = salud[p.slug];
         if (!h || h.docs === null || h.docs === undefined) return '';
-        return h.docs > 0
-          ? `<span class="pipe-row__prefix" title="documentos en ${escapeHtml(h.index || '')}">${icon('database')} ${h.docs.toLocaleString('es')} docs</span>`
-          : `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="${escapeHtml(h.index || '')}">${icon('database')} sin documentos</span>`;
+        if (h.docs > 0) {
+          return `<span class="pipe-row__prefix" title="documentos en ${escapeHtml(h.index || '')}">${icon('database')} ${h.docs.toLocaleString('es')} docs</span>`;
+        }
+        // En pausa, sin documentos es lo esperable: gris, no rojo de error.
+        return p.active
+          ? `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="${escapeHtml(h.index || '')}">${icon('database')} sin documentos</span>`
+          : `<span class="pipe-row__prefix" title="La ingesta de esta pipeline todavía no arrancó">${icon('database')} sin documentos (en pausa)</span>`;
       };
       // CSS valida el .conf al crear la configuración y la deja `available` o
       // `unavailable`. Una que no compila no ingiere NADA, y hasta ahora se veía

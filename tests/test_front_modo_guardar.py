@@ -153,6 +153,22 @@ def test_la_descripcion_de_un_paso_no_se_corta_a_68_caracteres():
     assert "max-width" not in regla[:regla.index("}")]
 
 
+def test_verificar_ingesta_distingue_en_pausa_de_sin_datos():
+    """Con las pipelines en pausa, "Sin documentos… revisá el bucket y el
+    filtro" mandaba a buscar el problema donde no estaba: no habían arrancado."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("async function verificarIngesta(btn)")
+    fn = html[i:html.index("function buildDeployBodyFromStatus(", i)]
+    assert "en pausa, la ingesta no arrancó" in fn
+    assert "Iniciar ingesta con Logstash" in fn
+    assert "Logstash lee el bucket cada 60 s" in fn
+    assert "Revisá que el prefijo del bucket tenga objetos y que el filtro matchee" not in fn
+
+    j = html.index("const chipDocs = (p) => {")
+    chip = html[j:html.index("};", j)]
+    assert "sin documentos (en pausa)" in chip, "en pausa, sin documentos no es un error"
+
+
 def test_guardar_no_valida_el_destino():
     """La contraseña de OpenSearch era obligatoria aunque el campo no se usara."""
     html = _INDEX.read_text(encoding="utf-8")

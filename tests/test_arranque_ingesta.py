@@ -11,6 +11,8 @@ arrancar una pipeline cuyo .conf todavía se está verificando.
 import json
 import pathlib
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -151,6 +153,64 @@ def test_la_activacion_no_depende_de_las_configuraciones():
     # configuración que no existe.
     assert re.search(r"name\s*=\s*local\.pipeline_conf_names\[each\.key\]", tf)
     assert 'substr("pipeline-${k}", 0, 32)' in tf
+
+
+def test_el_output_de_las_activas_lee_el_recurso_de_la_activacion():
+    """La vista dice "Ingestando" o "En pausa" con este output. Leyendo el
+    local, un apply dirigido a la activación no lo actualizaba: las pipelines
+    arrancaban y la pantalla seguía en "En pausa"."""
+    tf = _TF.read_text(encoding="utf-8")
+    bloque = tf[tf.index('output "active_pipeline_names"'):]
+    bloque = bloque[:bloque.index("\n}\n")]
+    valor = bloque[bloque.index("value"):]
+    assert "huaweicloud_css_logstash_pipeline.pipeline" in valor
+    assert "local.active_pipeline_names" not in valor
+
+
+_MINI = """
+variable "p" { type = map(bool) }
+locals {
+  nombres = { for k, v in var.p : k => "pipeline-${k}" }
+  activas = [for k, v in var.p : local.nombres[k] if v]
+}
+resource "terraform_data" "cluster" {}
+resource "terraform_data" "conf" {
+  for_each = var.p
+  input    = local.nombres[each.key]
+}
+resource "terraform_data" "pipe" {
+  count = length(local.activas) > 0 ? 1 : 0
+  input = { cluster = terraform_data.cluster.id, names = local.activas }
+}
+output "desde_el_local"   { value = local.activas }
+output "desde_el_recurso" { value = length(terraform_data.pipe) > 0 ? terraform_data.pipe[0].input.names : [] }
+"""
+
+
+@pytest.mark.skipif(shutil.which("terraform") is None, reason="terraform no está instalado")
+def test_terraform_no_actualiza_un_output_sin_recursos_en_un_apply_dirigido(tmp_path):
+    """El comportamiento de Terraform en el que se apoya el diseño, probado de
+    verdad con recursos locales (`terraform_data`, sin nube ni credenciales):
+    tras un `-target` a la activación, el output que lee el local queda viejo y
+    el que lee el recurso refleja lo que se aplicó."""
+    (tmp_path / "main.tf").write_text(_MINI, encoding="utf-8")
+
+    def tf(*args):
+        r = subprocess.run(["terraform", *args, "-no-color"], cwd=tmp_path,
+                           capture_output=True, text=True, timeout=180)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout
+
+    def salida(nombre):
+        return json.loads(tf("output", "-json", nombre))
+
+    tf("init", "-input=false")
+    tf("apply", "-auto-approve", "-input=false", "-var=p={a=false,b=false}")
+    tf("apply", "-auto-approve", "-input=false", "-target=terraform_data.pipe",
+       "-var=p={a=true,b=true}")
+
+    assert salida("desde_el_local") == [], "si esto cambia, Terraform cambió y el output viejo andaría"
+    assert salida("desde_el_recurso") == ["pipeline-a", "pipeline-b"]
 
 
 def test_el_target_apunta_al_recurso_de_la_activacion():
