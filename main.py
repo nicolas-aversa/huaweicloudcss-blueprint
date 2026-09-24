@@ -6694,8 +6694,16 @@ _REGLAS_DEL_CHAT = (
     f"B. If answering needs information that is NOT in FIELDS, output exactly "
     f"{_SIN_DATO}: <the missing information>. NEVER invent a field name.\n"
     "C. Use the CONVERSATION (if any) to resolve references like 'esas', 'ese puntaje', "
-    "'and by month?'."
+    "'and by month?'.\n"
+    "D. If the question asks WHY, about reasons, complaints, topics, what people say, or the "
+    "language of a free-text field (things a count cannot answer), do NOT aggregate: return "
+    "sample rows of that text field so they can be read, e.g. "
+    "source=<index> | where <filters> and isnotnull(<text_field>) | fields <text_field> | head 30"
 )
+# Una consulta de filas (sin `stats`, con `head`) trae texto para LEER, no un
+# número: con el tope, la respuesta no manda miles de comentarios al modelo.
+_MAX_FILAS_DE_MUESTRA = 50
+_TEXTO_DE_MUESTRA = 300
 
 
 def _memoria(historial: list[ChatTurno]) -> str:
@@ -6710,6 +6718,38 @@ def _memoria(historial: list[ChatTurno]) -> str:
 
 def _limpiar_ppl(texto: str | None) -> str:
     return (texto or "").replace("```ppl", "").replace("```", "").strip()
+
+
+def _es_muestra(ppl: str) -> bool:
+    """Trae filas para leer (sin agregar), no un número."""
+    return (re.search(r"\|\s*stats\b", ppl, re.I) is None
+            and re.search(r"\|\s*head\s+\d+", ppl, re.I) is not None)
+
+
+def _con_tope(ppl: str) -> str:
+    return re.sub(r"(\|\s*head\s+)(\d+)",
+                  lambda m: m.group(1) + str(min(int(m.group(2)), _MAX_FILAS_DE_MUESTRA)),
+                  ppl, flags=re.I)
+
+
+def _prompt_de_muestra(pregunta: str, ppl: str, result: dict, memoria: str) -> str:
+    """Leer las filas y responder con lo que dicen, sin extrapolar al total."""
+    import json as _json
+    filas = [[(str(v)[:_TEXTO_DE_MUESTRA] if isinstance(v, str) else v) for v in fila]
+             for fila in result.get("datarows", [])]
+    n = len(filas)
+    columnas = [c.get("name", "") for c in result.get("schema", [])]
+    return (
+        (memoria + "\n\n" if memoria else "")
+        + f"Pregunta del usuario: {pregunta}\n"
+        f"Consulta PPL que se ejecutó: {ppl}\n"
+        f"Filas de MUESTRA ({n}), columnas {columnas}: {_json.dumps(filas, ensure_ascii=False)}\n\n"
+        "Leé las filas y respondé en el MISMO idioma que el usuario. Resumí qué dicen (temas, "
+        "motivos, o el idioma si lo pregunta) indicando en cuántas de las filas aparece cada cosa "
+        f"(por ejemplo: \"en 12 de {n}\"). Aclará que es una muestra de {n} filas y no el total, y "
+        "no extrapoles porcentajes al total. Citá entre comillas una a tres frases cortas de "
+        "ejemplo, en su idioma original. Si las filas no alcanzan para responder, decilo."
+    )
 
 
 def _prompt_de_respuesta(pregunta: str, ppl: str, result: dict, memoria: str) -> str:
@@ -6772,6 +6812,7 @@ def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str]
                             detail={"stage": "ppl_chat",
                                     "message": "No pude generar una consulta PPL válida a partir de la pregunta.",
                                     "ppl": ppl})
+    ppl = _con_tope(ppl)
     ok, cuerpo = ejecutar(ppl)
     if not ok:
         # Un reintento, con el error delante: el caso típico es un campo que no
@@ -6783,7 +6824,7 @@ def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str]
         if segundo.upper().startswith(_SIN_DATO):
             return _falta_el_dato(segundo, campos)
         if segundo.lower().startswith("source="):
-            ppl = segundo
+            ppl = _con_tope(segundo)
             ok, cuerpo = ejecutar(ppl)
         if not ok:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
@@ -6791,7 +6832,9 @@ def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str]
                                         "message": f"El PPL no se pudo ejecutar: {str(cuerpo)[:300]}",
                                         "ppl": ppl})
     result = cuerpo
-    answer = predecir_llm(_prompt_de_respuesta(pregunta, ppl, result, memoria))
+    # Un "¿por qué?" o "¿de qué se quejan?" trae filas: se leen, no se cuentan.
+    armar = _prompt_de_muestra if _es_muestra(ppl) else _prompt_de_respuesta
+    answer = predecir_llm(armar(pregunta, ppl, result, memoria))
     return PplChatResponse(answer=answer or f"Resultado: {result['datarows']}", ppl=ppl, result=result)
 
 

@@ -156,3 +156,46 @@ def test_el_request_trae_la_memoria():
     req = main.PplChatRequest(question="¿y?", history=[{"pregunta": "a", "ppl": "source=x", "respuesta": "b"}])
     assert req.history[0].ppl == "source=x"
     assert main.PplChatRequest(question="¿y?").history == []
+
+
+# ── Leer muestras ante un "¿por qué?" ───────────────────────────────────────
+_MUESTRA = "source=reviews-* | where review_score = 1 and isnotnull(review_comment_message) | fields review_comment_message | head 30"
+
+
+@pytest.mark.parametrize("ppl, es", [
+    (_MUESTRA, True),
+    ("source=reviews-* | stats count() as total by review_score", False),
+    ("source=reviews-* | stats count() as total by review_score | sort -total | head 5", False),
+    ("source=reviews-* | fields review_comment_message", False),     # sin tope: no es muestra
+])
+def test_que_es_una_consulta_de_muestra(ppl, es):
+    assert main._es_muestra(ppl) is es
+
+
+def test_una_muestra_se_lee_y_no_se_extrapola():
+    comentarios = [["Não recebi o produto, atraso enorme"], ["Produto veio quebrado"], ["x" * 900]]
+    f = _Fakes([_MUESTRA], respuesta="En 1 de 3 hablan de demora.",
+               ejecuciones=[(True, {"schema": [{"name": "review_comment_message"}], "datarows": comentarios})])
+    res = _charlar(f, "¿de qué se quejan las reseñas de puntaje 1?")
+    pedido = f.prompts_llm[0]
+    assert "Filas de MUESTRA (3)" in pedido and "Não recebi o produto" in pedido
+    assert "no el total" in pedido and "no extrapoles" in pedido and "Citá entre comillas" in pedido
+    assert "x" * main._TEXTO_DE_MUESTRA in pedido and "x" * (main._TEXTO_DE_MUESTRA + 1) not in pedido
+    assert res.answer == "En 1 de 3 hablan de demora."
+
+
+def test_una_muestra_no_trae_miles_de_filas():
+    f = _Fakes(["source=r | fields c | head 5000"])
+    _charlar(f)
+    assert f.ejecutadas == [f"source=r | fields c | head {main._MAX_FILAS_DE_MUESTRA}"]
+    assert main._con_tope("source=r | fields c | head 10") == "source=r | fields c | head 10"
+
+
+def test_un_conteo_se_redacta_como_conteo():
+    f = _Fakes(["source=r | stats count() as total"])
+    _charlar(f)
+    assert "Decí qué se midió" in f.prompts_llm[0] and "Filas de MUESTRA" not in f.prompts_llm[0]
+
+
+def test_la_regla_de_muestras_esta_en_el_prompt():
+    assert "do NOT aggregate" in main._REGLAS_DEL_CHAT and "| head 30" in main._REGLAS_DEL_CHAT
