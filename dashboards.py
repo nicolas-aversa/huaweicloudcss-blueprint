@@ -598,6 +598,8 @@ def _field_path(f: dict[str, Any]) -> str:
 _UNIDADES_DE_PROMEDIO = frozenset({
     "ms", "milisegundos", "s", "sec", "seg", "segundos", "min", "minutos",
     "h", "hs", "horas", "%", "pct", "porcentaje", "rate", "ratio",
+    # Velocidades y temperaturas: 142 PPM y 118 PPM no "suman 260".
+    "ppm", "rpm", "fps", "mbps", "km/h", "kmh", "°c", "°f",
 })
 
 
@@ -712,7 +714,10 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
         panels.append({"type": "metric", "title": _uniq(f"Con {lbl}", p), "agg": "count",
                        "label": f"Con {lbl}", "query": f"{p}:*", "grid": [mx, 4, 12, 8]})
         mx += 12
-    if primary_num and mx < 36:
+    # `<=`: la cuarta métrica entra justo (36 + 12 = 48). Con `<` la fila se
+    # cortaba en tres y la medida principal —la que más se mira— quedaba
+    # afuera siempre que el log trajera una entidad y un campo crítico.
+    if primary_num and mx <= 36:
         p, ap, lbl = primary_num
         panels.append({"type": "metric", "title": _uniq(f"{verbo_medida} {lbl}", p), "agg": agg_medida,
                        "field": p, "label": f"{verbo_medida} {lbl}", "grid": [mx, 4, 12, 8]})

@@ -129,6 +129,10 @@ import conf_lint  # noqa: E402
 import geo_fields  # noqa: E402
 # Tipos, formatos y .conf de una tabla, decididos por las filas reales.
 import perfilador  # noqa: E402
+# Etiquetas, roles y unidades de esa tabla (el LLM, sin poder romper nada).
+import semantica  # noqa: E402
+# Las diez preguntas de ejemplo del chat de un dataset nuevo.
+import preguntas  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -953,6 +957,7 @@ class Verificacion(BaseModel):
     filas: int = 0
     filas_ok: int = 0
     problemas: list[str] = Field(default_factory=list)
+    semantica: str = Field(default="", description="llm | heuristica: quién puso etiquetas y roles.")
 
 
 class GenerateFilterResponse(BaseModel):
@@ -1467,12 +1472,20 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     perfil = None
     if (request.input_type or "").strip().lower() != "jdbc" and not request.feedback:
         perfil = perfilador.perfilar(lineas)
+    candidatas: list[str] = []
     if perfil is not None and perfil.estructurado and perfil.filas > 0:
+        # La semántica va ANTES de armar el .conf: en un CSV sin header puede
+        # renombrar `columna_7`, y el filter tiene que salir con ese nombre.
+        sem = semantica.enriquecer(perfil)
+        if sem.nota:
+            print(f"[semantica] sin LLM, quedan las heurísticas: {sem.nota}")
+        candidatas = sem.preguntas
         result = {"filter_code": perfilador.armar_filter(perfil, request.namespace),
                   "fields": perfilador.campos(perfil, request.namespace)}
         prueba = perfilador.verificar(perfil)
         verificacion = Verificacion(fuente="perfilador", formato=perfil.formato,
-                                    filas=prueba.total, filas_ok=prueba.ok, problemas=prueba.problemas)
+                                    filas=prueba.total, filas_ok=prueba.ok, problemas=prueba.problemas,
+                                    semantica=sem.fuente)
     else:
         result = _llm_filter(
             request.raw_log,
@@ -1522,6 +1535,7 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         filter_code=filter_code,
         fields=enriched_fields,
         verificacion=verificacion,
+        questions=preguntas.armar(enriched_fields, candidatas),
     )
 
 

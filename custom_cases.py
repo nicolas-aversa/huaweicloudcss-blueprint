@@ -38,6 +38,7 @@ from pathlib import Path
 
 import auth as _auth
 import maas_integrator as _mi
+import preguntas as _preguntas
 import verticals as _verticals
 
 # Grupo propio en el grid del paso 1. Se agrega al payload solo si hay ≥1 caso.
@@ -263,7 +264,11 @@ def front_entries() -> list[dict]:
             "sample": c.get("sample", ""),
             "filterCode": c.get("filter_code", ""),
             "fields": c.get("fields", []),
-            "questions": c.get("suggested_questions", []),
+            # Los casos guardados antes de que el modal mandara las preguntas
+            # tienen `[]`: se arman de sus campos, así el chat de cada caso
+            # muestra las suyas y no las mismas genéricas para todos.
+            "questions": (c.get("suggested_questions")
+                          or _preguntas.armar(c.get("fields", []))),
             "custom": True,
             "createdBy": c.get("created_by", ""),
             "caseType": c.get("case_type", "dataset"),

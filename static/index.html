@@ -3221,6 +3221,18 @@
         ${icon(completa ? 'check' : 'alert-triangle')} ${v.filas_ok}/${v.filas} filas verificadas</span>`;
     }
 
+    // Las preguntas de ejemplo que va a ofrecer el chat de este dataset: se
+    // guardan con el caso, así que se muestran acá, antes de guardarlo.
+    function bloquePreguntas(qs) {
+      if (!qs || !qs.length) return '';
+      return `<details class="mapping-preguntas" style="margin-top:12px;padding:10px 14px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--bg-secondary);">
+        <summary style="cursor:pointer;font-weight:600;color:var(--text-primary);">${icon('chat')} Preguntas de ejemplo para el asistente (${qs.length})</summary>
+        <ol style="margin:8px 0 0 18px;color:var(--text-secondary);font-size:var(--fs-sm);line-height:1.6;">
+          ${qs.map(q => `<li>${escapeHtml(q)}</li>`).join('')}
+        </ol>
+      </details>`;
+    }
+
     function renderMappingTable(fields) {
       const container = document.getElementById('mapping-table');
       if (!container) return;
@@ -3343,8 +3355,9 @@
             </thead>
             <tbody>${tbodyHtml}</tbody>
           </table>
+          ${bloquePreguntas(state.preguntas)}
         </div>`;
-      
+
       document.querySelectorAll('.mapping-edit-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           // currentTarget: con el ícono SVG adentro, e.target puede ser el <svg>.
@@ -3993,6 +4006,8 @@
             sample: state.rawLog || '',
             filter_code: state.filterCode || '',
             fields: state.fields || [],
+            // Las diez del paso 2 (LLM validado + plantillas con valores reales).
+            questions: state.preguntas || [],
             log_content: state.logFileContent || '',
             // El nombre con que se subió: así se guarda y así llega al bucket.
             log_filename: state.logFileName || '',
@@ -5176,10 +5191,13 @@
           '¿Hubo algún pico de actividad en algún momento?',
           '¿Cuál es la tendencia de volumen en la última semana?',
         ];
-        // Si hay fields en state, generar preguntas específicas.
-        if (state.fields && state.fields.length) {
-          const dims = state.fields.filter(f => f.dimension && f.type !== 'date');
-          const measures = state.fields.filter(f => (f.type || '') in {integer:1, float:1, long:1, double:1});
+        // Con los campos DEL CASO, no los del wizard: con los del wizard, dos
+        // casos abiertos a la vez mostraban las mismas preguntas en las dos
+        // pestañas (las del último dataset que se había analizado).
+        const caseFields = (_VVIS.find(v => v.slug === slug) || {}).fields || [];
+        if (caseFields.length) {
+          const dims = caseFields.filter(f => f.dimension && f.type !== 'date');
+          const measures = caseFields.filter(f => (f.type || '') in {integer:1, float:1, long:1, double:1});
           for (const d of dims.slice(0, 3)) {
             const lbl = d.business_label || d.raw_name || d.field_path;
             qs.push(`¿Cuáles son los 10 ${lbl} más frecuentes?`);

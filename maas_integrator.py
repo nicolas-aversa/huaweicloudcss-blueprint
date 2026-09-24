@@ -641,6 +641,7 @@ def get_huawei_project_id() -> str:
 _NON_DIMENSION_RE = re.compile(
     r"(descr|about|content|comment|review|message|msg|body|text|title|summary|"
     r"link|url|href|img|image|photo|uuid|guid|hash|token|email|mail|"
+    r"coment|mensaje|observac|detalle|texto|titulo|resumen|enlace|imagen|foto|correo|"
     r"_id$|^id$|\bid$)",
     re.IGNORECASE,
 )
@@ -671,19 +672,34 @@ def is_dimension(field_path: str, ftype: str, llm_flag: Any = None) -> bool:
 # _spec_from_fields (paneles del dashboard). Es metadata INTERNA de la plataforma
 # — no llega al index template ni a OpenSearch.
 
-_ROLE_ENTITY_RE = re.compile(r"(^|[._])(id|user|customer|client|account|session|patient)([._]|$)", re.IGNORECASE)
+# Cada lista va en inglés y en castellano: los datasets de los clientes llegan
+# con headers como "Fecha y Hora", "Código Error" o "Importe", y con solo el
+# inglés ninguno sacaba rol y el dashboard quedaba sin sus paneles por rol.
+_ROLE_ENTITY_RE = re.compile(
+    r"(^|[._])(id|user|customer|client|account|session|patient|"
+    r"usuario|cliente|cuenta|sesion|paciente|legajo|dni|cuit|socio|afiliado)([._]|$)",
+    re.IGNORECASE,
+)
 _ROLE_CRITICAL_RE = re.compile(
     r"(^|[._])(failed|error|denied|blocked|rejected|cancelled|canceled|"
-    r"down|downtime|critical|triage|alarm|alert|fault|outage|exception|timeout)([._]|$)",
+    r"down|downtime|critical|triage|alarm|alert|fault|outage|exception|timeout|"
+    r"fallido|fallida|fallo|falla|rechazo|rechazado|rechazada|denegado|denegada|"
+    r"bloqueado|bloqueada|cancelado|cancelada|caida|critico|critica|alarma|alerta|excepcion)([._]|$)",
     re.IGNORECASE,
 )
 _ROLE_SUCCESS_RE = re.compile(
-    r"(^|[._])(response_code|status_code|result_code|return_code|outcome|result|response|rc)([._]|$)",
+    r"(^|[._])(response_code|status_code|result_code|return_code|outcome|result|response|rc|"
+    r"estado|resultado|respuesta|codigo_respuesta|codigo_resultado)([._]|$)",
     re.IGNORECASE,
 )
-_ROLE_TIMESTAMP_RE = re.compile(r"(^|[._])(time|timestamp|date|tim|created_at|event_time)([._]|$)", re.IGNORECASE)
+_ROLE_TIMESTAMP_RE = re.compile(
+    r"(^|[._])(time|timestamp|date|tim|created_at|event_time|fecha|hora|fecha_hora|momento)([._]|$)",
+    re.IGNORECASE,
+)
 _ROLE_MEASURE_RE = re.compile(
-    r"(amount|price|cost|revenue|total|sum|latency|duration|bytes|size|volume|count|value|metric|measure)",
+    r"(amount|price|cost|revenue|total|sum|latency|duration|bytes|size|volume|count|value|metric|measure|"
+    r"monto|importe|precio|costo|coste|cantidad|consumo|velocidad|duracion|tiempo|peso|saldo|valor|"
+    r"volumen|temperatura|presion|caudal|produccion|paginas|ventas|ingreso|gasto|stock|litros)",
     re.IGNORECASE,
 )
 

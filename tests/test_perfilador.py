@@ -383,6 +383,15 @@ def test_una_linea_de_log_no_es_una_tabla(lineas):
     assert not perfilador.perfilar(lineas).estructurado
 
 
+def test_un_header_tecnico_se_muestra_como_etiqueta():
+    """`medio_pago` en un panel o en una pregunta se lee "Medio pago"; un
+    header que ya es para personas ("Páginas Totales") no se toca."""
+    p = perfilador.perfilar(["medio_pago,Páginas Totales,importe_ars (ARS)",
+                             "Débito,10,1.5", "Efectivo,12,2.5"])
+    assert [c.etiqueta for c in p.columnas] == ["Medio pago", "Páginas Totales", "importe_ars"]
+    assert [c.nombre for c in p.columnas][0] == "medio_pago"
+
+
 def test_una_tabla_con_fecha_y_nivel_sigue_siendo_tabla():
     p = perfilador.perfilar(["fecha,nivel,mensaje",
                              "2026-09-18 11:04:12,INFO,arrancó",

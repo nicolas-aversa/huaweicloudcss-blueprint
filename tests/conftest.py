@@ -16,6 +16,10 @@ def _settings_aislados(tmp_path, monkeypatch):
     import maas_integrator as _mi
 
     monkeypatch.setattr(_mi, "_SETTINGS_PATH", tmp_path / ".platform_settings.json")
+    # Ni una llamada real al MaaS desde la suite: con la key del `.env` de quien
+    # corre los tests, la semántica de un dataset nuevo iba a la red. Los tests
+    # que necesitan una key la ponen ellos.
+    monkeypatch.delenv("MAAS_API_KEY", raising=False)
     monkeypatch.setattr(_mi, "_fernet_cache", None, raising=False)
     # Lo mismo para `data/`: un caso creado desde la app local (`data/cases/`)
     # sumaba el grupo "Mis casos" al registro y un test que cuenta grupos

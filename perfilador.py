@@ -113,6 +113,7 @@ class Columna:
     distintos: int = 0
     frecuentes: list[str] = field(default_factory=list)
     dimension: bool = False
+    rol: str | None = None      # el que puso la semántica; None = se infiere por nombre
 
     @property
     def campo(self) -> str:
@@ -566,7 +567,11 @@ def perfilar(lineas: list[str]) -> Perfil:
     hay_header = _parece_header(primera, filas[1:])
     if hay_header:
         nombres = [_sanear(c, i) for i, c in enumerate(primera)]
-        etiquetas = [_etiqueta_y_unidad(c) for c in primera]
+        # `medio_pago` es un nombre técnico, no una etiqueta: igual que con las
+        # claves de un JSON, se muestra "Medio pago". "Páginas Totales" queda tal cual.
+        etiquetas = [_etiqueta_y_unidad(c.replace("_", " ").strip().capitalize()
+                                        if re.fullmatch(r"[a-z0-9_]+", c.strip()) else c)
+                     for c in primera]
         datos = filas[1:]
         lineas_datos = lineas[1:]
     else:
@@ -815,7 +820,14 @@ def campos(perfil: Perfil, ns: str = "data") -> list[dict]:
     fuera = []
     for c in perfil.columnas:
         path = ".".join([ns, *c.path])
-        rol = "timestamp" if c.nombre == perfil.fecha_evento else infer_role(path, c.tipo)
+        if c.nombre == perfil.fecha_evento:
+            rol = "timestamp"
+        else:
+            rol = c.rol or infer_role(path, c.tipo)
+        # Un "hora" que es texto no es la fecha del evento: con ese rol el
+        # dashboard creía tener serie temporal y graficaba la hora de ingesta.
+        if rol == "timestamp" and c.tipo != "date":
+            rol = None
         muestra = next((str(v) for v in c.valores
                         if v is not None and not (isinstance(v, str) and es_vacio(v))), "")
         fuera.append({
