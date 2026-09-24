@@ -907,6 +907,17 @@
     .infra-empty__tile .icon { width: 26px; height: 26px; }
     .infra-empty__title { font-size: var(--fs-lg); font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
     .infra-empty__text { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 24px; }
+    /* Provisionando: cabecera en una línea (tile chico al costado) y menos
+       aire, para que el flujo de datos de abajo entre sin scrollear. */
+    .infra-empty.is-provisioning {
+      display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px;
+      align-items: center; text-align: left; padding: 18px 22px;
+    }
+    .infra-empty.is-provisioning .infra-empty__tile { width: 40px; height: 40px; margin: 0; }
+    .infra-empty.is-provisioning .infra-empty__tile .icon { width: 20px; height: 20px; }
+    .infra-empty.is-provisioning .infra-empty__title { margin-bottom: 2px; }
+    .infra-empty.is-provisioning .infra-empty__text { margin-bottom: 0; }
+    .infra-empty.is-provisioning .deploy-progress { grid-column: 1 / -1; max-width: none; margin-top: 14px; }
     /* Step badge dentro de cada card del flujo */
     .step-badge {
       display: inline-flex;
@@ -1939,10 +1950,12 @@
       height: 100%; background: linear-gradient(90deg, var(--accent-green), #34d399);
       border-radius: var(--radius-pill); transition: width 0.6s var(--ease); width: 0%;
     }
+    /* En columnas: un deploy son once servicios o más, y en una sola columna
+       la lista empujaba todo lo demás fuera de la pantalla. */
     .deploy-progress__list {
       list-style: none; margin: 14px 0 0; padding: 12px 0 0;
       border-top: 1px solid var(--border-subtle);
-      display: flex; flex-direction: column; gap: 10px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 22px;
     }
     .deploy-progress__list:empty { display: none; }
     /* Un componente: estado a la izquierda, nombre, qué está haciendo y su %,
@@ -1981,12 +1994,13 @@
     .deploy-progress__item.is-stalled { opacity: .6; }
     .deploy-progress__item.is-stalled .deploy-progress__ico { animation: none; border-color: var(--text-muted); }
     /* Adentro de un status (ingesta, reconexión) no lleva marco propio. */
-    .status .deploy-progress, #infra-setup-status .deploy-progress { margin: 0; max-width: none; }
+    .status .deploy-progress, .setup-step__status .deploy-progress { margin: 0; max-width: none; }
+    .setup-step__status { margin-top: 10px; }
     /* Animacion de aprovisionamiento: pipeline log -> Logstash -> OpenSearch ->
        dashboards, con pulsos fluyendo entre etapas. Reemplaza el panel educativo
        durante el deploy. Puramente CSS, theme-aware, respeta prefers-reduced-motion. */
     .prov-anim {
-      max-width: none; margin: 20px 0 0; padding: 26px 20px; text-align: center;
+      max-width: none; margin: 14px 0 0; padding: 18px 20px; text-align: center;
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
     }
@@ -5335,7 +5349,10 @@
         running = d && d.running;
       } catch (_) { return; }
       if (!running) return;
-      const statusEl = document.getElementById('infra-setup-status');
+      // Lo que corre en background con el entorno ya creado es la ingesta (o
+      // el reintento de las DNAT): va debajo de "Iniciar ingesta".
+      const statusEl = document.getElementById('infra-ingest-btn-status')
+        || document.getElementById('infra-capabilities-result');
       const prog = _progresoEnStatus(statusEl, 'Reconectando a un despliegue en curso…');
       try {
         const res = await fetch('/api/v1/terraform/jobs/' + encodeURIComponent(running) + '/stream');
@@ -6098,7 +6115,7 @@
     // /apply-schema, sin terraform). Idempotente/reintentable.
     async function infraApplySchema(btn) {
       const body = resolveDeployBody();
-      const statusEl = document.getElementById('infra-setup-status');
+      const statusEl = document.getElementById('infra-apply-schema-btn-status');
       if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Pipeline”.', 'error'); return; }
       btn.disabled = true;
       if (statusEl) showStatus(statusEl, 'Aplicando index template e importando dashboards…', 'loading');
@@ -6178,7 +6195,7 @@
     // que falten. Después reintenta el index template solo.
     async function infraRepararDnat(btn) {
       const body = resolveDeployBody();
-      const statusEl = document.getElementById('infra-setup-status');
+      const statusEl = document.getElementById('infra-apply-schema-btn-status');
       if (!body || !statusEl) return;
       btn.disabled = true;
       const prog = _progresoEnStatus(statusEl, 'Creando las reglas DNAT…');
@@ -6198,7 +6215,7 @@
     // las creds OBS del body de la sesión (state.pendingDeploy).
     async function infraStartIngestion(btn) {
       const body = resolveDeployBody();
-      const statusEl = document.getElementById('infra-setup-status');
+      const statusEl = document.getElementById('infra-ingest-btn-status');
       if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Pipeline”.', 'error'); return; }
       btn.disabled = true;
       // Barras en vez de una línea "mensaje (N%)": esto también corre Terraform
@@ -6603,12 +6620,14 @@
           return;
         }
         body.innerHTML = `
-          <div class="infra-empty">
+          <div class="infra-empty is-provisioning">
             <div class="infra-empty__tile">${icon('rocket')}</div>
-            <div class="infra-empty__title">${isReuse ? 'Agregando pipeline al entorno…' : 'Provisionando tu entorno CSS…'}</div>
-            <div class="infra-empty__text">${isReuse
-              ? 'Se agrega esta pipeline en paralelo (índice y prefijo OBS propios), sin tocar las que ya corren.'
-              : 'Creando OpenSearch + Logstash en Huawei Cloud. Puede tardar 5-25 min; no cierres esta pestaña.'}</div>
+            <div>
+              <div class="infra-empty__title">${isReuse ? 'Agregando pipeline al entorno…' : 'Provisionando tu entorno CSS…'}</div>
+              <div class="infra-empty__text">${isReuse
+                ? 'Se agrega esta pipeline en paralelo (índice y prefijo OBS propios), sin tocar las que ya corren.'
+                : 'Creando los clusters CSS, la red y el acceso público en Huawei Cloud. Puede tardar 5-25 min; no cierres esta pestaña.'}</div>
+            </div>
             ${progresoHTML('Iniciando…', 'deploy-progress')}
           </div>
           ${provisioningAnimationHTML()}`;
@@ -6737,6 +6756,10 @@
             ${done
               ? '<span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>'
               : `<button class="btn ${enabled ? 'btn-primary' : 'btn-secondary'} btn-sm" id="${btnId}" ${enabled ? '' : 'disabled'}>${btnLabel}</button>`}
+            ${/* El progreso y el resultado de cada paso, debajo de SU botón:
+                 con un status único al final del panel, la barra de "Iniciar
+                 ingesta" aparecía debajo de Capabilities. */ ''}
+            <div id="${btnId}-status" class="setup-step__status hidden"></div>
           </div>
         </div>`;
       const setupTotal = 2 + (hasCapabilitySlug ? 1 : 0);
@@ -6771,7 +6794,6 @@
               </div>
             </div>
           </div>` : ''}
-          <div id="infra-setup-status" class="hidden" style="margin-top:10px;"></div>
           </div>
         </details>` : '';
 
@@ -6806,6 +6828,17 @@
             </div>
           </div>
         </div>
+        ${/* Las acciones del entorno, a mano apenas se entra: al final
+             quedaban debajo de todo el estado. */ ''}
+        <p class="form-hint" style="margin:0 0 10px;">Podés correr otro log <strong>en paralelo, en este mismo entorno</strong>: "Nuevo pipeline" agrega una pipeline con su propio índice y prefijo OBS (no toca las que ya corren, sin re-provisionar).</p>
+        <div class="infra-actions" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+          <button class="btn btn-primary" id="infra-new-pipeline-btn">${icon('spark')} Nuevo pipeline</button>
+          <a class="btn btn-secondary ${dashUrl ? '' : 'hidden'}" id="infra-dashboards-btn"
+             href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>
+          <div class="spacer" style="flex:1;"></div>
+          <button class="btn btn-secondary" id="infra-destroy-btn"
+                  style="border-color:rgba(229,0,0,0.4); color:var(--accent-red);">${icon('trash')} Destruir entorno</button>
+        </div>
         ${/* Lo que falta hacer va primero: con la puesta en marcha debajo de
              las pipelines, lo que se veía primero era el estado ("En pausa",
              "Verificar ingesta") y no el paso siguiente. Terminada, la
@@ -6823,15 +6856,7 @@
         </div>
         ${donePanel}
         <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
-        <p class="form-hint" style="margin:2px 0 14px;">Podés correr otro log <strong>en paralelo, en este mismo entorno</strong>: "Nuevo pipeline" agrega una pipeline con su propio índice y prefijo OBS (no toca las que ya corren, sin re-provisionar).</p>
-        <div class="infra-actions" style="display:flex; gap:12px; flex-wrap:wrap;">
-          <button class="btn btn-primary" id="infra-new-pipeline-btn">${icon('spark')} Nuevo pipeline</button>
-          <a class="btn btn-secondary ${dashUrl ? '' : 'hidden'}" id="infra-dashboards-btn"
-             href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>
-          <div class="spacer" style="flex:1;"></div>
-          <button class="btn btn-secondary" id="infra-destroy-btn"
-                  style="border-color:rgba(229,0,0,0.4); color:var(--accent-red);">${icon('trash')} Destruir entorno</button>
-        </div>`;
+        `;
 
       // Acciones: reusan las funciones del flujo.
       body.querySelector('#infra-new-pipeline-btn')?.addEventListener('click', () => {

@@ -201,3 +201,42 @@ def test_fuente_pasa_a_origen():
     assert "Fuente (input)" not in html and "Fuente y destino" not in html
     # El paso 1 deja de llamarse "Origen": ese nombre es del paso 3.
     assert '<span class="nav-substep__label">Datos</span>' in html
+
+
+def test_las_acciones_del_entorno_van_antes_de_la_puesta_en_marcha():
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function renderInfraView(")
+    vista = html[i:html.index("// Acciones: reusan las funciones del flujo.", i)]
+    puesta = vista.index("${setupPanel}")
+    for boton in ('id="infra-new-pipeline-btn"', 'id="infra-dashboards-btn"', 'id="infra-destroy-btn"'):
+        assert vista.index(boton) < puesta, boton
+
+
+def test_cada_paso_muestra_su_progreso_debajo_de_su_boton():
+    """La barra de "Iniciar ingesta" salía al final del panel, debajo de
+    Capabilities."""
+    html = _INDEX.read_text(encoding="utf-8")
+    assert "infra-setup-status" not in html
+    i = html.index("const setupStep = (n, done, enabled, label, hint, btnId, btnLabel) =>")
+    paso = html[i:html.index("</div>`;", i)]
+    assert paso.index('id="${btnId}"') < paso.index('id="${btnId}-status"')
+
+    def fn(nombre):
+        j = html.index(f"async function {nombre}(")
+        return html[j:html.index("\n    }\n", j)]
+    assert "getElementById('infra-apply-schema-btn-status')" in fn("infraApplySchema")
+    assert "getElementById('infra-apply-schema-btn-status')" in fn("infraRepararDnat")
+    assert "getElementById('infra-ingest-btn-status')" in fn("infraStartIngestion")
+    assert "getElementById('infra-ingest-btn-status')" in fn("_reconnectDeployJob")
+
+
+def test_provisionando_es_compacto_y_la_lista_va_en_columnas():
+    html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
+    lista = css[css.index("    .deploy-progress__list {"):]
+    lista = lista[:lista.index("}")]
+    assert "grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))" in lista
+    prov = css[css.index("    .infra-empty.is-provisioning {"):]
+    prov = prov[:prov.index("}")]
+    assert "grid-template-columns: auto minmax(0, 1fr)" in prov and "text-align: left" in prov
+    assert '<div class="infra-empty is-provisioning">' in html
