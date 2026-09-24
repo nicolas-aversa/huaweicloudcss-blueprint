@@ -220,6 +220,10 @@ class S3InputConfig(BaseModel):
     prefix: str = ""
     codec: str = "plain"
     charset: str = "UTF-8"
+    # Regex con que empieza cada registro, cuando los registros tienen varias
+    # líneas (un CSV con comentarios entre comillas que traen saltos de línea).
+    # La calcula el perfilador sobre la muestra; vacío = una línea, un evento.
+    multiline_pattern: str = ""
     interval: int = 60
     temporary_directory: str = "/opt/data/tmp/"
     # CSS UG (docs/logstash-llm-context.md, regla 8) recomienda delete=true
@@ -447,7 +451,22 @@ def gen_input_s3(c: S3InputConfig) -> str:
     if c.prefix:
         lines.append(_kv("prefix", c.prefix))
     lines.append(_kv("interval", c.interval))
-    if c.codec == "plain" and c.charset != "UTF-8":
+    if c.multiline_pattern and "'" not in c.multiline_pattern:
+        # Cada línea que NO empieza un registro se pega a la anterior: sin
+        # esto, un comentario de tres líneas eran tres documentos (dos sin
+        # puntaje, con basura en los campos). Comillas simples: el patrón
+        # lleva `"` y `config.support_escapes` está apagado. `auto_flush`
+        # suelta el último registro del archivo, que no tiene quién lo cierre.
+        lines += ["    codec => multiline {",
+                  f"      pattern => '{c.multiline_pattern}'",
+                  "      negate => true",
+                  '      what => "previous"',
+                  "      auto_flush_interval => 2",
+                  "      max_lines => 1000"]
+        if c.charset != "UTF-8":
+            lines.append(f'      charset => "{c.charset}"')
+        lines.append("    }")
+    elif c.codec == "plain" and c.charset != "UTF-8":
         lines.append(f'    codec => plain {{ charset => "{c.charset}" }}')
     else:
         lines.append(f'    codec => {c.codec}')
@@ -965,6 +984,8 @@ class Verificacion(BaseModel):
     filas_ok: int = 0
     problemas: list[str] = Field(default_factory=list)
     semantica: str = Field(default="", description="llm | heuristica: quién puso etiquetas y roles.")
+    multilinea: bool = Field(default=False, description=(
+        "Hay registros de varias líneas (un campo entre comillas con saltos de línea)."))
 
 
 class GenerateFilterResponse(BaseModel):
@@ -974,6 +995,9 @@ class GenerateFilterResponse(BaseModel):
     fields: list[FieldMapping] = Field(default_factory=list)
     verificacion: Verificacion | None = None
     questions: list[str] = Field(default_factory=list)
+    # Para el `codec => multiline` del input: con qué empieza cada registro.
+    # Vacío si cada línea es un registro (o si no se encontró un inicio fiable).
+    inicio_registro: str = ""
 
 
 class IndexTemplateRequest(BaseModel):
@@ -1497,9 +1521,15 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         result = {"filter_code": perfilador.armar_filter(perfil, ns),
                   "fields": perfilador.campos(perfil, ns)}
         prueba = perfilador.verificar(perfil)
+        problemas = list(prueba.problemas)
+        if perfil.multilinea and not perfil.inicio_registro:
+            # Sin un inicio fiable no hay codec multiline posible, y Logstash
+            # partiría cada registro de varias líneas en varios documentos.
+            problemas.insert(0, "hay registros de varias líneas y no encontré con qué empieza "
+                                "cada uno: Logstash los va a partir en varios documentos")
         verificacion = Verificacion(fuente="perfilador", formato=perfil.formato,
-                                    filas=prueba.total, filas_ok=prueba.ok, problemas=prueba.problemas,
-                                    semantica=sem.fuente)
+                                    filas=prueba.total, filas_ok=prueba.ok, problemas=problemas,
+                                    semantica=sem.fuente, multilinea=perfil.multilinea)
     else:
         result = _llm_filter(
             request.raw_log,
@@ -1563,6 +1593,7 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         fields=enriched_fields,
         verificacion=verificacion,
         questions=preguntas.armar(enriched_fields, candidatas, filas_de),
+        inicio_registro=(perfil.inicio_registro if perfil is not None else ""),
     )
 
 
@@ -2411,6 +2442,26 @@ def _pipeline_secrets(request: "TerraformDeployRequest") -> list[str]:
     return sorted(set(out))
 
 
+def _inicio_de_registro_del_caso(slug: str) -> str:
+    """El patrón multilínea de un caso guardado, sacado de su dataset (el mismo
+    archivo que se sube al bucket). Así un caso creado antes de que existiera
+    esto también se ingiere bien, sin volver a crearlo. "" si no aplica."""
+    ruta = custom_cases.dataset_path(slug)
+    if ruta is None:
+        return ""
+    try:
+        with ruta.open(encoding="utf-8", errors="replace") as fh:
+            cabeza = fh.read(256 * 1024)
+    except OSError:
+        return ""
+    lineas = cabeza.splitlines()[:-1] or cabeza.splitlines()   # la última puede venir cortada
+    try:
+        return perfilador.perfilar(lineas[:2000]).inicio_registro
+    except Exception as exc:  # noqa: BLE001 — sin patrón se ingiere como antes
+        print(f"[deploy] no pude perfilar el dataset de {slug}: {exc!r}")
+        return ""
+
+
 def _build_pipeline_conf_for_case(case: "PipelineCase", request: "TerraformDeployRequest") -> str:
     """Genera el pipeline .conf para un caso específico.
 
@@ -2450,6 +2501,7 @@ def _build_pipeline_conf_for_case(case: "PipelineCase", request: "TerraformDeplo
                 "endpoint": request.obs_endpoint,
                 "prefix": case.obs_prefix,
                 "codec": "plain",
+                "multiline_pattern": _inicio_de_registro_del_caso(case.slug),
             }
         }
     

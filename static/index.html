@@ -3312,6 +3312,9 @@
         state.fields = Array.isArray(data.fields) ? data.fields : [];
         state.verificacion = data.verificacion || null;
         state.preguntas = Array.isArray(data.questions) ? data.questions : [];
+        // Con qué empieza cada registro, si hay registros de varias líneas: va
+        // al `codec => multiline` del input s3 (ver collectInputConfig).
+        state.inicioRegistro = data.inicio_registro || '';
         state.generatedFromLog = rawLog;   // habilita el reuso sin re-llamar al LLM
         return { ok: true };
       } catch (err) {
@@ -3414,6 +3417,7 @@
       state.fields = [];
       state.filterCode = '';
       state.generatedFromLog = '';
+      state.inicioRegistro = '';   // el patrón multilínea es de ESE dataset
       const el = document.getElementById('mapping-table');
       if (el) el.innerHTML = '';
     }
@@ -4980,6 +4984,11 @@
         config.interval = 60;
         config.temporary_directory = '/opt/data/tmp/';
         config.codec = 'plain';
+        // Registros de varias líneas (un comentario con saltos de línea): sin
+        // esto, cada uno se partía en varios documentos.
+        if (state.deployMode === 'custom' && state.inicioRegistro) {
+          config.multiline_pattern = state.inicioRegistro;
+        }
         // watch_for_new_files y delete los inyecta el backend con default
         // true (decisión de plataforma, no del operador).
         // Predefinidos (readExistingMode): el dataset ya está en OBS (pre-cargado)

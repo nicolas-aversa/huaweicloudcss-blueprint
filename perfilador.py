@@ -136,6 +136,13 @@ class Perfil:
     fecha_evento: str = ""      # campo que va a @timestamp
     fecha_compuesta: tuple[str, str] | None = None   # (columna fecha, columna hora)
     lineas_datos: list[str] = field(default_factory=list)
+    # Hay registros de varias líneas (un campo entre comillas con saltos de
+    # línea, como los comentarios de una reseña). Logstash lee línea por línea:
+    # sin juntarlas, cada registro se parte en varios documentos.
+    multilinea: bool = False
+    # La regex con que empieza cada registro, para el `codec => multiline` del
+    # input. Vacía si no hay multilínea o si no se encontró un inicio confiable.
+    inicio_registro: str = ""
 
     @property
     def estructurado(self) -> bool:
@@ -338,6 +345,70 @@ def _elegir_separador(lineas: list[str]) -> tuple[str, list[list[str]]] | None:
         if mejor is None or moda > mejor[2]:
             mejor = (sep, filas, moda)
     return (mejor[0], mejor[1]) if mejor else None
+
+
+def _registros(lineas: list[str]) -> list[str]:
+    """Junta las líneas de un mismo registro: una comilla que abre en una línea
+    y cierra en otra es un campo con saltos de línea adentro. Las comillas
+    escapadas (`""`) no cambian la paridad. Un registro que la muestra cortó a
+    la mitad (quedó abierto al final) se descarta."""
+    fuera, actual, abierto = [], [], False
+    for linea in lineas:
+        actual.append(linea)
+        if linea.count('"') % 2:
+            abierto = not abierto
+        if not abierto:
+            fuera.append("\n".join(actual))
+            actual = []
+    return fuera
+
+
+_SEP_REGEX = {",": ",", ";": ";", "|": "\\|", "\t": "\\t"}
+
+
+def _nucleo_inicio(valores: list[str], col: "Columna") -> str | None:
+    """La forma de la primera columna, si todos sus valores la comparten y es
+    lo bastante específica para no confundirse con texto libre."""
+    if not valores:
+        return None
+    if all(re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", v)
+           for v in valores):
+        return r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    # Hex de largo fijo (un hash, un id): el largo sale del primero; si otros
+    # difieren, la validación de `_inicio_de_registro` lo descarta.
+    if len(valores[0]) >= 8 and all(re.fullmatch(r"[0-9a-fA-F]+", v) for v in valores):
+        return "[0-9a-fA-F]{%d}" % len(valores[0])
+    if col.tipo == "date" and col.formato_fecha:
+        fecha = next((f for f in _FECHAS if f.joda == col.formato_fecha), None)
+        if fecha is not None:
+            return fecha.forma
+    if all(re.fullmatch(r"\d+", v) for v in valores):
+        return r"\d+"
+    return None
+
+
+def _inicio_de_registro(perfil: "Perfil", registros: list[str]) -> str:
+    """La regex con que empieza cada registro de datos, o "" si no hay una en
+    la que se pueda confiar: tiene que calzar con la primera línea de TODOS los
+    registros y con NINGUNA de sus continuaciones (esa línea se pegaría al
+    registro anterior y lo partiría)."""
+    if not perfil.columnas or not registros:
+        return ""
+    col = perfil.columnas[0]
+    # Un registro sin primera columna no calza con ningún inicio: lo descarta la
+    # validación de abajo.
+    valores = [str(v).strip() for v in col.valores if not es_vacio(v)]
+    nucleo = _nucleo_inicio(valores, col)
+    sep = _SEP_REGEX.get(perfil.separador)
+    if nucleo is None or sep is None:
+        return ""
+    patron = '^"?' + nucleo + '"?' + sep
+    regex = re.compile(patron)
+    for r in registros:
+        primera, *resto = r.split("\n")
+        if not regex.match(primera) or any(regex.match(l) for l in resto):
+            return ""
+    return patron
 
 
 def _parece_header(celdas: list[str], resto: list[list[str]]) -> bool:
@@ -572,8 +643,8 @@ def _dimension(col: Columna, n_filas: int) -> bool:
 # ── Perfil ──────────────────────────────────────────────────────────────────
 def perfilar(lineas: list[str]) -> Perfil:
     """El perfil de la muestra, o uno con `formato=""` si no tiene estructura."""
-    lineas = [_sin_bom(l.rstrip("\r")) for l in (lineas or [])]
-    lineas = [l for l in lineas if l.strip() and not l.lstrip().startswith("#")]
+    crudas = [_sin_bom(l.rstrip("\r")) for l in (lineas or [])]
+    lineas = [l for l in crudas if l.strip() and not l.lstrip().startswith("#")]
     if not lineas:
         return Perfil("", [], 0)
 
@@ -592,7 +663,15 @@ def perfilar(lineas: list[str]) -> Perfil:
     if sum(1 for l in lineas if _LINEA_DE_LOG.match(l)) * 2 >= len(lineas):
         return Perfil("", [], 0)
 
-    elegido = _elegir_separador(lineas)
+    # Un campo entre comillas puede traer saltos de línea: se parte por
+    # REGISTRO. Si juntar no deja una tabla consistente (una comilla suelta que
+    # no abría nada), se vuelve a las líneas.
+    registros = [r for r in _registros(crudas) if r.strip() and not r.lstrip().startswith("#")]
+    elegido = _elegir_separador(registros) if any("\n" in r for r in registros) else None
+    if elegido is not None:
+        lineas = registros
+    else:
+        elegido = _elegir_separador(lineas)
     if elegido is None:
         return Perfil("", [], 0)
     sep, filas = elegido
@@ -632,6 +711,9 @@ def perfilar(lineas: list[str]) -> Perfil:
     perfil = Perfil("delimitado", columnas, len(datos), separador=sep,
                     header=lineas[0].strip() if hay_header else "", lineas_datos=lineas_datos)
     _cerrar(perfil)
+    perfil.multilinea = any("\n" in r for r in lineas_datos)
+    if perfil.multilinea:
+        perfil.inicio_registro = _inicio_de_registro(perfil, lineas_datos)
     return perfil
 
 
