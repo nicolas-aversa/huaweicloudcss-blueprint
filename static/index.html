@@ -5593,6 +5593,10 @@
       return entry;
     }
     function capChatLimpiar(slug) { capChats[slug] = []; }
+    // Los últimos turnos contestados de un caso, para mandarle al chat.
+    function capChatHistorial(slug, max = 4) {
+      return (capChats[slug] || []).filter(e => e.turno && !e.err).slice(-max).map(e => e.turno);
+    }
     function capChatFilaHTML(e) {
       const avatar = e.who === 'bot' ? `<span class="cap-chat__avatar">${icon('spark')}</span>` : '';
       return `<div class="cap-chat__row cap-chat__row--${e.who}" data-msg="${e.id}">${avatar}`
@@ -5992,6 +5996,9 @@
         // El caso de la PREGUNTA: la respuesta va a su conversación aunque
         // mientras tanto se cambie de pestaña o se rearme la vista.
         const slug = _activeChatSlug();
+        // La memoria del chat: los turnos anteriores de ESTE caso, con la
+        // consulta que se usó. Sin esto "¿cómo sabés?" era una pregunta nueva.
+        const history = capChatHistorial(slug);
         _agregar(slug, 'user', escapeHtml(question));
         const pend = _agregar(slug, 'bot', '<span class="cap-chat__dots">···</span>');
         capChatBusy = true;
@@ -6006,7 +6013,7 @@
           const res = await fetch('/api/v1/capabilities/ppl-chat', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              question, slug,
+              question, slug, history,
               opensearch_password: state.osPassword || '',
               opensearch_user: state.osUser || 'admin',
               https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del state
@@ -6033,6 +6040,7 @@
           // la primera vez; un re-render la muestra completa, con su gráfico.
           pend.html = `<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
           pend.result = data.result || null;
+          pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };
           const el = _msgDe(pend);
           if (!el) return;   // el caso no está en pantalla: se pinta al volver
           // Visualización Vega-Lite (motor de OpenSearch) + respuesta con typewriter + details.

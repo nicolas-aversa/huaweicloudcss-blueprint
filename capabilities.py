@@ -240,7 +240,12 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         "Alternatively use the extractors: year(@timestamp)=YYYY and month(@timestamp)=M (1-12).\n"
         "9. For sort direction use EITHER the '-' prefix OR the 'desc' suffix, NEVER both: "
         "'sort -total' or 'sort total desc' (ascending: 'sort total' or 'sort +total'). "
-        "NEVER write 'sort -total desc' - it is invalid.\n\n"
+        "NEVER write 'sort -total desc' - it is invalid.\n"
+        # La ingesta borra los campos vacíos (la limpieza del perfilador): un
+        # comentario vacío no es '', es un campo AUSENTE. "¿Cuántas sin
+        # comentario?" daba 0 comparando con ''.
+        "10. Empty or missing values are stored as ABSENT fields: count them with isnull(field) "
+        "and non-empty ones with isnotnull(field). NEVER compare a field with ''.\n\n"
         "CORRECT PATTERNS:\n"
         f"{examples}"
         f"# Filter a month (never match/wildcards on dates):\nsource={index_pattern} | where @timestamp >= '2025-03-01 00:00:00' and @timestamp < '2025-04-01 00:00:00' | stats count() as total\n\n"

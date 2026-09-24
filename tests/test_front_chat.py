@@ -58,6 +58,21 @@ capChatLimpiar('ventas');
 check('limpiar A', capChatLogHTML('ventas', 'Ventas').includes('Preguntame sobre Ventas'));
 check('B intacto', capChatLogHTML('fraude', 'Fraude').includes('No se pudo responder.'));
 
+// La memoria que va al backend: turnos contestados, sin errores, los últimos 4.
+capChatLimpiar('fraude');
+for (let i = 0; i < 6; i++) {
+  capChatAgregar('fraude', 'user', 'p' + i);
+  const b = capChatAgregar('fraude', 'bot', 'r' + i);
+  b.turno = { pregunta: 'p' + i, ppl: 'source=x' + i, respuesta: 'r' + i };
+  if (i === 5) b.err = true;
+}
+capChatAgregar('fraude', 'bot', '···');          // una pendiente, sin turno
+const h = capChatHistorial('fraude');
+check('historial: los últimos 4 contestados', h.map(t => t.pregunta).join(',') === 'p1,p2,p3,p4',
+      h.map(t => t.pregunta).join(','));
+check('historial: con la consulta', h[0].ppl === 'source=x1');
+check('historial: otro caso vacío', capChatHistorial('nada').length === 0);
+
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -116,3 +131,13 @@ def test_solo_en_memoria_y_se_borra_con_el_entorno():
     i = html.index("async function destroyEnvironment()")
     destroy = html[i:html.index("\n    }\n", i)]
     assert "delete capChats[k]" in destroy
+
+
+def test_la_pregunta_manda_la_memoria_de_su_caso():
+    fn = _render(_INDEX.read_text(encoding="utf-8"))
+    envio = fn[fn.index("async function sendCapChat(question)"):]
+    envio = envio[:envio.index("\n      }\n")]
+    # El historial se toma ANTES de agregar la pregunta nueva.
+    assert envio.index("const history = capChatHistorial(slug);") < envio.index("_agregar(slug, 'user'")
+    assert "question, slug, history," in envio
+    assert "pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };" in envio

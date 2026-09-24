@@ -6621,6 +6621,14 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     )
 
 
+class ChatTurno(BaseModel):
+    """Un turno anterior de la conversación: lo que se preguntó, con qué consulta
+    se contestó y qué se respondió. Es la memoria del chat."""
+    pregunta: str = ""
+    ppl: str = ""
+    respuesta: str = ""
+
+
 class PplChatRequest(BaseModel):
     """Request del chatbot PPL: pregunta en lenguaje natural sobre un tipo (slug)."""
     question: str = Field(..., min_length=1)
@@ -6629,6 +6637,10 @@ class PplChatRequest(BaseModel):
     opensearch_user: str = Field(default="admin")
     # None → se deriva del state (robusto tras un reload que perdió el flag en el front).
     https_enabled: bool | None = Field(default=None)
+    # Los turnos anteriores de ESTE caso. Sin memoria, "¿cómo sabés que es por
+    # la tardanza?" se procesaba como una pregunta nueva: se repetía la consulta
+    # y el modelo inventaba una justificación.
+    history: list[ChatTurno] = Field(default_factory=list, max_length=40)
 
 
 class PplChatResponse(BaseModel):
@@ -6664,6 +6676,123 @@ def _index_time_window(base: str, user: str, password: str, index_pattern: str):
         return (_fmt(rows[0][0]), _fmt(rows[0][1]))
     except Exception:
         return None
+
+
+# ── El chat: memoria, honestidad y autocorrección ───────────────────────────
+# Tres fallas vistas en una conversación real sobre reseñas: inventó un campo
+# (`review_language`) en vez de decir que ese dato no está; tradujo "tardanza" a
+# `review_score = 1` y quien redactaba —que no veía la consulta— afirmó que esas
+# reseñas eran por la tardanza; y a "¿cómo sabés?" repitió la consulta e inventó
+# una justificación, porque no tenía memoria.
+_TURNOS_DE_MEMORIA = 4
+_SIN_CONSULTA = "NO_QUERY"
+_SIN_DATO = "NO_DATA"
+_REGLAS_DEL_CHAT = (
+    "\n\nCONVERSATION RULES:\n"
+    f"A. If the user asks HOW or WHY a previous answer was obtained, or asks about that "
+    f"previous result itself instead of new data, output exactly {_SIN_CONSULTA}\n"
+    f"B. If answering needs information that is NOT in FIELDS, output exactly "
+    f"{_SIN_DATO}: <the missing information>. NEVER invent a field name.\n"
+    "C. Use the CONVERSATION (if any) to resolve references like 'esas', 'ese puntaje', "
+    "'and by month?'."
+)
+
+
+def _memoria(historial: list[ChatTurno]) -> str:
+    """Los últimos turnos, para el modelo: pregunta, consulta y respuesta."""
+    turnos = [t for t in historial if (t.pregunta or "").strip()][-_TURNOS_DE_MEMORIA:]
+    if not turnos:
+        return ""
+    return "CONVERSATION (oldest first):\n" + "\n---\n".join(
+        f"Pregunta: {t.pregunta[:300]}\nConsulta PPL: {(t.ppl or '(ninguna)')[:500]}\n"
+        f"Respuesta: {t.respuesta[:400]}" for t in turnos)
+
+
+def _limpiar_ppl(texto: str | None) -> str:
+    return (texto or "").replace("```ppl", "").replace("```", "").strip()
+
+
+def _prompt_de_respuesta(pregunta: str, ppl: str, result: dict, memoria: str) -> str:
+    import json as _json
+    return (
+        (memoria + "\n\n" if memoria else "")
+        + f"Pregunta del usuario: {pregunta}\n"
+        f"Consulta PPL que se ejecutó: {ppl}\n"
+        f"Resultado de la consulta (JSON): {_json.dumps(result, ensure_ascii=False)}\n\n"
+        "Respondé la pregunta en el MISMO idioma que el usuario, en una o dos frases claras, con "
+        "separador de miles en los números. Decí qué se midió según la consulta (por ejemplo: "
+        "\"cuento las reseñas con puntaje 1\"). NO atribuyas causas, motivos ni significados que la "
+        "consulta no mide: si la pregunta pide un porqué o un motivo y la consulta solo cuenta o "
+        "agrupa, aclaralo. No muestres JSON ni la query."
+    )
+
+
+def _sobre_lo_anterior(pregunta: str, historial: list[ChatTurno], memoria: str,
+                       predecir_llm) -> "PplChatResponse":
+    """Una pregunta sobre la respuesta anterior: se explica la consulta que se
+    usó, sin volver a consultar (y sin inventar una justificación)."""
+    anterior = next((t for t in reversed(historial) if (t.pregunta or "").strip()), None)
+    if anterior is None:
+        return PplChatResponse(answer="No tengo una respuesta anterior en esta conversación para explicar.")
+    respuesta = predecir_llm(
+        memoria + "\n\n"
+        f"El usuario pregunta sobre la respuesta anterior: {pregunta}\n\n"
+        "Explicá, en su idioma y en pocas frases, qué consulta se ejecutó y qué mide realmente, y "
+        "qué NO se puede concluir de ella. Si la respuesta anterior afirmó algo que la consulta no "
+        "mide, reconocelo y corregilo. No inventes datos ni ejecutes nada nuevo.")
+    return PplChatResponse(
+        answer=respuesta or f"Esa respuesta salió de esta consulta: {anterior.ppl or '(ninguna)'}.",
+        ppl=anterior.ppl or "")
+
+
+def _falta_el_dato(salida: str, campos: dict[str, str]) -> "PplChatResponse":
+    """El dato no está en el índice: se dice, con lo que sí hay."""
+    motivo = salida.split(":", 1)[1].strip() if ":" in salida else ""
+    hay = ", ".join(list(campos)[:15])
+    return PplChatResponse(answer=(
+        "Ese dato no está en los datos"
+        + (f" ({motivo})" if motivo else "")
+        + (f". Lo que sí tiene cada registro: {hay}." if hay else ".")))
+
+
+def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str],
+               predecir_ppl, predecir_llm, ejecutar) -> "PplChatResponse":
+    """La conversación, sin HTTP ni cluster: `predecir_ppl(prompt)` y
+    `predecir_llm(prompt)` devuelven texto (o None); `ejecutar(ppl)` devuelve
+    `(True, {schema, datarows})` o `(False, error)`."""
+    memoria = _memoria(historial)
+    prompt = (memoria + "\n\nPREGUNTA ACTUAL: " + pregunta) if memoria else pregunta
+    ppl = _limpiar_ppl(predecir_ppl(prompt))
+    if ppl.upper().startswith(_SIN_CONSULTA):
+        return _sobre_lo_anterior(pregunta, historial, memoria, predecir_llm)
+    if ppl.upper().startswith(_SIN_DATO):
+        return _falta_el_dato(ppl, campos)
+    if not ppl.lower().startswith("source="):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail={"stage": "ppl_chat",
+                                    "message": "No pude generar una consulta PPL válida a partir de la pregunta.",
+                                    "ppl": ppl})
+    ok, cuerpo = ejecutar(ppl)
+    if not ok:
+        # Un reintento, con el error delante: el caso típico es un campo que no
+        # existe. Si la información no está, el modelo lo dice (NO_DATA).
+        segundo = _limpiar_ppl(predecir_ppl(
+            prompt + f"\n\nThe query `{ppl}` failed: {str(cuerpo)[:300]}\n"
+            "Fix it using ONLY the fields listed in FIELDS. If the information does not exist "
+            f"in those fields, output exactly {_SIN_DATO}: <the missing information>."))
+        if segundo.upper().startswith(_SIN_DATO):
+            return _falta_el_dato(segundo, campos)
+        if segundo.lower().startswith("source="):
+            ppl = segundo
+            ok, cuerpo = ejecutar(ppl)
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail={"stage": "ppl_chat",
+                                        "message": f"El PPL no se pudo ejecutar: {str(cuerpo)[:300]}",
+                                        "ppl": ppl})
+    result = cuerpo
+    answer = predecir_llm(_prompt_de_respuesta(pregunta, ppl, result, memoria))
+    return PplChatResponse(answer=answer or f"Resultado: {result['datarows']}", ppl=ppl, result=result)
 
 
 @app.post("/api/v1/capabilities/ppl-chat", response_model=PplChatResponse, tags=["capabilities"])
@@ -6723,36 +6852,24 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
                 f"\n\nDATA TIME WINDOW: @timestamp ranges from {tw[0]} to {tw[1]}. "
                 "If the user names a month or period without a year, choose the year that falls within this window."
             )
+        _sp += _REGLAS_DEL_CHAT
         predict_params["system_prompt"] = _sp.replace("\n", "\\n")
-    ppl = _ml_predict(base, user, password, ppl_model, predict_params)
-    if ppl:
-        ppl = ppl.replace("```ppl", "").replace("```", "").strip()
-    if not ppl or not ppl.lower().startswith("source="):
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail={"stage": "ppl_chat",
-                                    "message": f"No pude generar una consulta PPL válida a partir de la pregunta.",
-                                    "ppl": ppl or ""})
 
-    # 2) Ejecutar el PPL. Si falla, devolver el error + el PPL (honesto, no inventar).
-    r = _os_req("POST", f"{base}/_plugins/_ppl", user, password, json_body={"query": ppl}, timeout=30)
-    if r is None or r.status_code != 200:
-        detail = (getattr(r, "text", "") or "")[:300]
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail={"stage": "ppl_chat", "message": f"El PPL no se pudo ejecutar: {detail}", "ppl": ppl})
-    body = r.json()
-    result = {"schema": body.get("schema", []), "datarows": body.get("datarows", [])}
+    def _predecir_ppl(prompt: str):
+        return _ml_predict(base, user, password, ppl_model, {**predict_params, "prompt": prompt})
 
-    # 3) Frasear el resultado. Fallback: devolver los datarows crudos si el LLM falla.
-    phrase_prompt = (
-        f"Pregunta del usuario: {request.question}\n"
-        f"Resultado de la consulta (JSON): {_json.dumps(result, ensure_ascii=False)}\n\n"
-        "Respondé la pregunta en el MISMO idioma que el usuario, en UNA frase clara, con separador de "
-        "miles en los números. No muestres JSON ni la query, solo la respuesta."
-    )
-    answer = _ml_predict(base, user, password, llm_model, {"prompt": phrase_prompt})
-    if not answer:
-        answer = f"Resultado: {result['datarows']}"
-    return PplChatResponse(answer=answer, ppl=ppl, result=result)
+    def _predecir_llm(prompt: str):
+        return _ml_predict(base, user, password, llm_model, {"prompt": prompt})
+
+    def _ejecutar(ppl: str):
+        r = _os_req("POST", f"{base}/_plugins/_ppl", user, password, json_body={"query": ppl}, timeout=30)
+        if r is None or r.status_code != 200:
+            return False, (getattr(r, "text", "") or "sin respuesta del cluster")[:600]
+        body = r.json()
+        return True, {"schema": body.get("schema", []), "datarows": body.get("datarows", [])}
+
+    return _conversar(request.question, request.history, (_spec or {}).get("fields", {}),
+                      _predecir_ppl, _predecir_llm, _ejecutar)
 
 
 class DatasetPreviewResponse(BaseModel):
