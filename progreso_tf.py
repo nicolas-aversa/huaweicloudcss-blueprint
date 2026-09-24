@@ -15,8 +15,10 @@ Acá el porcentaje sale de otro lado:
     ese es el conjunto de recursos, fijo desde el principio;
   * cada recurso tiene su propio avance, que solo sube (por tiempo transcurrido
     contra una duración estimada, y 100% al terminar);
-  * cada componente (la red, el cluster de OpenSearch, el de Logstash, cada
-    pipeline) es el promedio de sus recursos, pesado por lo que tardan;
+  * cada componente (cada cluster, cada pieza de la red —NAT, EIP, cada
+    regla DNAT, el SNAT, las reglas de SG—, cada pipeline) es el promedio de
+    sus recursos, pesado por lo que tardan. Van por separado para que se vea
+    TODO lo que levanta Terraform, no "la red" como una caja cerrada;
   * el global es la suma pesada de todos, sobre un denominador que ya no
     cambia. Si igual apareciera un recurso que el plan no anunció, el global
     se queda donde estaba en vez de bajar.
@@ -35,22 +37,33 @@ _TIPOS: dict[str, tuple[str, float, float]] = {
     "huaweicloud_css_logstash_cluster":       ("logstash",   600, 300),
     "huaweicloud_css_logstash_configuration": ("pipeline",    60,  30),
     "huaweicloud_css_logstash_pipeline":      ("activar",     60,  30),
-    "huaweicloud_nat_gateway":                ("red",         30,  20),
-    "huaweicloud_vpc_eip":                    ("red",         15,  10),
-    "huaweicloud_nat_dnat_rule":              ("red",         15,  10),
-    "huaweicloud_nat_snat_rule":              ("red",         15,  10),
-    "huaweicloud_networking_secgroup_rule":   ("red",          5,   5),
+    "huaweicloud_nat_gateway":                ("nat",         30,  20),
+    "huaweicloud_vpc_eip":                    ("eip",         15,  10),
+    "huaweicloud_nat_dnat_rule":              ("dnat",        15,  10),
+    "huaweicloud_nat_snat_rule":              ("snat",        15,  10),
+    "huaweicloud_networking_secgroup_rule":   ("sg",           5,   5),
 }
 _POR_DEFECTO = ("otros", 30, 20)
 _ETIQUETAS = {
-    "red": "Red y acceso público",
-    "opensearch": "OpenSearch cluster",
-    "logstash": "Logstash cluster",
+    "opensearch": "CSS OpenSearch cluster",
+    "logstash": "CSS Logstash cluster",
+    "nat": "NAT gateway",
+    "eip": "EIP pública",
+    "snat": "SNAT · salida a internet",
+    "sg": "Reglas de security group",
     "activar": "Activación de pipelines",
     "otros": "Otros recursos",
 }
-# Orden en pantalla: como se lee la arquitectura, de la red a la ingesta.
-_ORDEN = ["red", "opensearch", "logstash", "pipeline", "activar", "otros"]
+# Una fila por regla DNAT: son las que dan acceso al cluster privado, y cuando
+# falta una conviene verlo en la lista.
+_DNAT = {
+    "opensearch": "DNAT :9200 → OpenSearch",
+    "kibana": "DNAT → OpenSearch Dashboards",
+    "logstash_beats": "DNAT → Logstash (Beats)",
+}
+# Orden en pantalla: los clusters, la red que les da acceso y la ingesta.
+_ORDEN = ["opensearch", "logstash", "nat", "eip", "dnat", "snat", "sg",
+          "pipeline", "activar", "otros"]
 
 _PLAN = re.compile(
     r"^\s*# (?P<dir>\S+) (?P<acc>will be created|will be updated in-place|must be replaced|"
@@ -155,6 +168,9 @@ class ProgresoApply:
         if tipo_comp == "pipeline":
             m = _CLAVE.search(direccion)
             return f"pipeline:{m.group(1)}" if m else "pipeline"
+        if tipo_comp == "dnat":
+            partes = [p for p in direccion.split(".") if not p.startswith("module")]
+            return "dnat:" + partes[1].split("[")[0] if len(partes) > 1 else "dnat"
         return tipo_comp
 
     def _registrar(self, direccion: str, accion: str) -> _Recurso | None:
@@ -174,6 +190,9 @@ class ProgresoApply:
             return f"Pipeline · {componente.split(':', 1)[1]}"
         if componente == "pipeline":
             return "Pipelines"
+        if componente.startswith("dnat:"):
+            nombre = componente.split(":", 1)[1]
+            return _DNAT.get(nombre, f"DNAT · {nombre}")
         return _ETIQUETAS.get(componente, componente)
 
     def componentes(self) -> list[dict]:
@@ -208,12 +227,20 @@ class ProgresoApply:
         return self.global_
 
     def _fase(self) -> tuple[str, str]:
-        """Lo que se está esperando: el componente empezado con más por hacer."""
-        activos = [c for c in self.componentes() if not c["done"] and c["estado"] != "En espera"]
+        """Lo que está en curso. Con uno solo, cuál; con varios, cuántos en
+        paralelo y cuántos terminaron. Antes se nombraba solo el que más
+        faltaba (casi siempre el cluster de OpenSearch), y "Creando OpenSearch
+        cluster…" escondía la red y el Logstash creándose al mismo tiempo."""
+        comps = self.componentes()
+        activos = [c for c in comps if not c["done"] and c["estado"] != "En espera"]
         if not activos:
             return "Terraform apply", "Aplicando infraestructura…"
-        c = max(activos, key=lambda c: c["peso"] * (1 - c["percent"] / 100))
-        return c["label"], f"{c['estado']} {c['label']}…"
+        if len(activos) == 1:
+            c = activos[0]
+            return c["label"], f"{c['estado']} {c['label']}…"
+        listos = sum(1 for c in comps if c["done"])
+        return ("En paralelo",
+                f"{len(activos)} servicios en paralelo · {listos} de {len(comps)} listos")
 
     # ── Entrada ──────────────────────────────────────────────────────────
     def linea(self, linea: str) -> list[dict]:

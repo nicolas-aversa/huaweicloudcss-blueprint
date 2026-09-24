@@ -48,8 +48,8 @@ const texto = (key, cls) => fila(key).querySelector(cls).textContent;
 
 // El plan: todos los componentes de entrada, en espera.
 progresoEvento(raiz, { type: 'plan', items: [
-  { key: 'red', label: 'Red y acceso público', percent: 0, done: false, estado: 'En espera' },
-  { key: 'opensearch', label: 'OpenSearch cluster', percent: 0, done: false, estado: 'En espera' },
+  { key: 'nat', label: 'NAT gateway', percent: 0, done: false, estado: 'En espera' },
+  { key: 'opensearch', label: 'CSS OpenSearch cluster', percent: 0, done: false, estado: 'En espera' },
   { key: 'pipeline:fintech', label: 'Pipeline · fintech', percent: 0, done: false, estado: 'En espera' },
 ]});
 check('plan: tres filas', raiz.querySelector('.deploy-progress__list').children.length === 3);
@@ -57,7 +57,7 @@ check('plan: en espera', fila('opensearch').classList.contains('is-waiting'));
 check('plan: texto', texto('opensearch', '.deploy-progress__estado') === 'En espera');
 
 // Un componente que avanza.
-progresoEvento(raiz, { type: 'item', key: 'opensearch', label: 'OpenSearch cluster',
+progresoEvento(raiz, { type: 'item', key: 'opensearch', label: 'CSS OpenSearch cluster',
                        percent: 34.4, done: false, estado: 'Creando' });
 check('item: ya no espera', !fila('opensearch').classList.contains('is-waiting'));
 check('item: qué hace y cuánto', texto('opensearch', '.deploy-progress__estado') === 'Creando · 34%',
@@ -65,10 +65,10 @@ check('item: qué hace y cuánto', texto('opensearch', '.deploy-progress__estado
 check('item: su barra', fila('opensearch').querySelector('.deploy-progress__minifill').style.width === '34%');
 
 // Otro que termina.
-progresoEvento(raiz, { type: 'item', key: 'red', label: 'Red y acceso público',
+progresoEvento(raiz, { type: 'item', key: 'nat', label: 'NAT gateway',
                        percent: 100, done: true, estado: 'listo' });
-check('listo: tilde', fila('red').classList.contains('is-done'));
-check('listo: texto', texto('red', '.deploy-progress__estado') === 'Listo');
+check('listo: tilde', fila('nat').classList.contains('is-done'));
+check('listo: texto', texto('nat', '.deploy-progress__estado') === 'Listo');
 
 // Un componente que el plan no traía aparece igual.
 progresoEvento(raiz, { type: 'item', key: 'otros', label: 'Otros recursos',
@@ -76,18 +76,18 @@ progresoEvento(raiz, { type: 'item', key: 'otros', label: 'Otros recursos',
 check('nuevo: aparece', !!fila('otros'));
 
 // El global.
-progresoEvento(raiz, { type: 'progress', percent: 41.6, phase: 'OpenSearch cluster',
-                       message: 'Creando OpenSearch cluster…' });
+progresoEvento(raiz, { type: 'progress', percent: 41.6, phase: 'CSS OpenSearch cluster',
+                       message: 'Creando CSS OpenSearch cluster…' });
 check('global: barra', raiz.querySelector('.deploy-progress__fill').style.width === '41.6%');
 check('global: %', raiz.querySelector('.deploy-progress__pct').textContent === '42%');
-check('global: fase', raiz.querySelector('.deploy-progress__phase').textContent === 'Creando OpenSearch cluster…');
+check('global: fase', raiz.querySelector('.deploy-progress__phase').textContent === 'Creando CSS OpenSearch cluster…');
 
 // Se corta: lo que no terminó queda interrumpido, lo que terminó sigue listo.
 progresoFin(raiz, false);
 check('corte: interrumpido', fila('opensearch').classList.contains('is-stalled'));
 check('corte: texto', texto('opensearch', '.deploy-progress__estado') === 'Interrumpido');
-check('corte: el listo sigue listo', fila('red').classList.contains('is-done')
-      && !fila('red').classList.contains('is-stalled'));
+check('corte: el listo sigue listo', fila('nat').classList.contains('is-done')
+      && !fila('nat').classList.contains('is-stalled'));
 check('corte: no marca 100%', raiz.querySelector('.deploy-progress__pct').textContent === '42%');
 
 // Un plan nuevo en el mismo contenedor (otro deploy) reemplaza las filas.

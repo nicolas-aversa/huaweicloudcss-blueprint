@@ -28,6 +28,8 @@ Terraform will perform the following actions:
   # huaweicloud_nat_gateway.nat will be created
   # huaweicloud_vpc_eip.nat_eip will be created
   # huaweicloud_networking_secgroup_rule.opensearch_public_9200 will be created
+  # huaweicloud_nat_dnat_rule.opensearch[0] will be created
+  # huaweicloud_nat_dnat_rule.kibana[0] will be created
   # data.huaweicloud_networking_port.os_node will be read during apply
 
 Plan: 7 to add, 1 to change, 0 to destroy.
@@ -45,6 +47,10 @@ huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [9m0s elapsed]
 huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [18m30s elapsed]
 huaweicloud_css_cluster.opensearch_cluster[0]: Creation complete after 18m41s [id=os-1]
 data.huaweicloud_networking_port.os_node: Reading...
+huaweicloud_nat_dnat_rule.opensearch[0]: Creating...
+huaweicloud_nat_dnat_rule.kibana[0]: Creating...
+huaweicloud_nat_dnat_rule.opensearch[0]: Creation complete after 4s [id=d1]
+huaweicloud_nat_dnat_rule.kibana[0]: Creation complete after 5s [id=d2]
 huaweicloud_css_logstash_cluster.logstash_cluster: Creating...
 huaweicloud_css_logstash_cluster.logstash_cluster: Still creating... [5m0s elapsed]
 huaweicloud_css_logstash_cluster.logstash_cluster: Creation complete after 9m12s [id=ls-1]
@@ -95,9 +101,12 @@ def test_el_global_nunca_baja_aunque_los_recursos_vayan_en_paralelo():
 def test_el_cluster_pesa_lo_que_tarda():
     """Que terminen la red y la EIP (segundos) no puede mover la barra como
     los quince minutos del cluster."""
-    p, eventos = _correr("\n".join(LOG.splitlines()[:26]))   # hasta que termina la red
-    red_lista = [e for e in eventos if e["type"] == "item" and e["key"] == "red" and e["done"]]
-    assert red_lista
+    lineas = LOG.splitlines()
+    fin_red = lineas.index("huaweicloud_networking_secgroup_rule.opensearch_public_9200: "
+                           "Creation complete after 1s [id=sg-1]")
+    p, eventos = _correr("\n".join(lineas[:fin_red + 1]))   # hasta que termina la red
+    listos = {e["key"] for e in eventos if e["type"] == "item" and e["done"]}
+    assert {"nat", "eip", "sg"} <= listos
     assert p.fraccion() < 0.1
 
 
@@ -120,8 +129,12 @@ def test_el_plan_anuncia_los_componentes_antes_de_empezar():
     _, eventos = _correr()
     plan = eventos[0]
     assert plan["type"] == "plan"
+    # Cada servicio por separado (no "la red" como una caja cerrada), y cada
+    # regla DNAT con su fila: son las que dan acceso al cluster privado.
     assert [c["label"] for c in plan["items"]] == [
-        "Red y acceso público", "OpenSearch cluster", "Logstash cluster",
+        "CSS OpenSearch cluster", "CSS Logstash cluster", "NAT gateway", "EIP pública",
+        "DNAT → OpenSearch Dashboards", "DNAT :9200 → OpenSearch",
+        "Reglas de security group",
         "Pipeline · fintech", "Pipeline · siem", "Activación de pipelines"]
     assert all(c["percent"] == 0 and not c["done"] and c["estado"] == "En espera"
                for c in plan["items"])
@@ -149,15 +162,14 @@ def test_el_estado_dice_que_se_esta_haciendo():
 
 
 def test_la_fase_es_lo_que_se_esta_esperando():
-    """Mientras el cluster tarda, la fase es el cluster, aunque en el medio
-    termine una regla de security group."""
+    """Con la red ya lista y solo el cluster en curso, la fase es el cluster."""
     lineas = LOG.splitlines()
     # Hasta el "9m0s" del cluster: la red ya terminó, el cluster sigue.
     _, eventos = _correr("\n".join(lineas[:lineas.index(
         "huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [9m0s elapsed]") + 1]))
     ultima = [e for e in eventos if e["type"] == "apply"][-1]
-    assert ultima["phase"] == "OpenSearch cluster"
-    assert ultima["message"] == "Creando OpenSearch cluster…"
+    assert ultima["phase"] == "CSS OpenSearch cluster"
+    assert ultima["message"] == "Creando CSS OpenSearch cluster…"
 
 
 def test_un_recurso_que_recien_arranca_ya_esta_en_curso():
@@ -167,7 +179,7 @@ def test_un_recurso_que_recien_arranca_ya_esta_en_curso():
         "huaweicloud_css_logstash_cluster.logstash_cluster: Creating...") + 1]))
     ls = [e for e in eventos if e["type"] == "item" and e["key"] == "logstash"][-1]
     assert ls["estado"] == "Creando" and ls["percent"] == 0
-    assert [e for e in eventos if e["type"] == "apply"][-1]["phase"] == "Logstash cluster"
+    assert [e for e in eventos if e["type"] == "apply"][-1]["phase"] == "CSS Logstash cluster"
 
 
 def test_un_reemplazo_primero_elimina_y_despues_crea():
@@ -212,17 +224,30 @@ def test_un_recurso_que_tarda_mas_de_lo_previsto_se_sigue_moviendo():
     assert 0.9 < a < b < 1.0, (a, b)
 
 
-def test_con_dos_en_curso_la_fase_es_el_que_mas_falta():
-    """El cluster (quince minutos) y la activación de pipelines (un minuto) en
-    paralelo: lo que se espera es el cluster, aunque la activación venga después
-    en la lista."""
+def test_con_varios_en_curso_la_fase_dice_cuantos():
+    """Nombrar solo al que más falta ("Creando OpenSearch cluster…") escondía
+    lo que se creaba al mismo tiempo."""
     log = ("  # huaweicloud_css_cluster.opensearch_cluster[0] will be created\n"
            "  # huaweicloud_css_logstash_pipeline.pipeline[0] will be updated in-place\n"
            "Plan: 1 to add, 1 to change, 0 to destroy.\n"
            "huaweicloud_css_cluster.opensearch_cluster[0]: Creating...\n"
            "huaweicloud_css_logstash_pipeline.pipeline[0]: Modifying... [id=p0]\n")
     _, eventos = _correr(log)
-    assert [e for e in eventos if e["type"] == "apply"][-1]["phase"] == "OpenSearch cluster"
+    ultima = [e for e in eventos if e["type"] == "apply"][-1]
+    assert ultima["phase"] == "En paralelo"
+    assert ultima["message"] == "2 servicios en paralelo · 0 de 2 listos"
+
+    _, eventos = _correr(log + "huaweicloud_css_logstash_pipeline.pipeline[0]: "
+                               "Modifications complete after 20s [id=p0]\n")
+    ultima = [e for e in eventos if e["type"] == "apply"][-1]
+    assert ultima["message"] == "Creando CSS OpenSearch cluster…", "queda uno: se nombra"
+
+    # En el deploy entero: la EIP ya terminó; el NAT y el cluster siguen.
+    lineas = LOG.splitlines()
+    _, eventos = _correr("\n".join(lineas[:lineas.index(
+        "huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [10s elapsed]") + 1]))
+    ultima = [e for e in eventos if e["type"] == "apply"][-1]
+    assert ultima["message"] == "2 servicios en paralelo · 1 de 10 listos"
 
 
 def test_un_data_source_no_es_un_recurso_que_se_crea():
@@ -255,3 +280,16 @@ def test_los_tramos_del_global_estan_en_orden():
             < main._PCT_INGESTA_HASTA < 100)
     assert main._pct_apply(0) == main._PCT_APPLY_DESDE
     assert main._pct_apply(1) == main._PCT_APPLY_HASTA
+
+
+def test_cada_regla_dnat_es_su_propia_fila():
+    p = progreso_tf.ProgresoApply()
+    for d in ("huaweicloud_nat_dnat_rule.opensearch[0]", "huaweicloud_nat_dnat_rule.kibana[0]",
+              "huaweicloud_nat_dnat_rule.logstash_beats[0]", "huaweicloud_nat_dnat_rule.otra[0]"):
+        p._registrar(d, "crear")
+    assert [(c["key"], c["label"]) for c in p.componentes()] == [
+        ("dnat:kibana", "DNAT → OpenSearch Dashboards"),
+        ("dnat:logstash_beats", "DNAT → Logstash (Beats)"),
+        ("dnat:opensearch", "DNAT :9200 → OpenSearch"),
+        ("dnat:otra", "DNAT · otra"),
+    ]
