@@ -4105,9 +4105,26 @@
       const bucketEl = document.getElementById('input-bucket');
       const prefixEl = document.getElementById('input-prefix');
       const idxEl = document.getElementById('output-index');
-      // Solo se pisa el bucket si el caso trae uno propio: si no, se respeta lo
-      // que el operador haya escrito.
-      if (bucketEl && cm.ownBucket) bucketEl.value = cm.ownBucket;
+      // El bucket de un caso con origen propio se MUESTRA, bloqueado, pero no
+      // pisa el compartido: el que había queda en `data-shared` y vuelve al
+      // cambiar de pestaña. Antes se escribía encima y no se devolvía nunca
+      // (un caso de demo no trae bucket propio, así que no lo restauraba), y el
+      // deploy salía con todos los casos leyendo el bucket de CTS.
+      if (bucketEl) {
+        if (cm.ownBucket) {
+          if (bucketEl.dataset.shared === undefined) bucketEl.dataset.shared = bucketEl.value;
+          bucketEl.value = cm.ownBucket;
+          bucketEl.readOnly = true;
+          bucketEl.title = `${cm.label} lee de su propio bucket: no se edita.`;
+        } else {
+          if (bucketEl.dataset.shared !== undefined) {
+            bucketEl.value = bucketEl.dataset.shared;
+            delete bucketEl.dataset.shared;
+          }
+          bucketEl.readOnly = false;
+          bucketEl.title = '';
+        }
+      }
       if (prefixEl) prefixEl.value = cm.prefix;
       if (idxEl) idxEl.value = cm.index;
     }
@@ -4296,6 +4313,17 @@
       return sel.length ? sel : ['custom'];
     }
 
+    // El bucket COMPARTIDO del deploy: el que escribió el operador, o el de
+    // demos. NUNCA el de un caso con origen propio — ese vive solo en su caso.
+    // Cuando la pestaña activa del paso 3 es uno de esos casos, el campo muestra
+    // el suyo (bloqueado) y el compartido queda guardado en `data-shared`.
+    function sharedBucket() {
+      const el = document.getElementById('input-bucket');
+      if (!el) return demoBucket();
+      const v = el.dataset.shared !== undefined ? el.dataset.shared : el.value;
+      return v || demoBucket();
+    }
+
     // Metadata de fuente/destino/campos por tipo (para el resumen y el .conf).
     // Dónde vive el dato de un caso y con qué índice sale. Único lugar que lo
     // resuelve: lo usan el preview del paso 4 y el body del deploy, y si
@@ -4308,8 +4336,7 @@
       // dataset que la plataforma sube (CTS: trazas reales en mi-tracker-cts).
       // El resto lee del bucket de demos del SA.
       const ownBucket = (!isCustom && meta.obsBucket) || '';
-      const bucket = ownBucket
-        || document.getElementById('input-bucket')?.value || demoBucket();
+      const bucket = ownBucket || sharedBucket();
       const prefix = isCustom
         ? (document.getElementById('input-prefix')?.value || 'logs/')
         // Prefijo TOP-LEVEL por tipo. NO anidar bajo un padre compartido como
@@ -4328,10 +4355,16 @@
     // con datos que la plataforma no subió (hoy solo CTS, con las trazas de
     // auditoría reales de la cuenta). Para esos casos el origen no se elige ni
     // se escribe: el paso 3 lo muestra fijo y todo lo demás lo lee de acá.
+    // Solo con UN caso elegido: con varios, el paso 3 tiene una pestaña por
+    // caso y el origen propio es de ESE caso, no del deploy. Aplicado al form
+    // compartido —que es lo que hacía— el bucket de CTS terminaba siendo el del
+    // body, y los casos de demo salían leyendo `mi-tracker-cts`, donde no está
+    // su dataset; peor, el guard que sube los datasets que faltan se los subía
+    // ahí, encima de las trazas de auditoría reales del cliente.
     function casoConOrigenPropio() {
-      const id = (state.selectedExamples || [])[0];
-      if (!id || id === 'custom') return null;
-      const cm = caseMeta(id);
+      const sel = (state.selectedExamples || []).filter(id => id && id !== 'custom');
+      if (sel.length !== 1) return null;
+      const cm = caseMeta(sel[0]);
       return cm.ownBucket ? cm : null;
     }
 
@@ -4857,6 +4890,10 @@
       state.httpsEnabled = body.https_enabled;
 
       if (state.selectedExamples.length > 1) {
+        // El bucket del body es el COMPARTIDO: de ahí leen los casos de demo y
+        // ahí se suben sus datasets si faltan. El de un caso con origen propio
+        // viaja en su caso y en ningún otro lado.
+        body.obs_bucket = sharedBucket();
         // Cada caso lleva su prefijo e índice; el bucket es el del body salvo que
         // el vertical declare uno propio (CTS lee trazas reales de otro bucket).
         // Los predefinidos leen su dataset YA presente en OBS (read_existing) →
@@ -5756,7 +5793,11 @@
         // el caso declare origen propio: acá estaba fijo en el bucket de demos y
         // un redeploy de CTS tras un F5 lo mandaba a buscar sus trazas ahí, tres
         // líneas debajo del comentario que promete justamente lo contrario.
-        obs_bucket: (LOG_EXAMPLES.find(e => e.id === primary.slug)?.obsBucket) || demoBucket(),
+        // Con varias pipelines vuelve a ser el compartido: el propio de cada una
+        // viaja en `cases[]`, y el de la primera no es el de las demás.
+        obs_bucket: (pipelines.length > 1
+          ? demoBucket()
+          : (LOG_EXAMPLES.find(e => e.id === primary.slug)?.obsBucket) || demoBucket()),
         obs_access_key: (state.obsCreds || {}).ak || '',
         obs_secret_key: '',   // lo completa el servidor con el de la cuenta
 

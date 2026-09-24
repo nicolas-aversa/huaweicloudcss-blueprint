@@ -3157,6 +3157,11 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
         )
     _normalizar_conf(request)
     _check_conf_compila(request)
+    # Va ANTES de los dos guards: los dos miran `request.obs_bucket`, y el de
+    # datasets además SUBE ahí lo que falte. Con el bucket de otro caso adentro,
+    # ese upload iría al bucket ajeno.
+    for nota in _aislar_bucket_compartido(request):
+        print(f"[deploy] bucket compartido aislado: {nota}")
     _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
     # Lock por-usuario: se adquiere ya (puede cortar con 409) y se libera cuando
@@ -3212,6 +3217,8 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
                             detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
     _normalizar_conf(request)
     _check_conf_compila(request)
+    for nota in _aislar_bucket_compartido(request):
+        print(f"[deploy-job] bucket compartido aislado: {nota}")
     _check_conf_reads_from_a_bucket(request)
     _check_demo_datasets_present(request)
 
@@ -3429,6 +3436,42 @@ def _force_case_own_source(request: "TerraformDeployRequest") -> list[str]:
     return notas
 
 
+def _aislar_bucket_compartido(request: "TerraformDeployRequest") -> list[str]:
+    """Un caso con origen propio no le presta su bucket a los demás.
+
+    En un deploy con varios casos, `obs_bucket` del body es el bucket
+    **compartido**: de ahí leen los casos de demo y ahí se suben sus datasets si
+    faltan. Un caso con origen propio (hoy CTS, `mi-tracker-cts/CloudTraces/`)
+    tiene el suyo y viaja en el caso.
+
+    Al elegir la pestaña de CTS en el paso 3, el front escribía ese bucket en el
+    campo compartido y no lo devolvía al cambiar de pestaña. El deploy salía con
+    los casos de demo leyendo `mi-tracker-cts` —donde no está su dataset— y el
+    guard de datasets les subía los sintéticos ahí, encima de las trazas de
+    auditoría reales del cliente. El front ya no lo pisa; esto es lo que hace
+    que el arreglo no dependa de él (una pestaña vieja, una regresión futura).
+
+    Se corrige al bucket de demos de la cuenta. Si no hay ninguno configurado
+    queda vacío a propósito: `_check_conf_reads_from_a_bucket` corta con un 400
+    que dice dónde cargarlo, que es mejor que escribir en el bucket ajeno.
+    """
+    if not request.cases or not request.obs_bucket:
+        return []
+    propios = {b for c in request.cases
+               if (b := (c.obs_bucket or _origen_propio(c.slug)[0]))}
+    if request.obs_bucket not in propios:
+        return []
+    # Si TODOS los casos traen su propio bucket, el compartido no lo usa nadie.
+    comparten = [c.slug for c in request.cases
+                 if not (c.obs_bucket or _origen_propio(c.slug)[0])
+                 and not (c.input_config or custom_cases.case_type_for(c.slug) == "live")]
+    if not comparten:
+        return []
+    ajeno, request.obs_bucket = request.obs_bucket, get_huawei_settings().get("demo_bucket", "")
+    return [f"{', '.join(comparten)} no leen de `{ajeno}` (es de otro caso): "
+            f"bucket compartido → `{request.obs_bucket or '‹sin bucket de demos›'}`"]
+
+
 def _check_conf_reads_from_a_bucket(request: "TerraformDeployRequest") -> None:
     """Corta con 400 si no hay bucket del que leer.
 
@@ -3479,7 +3522,11 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
     known = _demo_dataset_files()
     # (slug, prefijo, lee-del-bucket, trae-fuente-propia), venga como venga.
     if request.cases:
-        objetivos = [(c.slug, c.obs_prefix, c.read_existing_bucket, bool(c.input_config))
+        # Un caso con bucket propio queda fuera del chequeo: su dato no lo sube
+        # la plataforma, y este guard SUBE lo que falta. Sobre el bucket de
+        # trazas de un cliente eso sería escribirle sintéticos encima.
+        objetivos = [(c.slug, c.obs_prefix, c.read_existing_bucket,
+                      bool(c.input_config) or bool(c.obs_bucket or _origen_propio(c.slug)[0]))
                      for c in request.cases]
     else:
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)

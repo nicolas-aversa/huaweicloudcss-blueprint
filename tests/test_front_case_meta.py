@@ -31,11 +31,18 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None,
 _ARNES = r"""
 const DOM = {};
 const document = { getElementById: id => DOM[id] || null };
-const state = { fields: [], selectedExamples: [], obsCreds: { ak: 'AK' }, osPassword: '' };
+const state = { fields: [], selectedExamples: [], obsCreds: { ak: 'AK' }, osPassword: '',
+                outputPlugins: ['elasticsearch'], rawLog: '' };
 const window = { __VERTICALS__: PAYLOAD };
 function demoBucket() { return 'demos-del-sa'; }
 function hwRegion() { return 'la-south-2'; }
 function secretFieldValue() { return ''; }
+function collectOutputConfig() { return { user: 'admin', password: 'p', ssl: true }; }
+function slugFromIndex(i) { return (i || '').split('-')[0]; }
+function pipelineNamespace() { return 'data'; }
+// Un <input> como el del paso 3: `dataset` y `readOnly` de verdad, que es lo
+// que usa `_applyCaseSourceDest` para no pisar el bucket compartido.
+const campo = (value) => ({ value, dataset: {}, readOnly: false, title: '' });
 
 const fallos = [];
 const check = (nombre, cond, extra) => {
@@ -68,7 +75,7 @@ check('siem prefix', m.prefix === 'siem-logs/', m.prefix);
 check('siem ownBucket vacio', m.ownBucket === '', JSON.stringify(m.ownBucket));
 
 // Lo que el operador tipee NO puede desviar un caso con origen propio.
-DOM['input-bucket'] = { value: 'lo-que-escribio-el-operador' };
+DOM['input-bucket'] = campo('lo-que-escribio-el-operador');
 check('cts ignora el input', caseMeta('cts').bucket === 'mi-tracker-cts',
       caseMeta('cts').bucket);
 check('siem respeta el input',
@@ -95,8 +102,8 @@ check('sin seleccion', casoConOrigenPropio() === null);
 state.deployMode = 'demo';
 state.inputPlugin = 'obs';
 state.readExistingMode = true;
-DOM['input-bucket'] = { value: 'demos-del-sa' };
-DOM['input-prefix'] = { value: 'cts-logs/' };
+DOM['input-bucket'] = campo('demos-del-sa');
+DOM['input-prefix'] = campo('cts-logs/');
 state.selectedExamples = ['cts'];
 let cfg = collectInputConfig();
 check('conf de cts: bucket', cfg.bucket === 'mi-tracker-cts', cfg.bucket);
@@ -116,9 +123,60 @@ check('redeploy de cts: prefix', body.obs_prefix === 'CloudTraces/', body.obs_pr
 body = buildDeployBodyFromStatus({ pipelines: [{ slug: 'siem', index: 'siem-%{+YYYY.MM}', obs_prefix: 'siem-logs/' }] });
 check('redeploy de siem: bucket de demos', body.obs_bucket === 'demos-del-sa', body.obs_bucket);
 
+// ── Varios casos a la vez, uno de ellos CTS ────────────────────────────────
+// El bucket de CTS no es el de los demás. Mientras lo fue, los casos de demo
+// salían leyendo `mi-tracker-cts` —donde no está su dataset— y el guard que
+// sube los datasets que faltan se los escribía ahí, encima de las trazas.
+state.selectedExamples = ['cts', 'siem'];
+DOM['input-bucket'] = campo('demos-del-sa');
+DOM['input-prefix'] = campo('siem-logs/');
+DOM['output-index'] = campo('siem-%{+YYYY.MM}');
+
+check('multi: sin origen propio del deploy', casoConOrigenPropio() === null,
+      JSON.stringify(casoConOrigenPropio()));
+
+// La pestaña de CTS muestra su bucket, bloqueado, sin pisar el compartido.
+_applyCaseSourceDest('cts');
+check('tab cts: muestra el suyo', DOM['input-bucket'].value === 'mi-tracker-cts',
+      DOM['input-bucket'].value);
+check('tab cts: bloqueado', DOM['input-bucket'].readOnly === true);
+check('tab cts: guarda el compartido', DOM['input-bucket'].dataset.shared === 'demos-del-sa',
+      DOM['input-bucket'].dataset.shared);
+check('tab cts: siem sigue en el suyo', caseMeta('siem').bucket === 'demos-del-sa',
+      caseMeta('siem').bucket);
+check('tab cts: el body no se lleva el ajeno',
+      collectDeployBody(false).obs_bucket === 'demos-del-sa',
+      collectDeployBody(false).obs_bucket);
+check('tab cts: cada caso con su bucket',
+      JSON.stringify(collectDeployBody(false).cases.map(c => c.slug + '=' + c.obs_bucket))
+        === JSON.stringify(['cts=mi-tracker-cts', 'siem=']),
+      JSON.stringify(collectDeployBody(false).cases.map(c => c.slug + '=' + c.obs_bucket)));
+
+// Y al volver a una pestaña sin origen propio, el campo vuelve a ser editable.
+_applyCaseSourceDest('siem');
+check('tab siem: vuelve el compartido', DOM['input-bucket'].value === 'demos-del-sa',
+      DOM['input-bucket'].value);
+check('tab siem: editable', DOM['input-bucket'].readOnly === false);
+check('tab siem: sin resto guardado', DOM['input-bucket'].dataset.shared === undefined);
+
+// El input del `.conf` compartido tampoco se lleva el bucket de CTS.
+cfg = collectInputConfig();
+check('multi: input del form', cfg.bucket === 'demos-del-sa', cfg.bucket);
+
+// Redeploy tras un F5 con las dos pipelines: ídem.
+body = buildDeployBodyFromStatus({ pipelines: [
+  { slug: 'cts', index: 'cts-%{+YYYY.MM}', obs_prefix: 'CloudTraces/' },
+  { slug: 'siem', index: 'siem-%{+YYYY.MM}', obs_prefix: 'siem-logs/' },
+]});
+check('redeploy multi: bucket compartido', body.obs_bucket === 'demos-del-sa', body.obs_bucket);
+check('redeploy multi: cts con el suyo', body.cases[0].obs_bucket === 'mi-tracker-cts');
+check('redeploy multi: siem sin propio', body.cases[1].obs_bucket === '');
+
 // Custom sigue leyendo del form y nunca trae bucket propio.
-DOM['input-prefix'] = { value: 'mis-logs/' };
-DOM['output-index'] = { value: 'custom-%{+YYYY.MM}' };
+state.selectedExamples = [];
+DOM['input-bucket'] = campo('demos-del-sa');
+DOM['input-prefix'] = campo('mis-logs/');
+DOM['output-index'] = campo('custom-%{+YYYY.MM}');
 state.selectedExamples = [];
 m = caseMeta('custom');
 check('custom prefix del form', m.prefix === 'mis-logs/', m.prefix);
@@ -146,8 +204,12 @@ def _fuente_del_front() -> str:
     partes = [
         # Las declaraciones + applyVerticalsPayload (hasta su invocación al boot).
         _trozo(html, "    let _VDATA = ", "    applyVerticalsPayload(window.__VERTICALS__);"),
-        _trozo(html, "    function caseMeta(id) {", "    // Configuration file REAL de un tipo"),
+        _trozo(html, "    function sharedBucket() {", "    // Configuration file REAL de un tipo"),
+        _trozo(html, "    function _applyCaseSourceDest(id) {",
+               "    // Selecciona el plugin de input"),
         _trozo(html, "    // Collect input config", "    // Collect output config"),
+        _trozo(html, "    function collectDeployBody(startIngestion) {",
+               "    // Extrae un mensaje legible del `detail`"),
         _trozo(html, "    function buildDeployBodyFromStatus(data) {",
                "    // Paso: aplica index template"),
     ]

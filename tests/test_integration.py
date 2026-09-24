@@ -5759,6 +5759,130 @@ def test_corregir_el_origen_tambien_cubre_el_deploy_multi_caso():
     assert 'bucket => "mi-tracker-cts"' in main._build_pipeline_conf_for_case(req.cases[0], req)
 
 
+# ── El bucket de un caso no se le presta a los demás ────────────────────────
+# `obs_bucket` del body es el bucket COMPARTIDO: de ahí leen los casos de demo y
+# ahí se suben sus datasets si faltan. Elegir la pestaña de CTS en el paso 3
+# escribía `mi-tracker-cts` en el campo compartido y no lo devolvía: el deploy
+# salía con los casos de demo leyendo el bucket de trazas del cliente, y el guard
+# de datasets les subía los sintéticos ahí.
+def _settings_con_demo_bucket(monkeypatch, bucket="demos-del-sa"):
+    import maas_integrator
+    monkeypatch.setattr(maas_integrator, "get_huawei_settings",
+                        lambda: {"demo_bucket": bucket})
+    monkeypatch.setattr(main, "get_huawei_settings",
+                        lambda: {"demo_bucket": bucket}, raising=False)
+
+
+def test_el_bucket_de_cts_no_queda_como_el_compartido(monkeypatch):
+    _settings_con_demo_bucket(monkeypatch)
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"),
+                        _case_b("siem", "siem-logs/"),
+                        bucket="mi-tracker-cts")
+
+    notas = main._aislar_bucket_compartido(req)
+
+    assert req.obs_bucket == "demos-del-sa"
+    assert len(notas) == 1 and "siem" in notas[0] and "mi-tracker-cts" in notas[0]
+    # Y con eso cada pipeline vuelve a su bucket.
+    assert 'bucket => "mi-tracker-cts"' in main._build_pipeline_conf_for_case(req.cases[0], req)
+    assert 'bucket => "demos-del-sa"' in main._build_pipeline_conf_for_case(req.cases[1], req)
+
+
+def test_el_bucket_compartido_correcto_no_se_toca(monkeypatch):
+    _settings_con_demo_bucket(monkeypatch)
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"),
+                        _case_b("siem", "siem-logs/"))
+
+    assert main._aislar_bucket_compartido(req) == []
+    assert req.obs_bucket == "demos-del-sa"
+
+
+def test_si_todos_los_casos_traen_su_bucket_el_compartido_no_molesta(monkeypatch):
+    """No hay a quién proteger: nadie lee del compartido."""
+    _settings_con_demo_bucket(monkeypatch)
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"),
+                        bucket="mi-tracker-cts")
+
+    assert main._aislar_bucket_compartido(req) == []
+    assert req.obs_bucket == "mi-tracker-cts"
+
+
+def test_un_caso_live_no_cuenta_como_compartido(monkeypatch):
+    """Su fuente es Kafka/JDBC: no lee de ningún bucket."""
+    _settings_con_demo_bucket(monkeypatch)
+    vivo = main.PipelineCase(slug="kafka-caso", filter_code="filter { }",
+                             index_name="k-%{+YYYY.MM}",
+                             input_config={"plugin_type": "kafka", "kafka": {}})
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"), vivo,
+                        bucket="mi-tracker-cts")
+
+    assert main._aislar_bucket_compartido(req) == []
+    assert req.obs_bucket == "mi-tracker-cts"
+
+
+def test_sin_bucket_de_demos_configurado_el_deploy_corta(monkeypatch):
+    """Vaciarlo es a propósito: el 400 dice dónde cargarlo, y eso es mejor que
+    escribir los datasets de demo en el bucket de trazas del cliente."""
+    _settings_con_demo_bucket(monkeypatch, bucket="")
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"),
+                        _case_b("siem", "siem-logs/"),
+                        bucket="mi-tracker-cts")
+
+    main._aislar_bucket_compartido(req)
+
+    assert req.obs_bucket == ""
+    with pytest.raises(main.HTTPException) as exc:
+        main._check_conf_reads_from_a_bucket(req)
+    assert "siem" in exc.value.detail["message"]
+
+
+def test_el_guard_de_datasets_nunca_sube_al_bucket_de_otro_caso(monkeypatch):
+    """El guard sube el dataset que falte. Sobre el bucket de un caso con origen
+    propio eso sería escribirle sintéticos encima a las trazas del cliente."""
+    mirados, subidos = [], []
+
+    class FakeOBS:
+        def __init__(self, **kw):
+            self.bucket = kw.get("bucket")
+
+        def prefix_has_objects(self, prefix):
+            mirados.append((self.bucket, prefix))
+            return False
+
+        def put_file(self, key, src):
+            subidos.append((self.bucket, key))
+
+        def close(self):
+            pass
+
+    import obs_client
+    monkeypatch.setattr(obs_client, "OBSClient", FakeOBS)
+    monkeypatch.setattr(main, "_demo_dataset_files",
+                        lambda: {"cts": ["trazas.json"], "siem": ["siem.log"]})
+
+    req = _deploy_req_b(_case_b("cts", "CloudTraces/", "mi-tracker-cts"),
+                        _case_b("siem", "siem-logs/"))
+    with pytest.raises(main.HTTPException):
+        main._check_demo_datasets_present(req)
+
+    assert all(b == "demos-del-sa" for b, _ in mirados + subidos), (mirados, subidos)
+    assert not any("CloudTraces" in p for _, p in mirados)
+
+
+@pytest.mark.parametrize("fn", ["terraform_deploy_stream", "terraform_deploy_job"])
+def test_el_deploy_aisla_el_bucket_antes_de_los_guards(fn):
+    """Los dos guards miran `obs_bucket`, y el de datasets además SUBE ahí: si
+    el aislamiento corre después, el upload ya fue al bucket ajeno."""
+    import inspect
+    src = inspect.getsource(getattr(main, fn))
+
+    assert "_aislar_bucket_compartido" in src, f"{fn} no aísla el bucket compartido"
+    assert (src.index("_aislar_bucket_compartido")
+            < src.index("_check_demo_datasets_present")), fn
+    assert (src.index("_aislar_bucket_compartido")
+            < src.index("_check_conf_reads_from_a_bucket")), fn
+
+
 def test_el_deploy_corrige_el_origen_antes_de_escribir_nada(monkeypatch):
     """La corrección tiene que correr antes de `_prepare_deploy_tfvars` y del
     upload a OBS: es `case.obs_bucket` lo que hace que el upload NO escriba
