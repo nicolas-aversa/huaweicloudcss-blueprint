@@ -357,16 +357,16 @@
       border-color: var(--text-muted);
     }
 
-    /* Acción de campo (Probar, Preparar): gris con letra blanca, para que no
-       compita con el primario rojo ni se confunda con el secundario blanco.
-       --text-muted (#8a8b94) da 3.5:1 con blanco: pasa AA para texto grande /
-       bold. Más claro que eso no se lee. */
+    /* Acción de campo (Probar, Preparar): gris claro, para que no compita con
+       el primario rojo ni se confunda con el secundario blanco. Con un gris
+       así de claro la letra va oscura: blanco sobre algo más claro que
+       --text-muted (#8a8b94) ya no se lee. #15161a sobre #dcdbd4 da ~13:1. */
     .btn-muted {
-      background: var(--text-muted);
-      color: #fff;
+      background: #dcdbd4;
+      color: var(--text-primary);
     }
     .btn-muted:hover {
-      background: var(--text-secondary);
+      background: #cbc9c0;
     }
 
     /* (.btn-ghost — botón terciario — se define más abajo, junto al wizard.) */
