@@ -2679,6 +2679,133 @@ def _pct_apply(fraccion: float) -> float:
     return round(_PCT_APPLY_DESDE + (_PCT_APPLY_HASTA - _PCT_APPLY_DESDE) * fraccion, 1)
 
 
+# ── "Iniciar ingesta" sin volver a verificar cada .conf ─────────────────────
+# La fase 2 solo tiene que prender las pipelines. Pero un `terraform apply`
+# completo "actualiza" cada configuración (el provider guarda el .conf con las
+# credenciales como `***` y el nuestro las tiene en claro: diff perpetuo), y
+# CSS vuelve a verificar cada .conf antes de arrancar. Si las configuraciones ya
+# están creadas y no cambiaron, alcanza con aplicar solo la activación.
+_TARGET_ACTIVACION = "-target=huaweicloud_css_logstash_pipeline.pipeline"
+_CONF_EN_STATE = re.compile(r'^huaweicloud_css_logstash_configuration\.pipeline\["([^"]+)"\]$')
+
+
+def _configuraciones_en_state(terraform_dir: Path) -> set[str] | None:
+    """Los slugs con su configuración de Logstash en el state, o None si no se
+    pudo leer (y entonces no se arriesga un arranque directo)."""
+    try:
+        r = subprocess.run(["terraform", "state", "list", "-no-color"], cwd=terraform_dir,
+                           env=tfstate.tf_env(), capture_output=True, text=True, timeout=90)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[deploy] terraform state list falló: {exc!r}")
+        return None
+    if r.returncode != 0:
+        return None
+    return {m.group(1) for ln in (r.stdout or "").splitlines()
+            if (m := _CONF_EN_STATE.match(ln.strip()))}
+
+
+def _pasos_del_apply(start_ingestion: bool, previo: dict, actual: dict,
+                     slugs: list[str], en_state: set[str] | None) -> list[dict]:
+    """Los applies a correr, en orden: `{args, desde, hasta, sin_activar}`.
+
+    - Deploy (fase 1): un apply completo, como siempre.
+    - Iniciar ingesta con las configuraciones ya creadas e iguales al último
+      deploy: solo la activación (`-target`), sin re-verificar ningún .conf.
+    - Iniciar ingesta con algo nuevo o distinto: dos applies. El primero deja
+      las configuraciones listas SIN activar esas pipelines; el segundo activa.
+      La activación ya no depende de las configuraciones en Terraform (ver
+      `active_pipeline_names`), así que en un solo apply podría arrancar una
+      pipeline cuyo .conf todavía se está creando o verificando.
+    """
+    completo = {"args": [], "desde": _PCT_APPLY_DESDE, "hasta": _PCT_APPLY_HASTA, "sin_activar": []}
+    if not start_ingestion or not slugs:
+        return [completo]
+    listas = en_state is not None and all(
+        s in en_state
+        and (previo.get(s) or {}).get("pipeline_conf")
+        and (previo.get(s) or {}).get("pipeline_conf") == (actual.get(s) or {}).get("pipeline_conf")
+        for s in slugs)
+    if listas:
+        return [{"args": [_TARGET_ACTIVACION], "desde": _PCT_APPLY_DESDE,
+                 "hasta": _PCT_APPLY_HASTA, "sin_activar": []}]
+    medio = round((_PCT_APPLY_DESDE + _PCT_APPLY_HASTA) / 2, 1)
+    return [{"args": [], "desde": _PCT_APPLY_DESDE, "hasta": medio, "sin_activar": list(slugs)},
+            {"args": [_TARGET_ACTIVACION], "desde": medio, "hasta": _PCT_APPLY_HASTA,
+             "sin_activar": []}]
+
+
+def _tfvars_sin_activar(terraform_dir: Path, slugs: list[str]) -> str:
+    """Apaga `start_ingestion` de esos slugs en el tfvars del deploy y devuelve
+    el texto original, para reponerlo después del apply."""
+    ruta = terraform_dir / "deploy.auto.tfvars.json"
+    original = ruta.read_text(encoding="utf-8")
+    tfvars = json.loads(original)
+    for s in slugs:
+        if s in (tfvars.get("pipelines") or {}):
+            tfvars["pipelines"][s]["start_ingestion"] = False
+    ruta.write_text(json.dumps(tfvars, ensure_ascii=False, indent=2), encoding="utf-8")
+    return original
+
+
+def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str]):
+    """Corre los applies de `_pasos_del_apply` en orden; devuelve el código del
+    último que corrió (None si se cortó la lectura). Si uno falla no sigue: no
+    se activa una pipeline cuya configuración no quedó bien."""
+    returncode = 0
+    for paso in pasos:
+        original = (_tfvars_sin_activar(terraform_dir, paso["sin_activar"])
+                    if paso["sin_activar"] else None)
+        try:
+            returncode = yield from _correr_apply(terraform_dir, paso["args"],
+                                                  paso["desde"], paso["hasta"], tf_lines)
+        finally:
+            # Pase lo que pase, el tfvars vuelve a decir lo que pidió el deploy.
+            if original is not None:
+                (terraform_dir / "deploy.auto.tfvars.json").write_text(original, encoding="utf-8")
+        if returncode is None or returncode != 0:
+            return returncode
+    return returncode
+
+
+def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
+                  tf_lines: list[str]):
+    """Un `terraform apply`, streameado: eventos SSE mientras corre y, al
+    final, el código de salida (None si se cortó la lectura)."""
+    progreso = progreso_tf.ProgresoApply()
+    process = subprocess.Popen(
+        ["terraform", "apply", "-auto-approve", "-input=false", "-no-color", *args],
+        cwd=terraform_dir,
+        env=tfstate.tf_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    try:
+        for line in process.stdout:
+            tf_lines.append(line)
+            # La línea cruda va al historial (evento `log`): antes se descartaba
+            # salvo que el apply fallara, así que después no había forma de saber
+            # qué hizo el apply. El stream del wizard filtra estos eventos.
+            stripped = line.rstrip()
+            if stripped:
+                yield _sse({"type": "log", "source": "terraform apply", "message": stripped})
+            for ev in progreso.linea(line):
+                if ev["type"] == "apply":
+                    yield _sse({"type": "progress",
+                                "percent": round(desde + (hasta - desde) * ev["fraccion"], 1),
+                                "phase": ev["phase"], "message": ev["message"]})
+                else:   # `plan` (los componentes, una vez) e `item` (uno que cambió)
+                    yield _sse(ev)
+    except Exception as exc:  # noqa: BLE001
+        yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
+        return None
+    finally:
+        process.stdout.close()
+        process.wait()
+    return process.returncode
+
+
 # ── Credenciales en las respuestas ──────────────────────────────────────────
 # El `.conf` de Logstash lleva las credenciales embebidas (las necesita para
 # autenticarse contra OBS). Ese texto viajaba entero al navegador en
@@ -2873,8 +3000,11 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         yield _sse({"type": "log", "message": f"Aviso del configuration file: {aviso}"})
 
     # ── Setup: pipeline.conf + registry + tfvars ──────────────────────────────
+    # El registro de ANTES: para "Iniciar ingesta", decir si las configuraciones
+    # cambiaron desde el último deploy (y si no, arrancar sin re-verificarlas).
+    previo = _read_pipelines_registry(terraform_dir) if request.start_ingestion else {}
     try:
-        _prepare_deploy_tfvars(request, terraform_dir)
+        registry = _prepare_deploy_tfvars(request, terraform_dir)
     except Exception as exc:
         yield _sse({"type": "error", "message": f"Error en setup: {exc}"})
         return
@@ -2949,40 +3079,24 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     yield _sse({"type": "progress", "percent": 5, "phase": "Terraform apply",
                 "message": "Aplicando infraestructura…"})
 
-    progreso = progreso_tf.ProgresoApply()
-    tf_lines: list[str] = []
-    process = subprocess.Popen(
-        ["terraform", "apply", "-auto-approve", "-input=false", "-no-color"],
-        cwd=terraform_dir,
-        env=tfstate.tf_env(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    try:
-        for line in process.stdout:
-            tf_lines.append(line)
-            # La línea cruda va al historial (evento `log`): antes se descartaba
-            # salvo que el apply fallara, así que después no había forma de saber
-            # qué hizo el apply. El stream del wizard filtra estos eventos.
-            stripped = line.rstrip()
-            if stripped:
-                yield _sse({"type": "log", "source": "terraform apply", "message": stripped})
-            for ev in progreso.linea(line):
-                if ev["type"] == "apply":
-                    yield _sse({"type": "progress", "percent": _pct_apply(ev["fraccion"]),
-                                "phase": ev["phase"], "message": ev["message"]})
-                else:   # `plan` (los componentes, una vez) e `item` (uno que cambió)
-                    yield _sse(ev)
-    except Exception as exc:
-        yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
-        return
-    finally:
-        process.stdout.close()
-        process.wait()
+    slugs = ([c.slug for c in request.cases] if request.cases else
+             [(request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)])
+    en_state = _configuraciones_en_state(terraform_dir) if request.start_ingestion else None
+    pasos = _pasos_del_apply(request.start_ingestion, previo, registry, slugs, en_state)
+    if request.start_ingestion:
+        directo = len(pasos) == 1
+        yield _sse({"type": "step", "name": "Arranque de la ingesta", "ok": True, "reason": (
+            "Directo: las configuraciones ya están verificadas y no cambiaron, se activan sin "
+            "volver a verificarlas." if directo else
+            "En dos pasos: primero se crean o actualizan las configuraciones (CSS las verifica) "
+            "y después se activan.")})
 
-    apply_failed = process.returncode != 0
+    tf_lines: list[str] = []
+    returncode = yield from _aplicar_pasos(terraform_dir, pasos, tf_lines)
+    if returncode is None:
+        return                # la lectura se cortó: el error ya salió
+
+    apply_failed = returncode != 0
     yield _sse({"type": "step", "name": "terraform apply", "ok": not apply_failed,
                 "reason": ("".join(tf_lines)[-300:] if apply_failed else "")})
     if apply_failed:

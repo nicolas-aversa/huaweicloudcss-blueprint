@@ -412,10 +412,27 @@ locals {
   # String de hosts ya formateado para inyectar en cada pipeline.
   hosts_literal = "hosts => [\"${join("\", \"", local.opensearch_hosts)}\"]"
 
+  # Nombre de la configuración de cada pipeline: `pipeline-<slug>`, entre 4 y 32
+  # caracteres (ver el recurso). Una sola definición para la configuración y
+  # para la activación.
+  pipeline_conf_names = { for k, v in var.pipelines : k => substr("pipeline-${k}", 0, 32) }
+
   # Nombres de las configuraciones cuya fase 2 está prendida (a activar).
+  #
+  # Salen del nombre calculado y NO del atributo del recurso configuración, a
+  # propósito: leer `huaweicloud_css_logstash_configuration.pipeline[k].name`
+  # hacía que la activación DEPENDIERA de las configuraciones, así que hasta un
+  # `-target` a la activación arrastraba a todas. Y cada apply las "actualiza"
+  # (el provider guarda el .conf con las credenciales como `***`, ver abajo),
+  # con lo que "Iniciar ingesta" re-verificaba cada .conf antes de arrancar.
+  #
+  # Sin esa dependencia, el orden lo garantiza el backend: nunca activa en el
+  # mismo apply una configuración que se crea o cambia (primero un apply que
+  # las deja listas sin activarlas, después uno solo de la activación). Ver
+  # `_pasos_del_apply` en main.py.
   active_pipeline_names = [
     for k, v in var.pipelines :
-    huaweicloud_css_logstash_configuration.pipeline[k].name if v.start_ingestion
+    local.pipeline_conf_names[k] if v.start_ingestion
   ]
 }
 
@@ -434,7 +451,7 @@ resource "huaweicloud_css_logstash_configuration" "pipeline" {
   # invalid" fuera de ese rango): el prefijo `pipeline-` asegura el mínimo de 4
   # incluso para slugs cortos como `cts`; y `pipeline-fintech-transactions` = 29
   # entra en 32. Se acota a 32 por las dudas.
-  name = substr("pipeline-${each.key}", 0, 32)
+  name = local.pipeline_conf_names[each.key]
 
   # Inyectar los hosts de OpenSearch en el `.conf` de esta entrada.
   #
