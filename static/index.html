@@ -2364,9 +2364,9 @@
           <div class="nav-substeps__track" aria-hidden="true">
             <div class="nav-substeps__fill" id="rail-progress-fill"></div>
           </div>
-          <button class="nav-substep active" data-step="1" role="listitem" aria-current="step"><span class="nav-substep__label">Origen</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
+          <button class="nav-substep active" data-step="1" role="listitem" aria-current="step"><span class="nav-substep__label">Datos</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
           <button class="nav-substep" data-step="2" role="listitem"><span class="nav-substep__label">Estructura</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
-          <button class="nav-substep" data-step="3" role="listitem"><span class="nav-substep__label">Fuente y destino</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
+          <button class="nav-substep" data-step="3" role="listitem"><span class="nav-substep__label">Origen y destino</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
           <button class="nav-substep" data-step="4" role="listitem"><span class="nav-substep__label">Desplegar</span><span class="nav-substep__check"><svg class="icon"><use href="#ic-check"/></svg></span></button>
         </div>
         <div class="nav-group__label">Operar</div>
@@ -2679,7 +2679,7 @@
           <div class="wizard-head__row">
             <div class="wizard-head__meta">
               <span class="wizard-head__step">Paso <span id="wizard-step-num">1</span> de 4</span>
-              <span class="wizard-head__label" id="wizard-step-label">Origen</span>
+              <span class="wizard-head__label" id="wizard-step-label">Datos</span>
               <span class="wizard-head__next" id="wizard-step-next">Siguiente: Estructura</span>
             </div>
             <button class="btn-ghost" id="wizard-reset-btn" type="button">
@@ -2861,18 +2861,20 @@
           </div>
         </div>
 
-        <!-- Step 3: Fuente y destino (input + output) -->
+        <!-- Step 3: Origen y destino (input + output). En "Dataset nuevo" que se
+             guarda, solo el origen: el destino lo pone quien lo despliegue
+             desde la tarjeta (ver `syncModoGuardar`). -->
         <div class="step-pane" id="step-3">
           <div class="card">
-            <h2 class="card-title"><span class="step-badge">3</span>Fuente y destino</h2>
-            <p class="card-description">
+            <h2 class="card-title"><span class="step-badge">3</span><span id="step3-title-text">Origen y destino</span></h2>
+            <p class="card-description" id="step3-desc">
               ¿De dónde leemos los logs y a dónde escribimos los procesados?
             </p>
 
             <div id="step3-case-tabs"></div>
 
             <div id="step3-input-section">
-            <h3 class="section-subtitle">Fuente (input)</h3>
+            <h3 class="section-subtitle">Origen (input)</h3>
             <div class="plugin-grid" id="input-plugins">
               <div class="plugin-option selected" data-plugin="obs">
                 <span class="plugin-option__tile"><svg class="icon"><use href="#ic-cloud"/></svg></span>
@@ -2906,6 +2908,7 @@
             <div id="input-config"></div>
             </div><!-- /#step3-input-section -->
 
+            <div id="step3-output-section">
             <h3 class="section-subtitle" style="margin-top:24px;">Destino (output)</h3>
             <div class="plugin-grid" id="output-plugins">
               <div class="plugin-option selected" data-plugin="opensearch">
@@ -2924,13 +2927,14 @@
               </div>
             </div>
             <div id="output-config"></div>
+            </div><!-- /#step3-output-section -->
 
             <div id="pipeline-status" class="hidden" style="margin-top:16px;"></div>
 
             <div class="step-nav">
               <button class="btn btn-secondary" data-go-prev><svg class="icon"><use href="#ic-arrow-left"/></svg> Atrás</button>
               <div class="spacer"></div>
-              <button class="btn btn-primary" id="generate-pipeline-btn">Revisar y desplegar <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
+              <button class="btn btn-primary" id="generate-pipeline-btn"><span id="generate-pipeline-label">Revisar y desplegar</span> <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </div>
           </div>
         </div>
@@ -2938,9 +2942,9 @@
         <!-- Step 4: Desplegar -->
         <div class="step-pane" id="step-4">
           <div class="card">
-            <h2 class="card-title"><span class="step-badge">4</span>Revisar y desplegar</h2>
+            <h2 class="card-title"><span class="step-badge">4</span><span id="step4-title-text">Revisar y desplegar</span></h2>
             <p class="card-description">
-              Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.
+              Revisá cada pipeline (origen, destino y configuration file) y desplegá tu entorno CSS.
               El index template y los dashboards se aplican solos en la puesta en marcha.
             </p>
 
@@ -3647,7 +3651,7 @@
       });
     }
 
-    // Tabs por tipo en el paso 3 (Fuente y destino). Al cambiar de tab, el
+    // Tabs por tipo en el paso 3 (Origen y destino). Al cambiar de tab, el
     // bucket, prefijo OBS (`#input-prefix`) e índice (`#output-index`) se
     // actualizan al tipo seleccionado vía `_applyCaseSourceDest`, que respeta la
     // fuente propia de cada tipo (ej. cts → bucket mi-tracker-cts, prefijo
@@ -4566,8 +4570,10 @@
         el.innerHTML = `
           <div class="summary-card">
             ${row('database', 'Campos', `${cm.fieldsCount} campos`)}
-            ${row('cloud', 'Fuente', `OBS · ${escapeHtml(cm.bucket)} · <code>${escapeHtml(cm.prefix)}</code>`)}
-            ${row('search', 'Destino', `OpenSearch (CSS) · <code>${escapeHtml(cm.index)}</code>`)}
+            ${row('cloud', 'Origen', `OBS · ${escapeHtml(cm.bucket)} · <code>${escapeHtml(cm.prefix)}</code>`)}
+            ${row('search', 'Destino', soloGuarda()
+              ? 'Se elige al desplegarlo desde su tarjeta'
+              : `OpenSearch (CSS) · <code>${escapeHtml(cm.index)}</code>`)}
           </div>`;
       }
 
@@ -4575,14 +4581,15 @@
       const confEl = document.getElementById('deploy-conf-view');
       if (confEl) {
         state.caseConfs = state.caseConfs || {};
+        const mostrar = c => (soloGuarda() ? sinDestino(c) : c);
         if (state.caseConfs[active] != null) {
-          confEl.textContent = state.caseConfs[active];
+          confEl.textContent = mostrar(state.caseConfs[active]);
         } else {
           confEl.textContent = 'Generando configuration file…';
           fetchCaseConf(active).then(conf => {
             const masked = maskConf(conf);
             state.caseConfs[active] = masked;
-            if (state.deployActiveType === active) confEl.textContent = masked;
+            if (state.deployActiveType === active) confEl.textContent = mostrar(masked);
           }).catch(() => {
             if (state.deployActiveType === active) confEl.textContent = '(no se pudo generar el configuration file)';
           });
@@ -6890,7 +6897,7 @@
             const srcHtml = sources.map((src, i) => {
               const prev = src.length > 140 ? src.slice(0, 140) + '…' : src;
               return `<div style="margin-bottom:${i < sources.length - 1 ? 8 : 0}px;">
-                <span style="font-size:var(--fs-xs);font-weight:var(--fw-semi);color:var(--accent);">${labels[i] || 'Fuente ' + (i + 1)}</span>
+                <span style="font-size:var(--fs-xs);font-weight:var(--fw-semi);color:var(--accent);">${labels[i] || 'Origen ' + (i + 1)}</span>
                 <pre style="font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.45;white-space:pre-wrap;word-break:break-all;margin:2px 0 0;color:var(--text-muted);">${escapeHtml(prev)}</pre>
               </div>`;
             }).join('');
@@ -7038,7 +7045,7 @@
       const desc = document.getElementById('step1-desc');
       if (desc) {
         desc.innerHTML = mode === 'custom'
-          ? 'Decinos de dónde salen tus datos y el LLM detecta la estructura. Revisás los campos, confirmás el destino y lo guardás: queda como una card más del grid y se despliega ahí mismo.'
+          ? 'Decinos de dónde salen tus datos y el LLM detecta la estructura. Revisás los campos, confirmás el origen y lo guardás: queda como una card más del grid y se despliega ahí mismo.'
           : 'Elegí un caso de uso pre-cargado: un log real de ejemplo con su pipeline ya armado, listo para desplegar y analizar en OpenSearch.';
       }
 
@@ -7050,6 +7057,8 @@
         state.selectedExamples = [];
         _applySelectionState();
       }
+      // Dataset nuevo: el paso 3 es solo el origen, y el 4 guarda.
+      syncModoGuardar();
     }
 
     document.getElementById('example-mode-toggle')?.addEventListener('click', (e) => {
@@ -7144,7 +7153,14 @@
     // la clase `.active` en los `.step-pane` y en los items del stepper.
     let currentStep = 1;
     const TOTAL_STEPS = 4;
-    const STEP_LABELS = ['Origen', 'Estructura', 'Fuente y destino', 'Desplegar'];
+    // "Datos" y no "Origen" para el paso 1: "Origen" es el del paso 3, de dónde
+    // lee Logstash. Un dataset nuevo que se guarda no tiene destino ni se
+    // despliega acá: sus pasos 3 y 4 son "Origen" y "Guardar".
+    function stepLabels() {
+      const guarda = soloGuarda();
+      return ['Datos', 'Estructura', guarda ? 'Origen' : 'Origen y destino',
+              guarda ? 'Guardar' : 'Desplegar'];
+    }
 
     // Header de progreso sobre las cards: "Paso X de 4", título, hint del
     // siguiente paso y barra de avance.
@@ -7154,9 +7170,10 @@
       const nextEl = document.getElementById('wizard-step-next');
       const fillEl = document.getElementById('wizard-progress-fill');
       const barEl = document.getElementById('wizard-progress');
+      const labels = stepLabels();
       if (numEl) numEl.textContent = n;
-      if (labelEl) labelEl.textContent = STEP_LABELS[n - 1] || '';
-      if (nextEl) nextEl.textContent = n < TOTAL_STEPS ? `Siguiente: ${STEP_LABELS[n]}` : 'Último paso';
+      if (labelEl) labelEl.textContent = labels[n - 1] || '';
+      if (nextEl) nextEl.textContent = n < TOTAL_STEPS ? `Siguiente: ${labels[n]}` : 'Último paso';
       if (fillEl) fillEl.style.width = `${(n / TOTAL_STEPS) * 100}%`;
       if (barEl) barEl.setAttribute('aria-valuenow', String(n));
       // Riel vertical del rail izquierdo: el relleno baja hasta el paso actual.
@@ -7236,7 +7253,11 @@
           checks.push({ id: 'input-jdbc-url', label: 'la JDBC URL',
             test: v => /^jdbc:/.test(v), msg: 'Ingresá una JDBC URL válida (jdbc:…).' });
         }
-        if (state.outputPlugins.includes('opensearch')) {
+        // Sin destino que elegir (dataset nuevo que se guarda), no se valida:
+        // la contraseña obligatoria de un campo oculto trababa el paso.
+        if (soloGuarda()) {
+          // nada de output
+        } else if (state.outputPlugins.includes('opensearch')) {
           checks.push(
             { id: 'output-index', label: 'el índice',
               test: v => !!v && /^[a-z0-9+._\-]*$/.test(v.replace(/%\{[^}]*\}/g, '')),
@@ -7931,13 +7952,66 @@
       if (rt) rt.textContent = unaVez
         ? 'Revisá el pipeline y desplegalo. Lee del bucket del cliente y no se guarda como caso: es para una sola vez.'
         : isBuilder
-          ? 'Revisá el pipeline (fuente, filter y destino) y guardalo como un dataset reutilizable.'
-          : 'Revisá cada pipeline (fuente, destino y configuration file) y desplegá tu entorno CSS.';
+          ? 'Revisá el origen y el filter, y guardalo como un dataset reutilizable. El destino se elige cuando lo despliegues desde su tarjeta.'
+          : 'Revisá cada pipeline (origen, destino y configuration file) y desplegá tu entorno CSS.';
+      syncModoGuardar();
     }
 
     // Un caso que lee de un bucket OBS ajeno se despliega una vez y no se guarda.
     function esObsEnVivo() {
       return state.deployMode === 'custom' && state.sourceMode === 'live' && livePlugin() === 'obs';
+    }
+
+    // "Dataset nuevo" que termina en Guardar, sin desplegar. Ahí el destino no
+    // se elige: lo pone quien lo despliegue desde la tarjeta del caso (su
+    // cluster, su índice, su contraseña), así que pedirlo acá era pedir datos
+    // que nadie iba a usar —y la contraseña, obligatoria, trababa el paso—. La
+    // excepción es OBS en vivo: no se guarda y se despliega ahora.
+    function soloGuarda() {
+      return state.deployMode === 'custom' && !esObsEnVivo();
+    }
+
+    // Deja los pasos 3 y 4 —y el riel— de acuerdo con `soloGuarda()`. Se llama
+    // cada vez que cambia algo que lo decide: el modo, la fuente, el plugin.
+    function syncModoGuardar() {
+      const guarda = soloGuarda();
+      document.getElementById('step3-output-section')?.classList.toggle('hidden', guarda);
+      const textos = {
+        'step3-title-text': guarda ? 'Origen' : 'Origen y destino',
+        'step3-desc': guarda
+          ? '¿De dónde va a leer Logstash tus datos? El destino se elige cuando despliegues el caso desde su tarjeta.'
+          : '¿De dónde leemos los logs y a dónde escribimos los procesados?',
+        'generate-pipeline-label': guarda ? 'Revisar y guardar' : 'Revisar y desplegar',
+        'step4-title-text': guarda ? 'Revisar y guardar' : 'Revisar y desplegar',
+      };
+      for (const [id, t] of Object.entries(textos)) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = t;
+      }
+      const labels = stepLabels();
+      document.querySelectorAll('#pipeline-substeps .nav-substep').forEach(b => {
+        const l = b.querySelector('.nav-substep__label');
+        if (l && labels[+b.dataset.step - 1]) l.textContent = labels[+b.dataset.step - 1];
+      });
+      // El título del header, sin depender de `currentStep` (esto también corre
+      // al arrancar, antes de que exista): el paso activo lo marca el riel.
+      const activo = document.querySelector('#pipeline-substeps .nav-substep.active');
+      const n = activo ? +activo.dataset.step : 1;
+      const labelEl = document.getElementById('wizard-step-label');
+      const nextEl = document.getElementById('wizard-step-next');
+      if (labelEl) labelEl.textContent = labels[n - 1] || '';
+      if (nextEl) nextEl.textContent = n < labels.length ? `Siguiente: ${labels[n]}` : 'Último paso';
+    }
+
+    // Sin destino que mostrar, el configuration file del paso 4 termina en el
+    // filter: el output con `index => ""` que salía antes no es lo que se va a
+    // desplegar, y confundía.
+    function sinDestino(conf) {
+      const i = (conf || '').search(/\n\s*output\s*\{/);
+      if (i < 0) return conf;
+      return conf.slice(0, i).trimEnd() +
+        '\n\n# El destino (output) se arma al desplegar el caso desde su tarjeta:\n' +
+        '# el cluster, el índice y las credenciales de quien lo despliegue.\n';
     }
 
     // Leer la muestra del bucket: primera línea del primer objeto bajo el
