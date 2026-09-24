@@ -381,8 +381,25 @@ def test_la_fuente_en_la_nube_se_llama_asi():
     tarjetas = html[html.index('id="source-cards"'):html.index('id="source-pane-file"')]
 
     assert "Ya están en la nube" in tarjetas
-    assert "OBS bucket, Kafka, base de datos vía JDBC, o Beats." in tarjetas
+    assert "Bucket OBS, Kafka, base de datos vía JDBC, o Beats." in tarjetas
     assert "Llegan en vivo" not in html
+
+
+def test_los_chips_de_la_nube_siguen_el_orden_de_la_tarjeta():
+    """Mismo orden que la descripción de arriba, y el primero elegido por
+    defecto, con su panel visible desde el arranque."""
+    import re
+
+    html = _INDEX.read_text(encoding="utf-8")
+    chips = html[html.index('id="live-plugin"'):html.index('id="live-paste-pane"')]
+
+    assert re.findall(r'data-plugin="(\w+)"', chips) == ["obs", "kafka", "jdbc", "beats"]
+    assert re.search(r'class="src-chip is-active" data-plugin="obs"', chips)
+    assert chips.count("is-active") == 1
+    assert "|| 'obs';" in html[html.index("function livePlugin()"):][:200]
+    # El panel inicial es el de OBS, no el de pegar a mano.
+    assert '<div id="live-obs-pane">' in html
+    assert '<div id="live-paste-pane" class="hidden">' in html
 
 
 def test_las_preguntas_del_paso_2_no_van_con_estilos_inline():

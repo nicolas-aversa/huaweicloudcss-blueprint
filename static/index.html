@@ -2705,7 +2705,7 @@
                 <button type="button" class="src-card" data-src="live" role="radio" aria-checked="false">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-activity"/></svg></span>
                   <span class="src-card__name">Ya están en la nube</span>
-                  <span class="src-card__desc">OBS bucket, Kafka, base de datos vía JDBC, o Beats.</span>
+                  <span class="src-card__desc">Bucket OBS, Kafka, base de datos vía JDBC, o Beats.</span>
                 </button>
               </div>
 
@@ -2723,22 +2723,25 @@
                 <div class="form-group" style="margin-bottom:14px;">
                   <label class="form-label">¿Qué fuente?</label>
                   <div class="src-chips" id="live-plugin" role="radiogroup">
-                    <button type="button" class="src-chip is-active" data-plugin="kafka" role="radio" aria-checked="true">
-                      <svg class="icon"><use href="#ic-queue"/></svg> Kafka
+                    <!-- Mismo orden que la tarjeta "Ya están en la nube", y el primero
+                         elegido por defecto. -->
+                    <button type="button" class="src-chip is-active" data-plugin="obs" role="radio" aria-checked="true">
+                      <svg class="icon"><use href="#ic-cloud"/></svg> Bucket OBS
                     </button>
-                    <button type="button" class="src-chip" data-plugin="beats" role="radio" aria-checked="false">
-                      <svg class="icon"><use href="#ic-activity"/></svg> Beats
+                    <button type="button" class="src-chip" data-plugin="kafka" role="radio" aria-checked="false">
+                      <svg class="icon"><use href="#ic-queue"/></svg> Kafka
                     </button>
                     <button type="button" class="src-chip" data-plugin="jdbc" role="radio" aria-checked="false">
                       <svg class="icon"><use href="#ic-database"/></svg> Base de datos (JDBC)
                     </button>
-                    <button type="button" class="src-chip" data-plugin="obs" role="radio" aria-checked="false">
-                      <svg class="icon"><use href="#ic-cloud"/></svg> Bucket OBS
+                    <button type="button" class="src-chip" data-plugin="beats" role="radio" aria-checked="false">
+                      <svg class="icon"><use href="#ic-activity"/></svg> Beats
                     </button>
                   </div>
                 </div>
-                <!-- Kafka / Beats / JDBC: pegás la muestra a mano. -->
-                <div id="live-paste-pane">
+                <!-- Kafka / Beats / JDBC: pegás la muestra a mano. Oculto de
+                     entrada: el chip elegido por defecto es OBS. -->
+                <div id="live-paste-pane" class="hidden">
                   <label class="form-label">Pegá 2-3 líneas de muestra</label>
                   <textarea id="builder-paste" class="form-input" rows="5"
                     placeholder="Pegá 2-3 líneas representativas de tu log."
@@ -2749,7 +2752,7 @@
                      que puede mostrar el dato antes de desplegar, y por eso mismo
                      la única que NO se guarda como caso: los datos son de un
                      tercero y viven en su bucket. Se despliega una vez y listo. -->
-                <div id="live-obs-pane" class="hidden">
+                <div id="live-obs-pane">
                   <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
                     <div class="form-group" style="flex:1; min-width:180px; margin:0;">
                       <label class="form-label" for="live-obs-bucket">Bucket</label>
@@ -7953,7 +7956,7 @@
 
     // Plugin de la fuente en vivo elegido con los chips (antes era un <select>).
     function livePlugin() {
-      return document.querySelector('#live-plugin .src-chip.is-active')?.dataset.plugin || 'kafka';
+      return document.querySelector('#live-plugin .src-chip.is-active')?.dataset.plugin || 'obs';
     }
 
     function _syncLivePlugin() {
