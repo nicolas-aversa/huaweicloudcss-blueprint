@@ -6672,9 +6672,15 @@
                 ? `<span class="pipe-row__state" style="background:var(--accent-tint);color:var(--accent-hover);" title="Logstash no pudo compilar el configuration file (${escapeHtml(p.config_status)}): revisá el log de la pipeline en la consola de CSS.">Configuración inválida</span>`
                 : `<span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>`}
             </div>`).join('')
-          + `<div style="display:flex;justify-content:flex-end;">
-               <button class="btn btn-secondary btn-sm" id="infra-verify-btn">${icon('check')} Verificar ingesta</button>
-             </div>`
+          // Verificar recién tiene sentido con algo ingestando. Con todo en
+          // pausa el botón estaba igual, arriba de la puesta en marcha, y se
+          // leía como el primer paso: se tocaba antes de iniciar la ingesta y
+          // decía "sin documentos" de pipelines que ni habían arrancado.
+          + (pipelines.some(p => p.active)
+            ? `<div style="display:flex;justify-content:flex-end;">
+                 <button class="btn btn-secondary btn-sm" id="infra-verify-btn">${icon('check')} Verificar ingesta</button>
+               </div>`
+            : '')
         : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;
 
       // Un paso de la secuencia de puesta en marcha (número/check + label + botón).
@@ -6758,6 +6764,11 @@
             </div>
           </div>
         </div>
+        ${/* Lo que falta hacer va primero: con la puesta en marcha debajo de
+             las pipelines, lo que se veía primero era el estado ("En pausa",
+             "Verificar ingesta") y no el paso siguiente. Terminada, la
+             secuencia se va y queda el cierre después de las pipelines. */ ''}
+        ${setupPanel}
         <div class="section-card">
           <div class="section-card__head" style="margin-bottom:12px;">
             <span class="section-card__tile">${icon('database')}</span>
@@ -6768,7 +6779,7 @@
           </div>
           <div class="pipe-list">${pipeRows}</div>
         </div>
-        ${donePanel}${setupPanel}
+        ${donePanel}
         <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
         <p class="form-hint" style="margin:2px 0 14px;">Podés correr otro log <strong>en paralelo, en este mismo entorno</strong>: "Nuevo pipeline" agrega una pipeline con su propio índice y prefijo OBS (no toca las que ya corren, sin re-provisionar).</p>
         <div class="infra-actions" style="display:flex; gap:12px; flex-wrap:wrap;">
