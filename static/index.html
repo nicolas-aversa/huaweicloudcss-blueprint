@@ -1060,6 +1060,13 @@
     .mapping-header-title .mapping-verify .icon {
       width: 13px; height: 13px; color: currentColor; flex: none;
     }
+    /* Quién armó el .conf cuando no fue desde las filas: informativo, no un
+       resultado — neutro, sin el verde de "verificado". */
+    .mapping-verify.is-neutral {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      border-color: var(--border-subtle);
+    }
     .mapping-verify.is-partial {
       background: rgba(234, 179, 8, 0.12);
       color: #a16207;
@@ -3376,7 +3383,21 @@
     // cada fila: es la prueba, antes de desplegar, de que el .conf entiende tus
     // datos.
     function chipVerificacion(v) {
-      if (!v || v.fuente !== 'perfilador' || !v.filas) return '';
+      if (!v) return '';
+      // Quién armó el configuration file, dicho en la pantalla: no quedaba
+      // claro si lo había escrito el LLM o la plataforma.
+      if (v.fuente !== 'perfilador' || !v.filas) {
+        const quien = {
+          llm: ['spark', 'Armado con GLM-5.3',
+                'Tu log no es una tabla: el configuration file lo escribió GLM-5.3 y lo validamos contra la gramática de Logstash 7.10 antes de mostrártelo.'],
+          catalogo: ['check', 'Formato conocido',
+                     'Reconocimos el formato (syslog, CEF, Apache o log4j) y usamos su parser fijo, sin LLM.'],
+          determinista: ['check', 'Parser fijo',
+                         'JSON o clave=valor: el configuration file sale de un parser fijo, sin LLM.'],
+        }[v.fuente];
+        if (!quien) return '';
+        return `<span class="mapping-verify is-neutral" title="${escapeHtml(quien[2])}">${icon(quien[0])}${escapeHtml(quien[1])}</span>`;
+      }
       const completa = v.filas_ok === v.filas;
       // Cuando salen todas, el número que importa es cuántas se probaron, no la
       // fracción: "200/200" hace mirar dos veces para entender que está bien.
@@ -3385,7 +3406,7 @@
         : `${v.filas_ok} de ${v.filas} filas verificadas`;
       const detalle = (v.problemas || []).join(' · ')
         || (completa
-            ? `Probamos el .conf contra ${v.filas} filas de tu muestra: todas se leen con los tipos y el formato de fecha detectados.`
+            ? `El configuration file lo armó la plataforma a partir de tus filas, sin LLM (el LLM solo pone nombres, roles y preguntas). Lo probamos contra ${v.filas} filas de tu muestra: todas se leen con los tipos y el formato de fecha detectados.`
             : 'Algunas filas no se leen con los tipos detectados.');
       return `<span class="mapping-verify${completa ? '' : ' is-partial'}" title="${escapeHtml(detalle)}">
         ${icon(completa ? 'check' : 'alert-triangle')}${escapeHtml(texto)}</span>`;
@@ -4678,13 +4699,17 @@
       // ── Cierre: qué se va a crear / qué guarda el caso (closure antes del CTA) ──
       const closureEl = document.getElementById('deploy-closure');
       if (closureEl) {
+        // Local a propósito: vivía acá, se mudó a `syncStep4Actions` junto con
+        // los botones, y estas dos lecturas quedaron apuntando a nada —el paso
+        // 4 tiraba "isBuilder is not defined" cada vez que se pintaba—.
+        const isBuilder = soloGuarda();
         const labels = types.map(id => (LOG_EXAMPLES.find(e => e.id === id)?.label) || id);
         const hasCaps = types.some(t => CAPABILITY_SLUGS.has(t)) || state.deployMode === 'custom';
         const li = (ic, txt) => `<li style="display:flex; align-items:center; gap:9px; font-size:var(--fs-base); color:var(--text-secondary); padding:4px 0;">
           <span style="width:26px;height:26px;border-radius:7px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none;">${icon(ic)}</span>
           <span>${txt}</span></li>`;
         const items = isBuilder ? [
-          li('code', 'Configuration file de Logstash (con tu fuente elegida)'),
+          li('code', 'Configuration file de Logstash (con tu origen elegido)'),
           li('dashboard', 'Index template + dashboards de tus campos'),
           li('spark', 'Chatbot (NL→PPL) + forecasts sobre tus datos'),
           li('plus', 'Queda como una card más del grid, lista para desplegar cuando quieras'),

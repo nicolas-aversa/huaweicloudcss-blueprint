@@ -957,7 +957,9 @@ class FieldMapping(BaseModel):
 class Verificacion(BaseModel):
     """Qué tan bien le va al .conf con las filas de muestra."""
 
-    fuente: str = Field(description="perfilador | catalogo | llm")
+    fuente: str = Field(description=("Quién armó el .conf: perfilador (desde las filas) | "
+                                     "determinista (JSON, clave=valor) | catalogo (syslog, CEF, "
+                                     "Apache, log4j) | llm"))
     formato: str = Field(default="", description="delimitado | json | kv (si lo armó el perfilador).")
     filas: int = 0
     filas_ok: int = 0
@@ -1509,7 +1511,9 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
             previous_filter=raiz.sacar(request.previous_filter),
             input_type=request.input_type,
         )
-        verificacion = Verificacion(fuente="llm")
+        # Quién lo armó: un parser fijo (JSON, clave=valor), el generador de un
+        # formato conocido (syslog, CEF, Apache, log4j) o el LLM.
+        verificacion = Verificacion(fuente=result.get("generador") or "llm")
     # En modo namespaced los campos NO son ECS (is_ecs=False, field_path bajo el
     # namespace). Solo enriquecemos con classify_field los campos que vienen
     # de un detector del catálogo (Apache/Syslog/CEF) — esos sí traen ecs_path

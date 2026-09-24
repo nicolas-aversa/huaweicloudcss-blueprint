@@ -211,3 +211,41 @@ def test_el_llm_ve_hasta_cinco_lineas(monkeypatch):
 
     assert all(f"numero {i} " in visto["user"] for i in range(5))
     assert "numero 5 " not in visto["user"]
+
+
+# ── Quién armó el .conf, dicho en la pantalla ───────────────────────────────
+@pytest.mark.parametrize("raw, fuente", [
+    ("<34>Oct 11 22:14:15 mymachine su: 'su root' failed for lonvick on /dev/pts/8\n"
+     "<34>Oct 11 22:14:16 mymachine su: 'su root' failed for lonvick on /dev/pts/9", "catalogo"),
+    ('{\n  "a": 1,\n  "b": {"c": "x"}\n}', "determinista"),
+    ("2026-05-19 10:15:30 - host01 a=1|b=2|c=hola\n2026-05-19 10:15:31 - host01 a=2|b=3|c=chau",
+     "determinista"),
+    (TELEMETRIA, "perfilador"),
+], ids=["syslog", "json-indentado", "pipe-kv", "csv"])
+def test_la_respuesta_dice_quien_armo_el_conf(monkeypatch, raw, fuente):
+    """No quedaba claro si el .conf lo había escrito el LLM: ninguno de estos
+    pasa por él."""
+    _no_llamar_al_llm_de_verdad(monkeypatch)
+    assert _generar(raw)["verificacion"]["fuente"] == fuente
+
+
+def test_lo_que_arma_el_llm_se_marca_como_llm(monkeypatch):
+    import types
+    import maas_integrator as mi
+
+    def _create(**kw):
+        msg = types.SimpleNamespace(content='{"filter_code": "filter { }", "fields": []}')
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    monkeypatch.setattr(mi, "_build_client", lambda: types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=_create))))
+    body = _generar("linea rara sin formato conocido\notra linea rara sin formato")
+    assert body["verificacion"]["fuente"] == "llm"
+
+
+def _no_llamar_al_llm_de_verdad(monkeypatch):
+    import maas_integrator as mi
+
+    def _explota():
+        raise AssertionError("esto no tiene por qué ir al LLM")
+    monkeypatch.setattr(mi, "_build_client", _explota)

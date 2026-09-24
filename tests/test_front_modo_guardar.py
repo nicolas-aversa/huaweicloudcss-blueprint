@@ -107,6 +107,28 @@ def test_el_paso_3_de_un_dataset_nuevo_es_solo_el_origen(tmp_path):
     assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
 
 
+def test_el_resumen_del_paso_4_declara_lo_que_usa():
+    """`isBuilder` se mudó a `syncStep4Actions` junto con los botones y el
+    resumen del paso 4 lo siguió leyendo: "isBuilder is not defined" cada vez
+    que se pintaba, en el builder y en la demo."""
+    html = _INDEX.read_text(encoding="utf-8")
+    ini = html.index("    function renderDeploySummary(")
+    fn = html[ini:html.index("\n    }\n", ini)]
+    if "isBuilder" in fn:
+        assert "const isBuilder = " in fn, "renderDeploySummary usa isBuilder sin declararlo"
+    assert "const isBuilder = soloGuarda();" in fn
+
+
+def test_el_chip_dice_quien_armo_el_conf():
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function chipVerificacion(v)")
+    fn = html[i:html.index("function bloquePreguntas(", i)]
+    for fuente in ("llm:", "catalogo:", "determinista:"):
+        assert fuente in fn, fuente
+    assert "Armado con GLM-5.3" in fn
+    assert "sin LLM" in fn
+
+
 def test_guardar_no_valida_el_destino():
     """La contraseña de OpenSearch era obligatoria aunque el campo no se usara."""
     html = _INDEX.read_text(encoding="utf-8")

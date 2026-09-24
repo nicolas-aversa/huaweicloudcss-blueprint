@@ -1908,6 +1908,14 @@ def _regenerate_with_feedback(
     }
 
 
+def _generado_por(generador: str, result: dict) -> dict:
+    """Marca quién armó el filter: `determinista` (JSON, clave=valor, pipe),
+    `catalogo` (syslog, CEF, Apache, log4j) o `llm`. El paso 2 lo muestra: sin
+    esto no había forma de saber si el .conf lo había escrito el modelo."""
+    result["generador"] = generador
+    return result
+
+
 def generate_logstash_filter(
     sample_log: str, namespace: str = "data", ecs_overlay: bool = False,
     feedback: str = "", previous_filter: str = "",
@@ -1961,11 +1969,11 @@ def generate_logstash_filter(
     # Con feedback de validación: directo al LLM (los parsers determinísticos
     # reproducirían exactamente el filter que acaba de fallar).
     if (feedback or "").strip():
-        return _regenerate_with_feedback(
+        return _generado_por("llm", _regenerate_with_feedback(
             stripped, namespace=namespace, ecs_overlay=ecs_overlay,
             feedback=feedback.strip(), previous_filter=(previous_filter or "").strip(),
             input_type=input_type,
-        )
+        ))
 
     # JDBC: datos estructurados — skip parsers determinísticos, ir al LLM con
     # prompt especializado (no grok/kv/json, solo date + mutate).
@@ -1984,14 +1992,14 @@ def generate_logstash_filter(
         )
         if json_result:
             json_result["multiline_hint"] = detect_multiline(lines)
-            return json_result
+            return _generado_por("determinista", json_result)
     elif not is_jdbc and stripped.startswith("{") and stripped.endswith("}"):
         json_result = _generate_json_filter(
             stripped, namespace=namespace, ecs_overlay=ecs_overlay
         )
         if json_result:
             json_result["multiline_hint"] = detect_multiline(lines)
-            return json_result
+            return _generado_por("determinista", json_result)
 
     # 1) Catálogo de formatos especializados (Apache, Syslog, CEF, CSV).
     # Estos detectores son más específicos que los del path básico y los
@@ -2000,7 +2008,7 @@ def generate_logstash_filter(
     if not is_jdbc:
         catalog_result = _catalog_try_match(lines)
         if catalog_result is not None:
-            return catalog_result
+            return _generado_por("catalogo", catalog_result)
 
     # 2) Formatos básicos (pipe-kv, space-kv). JSON ya se manejó arriba.
     fmt = _detect_log_format(first_line) if not is_jdbc else ""
@@ -2010,13 +2018,13 @@ def generate_logstash_filter(
             first_line, namespace=namespace, ecs_overlay=ecs_overlay
         )
         result["multiline_hint"] = detect_multiline(lines)
-        return result
+        return _generado_por("determinista", result)
     if fmt == "space_kv":
         result = _generate_space_kv_filter(
             first_line, namespace=namespace, ecs_overlay=ecs_overlay
         )
         result["multiline_hint"] = detect_multiline(lines)
-        return result
+        return _generado_por("determinista", result)
 
     # 3) Formato no reconocido: cae al LLM. Truncamos para no quemar contexto:
     # capando los values de cada par k=v a 20 chars en logs pipe-separated muy
@@ -2179,7 +2187,7 @@ def generate_logstash_filter(
         problemas = _problemas_del_filtro(corregido["filter_code"])
         if not problemas:
             corregido["multiline_hint"] = detect_multiline(lines)
-            return corregido
+            return _generado_por("llm", corregido)
         filter_code = corregido["filter_code"]
         normalized_fields = corregido.get("fields") or normalized_fields
     if problemas:
@@ -2187,11 +2195,11 @@ def generate_logstash_filter(
             "El modelo no logró generar un filter válido para este log. "
             f"Lo que sigue mal: {problemas}")
 
-    return {
+    return _generado_por("llm", {
         "filter_code": filter_code.strip(),
         "fields": normalized_fields,
         "multiline_hint": detect_multiline(lines),
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
