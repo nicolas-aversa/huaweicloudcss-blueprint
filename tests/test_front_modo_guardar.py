@@ -235,9 +235,11 @@ def test_provisionando_es_compacto_y_la_lista_va_en_columnas():
     css = html[:html.index("</style>")]
     lista = css[css.index("    .deploy-progress__list {"):]
     lista = lista[:lista.index("}")]
-    assert "columns: 280px" in lista
-    grupo = css[css.index("    .deploy-progress__grupo {"):]
-    assert "break-inside: avoid" in grupo[:grupo.index("}")]
+    # 2×2: CSS | NAT Gateway, y VPC | EIP abajo (ver PROGRESO_ORDEN).
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in lista
+    angosta = css[css.index("@media (max-width: 720px) {\n      .deploy-progress__list"):]
+    assert ".deploy-progress__list { grid-template-columns: minmax(0, 1fr); }" in angosta[:120]
+    assert "const PROGRESO_ORDEN = ['css', 'nat', 'vpc', 'eip', 'otros'];" in html
     prov = css[css.index("    .infra-empty.is-provisioning {"):]
     prov = prov[:prov.index("}")]
     assert "grid-template-columns: auto minmax(0, 1fr)" in prov and "text-align: left" in prov

@@ -95,13 +95,14 @@ progresoEvento(raiz, { type: 'item', key: 'eip', grupo: 'eip', label: 'IP públi
                        percent: 0, done: false, estado: 'Creando' });
 progresoEvento(raiz, { type: 'item', key: 'sg', grupo: 'vpc', label: 'Reglas de entrada',
                        percent: 0, done: false, estado: 'Creando' });
-check('orden: eip antes de vpc', grupos(raiz) === 'css,nat,eip,vpc', grupos(raiz));
+// La grilla es de 2×2: CSS | NAT arriba, VPC | EIP abajo (VPC debajo de CSS).
+check('orden: css, nat, vpc, eip', grupos(raiz) === 'css,nat,vpc,eip', grupos(raiz));
 
 // Un componente que el plan no traía aparece igual.
 progresoEvento(raiz, { type: 'item', key: 'otros', label: 'Otros recursos',
                        percent: 10, done: false, estado: 'Creando' });
 check('nuevo: aparece', !!fila('otros'));
-check('nuevo: sin grupo va a Otros, al final', grupos(raiz) === 'css,nat,eip,vpc,otros', grupos(raiz));
+check('nuevo: sin grupo va a Otros, al final', grupos(raiz) === 'css,nat,vpc,eip,otros', grupos(raiz));
 
 // El global.
 progresoEvento(raiz, { type: 'progress', percent: 41.6, phase: 'CSS OpenSearch cluster',

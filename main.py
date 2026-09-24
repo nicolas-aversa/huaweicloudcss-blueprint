@@ -2867,6 +2867,12 @@ def _tfvars_sin_activar(terraform_dir: Path, slugs: list[str]) -> str:
 # API del CSS después del apply. Igual van en la lista, bajo CSS, desde el
 # principio: sin la ruta a MaaS el agente conversacional no llega al modelo, y
 # era el único paso del deploy que no se veía.
+# Las filas de las rutas, con su nombre en un solo lugar: lo usan el anuncio
+# (plan), las dos actualizaciones del deploy y la vista previa.
+_RUTA_MAAS = ("rutas:maas", "Rutas del cluster · IPs servicio MaaS")
+_RUTA_FUENTES = ("rutas:fuentes", "Rutas del Logstash · IPs de las fuentes")
+
+
 def _item_ruta(key: str, label: str, estado: str = "En espera", done: bool = False,
                error: bool = False) -> dict:
     item = {"key": key, "grupo": "css", "label": label, "percent": 100 if done else 0,
@@ -2880,9 +2886,9 @@ def _items_de_rutas(request: "TerraformDeployRequest") -> list[dict]:
     """Las rutas que va a agregar este deploy (solo la fase 1), en espera."""
     if request.start_ingestion:
         return []
-    items = [_item_ruta("rutas:maas", "Rutas → MaaS")]
+    items = [_item_ruta(*_RUTA_MAAS)]
     if _case_source_ips(request):
-        items.append(_item_ruta("rutas:fuentes", "Rutas → fuentes"))
+        items.append(_item_ruta(*_RUTA_FUENTES))
     return items
 
 
@@ -3358,7 +3364,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     # provisión (cluster nuevo). Best-effort. (Este es el path REAL del deploy —
     # el frontend usa /deploy-stream, no /terraform/deploy.)
     if not request.start_ingestion:
-        yield _sse({"type": "item", **_item_ruta("rutas:maas", "Rutas → MaaS", "Configurando")})
+        yield _sse({"type": "item", **_item_ruta(*_RUTA_MAAS, "Configurando")})
         try:
             cluster_id = (tf_outputs.get("opensearch_cluster_id") or {}).get("value", "")
             r = _add_css_cluster_routes(
@@ -3373,7 +3379,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
                     "ok": ok_maas, "reason": motivo_maas})
         yield _sse({"type": "item", **_item_ruta(
-            "rutas:maas", "Rutas → MaaS", "listo" if ok_maas else "Falló",
+            *_RUTA_MAAS, "listo" if ok_maas else "Falló",
             done=ok_maas, error=not ok_maas)})
 
         # Rutas del cluster de LOGSTASH hacia las fuentes del cliente (broker
@@ -3381,7 +3387,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         # el SNAT esté puesto. Solo si hay algún caso con fuente externa.
         source_ips = _case_source_ips(request)
         if source_ips:
-            yield _sse({"type": "item", **_item_ruta("rutas:fuentes", "Rutas → fuentes",
+            yield _sse({"type": "item", **_item_ruta(*_RUTA_FUENTES,
                                                      "Configurando")})
             try:
                 ls_id = (tf_outputs.get("logstash_cluster_id") or {}).get("value", "")
@@ -3398,7 +3404,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                 nombre_f = "Rutas del Logstash → fuentes del cliente"
             yield _sse({"type": "step", "name": nombre_f, "ok": ok_f, "reason": motivo_f})
             yield _sse({"type": "item", **_item_ruta(
-                "rutas:fuentes", "Rutas → fuentes", "listo" if ok_f else "Falló",
+                *_RUTA_FUENTES, "listo" if ok_f else "Falló",
                 done=ok_f, error=not ok_f)})
 
     # Security Analytics (Sigma rules + detector) para SIEM.
@@ -3523,7 +3529,7 @@ _MUESTRA_APPLY = Path(__file__).resolve().parent / "docs" / "muestras" / "terraf
 
 def _vista_previa_deploy(paso: float):
     """Los eventos del deploy de muestra. `paso`: segundos entre líneas."""
-    extras = [_item_ruta("rutas:maas", "Rutas → MaaS")]
+    extras = [_item_ruta(*_RUTA_MAAS)]
     progreso = progreso_tf.ProgresoApply(adicionales=len(extras))
     yield _sse({"type": "progress", "percent": 1, "phase": "Preparando",
                 "message": "Vista previa: reproduciendo un deploy real…"})
@@ -3533,10 +3539,10 @@ def _vista_previa_deploy(paso: float):
         yield from eventos
         if paso and any('"progress"' in e for e in eventos):
             time.sleep(paso)
-    yield _sse({"type": "item", **_item_ruta("rutas:maas", "Rutas → MaaS", "Configurando")})
+    yield _sse({"type": "item", **_item_ruta(*_RUTA_MAAS, "Configurando")})
     if paso:
         time.sleep(paso * 4)
-    yield _sse({"type": "item", **_item_ruta("rutas:maas", "Rutas → MaaS", "listo", done=True)})
+    yield _sse({"type": "item", **_item_ruta(*_RUTA_MAAS, "listo", done=True)})
     yield _sse({"type": "progress", "percent": _PCT_FINALIZANDO, "phase": "Finalizando",
                 "message": "Guardando estado del deploy…"})
     yield _sse({"type": "complete", "result": {"status": "preview"}})

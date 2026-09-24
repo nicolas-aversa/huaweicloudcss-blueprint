@@ -56,9 +56,9 @@ _GRUPO = {
 _ETIQUETAS = {
     "opensearch": "OpenSearch cluster",
     "logstash": "Logstash cluster",
-    "nat": "Gateway",
+    "nat": "Public Gateway",
     "eip": "IP pública",
-    "snat": "SNAT (salida)",
+    "snat": "SNAT · salida a MaaS",
     "sg": "Reglas de entrada",
     "activar": "Activar pipelines",
     "otros": "Otros recursos",

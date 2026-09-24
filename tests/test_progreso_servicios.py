@@ -62,8 +62,10 @@ def test_el_deploy_actualiza_las_filas_de_las_rutas():
     i = src.index("def _deploy_stream_gen_raw(")
     cuerpo = src[i:src.index("\ndef ", i + 10)]
     assert "extras=_items_de_rutas(request)" in cuerpo
-    for key in ("rutas:maas", "rutas:fuentes"):
-        assert re.search(rf'_item_ruta\("{key}", "[^"]+",\s*"Configurando"\)', cuerpo), key
+    for ruta in ("_RUTA_MAAS", "_RUTA_FUENTES"):
+        assert re.search(rf'_item_ruta\(\*{ruta},\s*"Configurando"\)', cuerpo), ruta
+    # Una sola etiqueta por ruta: el anuncio, el deploy y la vista previa la comparten.
+    assert "Rutas →" not in src
     assert "done=ok_maas, error=not ok_maas" in cuerpo
     assert "done=ok_f, error=not ok_f" in cuerpo
 
@@ -98,6 +100,28 @@ def test_el_plan_trae_las_filas_que_no_son_de_terraform(monkeypatch, tmp_path):
 
 
 # ── Los logos ───────────────────────────────────────────────────────────────
+def test_las_rutas_se_llaman_como_en_la_consola():
+    assert main._RUTA_MAAS == ("rutas:maas", "Rutas del cluster · IPs servicio MaaS")
+    assert main._RUTA_FUENTES == ("rutas:fuentes", "Rutas del Logstash · IPs de las fuentes")
+    assert progreso_tf._ETIQUETAS["snat"] == "SNAT · salida a MaaS"
+    assert progreso_tf._ETIQUETAS["nat"] == "Public Gateway"
+
+
+def test_los_logos_son_los_oficiales_de_draw_io():
+    """`build_logos_servicios.py` los baja de huaweicloud-latam/drawio-libraries;
+    el SVG de draw.io trae su propio fondo de color (el mosaico de la Consola)."""
+    import build_logos_servicios as b
+    assert set(b.LOGOS) == {"css", "nat", "eip", "vpc"}
+    for archivo in b.LOGOS:
+        svg = (_STATIC / "servicios" / f"{archivo}.svg").read_text(encoding="utf-8")
+        assert "Pixso" not in svg, "la <desc> del editor se saca"
+    # El `<title>` va como primer hijo del <svg>.
+    import base64
+    item = {"data": "data:image/svg+xml;base64,"
+            + base64.b64encode(b'<svg viewBox="0 0 72 72"><desc>Created with Pixso.</desc><g/></svg>').decode()}
+    assert b.svg_de(item, "EIP") == '<svg viewBox="0 0 72 72"><title>EIP</title><g/></svg>\n'
+
+
 def test_cada_servicio_tiene_su_logo_y_existe():
     html = (_STATIC / "index.html").read_text(encoding="utf-8")
     bloque = html[html.index("const PROGRESO_GRUPOS = {"):]
@@ -107,11 +131,12 @@ def test_cada_servicio_tiene_su_logo_y_existe():
     for servicio, ruta in logos.items():
         if servicio == "otros":
             continue
+        assert ruta == f"/static/servicios/{servicio}.svg", "el oficial, de build_logos_servicios.py"
         archivo = _STATIC / ruta.removeprefix("/static/")
         assert archivo.is_file(), ruta
         if archivo.suffix == ".svg":
             raiz = ET.fromstring(archivo.read_text(encoding="utf-8"))
-            assert raiz.get("viewBox") == "0 0 1024 1024", ruta
+            assert raiz.get("viewBox") == "0 0 72 72", f"{ruta}: no es el ícono oficial de draw.io"
             assert raiz.find("{http://www.w3.org/2000/svg}title") is not None, "accesible"
 
 

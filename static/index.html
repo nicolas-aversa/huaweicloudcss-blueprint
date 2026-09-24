@@ -1956,12 +1956,15 @@
     .deploy-progress__list {
       list-style: none; margin: 14px 0 0; padding: 12px 0 0;
       border-top: 1px solid var(--border-subtle);
-      columns: 280px; column-gap: 28px;
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px;
+      align-items: start;
     }
-    /* Columnas balanceadas y no grilla: los grupos chicos (EIP, VPC) se apilan
-       en vez de dejar un hueco al lado del grande. */
-    .deploy-progress__grupo { min-width: 0; break-inside: avoid; margin-bottom: 16px; }
-    .deploy-progress__grupo:last-child { margin-bottom: 0; }
+    /* Grilla de 2×2 (ver PROGRESO_ORDEN): CSS | NAT Gateway, y abajo VPC | EIP.
+       Con columnas balanceadas la derecha apilaba tres servicios y quedaba alta. */
+    .deploy-progress__grupo { min-width: 0; }
+    @media (max-width: 720px) {
+      .deploy-progress__list { grid-template-columns: minmax(0, 1fr); }
+    }
     .deploy-progress__servicio {
       display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
       font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary);
@@ -5216,13 +5219,14 @@
     // Los servicios de Huawei Cloud que levanta un deploy, con su logo. El
     // backend dice en qué `grupo` va cada componente.
     const PROGRESO_GRUPOS = {
-      css: { nombre: 'CSS', logo: '/static/css.png' },
+      css: { nombre: 'CSS', logo: '/static/servicios/css.svg' },
       nat: { nombre: 'NAT Gateway', logo: '/static/servicios/nat.svg' },
       eip: { nombre: 'EIP', logo: '/static/servicios/eip.svg' },
       vpc: { nombre: 'VPC · Security group', logo: '/static/servicios/vpc.svg' },
       otros: { nombre: 'Otros', logo: '' },
     };
-    const PROGRESO_ORDEN = ['css', 'nat', 'eip', 'vpc', 'otros'];
+    // En la grilla de dos columnas: CSS | NAT Gateway arriba, VPC | EIP abajo.
+    const PROGRESO_ORDEN = ['css', 'nat', 'vpc', 'eip', 'otros'];
     const _ordenGrupo = (k) => {
       const i = PROGRESO_ORDEN.indexOf(k);
       return i < 0 ? PROGRESO_ORDEN.length : i;
