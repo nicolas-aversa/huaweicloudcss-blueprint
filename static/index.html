@@ -1079,7 +1079,10 @@
        con un margen fijo metía 8px de aire permanente aunque no hubiera nada. */
     #settings-maas-test-status:not(:empty) { margin-top: 8px; }
     /* Acción de la card, al pie: el botón primero y el estado a continuación. */
-    .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    /* Con aire arriba: pegado a la última fila de campos, Guardar parecía un
+       botón más de esa fila y no la acción de toda la card. */
+    .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                        margin-top: var(--sp-4); }
     /* Los botones se re-escalan a esta vista: con labels de 12px e inputs de
        13.5px, el .btn base (11/22, 14px) se ve desproporcionado. */
     .settings-actions .btn,
@@ -2085,6 +2088,7 @@
       .app-view.is-settings.active { min-height: calc(100vh - 72px); }   /* 36 + 36 */
       .settings-card { padding: 12px 18px; }
       .settings-card__head { margin-bottom: 10px; }
+      .settings-actions { margin-top: 10px; }
       /* Y el rail con los sub-pasos abiertos. */
       .app-nav__items { padding-top: 8px; padding-bottom: 8px; gap: 2px; }
       .nav-substep { padding: 4px 12px; }
