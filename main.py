@@ -133,6 +133,8 @@ import perfilador  # noqa: E402
 import semantica  # noqa: E402
 # Las diez preguntas de ejemplo del chat de un dataset nuevo.
 import preguntas  # noqa: E402
+# Los campos de un dataset nuevo van a la raíz, como en los casos de ejemplo.
+import raiz  # noqa: E402
 
 app.add_middleware(auth.AuthMiddleware)
 
@@ -869,8 +871,9 @@ class GenerateFilterRequest(BaseModel):
         description="Log crudo de muestra (lo provee el nodo Input del canvas).",
     )
     namespace: str = Field(
-        default="data",
-        description="Parent bajo el cual viven los campos parseados (data.<campo>).",
+        default="",
+        description=("Parent bajo el cual viven los campos parseados. Vacío (el default) = "
+                     "en la raíz del documento, como los casos de ejemplo."),
     )
     ecs_overlay: bool = Field(
         default=False,
@@ -1469,6 +1472,12 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     # datos (solo el header) también va al LLM: sin valores no hay nada que
     # perfilar.
     lineas = request.raw_log.splitlines()
+    # Sin namespace pedido, los campos van a la raíz como en los casos de
+    # ejemplo. Los generadores igual arman todo bajo `data` —ahí está todo lo
+    # probado contra la gramática— y al final `raiz.promover` lo vacía en la
+    # raíz y reescribe los paths.
+    a_la_raiz = not (request.namespace or "").strip()
+    ns = (request.namespace or "").strip() or raiz.AREA
     perfil = None
     if (request.input_type or "").strip().lower() != "jdbc" and not request.feedback:
         perfil = perfilador.perfilar(lineas)
@@ -1481,8 +1490,8 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         if sem.nota:
             print(f"[semantica] sin LLM, quedan las heurísticas: {sem.nota}")
         candidatas, filas_de = sem.preguntas, sem.filas
-        result = {"filter_code": perfilador.armar_filter(perfil, request.namespace),
-                  "fields": perfilador.campos(perfil, request.namespace)}
+        result = {"filter_code": perfilador.armar_filter(perfil, ns),
+                  "fields": perfilador.campos(perfil, ns)}
         prueba = perfilador.verificar(perfil)
         verificacion = Verificacion(fuente="perfilador", formato=perfil.formato,
                                     filas=prueba.total, filas_ok=prueba.ok, problemas=prueba.problemas,
@@ -1490,10 +1499,12 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     else:
         result = _llm_filter(
             request.raw_log,
-            namespace=request.namespace,
+            namespace=ns,
             ecs_overlay=request.ecs_overlay,
             feedback=request.feedback,
-            previous_filter=request.previous_filter,
+            # El bloque que vacía `data` en la raíz lo agregamos nosotros: el
+            # LLM corrige el filter sin él, y se vuelve a poner al final.
+            previous_filter=raiz.sacar(request.previous_filter),
             input_type=request.input_type,
         )
         verificacion = Verificacion(fuente="llm")
@@ -1528,9 +1539,18 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     # el campo tiene que existir ya en el paso 2 para viajar en el body del
     # deploy hasta el index template y el dashboard.
     filter_code, enriched_fields, nota = geo_fields.aplicar(
-        result["filter_code"], enriched_fields, request.namespace)
+        result["filter_code"], enriched_fields, ns)
     if nota:
         print(f"[geo] {nota}")
+
+    # Último, para que también se lleve el `geo_point` que acaba de armarse. Si
+    # el filter no parsea, se queda bajo `data`: filter y campos siguen diciendo
+    # lo mismo, y el chequeo de compilación del deploy es el que avisa.
+    if a_la_raiz:
+        try:
+            filter_code, enriched_fields = raiz.promover(filter_code, enriched_fields)
+        except ValueError as exc:
+            print(f"[raiz] los campos quedan bajo `{raiz.AREA}.`: {exc}")
 
     return GenerateFilterResponse(
         filter_code=filter_code,

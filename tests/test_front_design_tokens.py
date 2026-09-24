@@ -349,6 +349,42 @@ def test_la_verificacion_se_lee_de_un_vistazo():
         "el número no tiene que bailar al pasar de 9 a 10 filas")
 
 
+def test_un_dataset_nuevo_no_cae_bajo_data():
+    """Los casos de ejemplo van a la raíz. El front pedía `data` al analizar y
+    volvía a caer en `data` al desplegar (`|| 'data'` con el string vacío)."""
+    html = _INDEX.read_text(encoding="utf-8")
+
+    j = html.index("async function transformLog()")
+    envio = html[j:html.index("let generating = false;", j)]
+    assert "const namespace = '';" in envio
+    assert "'data'" not in envio
+
+    k = html.index("function pipelineNamespace()")
+    fn = html[k:html.index("}", html.index("return", k))]
+    assert "'data'" not in fn, "el deploy no puede volver a `data`"
+
+
+def test_las_dos_fuentes_ocupan_todo_el_ancho():
+    """Tres columnas para dos tarjetas dejaban un hueco a la derecha."""
+    html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
+
+    regla = css[css.index(".src-cards {"):]
+    regla = regla[:regla.index("}")]
+    assert "repeat(2, minmax(0, 1fr))" in regla
+    tarjetas = html[html.index('id="source-cards"'):html.index('id="source-pane-file"')]
+    assert tarjetas.count('<button type="button" class="src-card') == 2
+
+
+def test_la_fuente_en_la_nube_se_llama_asi():
+    html = _INDEX.read_text(encoding="utf-8")
+    tarjetas = html[html.index('id="source-cards"'):html.index('id="source-pane-file"')]
+
+    assert "Ya están en la nube" in tarjetas
+    assert "OBS bucket, Kafka, base de datos vía JDBC, o Beats." in tarjetas
+    assert "Llegan en vivo" not in html
+
+
 def test_las_preguntas_del_paso_2_no_van_con_estilos_inline():
     html = _INDEX.read_text(encoding="utf-8")
 

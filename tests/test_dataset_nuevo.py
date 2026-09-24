@@ -128,13 +128,13 @@ def test_el_formato_de_la_fecha_y_las_etiquetas_llegan_al_paso_2(monkeypatch):
 
     campos = {f["field_path"]: f for f in _generar(TELEMETRIA)["fields"]}
 
-    fecha = campos["data.fecha_y_hora"]
+    fecha = campos["fecha_y_hora"]
     assert fecha["type"] == "date" and fecha["date_format"] == "yyyy-MM-dd HH:mm:ss"
     assert fecha["role"] == "timestamp"
-    assert campos["data.paginas_totales"]["business_label"] == "Páginas Totales"
-    assert campos["data.consumo_tinta_ml"]["unit"] == "ml"
-    assert campos["data.estado"]["dimension"] is True
-    assert set(campos["data.estado"]["frecuentes"]) == {"COMPLETADO", "FALLIDO"}
+    assert campos["paginas_totales"]["business_label"] == "Páginas Totales"
+    assert campos["consumo_tinta_ml"]["unit"] == "ml"
+    assert campos["estado"]["dimension"] is True
+    assert set(campos["estado"]["frecuentes"]) == {"COMPLETADO", "FALLIDO"}
 
 
 # ── El template dice lo mismo que el filter ─────────────────────────────────
@@ -154,7 +154,7 @@ def test_el_template_lee_la_fecha_con_el_formato_del_filter(monkeypatch):
     _no_llamar_al_llm(monkeypatch)
     campos = _generar(TELEMETRIA)["fields"]
 
-    m = _mapping(campos, "data.fecha_y_hora")
+    m = _mapping(campos, "fecha_y_hora")
 
     assert m["type"] == "date"
     assert m["format"].split("||")[0] == "yyyy-MM-dd HH:mm:ss"

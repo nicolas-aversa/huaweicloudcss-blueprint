@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+import raiz
 
 
 # Los datasets no se versionan (pesan ~1,3 GB; se bajan del Release o se
@@ -161,14 +162,30 @@ def test_generate_filter_calls_llm(monkeypatch):
     } <= set(f.keys())
     assert f["business_label"] == "ID de transacción"
 
-    # Todos los campos quedan bajo el namespace, sin forzar ECS.
+    # Sin namespace pedido, los campos van a la raíz como en los casos de
+    # ejemplo (`txn_id`, no `data.txn_id`), sin forzar ECS.
     for x in body["fields"]:
         assert x["is_ecs"] is False
-        assert x["field_path"].startswith("data.")
+        assert not x["field_path"].startswith("data.")
         assert x["ecs_overlay_path"] is None
 
     txn_id = next(x for x in body["fields"] if x["raw_name"] == "txn_id")
-    assert txn_id["field_path"] == "data.txn_id"
+    assert txn_id["field_path"] == "txn_id"
+    # El filter del LLM sigue armando bajo `data`, y un bloque al final lo vacía
+    # en la raíz: sin él, el dato llegaría a `data.txn_id` y el template, el
+    # dashboard y el chat lo buscarían en `txn_id`.
+    assert body["filter_code"].rstrip().endswith(raiz.bloque() + "\n}")
+
+
+def test_generate_filter_respeta_un_namespace_pedido(monkeypatch):
+    """Quien pida un namespace explícito lo sigue teniendo (y sin el bloque)."""
+    monkeypatch.setattr(main, "generate_logstash_filter", _mock_llm_response)
+
+    body = client.post("/api/v1/onboarding/generate-filter",
+                       json={"raw_log": SAMPLE_FINANCIAL_LOG, "namespace": "data"}).json()
+
+    assert all(x["field_path"].startswith("data.") for x in body["fields"])
+    assert raiz.bloque() not in body["filter_code"]
 
 
 def test_generate_filter_empty_raw_log_422():

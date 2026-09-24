@@ -1580,7 +1580,9 @@
     .example-card__del:hover { color: var(--accent-red); background: var(--accent-red-tint); }
     /* Las tres vías de entrada del paso 1, al mismo nivel: antes eran dos tabs
        + una escondida en un <details>, y no se leían como alternativas. */
-    .src-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+    /* Dos tarjetas, dos columnas: con tres quedaba un hueco a la derecha y las
+       tarjetas no llegaban al borde de la zona de carga de abajo. */
+    .src-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
     .src-card {
       display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
       padding: 13px 14px; font-family: inherit; cursor: pointer;
@@ -2485,7 +2487,7 @@
 
             <div class="guide-more">
               <strong>¿Y además?</strong>
-              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo o una fuente en vivo) y queda como una card más del grid, con sus dashboards y su asistente, para vos y para el resto del equipo.</span>
+              <span><strong>Dataset nuevo</strong>: decís de dónde salen tus datos (un archivo, o datos que ya están en la nube) y queda como una card más del grid, con sus dashboards y su asistente, para vos y para el resto del equipo.</span>
               <span><strong>Actividad</strong>: qué se ejecutó y por qué falló, con la salida de Terraform.</span>
               <span><strong>Panel de control</strong> (admins): quién entra, quién administra.</span>
             </div>
@@ -2702,8 +2704,8 @@
                 </button>
                 <button type="button" class="src-card" data-src="live" role="radio" aria-checked="false">
                   <span class="src-card__tile"><svg class="icon"><use href="#ic-activity"/></svg></span>
-                  <span class="src-card__name">Llegan en vivo</span>
-                  <span class="src-card__desc">Kafka, Beats, una base vía JDBC o un bucket OBS.</span>
+                  <span class="src-card__name">Ya están en la nube</span>
+                  <span class="src-card__desc">OBS bucket, Kafka, base de datos vía JDBC, o Beats.</span>
                 </button>
               </div>
 
@@ -3148,10 +3150,10 @@
         return { ok: false, error: 'Ingresá un log de ejemplo en el paso 1' };
       }
       state.rawLog = rawLog;
-      // Fijo, no configurable: el campo que lo elegía se sacó del wizard y la
-      // lectura quedó devolviendo siempre el default. Si vuelve a hacer falta
-      // elegirlo, hay que reponer el input, no solo esta constante.
-      const namespace = 'data';
+      // Vacío: los campos van a la raíz del documento, como en los casos de
+      // ejemplo (`sucursal`, no `data.sucursal`). Fijo, no configurable: si
+      // vuelve a hacer falta elegirlo, hay que reponer el input, no solo esto.
+      const namespace = '';
       state.namespace = namespace;
       try {
         const res = await fetch('/api/v1/onboarding/generate-filter', {
@@ -4904,9 +4906,12 @@
     // parsean a top-level (sin prefijo), asi que mandan '' . Solo "Tu log
     // especifico" (custom) usa `data` para aislar campos desconocidos y evitar
     // colisiones con metadata de Logstash (host, tags, etc.).
+    // Todos en la raíz: los casos de ejemplo siempre, y los datasets nuevos
+    // desde que dejaron de caer bajo `data.`. Un `|| 'data'` acá devolvía el
+    // namespace viejo justo cuando el nuevo es el string vacío.
     function pipelineNamespace() {
       const isPredefined = (state.selectedExamples || []).some(id => id !== 'custom');
-      return isPredefined ? '' : (state.namespace || 'data');
+      return isPredefined ? '' : (state.namespace ?? '');
     }
 
     function collectDeployBody(startIngestion) {
