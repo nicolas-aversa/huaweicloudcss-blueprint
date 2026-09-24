@@ -385,11 +385,44 @@ def test_una_linea_de_log_no_es_una_tabla(lineas):
 
 def test_un_header_tecnico_se_muestra_como_etiqueta():
     """`medio_pago` en un panel o en una pregunta se lee "Medio pago"; un
-    header que ya es para personas ("Páginas Totales") no se toca."""
+    header que ya es para personas ("Páginas Totales") no se toca. La unidad
+    se saca antes de humanizar."""
     p = perfilador.perfilar(["medio_pago,Páginas Totales,importe_ars (ARS)",
                              "Débito,10,1.5", "Efectivo,12,2.5"])
-    assert [c.etiqueta for c in p.columnas] == ["Medio pago", "Páginas Totales", "importe_ars"]
+    assert [c.etiqueta for c in p.columnas] == ["Medio pago", "Páginas Totales", "Importe ars"]
+    assert p.columnas[2].unidad == "ARS"
     assert [c.nombre for c in p.columnas][0] == "medio_pago"
+
+
+@pytest.mark.parametrize("header, etiqueta, tecnica", [
+    ("CantidadFacturas", "Cantidad facturas", True),
+    ("StockCode", "Stock code", True),
+    ("IDTrabajo", "ID trabajo", True),          # la sigla queda
+    ("medio_pago", "Medio pago", True),
+    ("sucursal", "Sucursal", True),
+    ("Páginas Totales", "Páginas Totales", False),
+    # Con espacios lo escribió una persona, aunque sea en minúscula.
+    ("medio de pago", "medio de pago", False),
+    ("Country", "Country", False),
+    ("ID", "ID", False),
+])
+def test_humanizar_un_nombre_tecnico(header, etiqueta, tecnica):
+    assert perfilador._humanizar(header) == (etiqueta, tecnica)
+
+
+def test_en_un_export_todas_las_etiquetas_son_tecnicas():
+    """Al lado de `StockCode` y `CantidadFacturas`, "Country" también salió de
+    un sistema: el LLM la puede traducir. En un archivo escrito por una
+    persona, "Páginas Totales" sigue siendo suya."""
+    export = perfilador.perfilar(["AnioMes,Country,StockCode,CantidadFacturas",
+                                  "2011-09,EIRE,71053,15", "2011-10,France,22752,8"])
+    assert all(c.etiqueta_tecnica for c in export.columnas)
+
+    persona = perfilador.perfilar(["Fecha,Cliente,Páginas Totales,medio_pago",
+                                   "2026-09-18,Sur,10,Débito", "2026-09-19,Norte,12,Efectivo"])
+    tecnicas = {c.etiqueta: c.etiqueta_tecnica for c in persona.columnas}
+    assert tecnicas == {"Fecha": False, "Cliente": False, "Páginas Totales": False,
+                        "Medio pago": True}
 
 
 def test_una_tabla_con_fecha_y_nivel_sigue_siendo_tabla():

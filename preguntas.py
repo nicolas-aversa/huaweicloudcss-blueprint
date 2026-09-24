@@ -87,6 +87,23 @@ def _valor(f: dict) -> str | None:
     return next((str(v)[:30] for v in (f.get("frecuentes") or []) if str(v).strip()), None)
 
 
+def _en_frase(etiqueta: str) -> str:
+    """"Páginas Totales" → "páginas totales"; "ID Trabajo" → "ID trabajo".
+
+    En medio de una pregunta una etiqueta va en minúscula, como se escribe en
+    castellano: "¿Cuál es el total de páginas por prensa?" y no "…de Páginas
+    Totales por Prensa?", que se lee como un reporte. Las siglas (ID, PPM)
+    y lo que ya viene mezclado (StockCode) se dejan como están.
+    """
+    # Solo baja lo que está escrito como palabra ("Totales"): una sigla ("ID")
+    # o un nombre mezclado ("StockCode") no tienen el resto en minúscula.
+    def _palabra(w: str) -> str:
+        if w[:1].isupper() and w[1:] == w[1:].lower():
+            return w.lower()
+        return w
+    return " ".join(_palabra(w) for w in etiqueta.split(" "))
+
+
 def _con_rol(fields: list[dict], rol: str) -> dict | None:
     return next((f for f in fields if f.get("role") == rol), None)
 
@@ -135,66 +152,75 @@ def plantillas(fields: list[dict], filas: str = "") -> list[str]:
     # que cambia es cómo suena, no lo que el chat tiene que resolver.
     cosas, cuantas = _sujeto(filas)
 
+    def _et(f: dict) -> str:
+        return _en_frase(_etiqueta(f))
+
     def _sumar_o_promediar(m: dict, donde: str) -> str:
+        # "el total de X" concuerda con cualquier etiqueta ("¿Cuánto suma
+        # unidades vendidas?" no). Y sin repetir: "el total de facturación",
+        # no "el total de facturación total".
         if _agg(m) == "promedio":
-            return f"¿Cuál es el promedio de {_etiqueta(m)} {donde}?"
-        return f"¿Cuánto suma {_etiqueta(m)} {donde}?"
+            return f"¿Cuál es el promedio de {_et(m)}{donde}?"
+        palabras = _et(m).split(" ")
+        sin_total = [w for w in palabras if w.lower() not in ("total", "totales")]
+        return f"¿Cuál es el total de {' '.join(sin_total or palabras)}{donde}?"
 
     qs: list[str] = []
     if exito:
-        qs.append(f"¿{cuantas} {cosas} hay de cada {_etiqueta(exito)}?")
+        qs.append(f"¿{cuantas} {cosas} hay de cada {_et(exito)}?")
     if hay_fecha:
         qs.append(f"¿{cuantas} {cosas} hubo por día?")
     if medida and primaria:
-        qs.append(_sumar_o_promediar(medida, f"en cada {_etiqueta(primaria)}"))
+        qs.append(_sumar_o_promediar(medida, f" por {_et(primaria)}"))
     if entidad:
-        # "con más {cosas}" no sirve cuando la entidad ES la fila ("los 10 ID
-        # Trabajo con más trabajos"); "que más se repiten" vale en los dos casos.
-        qs.append(f"¿Cuáles son los 10 {_etiqueta(entidad)} que más se repiten?")
+        # Sin poner la etiqueta en plural: "los 10 código de producto" no
+        # concuerda, y pluralizar a ciegas rompe las que están en inglés
+        # ("countrys"). "Valores" concuerda siempre.
+        qs.append(f"¿Cuáles son los 10 valores de {_et(entidad)} que más se repiten?")
     falla = next((str(v)[:30] for v in (exito or {}).get("frecuentes") or []
                   if _PARECE_FALLA.search(str(v))), None) if exito else None
     if falla:
         qs.append(f"¿{cuantas} {cosas} terminaron en {falla}?")
     if critico:
-        qs.append(f"¿{cuantas} {cosas} tienen {_etiqueta(critico)}?")
+        qs.append(f"¿{cuantas} {cosas} tienen {_et(critico)}?")
     if falla and primaria and primaria is not exito:
-        qs.append(f"¿Qué {_etiqueta(primaria)} tuvo más {cosas} en {falla}?")
+        qs.append(f"¿Qué {_et(primaria)} tuvo más {cosas} en {falla}?")
     # Una por dimensión, alternando con la medida en las dos primeras: seis
     # "¿… hay por X?" seguidas se leen como una lista, no como preguntas.
     otras = [d for d in dims if d is not exito]
     for i, d in enumerate(otras):
-        qs.append(f"¿{cuantas} {cosas} hay por {_etiqueta(d)}?")
+        qs.append(f"¿{cuantas} {cosas} hay por {_et(d)}?")
         if medida and i < 2 and d is not primaria:
-            qs.append(_sumar_o_promediar(medida, f"en cada {_etiqueta(d)}"))
+            qs.append(_sumar_o_promediar(medida, f" por {_et(d)}"))
     if medida:
-        qs.append(f"¿Cuál es el valor más alto de {_etiqueta(medida)}?")
+        qs.append(f"¿Cuál es el valor más alto de {_et(medida)}?")
     if medida and hay_fecha:
-        qs.append(f"¿Cómo evolucionó {_etiqueta(medida)} día a día?")
+        qs.append(f"¿Cómo evolucionó {_et(medida)} día a día?")
     if critico:
-        qs.append(f"¿Qué {_etiqueta(critico)} aparece más veces?")
+        qs.append(f"¿Qué {_et(critico)} aparece más veces?")
     if entidad:
-        qs.append(f"¿Cuántos {_etiqueta(entidad)} distintos hay?")
+        qs.append(f"¿Cuántos valores distintos tiene {_et(entidad)}?")
     if medida and primaria:
         verbo = "tiene el promedio más alto de" if _agg(medida) == "promedio" else "acumula más"
-        qs.append(f"¿Qué {_etiqueta(primaria)} {verbo} {_etiqueta(medida)}?")
+        qs.append(f"¿Qué {_et(primaria)} {verbo} {_et(medida)}?")
     for m in medidas[1:]:
-        qs.append(_sumar_o_promediar(m, "en total"))
+        qs.append(_sumar_o_promediar(m, ""))
     # Más variantes, para que un dataset chico (cuatro columnas) también llegue
     # a diez sin repetir: todas siguen siendo una sola agregación.
     for d in otras:
         # "¿Qué X…?" y no "¿Cuál es el X…?": el artículo depende del género de
         # la etiqueta ("el Cliente", "la Sucursal") y no lo sabemos.
-        qs.append(f"¿Qué {_etiqueta(d)} tiene más {cosas}?")
+        qs.append(f"¿Qué {_et(d)} tiene más {cosas}?")
         top = _valor(d)
         if top:
             # "corresponden a" y no "hay en": sirve para un lugar (Palermo) y
             # para lo que no lo es (Débito, PRENSA-03).
             qs.append(f"¿{cuantas} {cosas} corresponden a {top}?")
         if medida and d is not primaria:
-            qs.append(_sumar_o_promediar(medida, f"en cada {_etiqueta(d)}"))
+            qs.append(_sumar_o_promediar(medida, f" por {_et(d)}"))
     if medida:
-        qs.append(f"¿Cuál es el valor más bajo de {_etiqueta(medida)}?")
-        qs.append(_sumar_o_promediar(medida, "en total"))
+        qs.append(f"¿Cuál es el valor más bajo de {_et(medida)}?")
+        qs.append(_sumar_o_promediar(medida, ""))
     if hay_fecha:
         qs.append(f"¿Qué día hubo más {cosas}?")
     qs.append(f"¿{cuantas} {cosas} hay en total?")

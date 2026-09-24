@@ -43,7 +43,11 @@ _NUMERICOS = ("integer", "float")
 _NOMBRE_VALIDO = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # "las facturas", "los trabajos de impresión": artículo (que da el género) más
 # una o dos palabras. Cualquier otra cosa se descarta y quedan "los registros".
-_FILAS = re.compile(r"^(los|las) [a-záéíóúüñ]{3,20}( (de|del|de la) [a-záéíóúüñ]{3,20})?$")
+_FILAS = re.compile(
+    r"^(los|las) [a-záéíóúüñ]{3,20}"
+    # "de impresión" sí; "de cada mes" no: después del "de" va un sustantivo.
+    r"( (de|del|de la) (?!(cada|un|una|los|las|el|la|todo|todos|todas)\b)[a-záéíóúüñ]{3,20})?"
+    r"(?=$| )")
 _SIN_HEADER = re.compile(r"^columna_\d+$")
 
 
@@ -171,7 +175,11 @@ def _filas_validas(filas: Any) -> str:
     if not isinstance(filas, str):
         return ""
     limpio = " ".join(filas.strip().lower().split())
-    return limpio if _FILAS.match(limpio) else ""
+    # Se queda con el comienzo: el modelo suele describir de más ("las
+    # facturas mensuales por país"), y descartar todo por eso dejaba las
+    # preguntas diciendo "registros" al lado de una del LLM que decía "facturas".
+    m = _FILAS.match(limpio)
+    return m.group(0) if m else ""
 
 
 # ── La validación ───────────────────────────────────────────────────────────
@@ -201,10 +209,12 @@ def aplicar(perfil, datos: dict) -> None:
     """Aplica al perfil lo que haya de válido en la respuesta del LLM."""
     columnas = datos.get("columnas")
     columnas = columnas if isinstance(columnas, dict) else {}
-    # La etiqueta original es el vocabulario del cliente: si el CSV trae header,
-    # se respeta. La del LLM se usa donde no hay nada mejor (un `columna_3`, una
-    # clave `src_ip` de un JSON).
-    etiquetas_propias = perfil.formato == "delimitado" and bool(perfil.header)
+    # La etiqueta que escribió una persona ("Páginas Totales") es el vocabulario
+    # del cliente y se respeta. La del LLM entra donde la nuestra salió de un
+    # nombre técnico: `CantidadFacturas`, `medio_pago`, `columna_3`, una clave
+    # `src_ip` de un JSON. Antes la regla era por archivo —con header, nunca— y
+    # un CSV con headers en CamelCase quedaba con "CantidadFacturas" en cada
+    # panel y cada pregunta.
     unicos: set[str] = set()   # roles que tienen que ser de un solo campo
 
     for c in perfil.columnas:
@@ -213,7 +223,7 @@ def aplicar(perfil, datos: dict) -> None:
             continue
 
         etiqueta = info.get("etiqueta")
-        if (not etiquetas_propias and isinstance(etiqueta, str)
+        if (c.etiqueta_tecnica and isinstance(etiqueta, str)
                 and 0 < len(etiqueta.strip()) <= _MAX_ETIQUETA):
             c.etiqueta = etiqueta.strip()
 

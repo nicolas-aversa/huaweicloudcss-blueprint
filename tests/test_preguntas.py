@@ -84,28 +84,52 @@ def test_nunca_mas_de_diez():
 
 def test_las_plantillas_usan_los_roles_y_los_valores_reales():
     qs = preguntas.armar(_campos(TELEMETRIA), [], "los trabajos")
-    assert "¿Cuántos trabajos hay de cada Estado?" in qs
+    assert "¿Cuántos trabajos hay de cada estado?" in qs
     assert "¿Cuántos trabajos hubo por día?" in qs
-    assert "¿Cuáles son los 10 ID Trabajo que más se repiten?" in qs
-    assert "¿Cuántos trabajos tienen Código Error?" in qs
-    # El valor real del estado de falla, como lo diría una persona.
+    assert "¿Cuáles son los 10 valores de ID trabajo que más se repiten?" in qs
+    assert "¿Cuántos trabajos tienen código error?" in qs
+    # El valor real del estado de falla, como lo diría una persona (el valor
+    # va como está: es lo que hay que escribir para filtrar).
     assert "¿Cuántos trabajos terminaron en FALLIDO?" in qs
-    assert "¿Qué Cliente tuvo más trabajos en FALLIDO?" in qs
+    assert "¿Qué cliente tuvo más trabajos en FALLIDO?" in qs
     # "Cliente" también tiene rol de entidad, pero la entidad elegida es ID
-    # Trabajo: Cliente agrupa, y es la torta principal del dashboard.
-    assert "¿Cuánto suma Páginas Totales en cada Cliente?" in qs
+    # Trabajo: Cliente agrupa, y es la torta principal del dashboard. Y sin
+    # repetir "total": "el total de páginas", no "de páginas totales".
+    assert "¿Cuál es el total de páginas por cliente?" in qs
 
 
 def test_las_preguntas_suenan_a_persona_y_no_a_titulo_de_reporte():
-    """Se leen en voz alta: nada de "total de X por Y" ni "registros" cuando
-    sabemos que cada fila es una factura."""
+    """Se leen en voz alta: la etiqueta en minúscula en medio de la frase,
+    nada de "registros" cuando sabemos que cada fila es una factura, y nada
+    de títulos de reporte."""
     qs = preguntas.armar(_campos(VENTAS), [], "las facturas")
 
-    assert not any("¿Cuál es el total de" in q for q in qs), qs
-    assert not any("valores de" in q or "Distribución" in q for q in qs), qs
+    assert not any("Distribución" in q for q in qs), qs
     assert not any("registros" in q for q in qs), qs
+    assert not any(" Importe" in q or " Sucursal" in q for q in qs), (
+        "una etiqueta con mayúscula en medio de la frase se lee como un reporte")
     assert "¿Cuántas facturas hubo por día?" in qs
-    assert "¿Cuánto suma Importe en cada Sucursal?" in qs
+    assert "¿Cuál es el total de importe por sucursal?" in qs
+
+
+@pytest.mark.parametrize("etiqueta, en_frase", [
+    ("Páginas Totales", "páginas totales"),
+    ("ID Trabajo", "ID trabajo"),            # las siglas no se tocan
+    ("Velocidad PPM", "velocidad PPM"),
+    ("Prensa / Máquina", "prensa / máquina"),
+    ("StockCode", "StockCode"),              # mezclado: no sé qué es, se deja
+])
+def test_una_etiqueta_en_medio_de_la_frase_va_en_minuscula(etiqueta, en_frase):
+    assert preguntas._en_frase(etiqueta) == en_frase
+
+
+def test_el_total_no_se_repite():
+    fs = [{"raw_name": "facturacion_total", "business_label": "Facturación total",
+           "type": "float", "role": "measure"},
+          {"raw_name": "pais", "business_label": "País", "type": "string", "dimension": True}]
+    qs = preguntas.plantillas(fs, "las ventas")
+    assert "¿Cuál es el total de facturación por país?" in qs
+    assert not any("total de facturación total" in q for q in qs), qs
 
 
 @pytest.mark.parametrize("filas, esperada", [
@@ -131,15 +155,15 @@ def test_con_muchas_dimensiones_las_diez_no_son_la_misma_pregunta():
 
     assert len(qs) == 10
     # La medida acompaña a las primeras dimensiones, no a todas.
-    assert 2 <= sum(1 for q in qs if "en cada" in q) <= 3, qs
+    assert 2 <= sum(1 for q in qs if q.startswith("¿Cuál es el total de páginas por")) <= 3, qs
     # Y ninguna dimensión se queda sin su conteo por culpa de eso.
-    assert "¿Cuántos trabajos hay por Turno?" in qs, qs
+    assert "¿Cuántos trabajos hay por turno?" in qs, qs
 
 
 def test_un_dataset_chico_llega_a_diez_con_las_variantes():
     qs = preguntas.plantillas(_campos(VENTAS), "las facturas")
-    assert "¿Cuál es el valor más bajo de Importe?" in qs
-    assert "¿Qué Sucursal tiene más facturas?" in qs
+    assert "¿Cuál es el valor más bajo de importe?" in qs
+    assert "¿Qué sucursal tiene más facturas?" in qs
     assert "¿Cuántas facturas corresponden a Palermo?" in qs
 
 
@@ -148,15 +172,15 @@ def test_una_velocidad_se_promedia_como_en_el_dashboard():
            "unit": "PPM", "role": "measure"},
           {"raw_name": "prensa", "business_label": "Prensa", "type": "string", "dimension": True}]
     qs = preguntas.plantillas(fs)
-    assert "¿Cuál es el promedio de Velocidad en cada Prensa?" in qs
-    assert not any("suma Velocidad" in q for q in qs), "142 PPM y 118 PPM no suman 260"
+    assert "¿Cuál es el promedio de velocidad por prensa?" in qs
+    assert not any("total de velocidad" in q for q in qs), "142 PPM y 118 PPM no suman 260"
 
 
 def test_dos_datasets_distintos_dan_preguntas_distintas():
     a, b = preguntas.armar(_campos(TELEMETRIA), []), preguntas.armar(_campos(VENTAS), [])
     assert len(b) == 10
     assert len(set(a) & set(b)) <= 2   # a lo sumo las genéricas ("por día", "en total")
-    assert any("Sucursal" in q or "sucursal" in q for q in b)
+    assert any("sucursal" in q for q in b)
 
 
 def test_sin_campos_igual_hay_una_pregunta():

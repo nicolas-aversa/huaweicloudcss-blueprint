@@ -402,13 +402,22 @@ def test_los_chips_de_la_nube_siguen_el_orden_de_la_tarjeta():
     assert '<div id="live-paste-pane" class="hidden">' in html
 
 
-def test_las_preguntas_del_paso_2_no_van_con_estilos_inline():
+def test_las_preguntas_del_paso_2_se_ven_como_en_el_chat():
+    """Eran una lista numerada —un documento—. Ahora son sugerencias con el
+    destello del chat, en una grilla, abiertas de entrada."""
     html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
 
     i = html.index("function bloquePreguntas(qs)")
     fn = html[i:html.index("function renderMappingTable(", i)]
     assert "style=" not in fn, "el estilo vive en .mapping-preguntas"
-    assert ".mapping-preguntas {" in html[:html.index("</style>")]
+    assert "<ol" not in fn, "no es una lista numerada"
+    assert '<details class="mapping-preguntas" open>' in fn
+    assert "icon('spark')" in fn, "el mismo destello que las sugerencias del chat"
+    assert 'class="mapping-preguntas__lista"' in fn
+
+    lista = css[css.index(".mapping-preguntas__lista {"):]
+    assert "repeat(2, minmax(0, 1fr))" in lista[:lista.index("}")]
 
 
 def test_crear_un_caso_solo_lo_guarda():

@@ -114,6 +114,10 @@ class Columna:
     frecuentes: list[str] = field(default_factory=list)
     dimension: bool = False
     rol: str | None = None      # el que puso la semántica; None = se infiere por nombre
+    # La etiqueta salió de un nombre técnico (`CantidadFacturas`, `medio_pago`,
+    # una clave de JSON, `columna_3`): el LLM la puede mejorar. La que escribió
+    # una persona ("Páginas Totales") es el vocabulario del cliente y no se toca.
+    etiqueta_tecnica: bool = False
 
     @property
     def campo(self) -> str:
@@ -160,6 +164,35 @@ def _etiqueta_y_unidad(texto: str) -> tuple[str, str | None]:
     if m and m.group(1).strip():
         return m.group(1).strip(), m.group(2).strip()
     return (texto or "").strip(), None
+
+
+# Frontera de CamelCase: `CantidadFacturas`, y el fin de una sigla (`IDTrabajo`).
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _humanizar(texto: str) -> tuple[str, bool]:
+    """`CantidadFacturas` → ("Cantidad facturas", True).
+
+    Un nombre técnico —snake_case, CamelCase, todo en minúscula— se lee como
+    etiqueta: palabras separadas, la primera en mayúscula, las siglas intactas
+    ("IDTrabajo" → "ID trabajo"). Devuelve también si ERA técnico, que es lo que
+    habilita al LLM a proponer una mejor ("Cantidad de facturas"). Lo que ya
+    escribió una persona ("Páginas Totales", "Country") queda como está.
+    """
+    t = (texto or "").strip()
+    if not t or " " in t:
+        return t, False
+    palabras = [w for parte in re.split(r"[_\-.]+", t) for w in _CAMEL.split(parte) if w]
+    tecnico = len(palabras) > 1 or t.islower()
+    if not tecnico:
+        return t, False
+
+    def _caso(w: str, primera: bool) -> str:
+        if len(w) > 1 and w.isupper():
+            return w                                    # sigla: ID, PPM, SKU
+        return w.capitalize() if primera else w.lower()
+
+    return " ".join(_caso(w, i == 0) for i, w in enumerate(palabras)), True
 
 
 def _nombres_unicos(nombres: list[str]) -> list[str]:
@@ -567,24 +600,34 @@ def perfilar(lineas: list[str]) -> Perfil:
     hay_header = _parece_header(primera, filas[1:])
     if hay_header:
         nombres = [_sanear(c, i) for i, c in enumerate(primera)]
-        # `medio_pago` es un nombre técnico, no una etiqueta: igual que con las
-        # claves de un JSON, se muestra "Medio pago". "Páginas Totales" queda tal cual.
-        etiquetas = [_etiqueta_y_unidad(c.replace("_", " ").strip().capitalize()
-                                        if re.fullmatch(r"[a-z0-9_]+", c.strip()) else c)
-                     for c in primera]
+        # `medio_pago` o `CantidadFacturas` son nombres técnicos, no etiquetas:
+        # se muestran "Medio pago" y "Cantidad facturas" (y el LLM los puede
+        # mejorar). "Páginas Totales" queda tal cual. La unidad se saca primero:
+        # `importe_ars (ARS)` → "Importe ars" en ARS.
+        etiquetas = []
+        for c in primera:
+            texto, unidad = _etiqueta_y_unidad(c)
+            etiquetas.append((*_humanizar(texto), unidad))
+        # Si la mayoría de los headers son técnicos, el archivo es un export y
+        # también lo es "Country" al lado de `StockCode` y `CantidadFacturas`:
+        # el LLM la puede traducir ("País"). En un archivo escrito por una
+        # persona, las etiquetas siguen siendo suyas.
+        if sum(1 for _, tecnica, _ in etiquetas if tecnica) * 2 > len(etiquetas):
+            etiquetas = [(e, True, u) for e, _, u in etiquetas]
         datos = filas[1:]
         lineas_datos = lineas[1:]
     else:
         nombres = [f"columna_{i + 1}" for i in range(len(primera))]
-        etiquetas = [(f"Columna {i + 1}", None) for i in range(len(primera))]
+        etiquetas = [(f"Columna {i + 1}", True, None) for i in range(len(primera))]
         datos = filas
         lineas_datos = lineas
     nombres = _nombres_unicos(nombres)
     columnas = []
     for i, nombre in enumerate(nombres):
-        etiqueta, unidad = etiquetas[i]
+        etiqueta, tecnica, unidad = etiquetas[i]
         col = Columna(nombre=nombre, etiqueta=etiqueta or nombre, path=(nombre,), unidad=unidad,
-                      valores=[f[i] if i < len(f) else "" for f in datos])
+                      valores=[f[i] if i < len(f) else "" for f in datos],
+                      etiqueta_tecnica=tecnica or not etiqueta)
         columnas.append(col)
     perfil = Perfil("delimitado", columnas, len(datos), separador=sep,
                     header=lineas[0].strip() if hay_header else "", lineas_datos=lineas_datos)
@@ -602,9 +645,11 @@ def _perfil_de_dicts(formato: str, filas: list[dict], lineas: list[str]) -> Perf
     columnas = []
     for k in orden:
         nombre = "_".join(k)
-        etiqueta, unidad = _etiqueta_y_unidad(k[-1].replace("_", " ").strip().capitalize())
-        columnas.append(Columna(nombre=nombre, etiqueta=etiqueta, path=k, unidad=unidad,
-                                valores=[p.get(k) for p in planas]))
+        texto, unidad = _etiqueta_y_unidad(k[-1])
+        etiqueta, _ = _humanizar(texto)
+        # Una clave de JSON o de clave=valor siempre es un nombre técnico.
+        columnas.append(Columna(nombre=nombre, etiqueta=etiqueta or texto, path=k, unidad=unidad,
+                                valores=[p.get(k) for p in planas], etiqueta_tecnica=True))
     perfil = Perfil(formato, columnas, len(planas), lineas_datos=lineas)
     _cerrar(perfil)
     return perfil

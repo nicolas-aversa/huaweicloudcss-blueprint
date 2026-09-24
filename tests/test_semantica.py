@@ -69,6 +69,10 @@ def test_aplica_roles_dimension_y_unidad_y_devuelve_las_preguntas():
     ("las facturas", "las facturas"),
     ("los trabajos de impresión", "los trabajos de impresión"),
     ("  Las Ventas  ", "las ventas"),
+    # El modelo describe de más: se queda con el artículo y el sustantivo.
+    ("las ventas mensuales por producto y país", "las ventas"),
+    ("las facturas de cada mes", "las facturas"),
+    ("los trabajos de impresión del turno noche", "los trabajos de impresión"),
     ("facturas", ""),                       # sin artículo no sabemos el género
     ("cada fila es una factura de venta", ""),
     ("los", ""),
@@ -87,6 +91,32 @@ def test_con_header_la_etiqueta_es_la_del_cliente():
     p = _perfil(TELEMETRIA)
     semantica.enriquecer(p, _responde({"columnas": {"paginas_totales": {"etiqueta": "Total de hojas"}}}))
     assert _col(p, "paginas_totales").etiqueta == "Páginas Totales"
+
+
+def test_un_header_tecnico_si_lo_mejora_el_llm():
+    """`CantidadFacturas` salió de un sistema, no de una persona: la etiqueta
+    del LLM ("Cantidad de facturas") entra. Antes la regla era por archivo
+    —con header, nunca— y quedaba "CantidadFacturas" en cada panel y pregunta."""
+    p = _perfil("AnioMes,Country,CantidadFacturas\n2011-09,EIRE,15\n2011-10,France,8\n")
+    semantica.enriquecer(p, _responde({"columnas": {
+        "aniomes": {"etiqueta": "Año y mes"},
+        "country": {"etiqueta": "País"},
+        "cantidadfacturas": {"etiqueta": "Cantidad de facturas"},
+    }}))
+    assert [c.etiqueta for c in p.columnas] == ["Año y mes", "País", "Cantidad de facturas"]
+
+
+def test_una_clave_de_json_la_mejora_el_llm():
+    """En un JSON las claves siempre son nombres técnicos, aunque parezcan
+    palabras ("Country"): la etiqueta del LLM entra."""
+    p = _perfil('{"src_ip": "10.0.0.1", "Country": "AR", "bytes": 10}\n'
+                '{"src_ip": "10.0.0.2", "Country": "UY", "bytes": 12}\n')
+    semantica.enriquecer(p, _responde({"columnas": {
+        "src_ip": {"etiqueta": "IP de origen"}, "Country": {"etiqueta": "País"},
+    }}))
+    etiquetas = {c.nombre: c.etiqueta for c in p.columnas}
+    assert etiquetas["src_ip"] == "IP de origen"
+    assert etiquetas["Country"] == "País"
 
 
 def test_la_unidad_del_header_le_gana_a_la_del_llm():
@@ -312,7 +342,7 @@ def test_el_endpoint_usa_la_semantica_y_devuelve_diez_preguntas(monkeypatch):
     assert body["questions"][0] == "¿Qué Cliente imprimió más Páginas Totales?"
     assert not any("Por qué" in q for q in body["questions"])
     # Y lo que el LLM dijo que es cada fila llega hasta las plantillas.
-    assert "¿Cuántos trabajos hay de cada Estado?" in body["questions"]
+    assert "¿Cuántos trabajos hay de cada estado?" in body["questions"]
 
 
 def test_sin_api_key_el_endpoint_sigue_y_las_preguntas_salen_de_las_plantillas():
@@ -323,5 +353,5 @@ def test_sin_api_key_el_endpoint_sigue_y_las_preguntas_salen_de_las_plantillas()
     assert len(body["questions"]) == 10
     # Sin LLM no sabemos que cada fila es un trabajo: son "registros", pero
     # siguen sonando a pregunta y no a título de reporte.
-    assert "¿Cuántos registros hay de cada Estado?" in body["questions"]
+    assert "¿Cuántos registros hay de cada estado?" in body["questions"]
     assert "¿Cuántos registros terminaron en FALLIDO?" in body["questions"]
