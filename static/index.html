@@ -164,6 +164,12 @@
          se corre horizontalmente unos píxeles. */
       scrollbar-gutter: stable;
       padding: 48px 28px;
+      /* Container: el ensanchado del Home y del banner del entorno se calcula
+         con el ancho REAL del área de contenido (100cqi), no con el de la
+         ventana. Con el panel del asistente abierto, las cuentas contra el
+         ancho fijo del contenedor achicaban el banner y apilaban las tarjetas. */
+      container-type: inline-size;
+      container-name: principal;
     }
 
     .container {
@@ -671,6 +677,44 @@
       transition: background var(--t-base), border-color var(--t-base);
     }
     .app-nav__env:hover { background: var(--bg-primary); border-color: var(--border-default); }
+
+    /* Contraer / expandir la barra (al pie). */
+    .app-nav__toggle {
+      display: flex; align-items: center; gap: var(--sp-3); flex-shrink: 0;
+      margin: 0 12px 12px; padding: var(--sp-2) var(--sp-3);
+      border: none; border-radius: var(--radius-sm); background: transparent; cursor: pointer;
+      font: inherit; font-size: var(--fs-sm); color: var(--text-muted); text-align: left;
+      transition: background var(--t-fast), color var(--t-fast);
+    }
+    .app-nav__toggle:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .app-nav__toggle .icon { width: 16px; height: 16px; flex: none; transform: rotate(90deg); }
+    /* Contraída: solo íconos (su nombre aparece al pasar el mouse). Deja
+       lugar para el contenido, sobre todo con el asistente abierto. En el
+       celular la barra es otra (arriba, con hamburguesa) y no se contrae. */
+    @media (min-width: 769px) {
+      body.nav-contraida { --rail-w: 68px; }
+      body.nav-contraida .app-nav__brand { justify-content: center; padding: 0; }
+      body.nav-contraida .app-nav__brand-text,
+      body.nav-contraida .nav-item__label,
+      body.nav-contraida .nav-item__chevron,
+      body.nav-contraida .nav-substeps,
+      body.nav-contraida .app-nav__env-detail,
+      body.nav-contraida .app-nav__env-status,
+      body.nav-contraida .app-nav__user-email,
+      body.nav-contraida .app-nav__toggle-label { display: none; }
+      body.nav-contraida .nav-group__label {
+        height: 0; padding: 0; margin: 8px 6px; overflow: hidden;
+        border-top: 1px solid var(--border-subtle);
+      }
+      body.nav-contraida .app-nav__items { padding: 12px 10px; }
+      body.nav-contraida .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+      body.nav-contraida .nav-dot { position: absolute; top: 6px; right: 8px; }
+      body.nav-contraida .app-nav__env { padding: 12px 0; display: flex; justify-content: center; }
+      body.nav-contraida .app-nav__env-head { justify-content: center; }
+      body.nav-contraida .app-nav__toggle { justify-content: center; margin: 0 10px 12px; }
+      body.nav-contraida .app-nav__toggle .icon { transform: rotate(-90deg); }
+    }
+    @media (max-width: 768px) { .app-nav__toggle { display: none; } }
     .app-nav__env-head { display: flex; align-items: center; gap: 8px; }
     .app-nav__env-dot {
       width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
@@ -1822,11 +1866,15 @@
        el container base (pantallas grandes dejaban demasiado canvas vacío a
        los costados), sin tocar `.container` global — el wizard/copiloto
        siguen necesitándolo angosto para que los forms se lean bien. */
+    /* El ancho que se busca: el "wide" si hay lugar, si no todo el área de
+       contenido (100cqi) menos el padding lateral de .main-content (28 + 28).
+       Los márgenes nunca pasan de 0: ensanchan, no achican. */
     #view-home,
     #view-infra .infra-dash__banner {
-      margin-left: calc((var(--container-w) - min(var(--container-wide), 100%)) / 2);
-      margin-right: calc((var(--container-w) - min(var(--container-wide), 100%)) / 2);
-      max-width: min(var(--container-wide), 100%);
+      --ancho-amplio: min(var(--container-wide), calc(100cqi - 56px));
+      margin-left: min(0px, calc((100% - var(--ancho-amplio)) / 2));
+      margin-right: min(0px, calc((100% - var(--ancho-amplio)) / 2));
+      max-width: none;
     }
 
     /* Vistas que entran en una sola pantalla (Home y Configuración): el
@@ -1888,14 +1936,17 @@
       margin: -8px 0 14px;
     }
     .pipe-row {
-      display: flex; align-items: center; gap: 12px;
+      display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
       padding: 11px 14px; background: var(--bg-primary);
       border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
     }
     .pipe-row__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-default); }
     .pipe-row__dot.is-active { background: var(--accent-green); box-shadow: 0 0 0 3px var(--accent-green-tint); }
-    .pipe-row__idx { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-primary); }
-    .pipe-row__prefix { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--text-muted); }
+    .pipe-row__idx {
+      font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-primary);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;
+    }
+    .pipe-row__prefix { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
     .pipe-row__prefix .icon { width: 13px; height: 13px; }
     .pipe-row__state {
       margin-left: auto; font-size: var(--fs-xs); font-weight: 600; padding: 3px 10px;
@@ -2624,6 +2675,11 @@
           </div>
         </button>
       </div>
+
+      <button class="app-nav__toggle" id="nav-toggle" type="button" aria-expanded="true" title="Contraer menú">
+        <svg class="icon"><use href="#ic-chevron"/></svg>
+        <span class="app-nav__toggle-label">Contraer menú</span>
+      </button>
 
       <!-- Usuario logueado + logout: solo visible en modo hosteado (auth on). -->
       <div class="app-nav__user hidden" id="nav-user">
@@ -7326,6 +7382,33 @@
       showView('infra');
       hydrateActiveEnv();
     }
+
+    // Barra izquierda contraíble. Es una preferencia de quien mira: queda en
+    // este navegador (localStorage), y si no se puede leer, arranca expandida.
+    (function navContraible() {
+      const btn = document.getElementById('nav-toggle');
+      if (!btn) return;
+      // Contraída solo quedan los íconos: el nombre, al pasar el mouse.
+      document.querySelectorAll('.app-nav .nav-item').forEach(b => {
+        const lbl = b.querySelector('.nav-item__label');
+        if (lbl && !b.title) b.title = lbl.textContent.trim();
+      });
+      const aplicar = (on) => {
+        document.body.classList.toggle('nav-contraida', on);
+        btn.setAttribute('aria-expanded', String(!on));
+        const texto = on ? 'Expandir menú' : 'Contraer menú';
+        btn.title = texto;
+        btn.querySelector('.app-nav__toggle-label').textContent = texto;
+      };
+      let guardado = false;
+      try { guardado = localStorage.getItem('navContraida') === '1'; } catch (_) { /* sin storage */ }
+      aplicar(guardado);
+      btn.addEventListener('click', () => {
+        const on = !document.body.classList.contains('nav-contraida');
+        aplicar(on);
+        try { localStorage.setItem('navContraida', on ? '1' : '0'); } catch (_) { /* sin storage */ }
+      });
+    })();
 
     (function maybePreviewDeployAnim() {
       const params = new URLSearchParams(location.search);
