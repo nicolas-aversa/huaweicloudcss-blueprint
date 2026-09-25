@@ -184,7 +184,8 @@ def test_la_puesta_en_marcha_va_antes_que_las_pipelines():
     i = html.index("${setupPanel}")
     j = html.index('<span class="section-card__title">Pipelines</span>')
     assert i < j, "el paso que falta tiene que verse antes que el estado"
-    assert html.index("${donePanel}") > j, "el cierre, después"
+    # Sin cartel de cierre ("Entorno operativo"): terminada, queda plegada.
+    assert "donePanel" not in html and "Entorno operativo" not in html
 
 
 def test_guardar_no_valida_el_destino():

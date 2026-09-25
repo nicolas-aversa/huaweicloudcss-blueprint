@@ -693,6 +693,8 @@
       transition: background var(--t-fast), color var(--t-fast);
     }
     .app-nav__toggle:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .app-nav__toggle[aria-disabled="true"],
+    .app-nav__toggle[aria-disabled="true"]:hover { opacity: .4; cursor: not-allowed; background: transparent; color: var(--text-muted); }
     .app-nav__toggle .icon { width: 17px; height: 17px; }
     /* Contraída: solo íconos (su nombre aparece al pasar el mouse). Deja
        lugar para el contenido, sobre todo con el asistente abierto. En el
@@ -2316,8 +2318,12 @@
     .cap-lanzador.is-abierto { display: none; }
     /* Con lugar, el panel corre el contenido en vez de taparlo. */
     @media (min-width: 1100px) {
-      body.con-asistente .app-shell { padding-right: var(--asistente-w); }
+      body.con-asistente.en-entorno .app-shell { padding-right: var(--asistente-w); }
     }
+    /* El asistente vive solo en "Entorno desplegado": en el resto de las
+       vistas no están ni el panel ni su botón (ver showView). */
+    body:not(.en-entorno) .cap-flotante,
+    body:not(.en-entorno) .cap-lanzador { display: none; }
     .cap-flotante__head {
       display: flex; align-items: center; gap: 10px; padding: 14px 10px 14px 16px;
       border-bottom: 1px solid var(--border-subtle);
@@ -5788,8 +5794,9 @@
         if (navAntesDelAsistente === null) navAntesDelAsistente = document.body.classList.contains('nav-contraida');
         aplicarNavContraida(true);
       } else if (navAntesDelAsistente !== null) {
-        aplicarNavContraida(navAntesDelAsistente);
-        navAntesDelAsistente = null;
+        const antes = navAntesDelAsistente;
+        navAntesDelAsistente = null;   // antes de aplicar: así el botón se desbloquea
+        aplicarNavContraida(antes);
       }
     }
 
@@ -6058,7 +6065,7 @@
       lanzador.innerHTML = icon('chat');
       document.body.append(host, lanzador);
       document.body.classList.toggle('con-asistente', capChatAbierto);
-      if (capChatAbierto) _navConAsistente(true);
+      if (capChatAbierto && document.body.classList.contains('en-entorno')) _navConAsistente(true);
 
       // \u2500\u2500 Chat NL\u2192PPL nativo: pega a POST /api/v1/capabilities/ppl-chat (orquestado
       // server-side, sin el Assistant de Dashboards). El slug activo = la tab elegida. \u2500\u2500
@@ -6895,6 +6902,12 @@
       const abierto = name === 'pipeline';
       document.getElementById('pipeline-substeps')?.classList.toggle('hidden', !abierto);
       document.getElementById('nav-pipeline')?.setAttribute('aria-expanded', String(abierto));
+      // El asistente vive solo en "Entorno desplegado". Al salir se oculta
+      // (CSS) y la barra vuelve a como estaba; al volver, si estaba abierto,
+      // se ve de nuevo y la contrae otra vez.
+      const enEntorno = name === 'infra';
+      document.body.classList.toggle('en-entorno', enEntorno);
+      _navConAsistente(enEntorno && capChatAbierto && !!document.getElementById('deploy-capabilities'));
       // Configuración: precargar creds + estado de la key + mapa de modelos.
       if (name === 'settings' && typeof renderSettingsView === 'function') renderSettingsView();
       if (name === 'activity' && typeof renderActivityView === 'function') renderActivityView();
@@ -7182,7 +7195,7 @@
       const ingestDone = pipelines.length > 0 && pipelines.every(p => p.active);
       const rechazadas = pipelines.filter(p => p.config_status === 'rechazada');
       const capsDone = !!(data.capabilities && Object.keys(data.capabilities).length);
-      // Todo listo → banner de cierre "Entorno operativo" en vez del panel de pasos.
+      // Todo listo → la puesta en marcha queda plegada.
       const allDone = pipelines.length > 0 && schemaDone && ingestDone && (capsDone || !hasCapabilitySlug);
       const showSetup = pipelines.length > 0;
 
@@ -7282,15 +7295,6 @@
           </div>
         </details>` : '';
 
-      // Cierre de la puesta en marcha: el final de la secuencia se celebra
-      // ("design dialogs to yield closure"), no se esfuma en silencio.
-      const donePanel = allDone ? `
-        <div style="margin:6px 0 16px; padding:16px 18px; border:1px solid rgba(22,163,74,.35); border-radius:var(--radius-lg); background:var(--accent-green-tint); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-          <span class="status-pill"><span class="status-pill__dot"></span>Entorno operativo</span>
-          <span style="font-size:var(--fs-base); color:var(--text-secondary);">Datos ingestados, dashboards listos${hasCapabilitySlug ? ' y plugins provisionados' : ''}. Todo quedó operativo.</span>
-          ${dashUrl ? `<a class="btn btn-primary btn-sm" style="margin-left:auto;" href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>` : ''}
-        </div>` : '';
-
       body.innerHTML = `
         <div class="infra-dash__banner">
           <div class="infra-dash__head">
@@ -7326,8 +7330,8 @@
         </div>
         ${/* Lo que falta hacer va primero: con la puesta en marcha debajo de
              las pipelines, lo que se veía primero era el estado ("En pausa",
-             "Verificar ingesta") y no el paso siguiente. Terminada, la
-             secuencia se va y queda el cierre después de las pipelines. */ ''}
+             "Verificar ingesta") y no el paso siguiente. Terminada, queda
+             plegada ("3 de 3"): sin cartel de cierre, que sobraba. */ ''}
         ${setupPanel}
         <div class="section-card">
           <div class="section-card__head" style="margin-bottom:12px;">
@@ -7339,7 +7343,6 @@
           </div>
           <div class="pipe-list">${pipeRows}</div>
         </div>
-        ${donePanel}
         <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
         `;
 
@@ -7504,7 +7507,12 @@
       const btn = document.getElementById('nav-toggle');
       if (!btn) return;
       btn.setAttribute('aria-expanded', String(!on));
-      const texto = on ? 'Expandir la barra lateral' : 'Contraer la barra lateral';
+      // Con el asistente abierto la barra queda contraída: primero se cierra él.
+      // aria-disabled y no disabled: así el tooltip dice por qué.
+      const bloqueada = navAntesDelAsistente !== null;
+      btn.setAttribute('aria-disabled', String(bloqueada));
+      const texto = bloqueada ? 'Cerrá el asistente para expandir la barra'
+        : on ? 'Expandir la barra lateral' : 'Contraer la barra lateral';
       btn.title = texto;
       btn.setAttribute('aria-label', texto);
     }
@@ -7521,9 +7529,9 @@
       try { guardado = localStorage.getItem('navContraida') === '1'; } catch (_) { /* sin storage */ }
       aplicarNavContraida(guardado);
       btn.addEventListener('click', () => {
+        if (btn.getAttribute('aria-disabled') === 'true') return;   // asistente abierto
         const on = !document.body.classList.contains('nav-contraida');
         aplicarNavContraida(on);
-        navAntesDelAsistente = null;   // lo eligió la persona: al cerrar el asistente, no se toca
         try { localStorage.setItem('navContraida', on ? '1' : '0'); } catch (_) { /* sin storage */ }
       });
     })();

@@ -364,7 +364,7 @@ def test_el_asistente_es_un_panel_lateral_que_corre_el_contenido():
     panel = css[css.index("    .cap-flotante {"):]
     panel = panel[:panel.index("}")]
     assert "top: 0; right: 0; bottom: 0" in panel and "width: min(var(--asistente-w), 100vw)" in panel
-    assert "body.con-asistente .app-shell { padding-right: var(--asistente-w); }" in css
+    assert "body.con-asistente.en-entorno .app-shell { padding-right: var(--asistente-w); }" in css
     assert ".cap-lanzador.is-abierto { display: none; }" in css
     fn = _render(html)
     abrir = fn[fn.index("const _abrir = (on) => {"):]
@@ -387,6 +387,21 @@ def test_las_sugerencias_se_toman_por_delegacion_y_no_hay_fila_de_fichas():
         assert rastro not in html, rastro
     assert 'class="cap-chat__composer" id="cap-chat-form"' in fn
     assert 'id="cap-chat-clear" title="Nueva conversación"' in fn
+
+
+def test_el_asistente_vive_solo_en_el_entorno():
+    """En el resto de las vistas no están ni el panel ni su botón, y la barra
+    vuelve a como estaba; al volver, si estaba abierto, se ve de nuevo."""
+    html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
+    assert "body:not(.en-entorno) .cap-flotante,\n    body:not(.en-entorno) .cap-lanzador { display: none; }" in css
+    i = html.index("    function showView(name) {")
+    vista = html[i:html.index("\n    }\n", i)]
+    assert "document.body.classList.toggle('en-entorno', enEntorno);" in vista
+    assert "const enEntorno = name === 'infra';" in vista
+    assert "_navConAsistente(enEntorno && capChatAbierto && !!document.getElementById('deploy-capabilities'));" in vista
+    # Un re-render desde otra vista (p. ej. al hidratar el estado) no contrae la barra.
+    assert "if (capChatAbierto && document.body.classList.contains('en-entorno')) _navConAsistente(true);" in _render(html)
 
 
 def test_la_vista_previa_del_entorno():

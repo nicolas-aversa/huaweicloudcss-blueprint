@@ -63,11 +63,18 @@ def test_la_preferencia_queda_en_el_navegador_y_los_iconos_tienen_nombre():
     assert "localStorage.setItem('navContraida', on ? '1' : '0')" in fn
     assert re.search(r"try \{ guardado = localStorage", fn), "sin storage, arranca expandida"
     assert "b.title = lbl.textContent.trim();" in fn
-    assert "aplicarNavContraida(on);" in fn and "navAntesDelAsistente = null;" in fn
+    assert "aplicarNavContraida(on);" in fn
+    # Con el asistente abierto el botón no hace nada: primero se cierra él.
+    assert fn.index("if (btn.getAttribute('aria-disabled') === 'true') return;") < fn.index("aplicarNavContraida(on);")
+    assert "navAntesDelAsistente" not in fn[fn.index("btn.addEventListener('click'"):]
     j = HTML.index("function aplicarNavContraida(on) {")
     aplicar = HTML[j:HTML.index("\n    }\n", j)]
     assert "document.body.classList.toggle('nav-contraida', on);" in aplicar
     assert "btn.setAttribute('aria-label', texto);" in aplicar
+    assert "const bloqueada = navAntesDelAsistente !== null;" in aplicar
+    assert "btn.setAttribute('aria-disabled', String(bloqueada));" in aplicar
+    assert "'Cerrá el asistente para expandir la barra'" in aplicar
+    assert '.app-nav__toggle[aria-disabled="true"]:hover { opacity: .4; cursor: not-allowed;' in CSS
 
 
 def test_el_asistente_contrae_la_barra_y_al_cerrarse_la_deja_como_estaba():
@@ -76,11 +83,11 @@ def test_el_asistente_contrae_la_barra_y_al_cerrarse_la_deja_como_estaba():
     # Abrir: recuerda cómo estaba (una sola vez) y contrae.
     assert "if (navAntesDelAsistente === null) navAntesDelAsistente = document.body.classList.contains('nav-contraida');" in fn
     assert "aplicarNavContraida(true);" in fn
-    # Cerrar: vuelve a como estaba, y olvida.
-    assert "aplicarNavContraida(navAntesDelAsistente);" in fn and "navAntesDelAsistente = null;" in fn
+    # Cerrar: olvida (así el botón se desbloquea) y vuelve a como estaba.
+    assert fn.index("navAntesDelAsistente = null;") < fn.index("aplicarNavContraida(antes);")
     # Lo llaman abrir/cerrar, el re-armado con el panel abierto y la salida del asistente.
     assert "_navConAsistente(on);" in HTML
-    assert "if (capChatAbierto) _navConAsistente(true);" in HTML
+    assert "if (capChatAbierto && document.body.classList.contains('en-entorno')) _navConAsistente(true);" in HTML
     j = HTML.index("function _quitarAsistente()")
     assert "_navConAsistente(false);" in HTML[j:HTML.index("\n    }\n", j)]
 
@@ -98,21 +105,27 @@ def test_abrir_y_cerrar_el_asistente_con_la_barra_de_cada_forma(tmp_path):
     nav = HTML[j:HTML.index("\n    }\n", HTML.index("function _navConAsistente", j)) + 7]
     arnes = r"""
 const clases = new Set();
+const boton = { attrs: {}, title: '', setAttribute(k, v) { this.attrs[k] = String(v); } };
 const document = {
   body: { classList: { toggle(c, on) { on ? clases.add(c) : clases.delete(c); }, contains: (c) => clases.has(c) } },
-  getElementById: () => ({ setAttribute() {}, set title(v) {} }),
+  getElementById: () => boton,
 };
+const bloqueado = () => boton.attrs['aria-disabled'] === 'true';
 """ + aplicar + nav + r"""
 const fallos = [];
 const check = (n, c) => { if (!c) fallos.push(n); };
 // Expandida: abrir la contrae, cerrar la expande.
+check('sin asistente: libre', (aplicarNavContraida(false), !bloqueado()) && boton.title === 'Contraer la barra lateral');
 _navConAsistente(true);  check('abrir contrae', clases.has('nav-contraida'));
+check('abierto: bloqueado y dice por qué', bloqueado() && boton.title === 'Cerrá el asistente para expandir la barra');
 _navConAsistente(true);  check('re-render abierto sigue contraída', clases.has('nav-contraida'));
 _navConAsistente(false); check('cerrar vuelve a expandida', !clases.has('nav-contraida'));
+check('cerrado: libre otra vez', !bloqueado() && boton.title === 'Contraer la barra lateral');
 // Ya contraída por la persona: cerrar el asistente la deja contraída.
 aplicarNavContraida(true);
 _navConAsistente(true); _navConAsistente(false);
 check('contraída antes, contraída después', clases.has('nav-contraida'));
+check('contraída y cerrado: libre para expandir', !bloqueado() && boton.title === 'Expandir la barra lateral');
 // Cerrar sin haber abierto no toca nada.
 aplicarNavContraida(false); _navConAsistente(false);
 check('cerrar sin abrir no toca', !clases.has('nav-contraida'));
