@@ -2109,6 +2109,10 @@ class TerraformDeployRequest(BaseModel):
     namespace: str = Field(default="data", description="Namespace de los campos (para el index template).")
     log_file_content: str = Field(default="", description="Contenido del archivo importado (custom single-case). Se sube tal cual a OBS, sin sintéticos.")
     start_ingestion: bool = Field(default=False)
+    # Borrar los índices de los casos antes de ingestar (fase 2). "Reiniciar
+    # ingesta" manda False: borrarlos solo sirve si Logstash vuelve a leer los
+    # archivos, y si recuerda los que ya leyó, el índice quedaría vacío.
+    clear_indices: bool = Field(default=True)
     cases: list[PipelineCase] = Field(default_factory=list, description="Casos múltiples para deploy en paralelo")
     fresh_deploy: bool = Field(default=False, description="Si True, limpia el registro de pipelines antes de agregar los nuevos. SOLO se respeta sin entorno activo (sin marcador de plataforma): con un entorno andando siempre se mergea, porque el for_each de Terraform destruye toda pipeline que no esté en el mapa.")
     existing_opensearch_endpoint: str = Field(default="", description="Endpoint de un cluster OpenSearch existente (ip:port). Si no está vacío, se saltea la creación del cluster OS y se usa este. Solo para demos con chatbot ya habilitado.")
@@ -3227,12 +3231,13 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     obs_executor = None
     obs_future = None
     if request.start_ingestion:
-        yield _sse({"type": "progress", "percent": 3, "phase": "Limpiando índices",
-                    "message": "Limpiando índices previos…"})
-        try:
-            _clear_case_indices(request, _cluster_with_public_access(terraform_dir))
-        except Exception as exc:
-            print(f"[deploy-stream] clear-index falló (best-effort): {exc!r}")
+        if request.clear_indices:
+            yield _sse({"type": "progress", "percent": 3, "phase": "Limpiando índices",
+                        "message": "Limpiando índices previos…"})
+            try:
+                _clear_case_indices(request, _cluster_with_public_access(terraform_dir))
+            except Exception as exc:
+                print(f"[deploy-stream] clear-index falló (best-effort): {exc!r}")
     else:
         yield _sse({"type": "progress", "percent": 2, "phase": "Subiendo logs",
                     "message": "Subiendo datos a OBS…"})
@@ -6612,7 +6617,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
 
-    msg = "Capabilities provisionadas" if any_ok else "No se provisionó ninguna capability"
+    msg = "Plugins provisionados" if any_ok else "No se provisionó ningún plugin"
     runs.finish(run, "complete" if any_ok else "error", detail=msg)
     return ProvisionCapabilitiesResponse(
         status="success" if any_ok else "partial",
@@ -6866,7 +6871,7 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     if not ppl_model or not llm_model:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "ppl_chat",
-                                    "message": "El chatbot no está provisionado para este tipo. Corré 'Provisionar capabilities'."})
+                                    "message": "El chatbot no está provisionado para este tipo. Corré 'Provisionar plugins'."})
 
     # 1) NL → PPL. Pasamos el system_prompt del SLUG elegido (índice + campos + reglas)
     # para que el modelo apunte al vertical correcto. Sin esto, el _predict directo usa

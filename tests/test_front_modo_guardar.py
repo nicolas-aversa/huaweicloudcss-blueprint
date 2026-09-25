@@ -217,7 +217,7 @@ def test_cada_paso_muestra_su_progreso_debajo_de_su_boton():
     Capabilities."""
     html = _INDEX.read_text(encoding="utf-8")
     assert "infra-setup-status" not in html
-    i = html.index("const setupStep = (n, done, enabled, label, hint, btnId, btnLabel) =>")
+    i = html.index("const setupStep = (n, done, enabled, label, hint, btnId, btnLabel, redoLabel) =>")
     paso = html[i:html.index("</div>`;", i)]
     assert paso.index('id="${btnId}"') < paso.index('id="${btnId}-status"')
 

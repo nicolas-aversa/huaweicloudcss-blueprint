@@ -410,10 +410,6 @@
       color: #111111;
       border: 1px solid var(--border-subtle);
     }
-    /* Mismo ancho para "Aplicar index template + dashboards" y "Provisionar capabilities". */
-    #infra-apply-schema-btn, #infra-capabilities-btn {
-      min-width: 300px; max-width: 100%; justify-content: center;
-    }
 
     /* Plugin selector */
     .plugin-grid {
@@ -490,20 +486,24 @@
       margin-bottom: 16px;
     }
 
-    .status-success {
-      background: rgba(22, 163, 74, 0.1);
-      color: var(--accent-green);
-      border: 1px solid rgba(22, 163, 74, 0.2);
+    /* Hecho y error, en el mismo lenguaje que "trabajando" (.status-loading):
+       una superficie de la casa —blanca, borde suave, sombra mínima— con un
+       indicador chico a la izquierda. Eran recuadros verde y rojo que no se
+       parecían a nada más de la plataforma. */
+    .status-success, .status-error {
+      display: flex; align-items: flex-start; gap: 10px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-xs);
     }
-
-    /* Los alfa 0.1/0.2 quedan literales a propósito: son la convención que
-       comparten .status-success y .status-loading acá al lado. Mapearlos a
-       --accent-tint/--accent-ring rompería el paralelo entre los tres estados. */
-    .status-error {
-      background: rgba(229, 0, 0, 0.1);
-      color: var(--accent-hover);
-      border: 1px solid rgba(229, 0, 0, 0.2);
+    .status-success::before, .status-error::before {
+      flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #fff; font-size: var(--fs-xs); font-weight: 700; line-height: 1;
     }
+    .status-success::before { content: "✓"; background: var(--accent-green); }
+    .status-error::before { content: "!"; background: var(--accent); }
 
     /* "Trabajando": era un recuadro azul, el único azul de una paleta cálida
        con acento rojo, y se leía como un aviso ajeno a la plataforma. Ahora es
@@ -2020,6 +2020,7 @@
     /* Adentro de un status (ingesta, reconexión) no lleva marco propio. */
     .status .deploy-progress, .setup-step__status .deploy-progress { margin: 0; max-width: none; }
     .setup-step__status { margin-top: 10px; }
+    .setup-step__hecho { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     /* Animacion de aprovisionamiento: pipeline log -> Logstash -> OpenSearch ->
        dashboards, con pulsos fluyendo entre etapas. Reemplaza el panel educativo
        durante el deploy. Puramente CSS, theme-aware, respeta prefers-reduced-motion. */
@@ -2600,7 +2601,7 @@
               </div>
               <ol class="guide-list">
                 <li><strong>Pipeline</strong> → elegí uno o más datasets → <strong>Desplegar</strong>. Podés cerrar el browser: sigue solo y se reengancha.</li>
-                <li>En <strong>Entorno desplegado</strong>, la puesta en marcha: index template + dashboards → ingesta → capabilities.</li>
+                <li>En <strong>Entorno desplegado</strong>, la puesta en marcha: index template + dashboards → ingesta → plugins.</li>
                 <li>Al terminar, <strong>Destruir entorno</strong>. Los clusters CSS cuestan mientras corren.</li>
               </ol>
             </section>
@@ -4764,7 +4765,7 @@
           ]),
           li('database', `${types.length} pipeline ETL${types.length > 1 ? 's' : ''} de Logstash: ${escapeHtml(labels.join(', '))}`),
           li('dashboard', 'Index template + dashboards por tipo'),
-          ...(hasCaps ? [li('spark', 'Capabilities de OpenSearch: agente conversacional (NL→PPL) + forecasts')] : []),
+          ...(hasCaps ? [li('spark', 'Plugins de OpenSearch: agente conversacional (NL→PPL) + forecasts')] : []),
         ].join('');
         closureEl.innerHTML = `
           <div class="deploy-panel">
@@ -5145,7 +5146,7 @@
       if (state.deployMode === 'demo' && demoEndpoint) {
         body.existing_opensearch_endpoint = demoEndpoint;
       }
-      // Guardar creds OS para que el botón "Provisionar capabilities" de la vista
+      // Guardar creds OS para que el botón "Provisionar plugins" de la vista
       // infra pueda llamar a /provision-capabilities tras la ingesta sin re-pedirlas.
       state.osPassword = body.opensearch_password;
       state.osUser = body.opensearch_user;
@@ -5459,7 +5460,7 @@
             if (!e.startsWith('data: ')) continue;
             let d; try { d = JSON.parse(e.slice(6)); } catch (_) { continue; }
             if (d.type === 'progress' || d.type === 'plan' || d.type === 'item') progresoEvento(prog, d);
-            else if (d.type === 'complete') { if (statusEl) showStatus(statusEl, '✓ Despliegue completado.', 'success'); await hydrateActiveEnv(); }
+            else if (d.type === 'complete') { if (statusEl) showStatus(statusEl, 'Despliegue completado.', 'success'); await hydrateActiveEnv(); }
             else if (d.type === 'error' && statusEl) showStatus(statusEl, 'Error: ' + d.message, 'error');
           }
         }
@@ -5471,14 +5472,14 @@
       const preStatus = document.getElementById('deploy-status-1');
       const conf = state.pipelineCode;
       if (!conf) {
-        if (preStatus) showStatus(preStatus, '⚠ El configuration file todavía no está listo. Volvé al paso 3 y tocá "Revisar y desplegar".', 'error');
+        if (preStatus) showStatus(preStatus, 'El configuration file todavía no está listo. Volvé al paso 3 y tocá "Revisar y desplegar".', 'error');
         return;
       }
       // Productivo: los logs ya están en OBS; lo que hace falta es haber leído la
       // muestra (paso 1 → Siguiente), que es de donde salen el filter y los campos.
       const isCustom = state.selectedExamples.length === 1 && state.selectedExamples[0] === 'custom';
       if (isCustom && !state.rawLog) {
-        if (preStatus) showStatus(preStatus, '⚠ Todavía no se analizó el bucket. Volvé al paso 1 y tocá "Siguiente" para leer una muestra de tus logs.', 'error');
+        if (preStatus) showStatus(preStatus, 'Todavía no se analizó el bucket. Volvé al paso 1 y tocá "Siguiente" para leer una muestra de tus logs.', 'error');
         return;
       }
       preStatus?.classList.add('hidden');
@@ -6098,7 +6099,7 @@
     }
 
     // Paso 3 (post-ingesta): provisiona capabilities sobre el cluster con datos ya
-    // ingeridos. Lo dispara el botón "Provisionar capabilities" de la vista infra.
+    // ingeridos. Lo dispara el botón "Provisionar plugins" de la vista infra.
     async function provisionCapabilitiesFromInfra(btn, pipelines, force) {
       const mount = document.getElementById('infra-capabilities-result');
       if (!btn) return;
@@ -6106,7 +6107,7 @@
       const slugs = (pipelines || []).filter(p => p.has_capabilities).map(p => p.slug);
       btn.disabled = true;
       const original = btn.innerHTML;
-      btn.innerHTML = `${icon('check')} Provisionando…`;
+      btn.innerHTML = 'Provisionando…';
       try {
         const res = await fetch('/api/v1/onboarding/provision-capabilities', {
           method: 'POST',
@@ -6133,7 +6134,10 @@
         }
         await hydrateActiveEnv();
       } catch (err) {
-        if (mount) mount.innerHTML = `<div class="status status-error">Error: ${escapeHtml(err.message)}</div>`;
+        // El error, debajo de SU botón (como los otros dos pasos).
+        const statusEl = document.getElementById('infra-capabilities-btn-status');
+        if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
+        else if (mount) mount.innerHTML = `<div class="status status-error">Error: ${escapeHtml(err.message)}</div>`;
       } finally {
         btn.disabled = false;
         btn.innerHTML = original;
@@ -6187,7 +6191,7 @@
             `${enPausa.join(', ')}: en pausa, la ingesta no arrancó. Tocá «Iniciar ingesta con Logstash» en Puesta en marcha.`);
           if (sinDatos.length) partes.push(
             `${sinDatos.join(', ')}: ingestando pero todavía sin documentos. Logstash lee el bucket cada 60 s: esperá un minuto y volvé a verificar; si sigue igual, revisá que el prefijo tenga objetos.`);
-          toast(partes.length ? partes.join(' · ') : 'Todas las pipelines tienen documentos.',
+          toast(partes.length ? partes.join(' · ') : 'Todos los pipelines tienen documentos.',
             partes.length ? 'info' : 'success', partes.length ? 10000 : 4000);
         }
         renderInfraView(state.lastStatus);
@@ -6279,11 +6283,11 @@
         const data = await res.json();
         if (!res.ok) throw detailError(data);
         if (!data.index_template_applied) {
-          if (statusEl) showStatus(statusEl, '⚠ No se pudo aplicar el index template. Reintentá.', 'error');
+          if (statusEl) showStatus(statusEl, 'No se pudo aplicar el index template. Reintentá.', 'error');
           return;
         }
         const dashMsg = data.dashboards_imported ? ' · dashboards importados' : '';
-        if (statusEl) showStatus(statusEl, `✓ Index template aplicado${dashMsg}.`, 'success');
+        if (statusEl) showStatus(statusEl, `Index template aplicado${dashMsg}.`, 'success');
         await hydrateActiveEnv();
       } catch (err) {
         if (err.stage === 'dnat_faltante' && statusEl) {
@@ -6364,7 +6368,10 @@
 
     // Paso: arranca Logstash (re-corre terraform con start_ingestion=true). Necesita
     // las creds OBS del body de la sesión (state.pendingDeploy).
-    async function infraStartIngestion(btn) {
+    // `conservarIndices`: al REINICIAR una ingesta que ya corrió no se borra el
+    // índice. Borrarlo solo sirve si Logstash vuelve a leer los archivos, y si
+    // recuerda los que ya leyó, el índice quedaría vacío.
+    async function infraStartIngestion(btn, { conservarIndices = false } = {}) {
       const body = resolveDeployBody();
       const statusEl = document.getElementById('infra-ingest-btn-status');
       if (!body) { if (statusEl) showStatus(statusEl, 'No pude reconstruir la config del deploy. Reingresá por “Pipeline”.', 'error'); return; }
@@ -6375,9 +6382,10 @@
       try {
         // La fase 2 corre siempre sobre un entorno que ya existe: nunca es "fresh".
         const ok = await _seguirDeploy(
-          await _openDeployStream({ ...body, start_ingestion: true, fresh_deploy: false }), prog);
+          await _openDeployStream({ ...body, start_ingestion: true, fresh_deploy: false,
+                                    clear_indices: !conservarIndices }), prog);
         if (!ok) throw new Error('La ingesta no completó correctamente.');
-        if (statusEl) showStatus(statusEl, '✓ Ingesta iniciada. Los datos empiezan a entrar (esperá ~1-2 min antes de provisionar capabilities).', 'success');
+        if (statusEl) showStatus(statusEl, 'Ingesta iniciada. Los datos empiezan a entrar (esperá ~1-2 min antes de provisionar plugins).', 'success');
         await hydrateActiveEnv();
       } catch (err) {
         if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
@@ -6598,7 +6606,7 @@
       deploy: { label: 'Despliegue', icon: 'rocket' },
       ingestion: { label: 'Ingesta', icon: 'play' },
       schema: { label: 'Template + dashboards', icon: 'dashboard' },
-      capabilities: { label: 'Capabilities', icon: 'spark' },
+      capabilities: { label: 'Plugins', icon: 'spark' },
       destroy: { label: 'Teardown', icon: 'trash' },
     };
     const RUN_STATUS = {
@@ -6843,7 +6851,7 @@
       const capsDone = !!(data.capabilities && Object.keys(data.capabilities).length);
       // Todo listo → banner de cierre "Entorno operativo" en vez del panel de pasos.
       const allDone = pipelines.length > 0 && schemaDone && ingestDone && (capsDone || !hasCapabilitySlug);
-      const showSetup = pipelines.length > 0 && !allDone;
+      const showSetup = pipelines.length > 0;
 
       // Rellenar el detalle de la mini-card del rail (ya visible por el toggle).
       const navEnvProject = document.getElementById('nav-env-project');
@@ -6892,13 +6900,15 @@
           // decía "sin documentos" de pipelines que ni habían arrancado.
           + (pipelines.some(p => p.active)
             ? `<div style="display:flex;justify-content:flex-end;">
-                 <button class="btn btn-secondary btn-sm" id="infra-verify-btn">${icon('check')} Verificar ingesta</button>
+                 <button class="btn btn-primary btn-sm" id="infra-verify-btn">Verificar ingesta</button>
                </div>`
             : '')
         : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;
 
       // Un paso de la secuencia de puesta en marcha (número/check + label + botón).
-      const setupStep = (n, done, enabled, label, hint, btnId, btnLabel) => `
+      // Hecho → la pastilla y, al lado, el botón para rehacerlo (cada paso es
+      // reintentable). Los botones llevan solo texto y miden lo que su texto.
+      const setupStep = (n, done, enabled, label, hint, btnId, btnLabel, redoLabel) => `
         <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; ${n > 1 ? 'border-top:1px solid var(--border-subtle);' : ''}">
           <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:var(--fs-sm); font-weight:700;
             background:${done ? 'var(--accent-green)' : (enabled ? 'var(--accent)' : 'var(--bg-tertiary)')};
@@ -6907,7 +6917,10 @@
             <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary);">${label}</div>
             <div class="form-hint" style="margin:2px 0 8px;">${hint}</div>
             ${done
-              ? '<span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>'
+              ? `<div class="setup-step__hecho">
+                   <span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>
+                   <button class="btn btn-secondary btn-sm" id="${btnId}">${redoLabel}</button>
+                 </div>`
               : `<button class="btn ${enabled ? 'btn-primary' : 'btn-secondary'} btn-sm" id="${btnId}" ${enabled ? '' : 'disabled'}>${btnLabel}</button>`}
             ${/* El progreso y el resultado de cada paso, debajo de SU botón:
                  con un status único al final del panel, la barra de "Iniciar
@@ -6918,7 +6931,7 @@
       const setupTotal = 2 + (hasCapabilitySlug ? 1 : 0);
       const setupDoneCount = (schemaDone ? 1 : 0) + (ingestDone ? 1 : 0) + (hasCapabilitySlug && capsDone ? 1 : 0);
       const setupPanel = showSetup ? `
-        <details class="section-card setup-card" open>
+        <details class="section-card setup-card" ${allDone ? '' : 'open'}>
           <summary class="setup-card__summary">
             <span class="section-card__tile">${icon('rocket')}</span>
             <span class="section-card__title">Puesta en marcha</span>
@@ -6929,26 +6942,16 @@
           <div class="form-hint" style="margin:0 0 8px;">Completá la secuencia para dejar el entorno operativo. Cada paso es reintentable.</div>
           ${setupStep(1, schemaDone, !schemaDone, 'Index template + dashboards',
             'Define los tipos en OpenSearch e importa los dashboards, antes de ingestar.',
-            'infra-apply-schema-btn', icon('check') + ' Aplicar index template + dashboards')}
+            'infra-apply-schema-btn', 'Aplicar index template + dashboards', 'Volver a aplicar')}
           ${setupStep(2, ingestDone, schemaDone && !ingestDone, 'Iniciar ingesta',
             !schemaDone ? 'Aplicá primero el index template.'
               : rechazadas.length ? `CSS rechazó el configuration file de ${rechazadas.map(p => escapeHtml(p.slug)).join(', ')}: al reintentar se manda de nuevo.`
               : 'Arranca Logstash: recién acá empiezan a entrar los datos.',
-            'infra-ingest-btn', icon('play') + ' Iniciar ingesta con Logstash')}
-          ${hasCapabilitySlug ? `
-          <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border-subtle);">
-            <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:var(--fs-sm); font-weight:700;
-              background:${capsDone ? 'var(--accent-green)' : (ingestDone ? 'var(--accent)' : 'var(--bg-tertiary)')};
-              color:${capsDone || ingestDone ? '#fff' : 'var(--text-muted)'};">${capsDone ? '✓' : '3'}</span>
-            <div style="flex:1; min-width:0;">
-              <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary);">Capabilities de OpenSearch</div>
-              <div class="form-hint" style="margin:2px 0 8px;">${ingestDone ? 'Agente conversacional (NL→PPL) y forecast. Esperá ~1-2 min a que carguen datos.' : 'Iniciá la ingesta y esperá que entren documentos.'}</div>
-              <div style="display:flex; align-items:center; gap:8px;">
-                ${capsDone ? '<span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>' : ''}
-                <button class="btn ${ingestDone ? 'btn-primary' : 'btn-secondary'} btn-sm" id="infra-capabilities-btn" ${ingestDone ? '' : 'disabled'}>${icon('spark')} ${capsDone ? 'Re-provisionar' : 'Provisionar capabilities'}</button>
-              </div>
-            </div>
-          </div>` : ''}
+            'infra-ingest-btn', 'Iniciar ingesta con Logstash', 'Reiniciar ingesta')}
+          ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
+            ingestDone ? 'Agente conversacional (NL→PPL) y forecast. Esperá ~1-2 min a que carguen datos.'
+                       : 'Iniciá la ingesta y esperá que entren documentos.',
+            'infra-capabilities-btn', 'Provisionar plugins', 'Volver a provisionar plugins') : ''}
           </div>
         </details>` : '';
 
@@ -6957,7 +6960,7 @@
       const donePanel = allDone ? `
         <div style="margin:6px 0 16px; padding:16px 18px; border:1px solid rgba(22,163,74,.35); border-radius:var(--radius-lg); background:var(--accent-green-tint); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
           <span class="status-pill"><span class="status-pill__dot"></span>Entorno operativo</span>
-          <span style="font-size:var(--fs-base); color:var(--text-secondary);">Datos ingestados, dashboards listos${hasCapabilitySlug ? ' y capabilities provisionadas' : ''}. Todo quedó operativo.</span>
+          <span style="font-size:var(--fs-base); color:var(--text-secondary);">Datos ingestados, dashboards listos${hasCapabilitySlug ? ' y plugins provisionados' : ''}. Todo quedó operativo.</span>
           ${dashUrl ? `<a class="btn btn-primary btn-sm" style="margin-left:auto;" href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>` : ''}
         </div>` : '';
 
@@ -7024,7 +7027,7 @@
       body.querySelector('#infra-apply-schema-btn')?.addEventListener('click', (e) =>
         infraApplySchema(e.currentTarget));
       body.querySelector('#infra-ingest-btn')?.addEventListener('click', (e) =>
-        infraStartIngestion(e.currentTarget));
+        infraStartIngestion(e.currentTarget, { conservarIndices: ingestDone }));
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, capsDone));
       body.querySelector('#infra-verify-btn')?.addEventListener('click', (e) =>
