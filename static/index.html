@@ -2137,26 +2137,6 @@
     .cap-assistant__code { display: block; margin-top: 6px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-all; }
 
     .cap-chat { margin-top: 14px; }
-    /* Selector de caso: banda propia, centrada y distintiva, bajo el header. */
-    .cap-assistant__cases {
-      display: flex; flex-direction: column; align-items: center; gap: 7px;
-      padding: 14px 22px 12px;
-    }
-    .cap-assistant__cases-lbl {
-      font-size: var(--fs-xs); font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
-      color: var(--text-muted);
-    }
-    .cap-chat__tabs {
-      display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 4px; padding: 5px; margin: 0;
-      background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-pill); max-width: 100%; box-shadow: var(--shadow-xs);
-    }
-    .cap-chat__tabs .lp-tab-btn { border: none; background: transparent; border-radius: var(--radius-pill); padding: 7px 16px; font-weight: 600; }
-    .cap-chat__tabs .lp-tab-btn.lp-tab-active {
-      background: var(--accent);
-      color: #fff; box-shadow: 0 4px 12px -5px var(--accent);
-    }
-    .cap-chat__tabs .lp-tab-btn:hover:not(.lp-tab-active) { color: var(--accent-hover); }
     .cap-chat__empty-title { font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-secondary); }
     /* Sugerencias persistentes (arriba del input): card-chips compactas que wrappean. */
     .cap-chat__suggest-row { margin-top: 10px; }
@@ -2257,16 +2237,74 @@
     .cap-chat__typing::after { content: '▋'; margin-left: 1px; color: var(--accent); animation: capBlink .8s steps(1) infinite; }
     @keyframes capBlink { 50% { opacity: 0; } }
 
-    /* ── Asistente hero / premium ── */
-    .cap-assistant { padding: 0; overflow: hidden; }
-    .cap-assistant > .section-card__head {
-      padding: 18px 22px; background: linear-gradient(135deg, var(--accent-tint), transparent 72%);
-      border-bottom: 1px solid var(--border-subtle);
+    /* ── Asistente flotante ──
+       Un botón fijo abajo a la derecha abre el chat en un panel sobre la
+       página, como el chat de soporte de cualquier web. Era una tarjeta dentro
+       de la vista: al aparecer (paso 3) la alargaba de golpe. */
+    .cap-lanzador {
+      position: fixed; right: 24px; bottom: 24px; z-index: 900;
+      width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--accent); color: #fff; box-shadow: var(--shadow-lg);
+      transition: filter var(--t-fast);
     }
-    .cap-assistant .section-card__title { font-size: var(--fs-lg); }
-    .cap-assistant__tile { background: var(--accent); color: #fff; box-shadow: 0 6px 18px -6px var(--accent); }
-    .cap-assistant > .cap-chat { margin-top: 0; padding: 14px 22px 6px; }
-    .cap-assistant > .cap-assistant__adv { padding: 0 22px 16px; margin-top: 8px; }
+    .cap-lanzador:hover { filter: brightness(1.06); }
+    .cap-lanzador .icon { width: 24px; height: 24px; }
+    .cap-flotante {
+      position: fixed; right: 24px; bottom: 92px; z-index: 900;
+      width: min(420px, calc(100vw - 48px)); height: min(640px, calc(100vh - 120px));
+      display: none; flex-direction: column; overflow: hidden;
+      background: var(--bg-primary); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
+    }
+    .cap-flotante.is-abierto { display: flex; }
+    .cap-flotante__head {
+      display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+      border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary);
+    }
+    .cap-flotante__tile {
+      flex: none; width: 34px; height: 34px; border-radius: var(--radius-md);
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--accent); color: #fff;
+    }
+    .cap-flotante__tile .icon { width: 18px; height: 18px; }
+    .cap-flotante__titulo {
+      flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+      font-size: var(--fs-base); color: var(--text-primary);
+    }
+    .cap-flotante__caso {
+      max-width: 100%; font: inherit; font-size: var(--fs-sm); color: var(--text-secondary);
+      padding: 2px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+      background: var(--bg-primary);
+    }
+    .cap-flotante__sub { font-size: var(--fs-sm); color: var(--text-muted); }
+    .cap-flotante__cerrar {
+      flex: none; border: none; background: transparent; color: var(--text-muted);
+      padding: 6px; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .cap-flotante__cerrar:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+    .cap-flotante__cerrar .icon { width: 18px; height: 18px; }
+    .cap-flotante .cap-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; padding: 0 12px 10px; }
+    .cap-flotante .cap-chat__log { flex: 1; min-height: 0; max-height: none; margin-top: 0; padding: 12px 2px; }
+    .cap-flotante .cap-chat__msg { max-width: 88%; }
+    .cap-flotante .cap-chat__msg--rich { width: 100%; }
+    /* min-width: 0 → la fila de sugerencias (que no se parte) scrollea adentro
+       en vez de ensanchar el panel y sacar el chat de la pantalla. */
+    .cap-flotante .cap-chat__suggest-row, .cap-flotante .cap-chat__suggest { min-width: 0; max-width: 100%; }
+    .cap-flotante .cap-chat__suggest-row { margin-top: 6px; }
+    .cap-flotante .cap-chat__suggest .lp-tab-panel { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+    .cap-flotante .cap-chat__suggest .lp-q-btn { flex: none; white-space: nowrap; }
+    .cap-flotante .cap-chat__form { margin-top: 8px; }
+    .cap-flotante > .cap-assistant__adv { margin: 0; padding: 0 14px 10px; font-size: var(--fs-xs); }
+    /* En un teléfono, el chat ocupa la pantalla y el botón se va mientras está abierto. */
+    @media (max-width: 560px) {
+      .cap-flotante { inset: 0; width: auto; height: auto; border-radius: 0; border: none; }
+      .cap-lanzador.is-abierto { display: none; }
+    }
+    /* El paso 3: qué plugins quedaron y el botón para abrir el asistente. */
+    .cap-resumen { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .cap-resumen .status-pill { margin: 0; }
+    .cap-resumen__lbl { font-size: var(--fs-sm); color: var(--text-muted); }
     @media (prefers-reduced-motion: reduce) {
       .cap-chart, .cap-chat__typing::after { animation: none; }
     }
@@ -5590,6 +5628,14 @@
     let capChatSlug = '';       // la pestaña elegida
     let capChatBusy = false;    // una pregunta a la vez, aunque el form se rearme
     let capChatSeq = 0;
+    let capChatAbierto = false;   // el panel flotante, abierto o no
+
+    // Sin entorno no hay asistente: el panel y su botón viven en <body>, fuera
+    // de la vista, así que se sacan a mano.
+    function _quitarAsistente() {
+      document.getElementById('deploy-capabilities')?.remove();
+      document.getElementById('cap-lanzador')?.remove();
+    }
 
     function capChatAgregar(slug, who, html) {
       const entry = { id: `m${++capChatSeq}`, who, html, result: null, err: false };
@@ -5616,8 +5662,8 @@
     function renderCapabilitiesResult(capsBySlug, anchor) {
       const statusEl = anchor || document.getElementById('infra-capabilities-result');
       if (!statusEl) return;
-      let host = document.getElementById('deploy-capabilities');
-      if (host) host.remove();
+      _quitarAsistente();
+      let host;
       const entries = Object.entries(capsBySlug || {});
       if (!entries.length) return;
       const [slug0, caps0] = entries[0];
@@ -5697,18 +5743,18 @@
           const showTabs = activeSlugs.length > 1;
           // La pestaña elegida sobrevive al re-render (antes volvía a la primera).
           const activa = Math.max(0, activeSlugs.indexOf(capChatSlug));
-          const tabsHtml = activeSlugs.map((s, i) => {
+          const opciones = activeSlugs.map((s, i) => {
             const label = SLUG_LABELS[s] || s.replace(/-/g, ' ');
-            return `<button type="button" role="tab" class="lp-tab-btn${i === activa ? ' lp-tab-active' : ''}" data-slug="${escapeHtml(s)}">${escapeHtml(label)}</button>`;
+            return `<option value="${escapeHtml(s)}"${i === activa ? ' selected' : ''}>${escapeHtml(label)}</option>`;
           }).join('');
           const panelsHtml = activeSlugs.map((s, i) => {
             const qs = _questionsFor(s).slice(0, 10);
             return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
           }).join('');
-          // Selector de caso: banda propia, centrada y distintiva (arriba del chat).
+          // El caso, en la cabecera del panel: un <select> si hay más de uno.
           tabsBar = showTabs
-            ? `<div class="cap-assistant__cases"><span class="cap-assistant__cases-lbl">Elegí el caso</span><div class="cap-chat__tabs" role="tablist">${tabsHtml}</div></div>`
-            : '';
+            ? `<select class="cap-flotante__caso" id="cap-chat-caso" aria-label="Caso">${opciones}</select>`
+            : `<span class="cap-flotante__sub">${escapeHtml(SLUG_LABELS[activeSlugs[0]] || 'Tus datos')}</span>`;
           // Un log de chat por caso (conversación separada), armado desde lo
           // guardado: así un re-render devuelve la conversación como estaba.
           logsHtml = activeSlugs.map((s, i) =>
@@ -5716,19 +5762,31 @@
           chipPanels = `<div class="cap-chat__suggest">${panelsHtml}</div>`;
         }
       }
+      // En el paso 3 queda una línea: qué plugins quedaron y el botón para abrir
+      // el asistente. El chat es un panel flotante (abajo a la derecha): como
+      // tarjeta dentro de la página, al aparecer la alargaba de golpe.
+      const hayChat = agentReady && activeSlugs.length;
+      statusEl.innerHTML = `
+        <div class="cap-resumen">
+          <span class="cap-resumen__lbl">Plugins:</span> ${chips}
+          ${hayChat ? '<button type="button" class="btn btn-primary btn-sm" id="cap-abrir">Abrir asistente</button>' : ''}
+        </div>`;
+      if (!hayChat) return;
+
       host = document.createElement('div');
       host.id = 'deploy-capabilities';
-      host.className = 'section-card cap-assistant';
+      host.className = 'cap-flotante' + (capChatAbierto ? ' is-abierto' : '');
+      host.setAttribute('role', 'dialog');
+      host.setAttribute('aria-label', 'Asistente de datos');
       host.innerHTML = `
-        <div class="section-card__head">
-          <span class="section-card__tile cap-assistant__tile">${icon('chat')}</span>
-          <span class="section-card__titlewrap">
-            <span class="section-card__title">Asistente de datos</span>
-            <span class="section-card__hint">Preguntá en lenguaje natural — lo traduzco a PPL y respondo con el dato real.</span>
-          </span>
+        <div class="cap-flotante__head">
+          <span class="cap-flotante__tile">${icon('chat')}</span>
+          <div class="cap-flotante__titulo">
+            <strong>Asistente de datos</strong>
+            ${tabsBar}
+          </div>
+          <button type="button" class="cap-flotante__cerrar" id="cap-flotante-cerrar" aria-label="Cerrar el asistente">${icon('x')}</button>
         </div>
-        ${agentReady && activeSlugs.length ? `
-        ${tabsBar}
         <div class="cap-chat">
           ${logsHtml}
           <div class="cap-chat__suggest-row">${chipPanels}</div>
@@ -5737,24 +5795,38 @@
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Escribí tu pregunta…">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
-        </div>` : ''}
+        </div>
         <details class="cap-assistant__adv">
           <summary>Cómo demostrar en Dashboards · Dev Tools (avanzado)</summary>
           <div class="cap-assistant__adv-body">
             <strong>En OpenSearch Dashboards:</strong> los <strong>Dashboards</strong> del tipo (volumen, cuentas, funnel) y el <strong>Forecasting</strong> desde su plugin.
-            ${agentReady && agentId ? `<code class="cap-assistant__code">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
+            ${agentId ? `<code class="cap-assistant__code">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
 {"parameters":{"question":"¿Cuántos eventos hay en total?"}}</code>` : ''}
           </div>
         </details>`;
-      if (anchor) anchor.appendChild(host);
-      else statusEl.insertAdjacentElement('afterend', host);
+      const lanzador = document.createElement('button');
+      lanzador.id = 'cap-lanzador';
+      lanzador.type = 'button';
+      lanzador.className = 'cap-lanzador' + (capChatAbierto ? ' is-abierto' : '');
+      lanzador.setAttribute('aria-label', 'Asistente de datos');
+      lanzador.innerHTML = icon('chat');
+      document.body.append(host, lanzador);
 
       // \u2500\u2500 Chat NL\u2192PPL nativo: pega a POST /api/v1/capabilities/ppl-chat (orquestado
       // server-side, sin el Assistant de Dashboards). El slug activo = la tab elegida. \u2500\u2500
       const chatInput = host.querySelector('#cap-chat-input');
       const chatForm = host.querySelector('#cap-chat-form');
       const _activeChatSlug = () =>
-        (host.querySelector('.lp-tab-btn.lp-tab-active')?.dataset.slug) || activeSlugs[0];
+        (host.querySelector('#cap-chat-caso')?.value) || activeSlugs[0];
+      const _abrir = (on) => {
+        capChatAbierto = on;
+        host.classList.toggle('is-abierto', on);
+        lanzador.classList.toggle('is-abierto', on);
+        if (on) chatInput?.focus();
+      };
+      lanzador.addEventListener('click', () => _abrir(!capChatAbierto));
+      host.querySelector('#cap-flotante-cerrar')?.addEventListener('click', () => _abrir(false));
+      statusEl.querySelector('#cap-abrir')?.addEventListener('click', () => _abrir(true));
       // Se busca en el asistente que está en pantalla AHORA, no en `host`: si
       // la vista se rearmó mientras llegaba una respuesta, `host` ya no está.
       const _logDe = (slug) =>
@@ -6067,25 +6139,17 @@
       host.querySelectorAll('.lp-q-btn').forEach(qb => {
         qb.addEventListener('click', () => sendCapChat(qb.dataset.q || ''));
       });
-      // Tabs: seleccionan el caso activo (slug). Cambian el log (chat separado por
-      // caso), las sugerencias y el marcado de la tab.
-      host.querySelectorAll('.lp-tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const slug = btn.dataset.slug;
-          capChatSlug = slug;
-          host.querySelectorAll('.lp-tab-btn').forEach(b => {
-            const on = b === btn;
-            b.classList.toggle('lp-tab-active', on);
-            b.setAttribute('aria-selected', on ? 'true' : 'false');
-          });
-          host.querySelectorAll('.cap-chat__log').forEach(l => {
-            l.style.display = (l.dataset.slug === slug) ? 'flex' : 'none';
-          });
-          host.querySelectorAll('.lp-tab-panel').forEach(p => {
-            p.style.display = (p.dataset.slug === slug) ? 'flex' : 'none';
-          });
-          if (chatInput) chatInput.focus();
+      // El caso: cambia el log (chat separado por caso) y las sugerencias.
+      host.querySelector('#cap-chat-caso')?.addEventListener('change', (e) => {
+        const slug = e.target.value;
+        capChatSlug = slug;
+        host.querySelectorAll('.cap-chat__log').forEach(l => {
+          l.style.display = (l.dataset.slug === slug) ? 'flex' : 'none';
         });
+        host.querySelectorAll('.lp-tab-panel').forEach(p => {
+          p.style.display = (p.dataset.slug === slug) ? 'flex' : 'none';
+        });
+        if (chatInput) chatInput.focus();
       });
       // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML
       // guardado trae el lugar, no el SVG.
@@ -6775,6 +6839,7 @@
       // aprovisionamiento (5-25 min) corre en background; mostramos el progreso.
       if (state.provisioning) {
         stopActiveEnvTicker();
+        _quitarAsistente();
         const isReuse = state.provisioning === 'reuse';
         body.innerHTML = `
           <div class="infra-empty is-provisioning">
@@ -6793,6 +6858,7 @@
 
       if (!active) {
         stopActiveEnvTicker();
+        _quitarAsistente();
 
         // "No tenés ningún entorno" es la respuesta correcta casi siempre, pero
         // no cuando esta cuenta SÍ desplegó y el state remoto no se pudo leer:

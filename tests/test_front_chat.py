@@ -141,3 +141,56 @@ def test_la_pregunta_manda_la_memoria_de_su_caso():
     assert envio.index("const history = capChatHistorial(slug);") < envio.index("_agregar(slug, 'user'")
     assert "question, slug, history," in envio
     assert "pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };" in envio
+
+
+# ── El chat flotante ────────────────────────────────────────────────────────
+def test_el_asistente_es_un_panel_flotante_y_no_alarga_la_pagina():
+    """Era una tarjeta dentro de la vista: al aparecer (paso 3) la alargaba."""
+    fn = _render(_INDEX.read_text(encoding="utf-8"))
+    assert "document.body.append(host, lanzador);" in fn
+    assert "host.className = 'cap-flotante' + (capChatAbierto ? ' is-abierto' : '');" in fn
+    assert "anchor.appendChild(host)" not in fn and "insertAdjacentElement('afterend', host)" not in fn
+    # En la página queda una línea: los plugins y el botón para abrirlo.
+    assert 'id="cap-abrir">Abrir asistente</button>' in fn
+    assert "statusEl.querySelector('#cap-abrir')?.addEventListener('click', () => _abrir(true));" in fn
+
+
+def test_abrir_y_cerrar_no_pierde_nada():
+    fn = _render(_INDEX.read_text(encoding="utf-8"))
+    abrir = fn[fn.index("const _abrir = (on) => {"):]
+    abrir = abrir[:abrir.index("};")]
+    assert "capChatAbierto = on;" in abrir and "classList.toggle('is-abierto', on)" in abrir
+    assert "lanzador.addEventListener('click', () => _abrir(!capChatAbierto));" in fn
+    assert "#cap-flotante-cerrar')?.addEventListener('click', () => _abrir(false));" in fn
+
+
+def test_el_caso_se_elige_en_la_cabecera():
+    fn = _render(_INDEX.read_text(encoding="utf-8"))
+    assert '<select class="cap-flotante__caso" id="cap-chat-caso" aria-label="Caso">' in fn
+    assert "(host.querySelector('#cap-chat-caso')?.value) || activeSlugs[0]" in fn
+    cambio = fn[fn.index("host.querySelector('#cap-chat-caso')?.addEventListener('change'"):]
+    assert "capChatSlug = slug;" in cambio[:600]
+
+
+def test_sin_entorno_no_queda_el_asistente():
+    """El panel y su botón viven en <body>, fuera de la vista."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function renderInfraView(")
+    vista = html[i:html.index("state.lastStatus = data;", i)]
+    assert vista.count("_quitarAsistente();") == 2        # provisionando y sin entorno
+    j = html.index("function _quitarAsistente()")
+    quitar = html[j:html.index("}", j)]
+    assert "'deploy-capabilities'" in quitar and "'cap-lanzador'" in quitar
+
+
+def test_el_css_del_panel():
+    html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
+    panel = css[css.index("    .cap-flotante {"):]
+    panel = panel[:panel.index("}")]
+    assert "position: fixed" in panel and "display: none" in panel
+    assert ".cap-flotante.is-abierto { display: flex; }" in css
+    lanzador = css[css.index("    .cap-lanzador {"):]
+    assert "position: fixed" in lanzador[:lanzador.index("}")]
+    celu = css[css.index("@media (max-width: 560px) {\n      .cap-flotante"):]
+    assert "inset: 0" in celu[:200]
