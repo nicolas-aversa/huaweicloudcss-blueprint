@@ -678,16 +678,17 @@
     }
     .app-nav__env:hover { background: var(--bg-primary); border-color: var(--border-default); }
 
-    /* Contraer / expandir la barra (al pie). */
+    /* Contraer / expandir la barra: un ícono solo, al pie, como en Cloudflare. */
+    .app-nav__pie { flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--border-subtle); }
     .app-nav__toggle {
-      display: flex; align-items: center; gap: var(--sp-3); flex-shrink: 0;
-      margin: 0 12px 12px; padding: var(--sp-2) var(--sp-3);
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; padding: 0;
       border: none; border-radius: var(--radius-sm); background: transparent; cursor: pointer;
-      font: inherit; font-size: var(--fs-sm); color: var(--text-muted); text-align: left;
+      color: var(--text-muted);
       transition: background var(--t-fast), color var(--t-fast);
     }
     .app-nav__toggle:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-    .app-nav__toggle .icon { width: 16px; height: 16px; flex: none; transform: rotate(90deg); }
+    .app-nav__toggle .icon { width: 17px; height: 17px; }
     /* Contraída: solo íconos (su nombre aparece al pasar el mouse). Deja
        lugar para el contenido, sobre todo con el asistente abierto. En el
        celular la barra es otra (arriba, con hamburguesa) y no se contrae. */
@@ -700,8 +701,7 @@
       body.nav-contraida .nav-substeps,
       body.nav-contraida .app-nav__env-detail,
       body.nav-contraida .app-nav__env-status,
-      body.nav-contraida .app-nav__user-email,
-      body.nav-contraida .app-nav__toggle-label { display: none; }
+      body.nav-contraida .app-nav__user-email { display: none; }
       body.nav-contraida .nav-group__label {
         height: 0; padding: 0; margin: 8px 6px; overflow: hidden;
         border-top: 1px solid var(--border-subtle);
@@ -711,10 +711,9 @@
       body.nav-contraida .nav-dot { position: absolute; top: 6px; right: 8px; }
       body.nav-contraida .app-nav__env { padding: 12px 0; display: flex; justify-content: center; }
       body.nav-contraida .app-nav__env-head { justify-content: center; }
-      body.nav-contraida .app-nav__toggle { justify-content: center; margin: 0 10px 12px; }
-      body.nav-contraida .app-nav__toggle .icon { transform: rotate(-90deg); }
+      body.nav-contraida .app-nav__pie { display: flex; justify-content: center; padding: 8px 0; }
     }
-    @media (max-width: 768px) { .app-nav__toggle { display: none; } }
+    @media (max-width: 768px) { .app-nav__pie { display: none; } }
     .app-nav__env-head { display: flex; align-items: center; gap: 8px; }
     .app-nav__env-dot {
       width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
@@ -2552,6 +2551,7 @@
     <symbol id="ic-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
     <symbol id="ic-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
     <symbol id="ic-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="ic-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
     <symbol id="ic-alert-triangle" viewBox="0 0 24 24"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></symbol>
     <symbol id="ic-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 12v5"/></symbol>
     <symbol id="ic-settings" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
@@ -2676,10 +2676,12 @@
         </button>
       </div>
 
-      <button class="app-nav__toggle" id="nav-toggle" type="button" aria-expanded="true" title="Contraer menú">
-        <svg class="icon"><use href="#ic-chevron"/></svg>
-        <span class="app-nav__toggle-label">Contraer menú</span>
-      </button>
+      <div class="app-nav__pie">
+        <button class="app-nav__toggle" id="nav-toggle" type="button" aria-expanded="true"
+                aria-label="Contraer la barra lateral" title="Contraer la barra lateral">
+          <svg class="icon"><use href="#ic-panel"/></svg>
+        </button>
+      </div>
 
       <!-- Usuario logueado + logout: solo visible en modo hosteado (auth on). -->
       <div class="app-nav__user hidden" id="nav-user">
@@ -5759,6 +5761,18 @@
     let capChatBusy = false;    // una pregunta a la vez, aunque el form se rearme
     let capChatSeq = 0;
     let capChatAbierto = false;   // el panel flotante, abierto o no
+    // Cómo estaba la barra izquierda antes de abrir el asistente (null: el
+    // asistente no la tocó). Al cerrarlo vuelve a eso.
+    let navAntesDelAsistente = null;
+    function _navConAsistente(abierto) {
+      if (abierto) {
+        if (navAntesDelAsistente === null) navAntesDelAsistente = document.body.classList.contains('nav-contraida');
+        aplicarNavContraida(true);
+      } else if (navAntesDelAsistente !== null) {
+        aplicarNavContraida(navAntesDelAsistente);
+        navAntesDelAsistente = null;
+      }
+    }
 
     // Sin entorno no hay asistente: el panel y su botón viven en <body>, fuera
     // de la vista, así que se sacan a mano.
@@ -5766,6 +5780,7 @@
       document.getElementById('deploy-capabilities')?.remove();
       document.getElementById('cap-lanzador')?.remove();
       document.body.classList.remove('con-asistente');
+      _navConAsistente(false);
     }
 
     function capChatAgregar(slug, who, html) {
@@ -5956,6 +5971,7 @@
       lanzador.innerHTML = icon('chat');
       document.body.append(host, lanzador);
       document.body.classList.toggle('con-asistente', capChatAbierto);
+      if (capChatAbierto) _navConAsistente(true);
 
       // \u2500\u2500 Chat NL\u2192PPL nativo: pega a POST /api/v1/capabilities/ppl-chat (orquestado
       // server-side, sin el Assistant de Dashboards). El slug activo = la tab elegida. \u2500\u2500
@@ -5968,6 +5984,7 @@
         host.classList.toggle('is-abierto', on);
         lanzador.classList.toggle('is-abierto', on);
         document.body.classList.toggle('con-asistente', on);
+        _navConAsistente(on);
         if (on) chatInput?.focus();
       };
       // Las sugerencias de abajo, solo cuando ya hay conversación: en el
@@ -7385,6 +7402,18 @@
 
     // Barra izquierda contraíble. Es una preferencia de quien mira: queda en
     // este navegador (localStorage), y si no se puede leer, arranca expandida.
+    // El asistente la contrae mientras está abierto (ver `_abrir`) y al
+    // cerrarse la deja como estaba.
+    function aplicarNavContraida(on) {
+      document.body.classList.toggle('nav-contraida', on);
+      const btn = document.getElementById('nav-toggle');
+      if (!btn) return;
+      btn.setAttribute('aria-expanded', String(!on));
+      const texto = on ? 'Expandir la barra lateral' : 'Contraer la barra lateral';
+      btn.title = texto;
+      btn.setAttribute('aria-label', texto);
+    }
+
     (function navContraible() {
       const btn = document.getElementById('nav-toggle');
       if (!btn) return;
@@ -7393,19 +7422,13 @@
         const lbl = b.querySelector('.nav-item__label');
         if (lbl && !b.title) b.title = lbl.textContent.trim();
       });
-      const aplicar = (on) => {
-        document.body.classList.toggle('nav-contraida', on);
-        btn.setAttribute('aria-expanded', String(!on));
-        const texto = on ? 'Expandir menú' : 'Contraer menú';
-        btn.title = texto;
-        btn.querySelector('.app-nav__toggle-label').textContent = texto;
-      };
       let guardado = false;
       try { guardado = localStorage.getItem('navContraida') === '1'; } catch (_) { /* sin storage */ }
-      aplicar(guardado);
+      aplicarNavContraida(guardado);
       btn.addEventListener('click', () => {
         const on = !document.body.classList.contains('nav-contraida');
-        aplicar(on);
+        aplicarNavContraida(on);
+        navAntesDelAsistente = null;   // lo eligió la persona: al cerrar el asistente, no se toca
         try { localStorage.setItem('navContraida', on ? '1' : '0'); } catch (_) { /* sin storage */ }
       });
     })();

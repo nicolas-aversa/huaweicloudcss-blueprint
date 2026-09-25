@@ -41,13 +41,19 @@ def test_las_filas_de_pipelines_bajan_de_renglon_sin_partir_nombres():
 
 
 def test_la_barra_se_contrae_a_iconos():
-    assert 'id="nav-toggle"' in HTML and "Contraer menú" in HTML
+    # Como el de Cloudflare: un ícono de panel al pie, sin texto (el nombre
+    # queda en el tooltip y en aria-label).
+    i = HTML.index('<div class="app-nav__pie">')
+    pie = HTML[i:HTML.index("</div>", i)]
+    assert 'id="nav-toggle"' in pie and '<use href="#ic-panel"/>' in pie
+    assert 'aria-label="Contraer la barra lateral"' in pie and "Contraer menú" not in HTML
+    assert '<symbol id="ic-panel"' in HTML
     celu = CSS[CSS.index("@media (min-width: 769px) {\n      body.nav-contraida"):]
     celu = celu[:celu.index("\n    }\n")]
     assert "body.nav-contraida { --rail-w: 68px; }" in celu
     for oculto in (".nav-item__label", ".app-nav__brand-text", ".nav-substeps", ".app-nav__env-detail"):
         assert f"body.nav-contraida {oculto}" in celu, oculto
-    assert "@media (max-width: 768px) { .app-nav__toggle { display: none; } }" in CSS, "en el celular no"
+    assert "@media (max-width: 768px) { .app-nav__pie { display: none; } }" in CSS, "en el celular no"
 
 
 def test_la_preferencia_queda_en_el_navegador_y_los_iconos_tienen_nombre():
@@ -57,4 +63,62 @@ def test_la_preferencia_queda_en_el_navegador_y_los_iconos_tienen_nombre():
     assert "localStorage.setItem('navContraida', on ? '1' : '0')" in fn
     assert re.search(r"try \{ guardado = localStorage", fn), "sin storage, arranca expandida"
     assert "b.title = lbl.textContent.trim();" in fn
-    assert "document.body.classList.toggle('nav-contraida', on);" in fn
+    assert "aplicarNavContraida(on);" in fn and "navAntesDelAsistente = null;" in fn
+    j = HTML.index("function aplicarNavContraida(on) {")
+    aplicar = HTML[j:HTML.index("\n    }\n", j)]
+    assert "document.body.classList.toggle('nav-contraida', on);" in aplicar
+    assert "btn.setAttribute('aria-label', texto);" in aplicar
+
+
+def test_el_asistente_contrae_la_barra_y_al_cerrarse_la_deja_como_estaba():
+    i = HTML.index("function _navConAsistente(abierto) {")
+    fn = HTML[i:HTML.index("\n    }\n", i)]
+    # Abrir: recuerda cómo estaba (una sola vez) y contrae.
+    assert "if (navAntesDelAsistente === null) navAntesDelAsistente = document.body.classList.contains('nav-contraida');" in fn
+    assert "aplicarNavContraida(true);" in fn
+    # Cerrar: vuelve a como estaba, y olvida.
+    assert "aplicarNavContraida(navAntesDelAsistente);" in fn and "navAntesDelAsistente = null;" in fn
+    # Lo llaman abrir/cerrar, el re-armado con el panel abierto y la salida del asistente.
+    assert "_navConAsistente(on);" in HTML
+    assert "if (capChatAbierto) _navConAsistente(true);" in HTML
+    j = HTML.index("function _quitarAsistente()")
+    assert "_navConAsistente(false);" in HTML[j:HTML.index("\n    }\n", j)]
+
+
+def test_abrir_y_cerrar_el_asistente_con_la_barra_de_cada_forma(tmp_path):
+    """En node, con las funciones reales: la barra vuelve a como estaba."""
+    import shutil
+    import subprocess
+    import pytest
+    if shutil.which("node") is None:
+        pytest.skip("node no está instalado")
+    i = HTML.index("    function aplicarNavContraida(on) {")
+    aplicar = HTML[i:HTML.index("\n    }\n", i) + 7]
+    j = HTML.index("    let navAntesDelAsistente = null;")
+    nav = HTML[j:HTML.index("\n    }\n", HTML.index("function _navConAsistente", j)) + 7]
+    arnes = r"""
+const clases = new Set();
+const document = {
+  body: { classList: { toggle(c, on) { on ? clases.add(c) : clases.delete(c); }, contains: (c) => clases.has(c) } },
+  getElementById: () => ({ setAttribute() {}, set title(v) {} }),
+};
+""" + aplicar + nav + r"""
+const fallos = [];
+const check = (n, c) => { if (!c) fallos.push(n); };
+// Expandida: abrir la contrae, cerrar la expande.
+_navConAsistente(true);  check('abrir contrae', clases.has('nav-contraida'));
+_navConAsistente(true);  check('re-render abierto sigue contraída', clases.has('nav-contraida'));
+_navConAsistente(false); check('cerrar vuelve a expandida', !clases.has('nav-contraida'));
+// Ya contraída por la persona: cerrar el asistente la deja contraída.
+aplicarNavContraida(true);
+_navConAsistente(true); _navConAsistente(false);
+check('contraída antes, contraída después', clases.has('nav-contraida'));
+// Cerrar sin haber abierto no toca nada.
+aplicarNavContraida(false); _navConAsistente(false);
+check('cerrar sin abrir no toca', !clases.has('nav-contraida'));
+console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
+"""
+    js = tmp_path / "nav.mjs"
+    js.write_text(arnes, encoding="utf-8")
+    res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
