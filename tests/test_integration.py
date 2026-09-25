@@ -4475,8 +4475,9 @@ def test_build_spec_from_fields_produces_valid_spec():
     assert 1 <= len(spec["forecasts"]) <= 3
     assert spec["volume_field"]
 
-    # Los campos no dimensionales (description, customer_id) no están en el prompt.
-    assert "data.description" not in spec["fields"]
+    # El texto libre sí está (sin él, "¿de qué se quejan?" no tenía qué leer),
+    # marcado como texto; un id opaco no.
+    assert "free text" in spec["fields"]["data.description"]
     assert "data.customer_id" not in spec["fields"]
     # Las dimensiones y medidas sí.
     assert "data.status" in spec["fields"]

@@ -445,6 +445,15 @@ def _field_desc(f: dict[str, Any], values: "list[str] | None" = None) -> str:
     return desc or "(sin descripción)"
 
 
+def _es_texto_libre(f: dict[str, Any]) -> bool:
+    """Texto que se LEE (un comentario, una descripción), no un id ni una
+    categoría: string que no es dimensión y cuyo nombre no es de un id."""
+    from perfilador import _NOMBRE_ID
+    if (f.get("type") or "") not in ("text", "string", "keyword") or f.get("dimension"):
+        return False
+    return not _NOMBRE_ID.search((f.get("field_path") or "").rsplit(".", 1)[-1])
+
+
 def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str, Any]],
                            label: str = "", enums: "dict[str, list[str]] | None" = None
                            ) -> dict[str, Any]:
@@ -467,16 +476,22 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
     def _is_dim(f: dict[str, Any]) -> bool:
         return bool(f.get("dimension"))
 
-    # FIELDS del prompt: dimensiones + medidas/fechas/ips. Se excluye el texto
-    # libre y los ids opacos (dimension=False y no numérico): no aportan al PPL
-    # y ensucian el prompt.
+    # FIELDS del prompt: dimensiones, medidas, fechas, ips y el TEXTO LIBRE.
+    # El texto libre se excluía ("no aporta al PPL") y era justo lo que hacía
+    # falta para "¿a qué se deben las malas reseñas?": el modelo no sabía que
+    # existía el comentario y contestaba que ese dato no estaba. Los ids opacos
+    # siguen afuera.
     prompt_fields: dict[str, str] = {}
     for f in usable:
         path = f["field_path"].strip()
         ftype = (f.get("type") or "").strip()
-        if not _is_dim(f) and ftype not in _MEASURE_TYPES + ("date", "ip"):
-            continue
-        prompt_fields[path] = _field_desc(f, enums.get(path))
+        if _is_dim(f) or ftype in _MEASURE_TYPES + ("date", "ip"):
+            prompt_fields[path] = _field_desc(f, enums.get(path))
+        elif _es_texto_libre(f):
+            como = (f"read sample rows with `fields {path} | head 30`"
+                    + (f", or search words with match({path}, 'words') written in the language of the data"
+                       if ftype == "text" else ""))
+            prompt_fields[path] = f"{_field_desc(f)} — free text: {como}"
 
     dims = [f for f in usable if _is_dim(f)]
     measures = [f for f in usable if (f.get("type") or "") in _MEASURE_TYPES]

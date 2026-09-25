@@ -6696,14 +6696,18 @@ _REGLAS_DEL_CHAT = (
     "\n\nCONVERSATION RULES:\n"
     f"A. If the user asks HOW or WHY a previous answer was obtained, or asks about that "
     f"previous result itself instead of new data, output exactly {_SIN_CONSULTA}\n"
-    f"B. If answering needs information that is NOT in FIELDS, output exactly "
-    f"{_SIN_DATO}: <the missing information>. NEVER invent a field name.\n"
+    f"B. If answering needs information that is NOT in FIELDS and NO field is related, output "
+    f"exactly {_SIN_DATO}: <the missing information>. NEVER invent a field name. If a related "
+    "field exists, answer with it instead.\n"
     "C. Use the CONVERSATION (if any) to resolve references like 'esas', 'ese puntaje', "
     "'and by month?'.\n"
-    "D. If the question asks WHY, about reasons, complaints, topics, what people say, or the "
-    "language of a free-text field (things a count cannot answer), do NOT aggregate: return "
-    "sample rows of that text field so they can be read, e.g. "
-    "source=<index> | where <filters> and isnotnull(<text_field>) | fields <text_field> | head 30"
+    "D. WHY questions (reasons, causes, what went wrong, complaints, topics, what people say, "
+    "or the language of a text): (1) if there is a FREE-TEXT field, do NOT aggregate: return "
+    "sample rows of it so they can be read, e.g. source=<index> | where <filters> and "
+    "isnotnull(<text_field>) | fields <text_field> | head 30; (2) otherwise, if there are fields "
+    "that explain the outcome (response, error or status codes, the failed step), aggregate the "
+    "bad outcomes by them, e.g. source=<index> | where <failure condition> | stats count() as "
+    "total by <code_field> | sort -total | head 10. Output NO_DATA only if no field relates."
 )
 # Una consulta de filas (sin `stats`, con `head`) trae texto para LEER, no un
 # número: con el tope, la respuesta no manda miles de comentarios al modelo.
@@ -6790,14 +6794,40 @@ def _sobre_lo_anterior(pregunta: str, historial: list[ChatTurno], memoria: str,
         ppl=anterior.ppl or "")
 
 
-def _falta_el_dato(salida: str, campos: dict[str, str]) -> "PplChatResponse":
-    """El dato no está en el índice: se dice, con lo que sí hay."""
+def _etiquetas(campos: dict[str, str]) -> list[str]:
+    """Cómo se llama cada campo para una persona (la etiqueta, no el path)."""
+    fuera: list[str] = []
+    for path, desc in campos.items():
+        etiqueta = (desc or "").split(" — ")[0].split(" (in ")[0].strip() or path
+        if etiqueta not in fuera:
+            fuera.append(etiqueta)
+    return fuera[:15]
+
+
+def _falta_el_dato(salida: str, campos: dict[str, str], pregunta: str = "", memoria: str = "",
+                   predecir_llm=None) -> "PplChatResponse":
+    """El dato no está: se dice como en una conversación, con lo que sí hay.
+
+    Era un texto fijo —el motivo en inglés entre paréntesis y la lista de
+    paths técnicos— que se repetía igual cada vez que el usuario insistía."""
     motivo = salida.split(":", 1)[1].strip() if ":" in salida else ""
-    hay = ", ".join(list(campos)[:15])
+    hay = _etiquetas(campos)
+    if predecir_llm is not None:
+        texto = predecir_llm(
+            (memoria + "\n\n" if memoria else "")
+            + f"Pregunta del usuario: {pregunta}\n"
+            f"Lo que falta en los datos: {motivo or '(no especificado)'}\n"
+            f"Lo que sí tiene cada registro: {', '.join(hay) or '(sin campos)'}\n\n"
+            "Respondé en el MISMO idioma que el usuario, conversacional, en una o dos frases: decí "
+            "que ese dato no está y ofrecé una o dos preguntas concretas que SÍ se pueden responder "
+            "con lo que hay. Si en la conversación ya dijiste que no está y el usuario insiste, no "
+            "repitas lo mismo: explicá por qué no alcanza y proponé otro camino. No inventes datos.")
+        if texto:
+            return PplChatResponse(answer=texto)
     return PplChatResponse(answer=(
         "Ese dato no está en los datos"
         + (f" ({motivo})" if motivo else "")
-        + (f". Lo que sí tiene cada registro: {hay}." if hay else ".")))
+        + (f". Lo que sí tiene cada registro: {', '.join(hay)}." if hay else ".")))
 
 
 def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str],
@@ -6811,7 +6841,7 @@ def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str]
     if ppl.upper().startswith(_SIN_CONSULTA):
         return _sobre_lo_anterior(pregunta, historial, memoria, predecir_llm)
     if ppl.upper().startswith(_SIN_DATO):
-        return _falta_el_dato(ppl, campos)
+        return _falta_el_dato(ppl, campos, pregunta, memoria, predecir_llm)
     if not ppl.lower().startswith("source="):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                             detail={"stage": "ppl_chat",
@@ -6827,7 +6857,7 @@ def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str]
             "Fix it using ONLY the fields listed in FIELDS. If the information does not exist "
             f"in those fields, output exactly {_SIN_DATO}: <the missing information>."))
         if segundo.upper().startswith(_SIN_DATO):
-            return _falta_el_dato(segundo, campos)
+            return _falta_el_dato(segundo, campos, pregunta, memoria, predecir_llm)
         if segundo.lower().startswith("source="):
             ppl = _con_tope(segundo)
             ok, cuerpo = ejecutar(ppl)

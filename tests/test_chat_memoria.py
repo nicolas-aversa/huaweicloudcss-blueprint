@@ -84,12 +84,34 @@ def test_como_sabes_sin_nada_antes():
 
 
 # ── El dato que no está ─────────────────────────────────────────────────────
-def test_si_el_dato_no_esta_lo_dice_con_lo_que_si_hay():
-    f = _Fakes([f"{main._SIN_DATO}: el idioma de la reseña"])
-    res = _charlar(f, "en que idioma está escrita las reseñas?")
+def test_si_el_dato_no_esta_lo_dice_como_en_una_conversacion():
+    """Era un texto fijo: el motivo en inglés entre paréntesis, los paths
+    técnicos, y lo mismo cada vez que el usuario insistía."""
+    f = _Fakes([f"{main._SIN_DATO}: el idioma de la reseña"],
+               respuesta="No tengo el idioma, pero puedo contarte las reseñas por puntaje.")
+    res = _charlar(f, "en que idioma está escrita las reseñas?", [TARDANZA])
     assert not f.ejecutadas
-    assert res.answer.startswith("Ese dato no está en los datos (el idioma de la reseña)")
-    assert "review_score" in res.answer and "review_comment_message" in res.answer
+    assert res.answer == "No tengo el idioma, pero puedo contarte las reseñas por puntaje."
+    pedido = f.prompts_llm[0]
+    assert "Pregunta del usuario: en que idioma está escrita las reseñas?" in pedido
+    assert "Lo que falta en los datos: el idioma de la reseña" in pedido
+    # Etiquetas para una persona, no paths.
+    assert "Lo que sí tiene cada registro: Puntaje (1-5), Comentario" in pedido
+    assert "ofrecé una o dos preguntas" in pedido and "el usuario insiste, no repitas lo mismo" in pedido
+    assert "CONVERSATION" in pedido, "con la conversación, para no repetirse"
+
+
+def test_si_el_modelo_no_redacta_queda_el_texto_con_etiquetas():
+    f = _Fakes([f"{main._SIN_DATO}: el idioma de la reseña"], respuesta=None)
+    res = _charlar(f, "¿en qué idioma?")
+    assert res.answer == ("Ese dato no está en los datos (el idioma de la reseña). "
+                          "Lo que sí tiene cada registro: Puntaje (1-5), Comentario.")
+
+
+def test_las_etiquetas_salen_de_la_descripcion():
+    campos = {"a.b": "Estado — values: OK, ERROR", "c": "Monto (in ARS) — numeric measure: sum/avg it",
+              "d": "", "e": "Estado"}
+    assert main._etiquetas(campos) == ["Estado", "Monto", "d"]
 
 
 # ── Autocorrección ──────────────────────────────────────────────────────────
@@ -108,7 +130,9 @@ def test_un_campo_inventado_se_corrige_con_el_error():
 def test_si_al_corregir_ve_que_el_dato_no_esta_lo_dice():
     f = _Fakes(["source=reviews-* | stats count() by review_language", f"{main._SIN_DATO}: idioma"],
                ejecuciones=[_NO_EXISTE])
-    assert _charlar(f).answer.startswith("Ese dato no está en los datos (idioma)")
+    f.respuesta = "No tengo el idioma de las reseñas."
+    assert _charlar(f).answer == "No tengo el idioma de las reseñas.", "también redactado por el modelo"
+    assert "Lo que falta en los datos: idioma" in f.prompts_llm[0]
 
 
 def test_si_tampoco_anda_devuelve_el_error_y_la_consulta():
@@ -199,3 +223,15 @@ def test_un_conteo_se_redacta_como_conteo():
 
 def test_la_regla_de_muestras_esta_en_el_prompt():
     assert "do NOT aggregate" in main._REGLAS_DEL_CHAT and "| head 30" in main._REGLAS_DEL_CHAT
+
+
+def test_por_que_se_contesta_con_lo_que_haya():
+    """"¿Por qué fallan las transacciones?" daba NO_DATA en la billetera, que no
+    tiene texto libre pero sí códigos de respuesta y el paso fallido."""
+    reglas = main._REGLAS_DEL_CHAT
+    d = reglas[reglas.index("D. WHY questions"):]
+    texto, codigos, sin_dato = (d.index("FREE-TEXT field"), d.index("response, error or status codes"),
+                                d.index("NO_DATA only if no field relates"))
+    assert texto < codigos < sin_dato, "primero leer texto, si no agrupar por códigos, y recién ahí NO_DATA"
+    assert "stats count() as total by <code_field>" in d
+    assert "If a related field exists, answer with it instead." in reglas
