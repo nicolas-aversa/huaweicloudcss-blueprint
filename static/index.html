@@ -156,6 +156,19 @@
        por eso es más generoso que el de los costados. */
     /* Padding vertical simétrico: el Home se centra dentro de esta caja, así
        que un top distinto del bottom se vería como más aire arriba que abajo. */
+    /* Scrollbar fina y roja, en toda la app. Chrome/Edge/Safari con los
+       pseudo-elementos (6 px, sin flechas); Firefox, que no los tiene, con
+       `scrollbar-width` / `scrollbar-color` (en Chrome esas propiedades
+       anularían los pseudo-elementos, por eso van solo en Firefox). */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent-hover); }
+    ::-webkit-scrollbar-corner { background: transparent; }
+    @supports not selector(::-webkit-scrollbar) {
+      * { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
+    }
+
     .main-content {
       flex: 1;
       overflow-y: auto;
@@ -1867,9 +1880,11 @@
        siguen necesitándolo angosto para que los forms se lean bien. */
     /* El ancho que se busca: el "wide" si hay lugar, si no todo el área de
        contenido (100cqi) menos el padding lateral de .main-content (28 + 28).
-       Los márgenes nunca pasan de 0: ensanchan, no achican. */
+       Los márgenes nunca pasan de 0: ensanchan, no achican.
+       En "Entorno desplegado" se ensancha la vista ENTERA: ensanchando solo el
+       banner, quedaba más ancho que las tarjetas de abajo. */
     #view-home,
-    #view-infra .infra-dash__banner {
+    #view-infra {
       --ancho-amplio: min(var(--container-wide), calc(100cqi - 56px));
       margin-left: min(0px, calc((100% - var(--ancho-amplio)) / 2));
       margin-right: min(0px, calc((100% - var(--ancho-amplio)) / 2));
@@ -5926,7 +5941,6 @@
       statusEl.innerHTML = `
         <div class="cap-resumen">
           <span class="cap-resumen__lbl">Plugins:</span> ${chips}
-          ${hayChat ? '<button type="button" class="btn btn-primary btn-sm" id="cap-abrir">Abrir asistente</button>' : ''}
         </div>
         ${hayChat && agentId ? `<details class="cap-assistant__adv">
           <summary>Cómo demostrarlo en Dashboards · Dev Tools (avanzado)</summary>
@@ -5993,7 +6007,7 @@
         host.classList.toggle('is-vacio', !(capChats[_activeChatSlug()] || []).length);
       lanzador.addEventListener('click', () => _abrir(!capChatAbierto));
       host.querySelector('#cap-flotante-cerrar')?.addEventListener('click', () => _abrir(false));
-      statusEl.querySelector('#cap-abrir')?.addEventListener('click', () => _abrir(true));
+
       // Se busca en el asistente que está en pantalla AHORA, no en `host`: si
       // la vista se rearmó mientras llegaba una respuesta, `host` ya no está.
       const _logDe = (slug) =>
@@ -6363,6 +6377,9 @@
           else if (typeof detail === 'string') msg = detail;
           throw new Error(msg);
         }
+        // Recién provisionados, el asistente se abre solo. Si se cierra, se
+        // vuelve a abrir con la burbuja de abajo a la derecha.
+        capChatAbierto = true;
         if (mount) {
           mount.innerHTML = '';
           renderCapabilitiesResult(data.capabilities || {}, mount);

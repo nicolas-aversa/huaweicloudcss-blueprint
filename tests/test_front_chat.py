@@ -155,9 +155,17 @@ def test_el_asistente_es_un_panel_flotante_y_no_alarga_la_pagina():
     assert "document.body.append(host, lanzador);" in fn
     assert "host.className = 'cap-flotante' + (capChatAbierto ? ' is-abierto' : '');" in fn
     assert "anchor.appendChild(host)" not in fn and "insertAdjacentElement('afterend', host)" not in fn
-    # En la página queda una línea: los plugins y el botón para abrirlo.
-    assert 'id="cap-abrir">Abrir asistente</button>' in fn
-    assert "statusEl.querySelector('#cap-abrir')?.addEventListener('click', () => _abrir(true));" in fn
+    # En la página queda una línea con los plugins; sin botón "Abrir asistente":
+    # se abre solo al provisionar y, si se cierra, con la burbuja.
+    assert "Abrir asistente" not in fn and "cap-abrir" not in fn
+
+
+def test_el_asistente_se_abre_solo_al_provisionar_los_plugins():
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("async function provisionCapabilitiesFromInfra(")
+    fn = html[i:html.index("\n    }\n", i)]
+    assert fn.index("capChatAbierto = true;") < fn.index("renderCapabilitiesResult(data.capabilities || {}, mount);")
+    assert fn.index("capChatAbierto = true;") > fn.index("if (!res.ok)"), "solo si salió bien"
 
 
 def test_abrir_y_cerrar_no_pierde_nada():

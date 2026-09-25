@@ -24,7 +24,7 @@ def test_el_area_de_contenido_es_un_container():
 
 
 def test_el_ensanchado_mide_el_contenido_y_nunca_achica():
-    i = CSS.index("    #view-home,\n    #view-infra .infra-dash__banner {")
+    i = CSS.index("    #view-home,\n    #view-infra {")
     regla = CSS[i:CSS.index("}", i)]
     assert "--ancho-amplio: min(var(--container-wide), calc(100cqi - 56px))" in regla
     # min(0px, …): los márgenes ensanchan (negativos) o quedan en 0; jamás
@@ -122,3 +122,18 @@ console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
     js.write_text(arnes, encoding="utf-8")
     res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_la_vista_del_entorno_se_ensancha_entera():
+    """Ensanchando solo el banner, quedaba más ancho que las tarjetas de abajo."""
+    assert "#view-infra .infra-dash__banner {\n      --ancho-amplio" not in CSS
+    assert "    #view-home,\n    #view-infra {\n      --ancho-amplio" in CSS
+
+
+def test_la_scrollbar_es_fina_y_roja():
+    assert "::-webkit-scrollbar { width: 6px; height: 6px; }" in CSS
+    assert "::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 999px; }" in CSS
+    # Firefox (sin los pseudo-elementos): las propiedades estándar, solo ahí,
+    # porque en Chrome anularían los pseudo-elementos.
+    ff = CSS[CSS.index("@supports not selector(::-webkit-scrollbar) {"):]
+    assert "scrollbar-width: thin; scrollbar-color: var(--accent) transparent;" in ff[:200]
