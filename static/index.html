@@ -104,6 +104,9 @@
       --accent-red-tint: var(--accent-tint);
       --accent-red-ring: var(--accent-ring);
       --accent-green-tint: rgba(22, 163, 74, 0.10);
+      /* En curso: el punto de "Entorno desplegado" mientras Terraform aplica. */
+      --accent-yellow: #e0a100;
+      --accent-yellow-tint: rgba(224, 161, 0, 0.18);
       /* Wash detrás del banner de infra. Va con rgba literal y no con el token
          porque necesita alpha; si se olvida al cambiar la paleta queda como el
          único resto del color viejo en toda la app. */
@@ -675,21 +678,7 @@
       flex-shrink: 0;
       box-shadow: 0 0 0 3px var(--accent-green-tint);
     }
-
-    /* Mini-card de estado del entorno: pegada al fondo de `.app-nav__items`
-       (flex column, `margin-top: auto` la empuja abajo, justo sobre el
-       footer) para que el rail no quede vacío debajo de los 4 items. */
-    .app-nav__env {
-      margin-top: auto;
-      display: block; width: 100%; text-align: left;
-      font-family: inherit; cursor: pointer;
-      padding: 12px 13px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      transition: background var(--t-base), border-color var(--t-base);
-    }
-    .app-nav__env:hover { background: var(--bg-primary); border-color: var(--border-default); }
+    .nav-dot.is-aplicando { background: var(--accent-yellow); box-shadow: 0 0 0 3px var(--accent-yellow-tint); }
 
     /* Contraer / expandir la barra: un ícono solo, al pie, como en Cloudflare.
        No se mueve al contraer: 18 px a la izquierda lo dejan centrado en la
@@ -716,8 +705,6 @@
       body.nav-contraida .nav-item__label,
       body.nav-contraida .nav-item__chevron,
       body.nav-contraida .nav-substeps,
-      body.nav-contraida .app-nav__env-detail,
-      body.nav-contraida .app-nav__env-status,
       body.nav-contraida .app-nav__user-email { display: none; }
       body.nav-contraida .app-nav__cuenta { flex: none; margin: 0; padding: 6px; }
       body.nav-contraida .nav-group__label {
@@ -727,24 +714,9 @@
       body.nav-contraida .app-nav__items { padding: 12px 10px; }
       body.nav-contraida .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
       body.nav-contraida .nav-dot { position: absolute; top: 6px; right: 8px; }
-      body.nav-contraida .app-nav__env { padding: 12px 0; display: flex; justify-content: center; }
-      body.nav-contraida .app-nav__env-head { justify-content: center; }
       body.nav-contraida .app-nav__toggle .icon { transform: scaleX(-1); }
     }
     @media (max-width: 768px) { .app-nav__pie { display: none; } }
-    .app-nav__env-head { display: flex; align-items: center; gap: 8px; }
-    .app-nav__env-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-      background: var(--text-muted);
-    }
-    .app-nav__env-dot.is-active { background: var(--accent-green); box-shadow: 0 0 0 3px var(--accent-green-tint); }
-    .app-nav__env-status { font-size: var(--fs-sm); font-weight: 700; color: var(--text-secondary); }
-    .app-nav__env-status.is-active { color: var(--accent-green); }
-    .app-nav__env-detail {
-      display: flex; flex-direction: column; gap: 1px;
-      margin-top: 8px; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4;
-    }
-    .app-nav__env-project { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); }
 
     /* La cuenta, arriba (modo hosteado), como en Cloudflare: el logo, el mail
        y las flechas de un selector. Al tocarla se abre un menú con el mail
@@ -2223,20 +2195,6 @@
 
     .cap-chat { margin-top: 14px; }
     .cap-chat__empty-title { font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-secondary); }
-    /* Sugerencias persistentes (arriba del input): card-chips compactas que wrappean. */
-    .cap-chat__suggest-row { margin-top: 10px; }
-    .cap-chat__suggest .lp-tab-panel { display: flex; flex-wrap: wrap; gap: 6px; }
-    .cap-chat__suggest .lp-q-btn {
-      display: inline-flex; align-items: center; gap: 5px; text-align: left;
-      padding: 5px 10px; font-size: var(--fs-xs); line-height: 1.25; cursor: pointer;
-      border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
-      background: var(--bg-primary); color: var(--text-secondary); transition: all var(--t-base);
-    }
-    .cap-chat__suggest .lp-q-btn .icon { width: 12px; height: 12px; flex: none; color: var(--accent); opacity: .85; }
-    .cap-chat__suggest .lp-q-btn:hover {
-      border-color: var(--accent); color: var(--text-primary);
-      background: var(--accent-tint);
-    }
 
     .cap-chat__log {
       margin-top: 10px; min-height: 380px; max-height: min(64vh, 640px); overflow-y: auto;
@@ -2387,18 +2345,38 @@
       border-bottom: 1px solid var(--border-subtle);
     }
     .cap-flotante__casos-lbl { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
-    .cap-flotante__select { position: relative; flex: 1; min-width: 0; display: flex; }
-    .cap-flotante__caso {
-      -webkit-appearance: none; appearance: none; width: 100%; cursor: pointer;
-      padding: 5px 30px 5px 12px; font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-semi);
-      color: var(--text-primary); background: var(--bg-secondary);
-      border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
+    /* El desplegable del caso: un botón y, abierto, una lista flotante con el
+       elegido en rojo y tildado (el <select> nativo abría la del sistema). */
+    .cap-caso { position: relative; z-index: 5; flex: 1; min-width: 0; }
+    .cap-caso__boton {
+      display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
+      padding: 7px 10px 7px 12px; font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-semi);
+      color: var(--text-primary); text-align: left;
+      background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: var(--radius-md);
+      box-shadow: var(--shadow-xs); transition: border-color var(--t-fast), box-shadow var(--t-fast);
     }
-    .cap-flotante__caso:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
-    .cap-flotante__select .icon {
-      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-      width: 14px; height: 14px; color: var(--text-muted); pointer-events: none;
+    .cap-caso__boton:hover { border-color: var(--text-muted); }
+    .cap-caso__boton[aria-expanded="true"],
+    .cap-caso__boton:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    .cap-caso__actual { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cap-caso__boton .icon { width: 14px; height: 14px; color: var(--text-muted); transition: transform var(--t-fast); }
+    .cap-caso__boton[aria-expanded="true"] .icon { transform: rotate(180deg); }
+    .cap-caso__lista {
+      position: absolute; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px;
+      list-style: none; max-height: 280px; overflow-y: auto;
+      background: var(--bg-primary); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
     }
+    .cap-caso__opcion {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; outline: none;
+      font-size: var(--fs-sm); color: var(--text-secondary); border-radius: var(--radius-sm);
+    }
+    .cap-caso__opcion span { flex: 1; min-width: 0; }
+    .cap-caso__opcion .icon { width: 14px; height: 14px; color: var(--accent); visibility: hidden; }
+    .cap-caso__opcion:hover,
+    .cap-caso__opcion:focus { background: var(--bg-tertiary); color: var(--text-primary); }
+    .cap-caso__opcion[aria-selected="true"] { color: var(--accent); font-weight: var(--fw-semi); }
+    .cap-caso__opcion[aria-selected="true"] .icon { visibility: visible; }
     .cap-flotante .cap-chat {
       flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0;
       background: var(--bg-secondary);
@@ -2429,17 +2407,6 @@
     }
     .cap-chat__idea .icon { flex: none; width: 14px; height: 14px; color: var(--accent); }
     .cap-chat__idea:hover { border-color: var(--accent); background: var(--accent-tint); }
-    /* Con conversación, las sugerencias van en una fila sobre el campo. */
-    .cap-flotante.is-vacio .cap-chat__suggest-row { display: none; }
-    .cap-flotante .cap-chat__suggest-row, .cap-flotante .cap-chat__suggest { min-width: 0; max-width: 100%; }
-    .cap-flotante .cap-chat__suggest-row { margin: 0; padding: 0 14px; }
-    .cap-flotante .cap-chat__suggest .lp-tab-panel {
-      flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 0 4px;
-      -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
-              mask-image: linear-gradient(90deg, #000 88%, transparent);
-    }
-    .cap-flotante .cap-chat__suggest .lp-tab-panel::-webkit-scrollbar { display: none; }
-    .cap-flotante .cap-chat__suggest .lp-q-btn { flex: none; white-space: nowrap; }
     /* Un solo campo, con el enviar adentro. */
     .cap-chat__composer {
       display: flex; align-items: center; gap: 6px; margin: 8px 14px 6px;
@@ -2711,19 +2678,6 @@
         <button class="nav-item hidden" data-view="control" id="nav-control" type="button">
           <span class="nav-item__icon"><svg class="icon"><use href="#ic-shield"/></svg></span>
           <span class="nav-item__label">Panel de control</span>
-        </button>
-
-        <!-- Mini-card del entorno activo: solo se muestra cuando hay un entorno
-             desplegado (renderInfraView la togglea). Oculta por defecto. -->
-        <button class="app-nav__env hidden" id="nav-env-card" type="button">
-          <div class="app-nav__env-head">
-            <span class="app-nav__env-dot is-active" id="nav-env-dot"></span>
-            <span class="app-nav__env-status is-active" id="nav-env-status">Activo</span>
-          </div>
-          <div class="app-nav__env-detail" id="nav-env-detail">
-            <span class="app-nav__env-project" id="nav-env-project">—</span>
-            <span id="nav-env-meta">—</span>
-          </div>
         </button>
       </div>
 
@@ -5615,6 +5569,23 @@
     // en `state.pendingDeploy`, lleva a Entorno desplegado y arranca solo el PRIMER
     // paso de la puesta en marcha (index template + dashboards); ingesta y
     // capabilities quedan como botones en infra.
+    // El punto de "Entorno desplegado": verde con el entorno activo, amarillo
+    // mientras Terraform aplica (deploy, ingesta, reglas DNAT, destroy o un
+    // job al que se reconectó). Cuenta las corridas, por si se superponen.
+    let terraformCorriendo = 0;
+    function terraformEnCurso(on) {
+      terraformCorriendo = Math.max(0, terraformCorriendo + (on ? 1 : -1));
+      pintarPuntoEntorno();
+    }
+    function pintarPuntoEntorno() {
+      const dot = document.getElementById('nav-infra-dot');
+      if (!dot) return;
+      const aplicando = terraformCorriendo > 0;
+      dot.classList.toggle('is-aplicando', aplicando);
+      dot.classList.toggle('hidden', !aplicando && !state.envActive);
+      dot.title = aplicando ? 'Terraform aplicando…' : 'Entorno activo';
+    }
+
     // Abre el stream de un deploy: lo lanza como JOB en background (sobrevive
     // refresh/cierre del browser) y devuelve el Response del stream para leer con
     // el mismo loop de SSE. Si deploy-job falla (p.ej. 409), propaga ese Response;
@@ -5657,6 +5628,7 @@
       const statusEl = document.getElementById('infra-ingest-btn-status')
         || document.getElementById('infra-capabilities-result');
       const prog = _progresoEnStatus(statusEl, 'Reconectando a un despliegue en curso…');
+      terraformEnCurso(true);
       try {
         const res = await fetch('/api/v1/terraform/jobs/' + encodeURIComponent(running) + '/stream');
         const reader = res.body.getReader();
@@ -5676,7 +5648,10 @@
             else if (d.type === 'error' && statusEl) showStatus(statusEl, 'Error: ' + d.message, 'error');
           }
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        terraformEnCurso(false);
+      }
     }
 
     async function runDeploy({ btn }) {
@@ -5704,6 +5679,7 @@
       const reuse = !!state.envActive;
       // Ir YA a Entorno desplegado: el progreso del aprovisionamiento se ve ahí.
       state.provisioning = reuse ? 'reuse' : 'new';
+      terraformEnCurso(true);
       if (btn) btn.disabled = true;
       showView('infra');
       renderInfraView(state.lastStatus);   // pinta el estado "provisionando"
@@ -5780,6 +5756,7 @@
         }
         toast(`Error al desplegar: ${err.message}`, 'error');
       } finally {
+        terraformEnCurso(false);
         if (btn) btn.disabled = false;
       }
     }
@@ -5840,21 +5817,91 @@
       return `<div class="cap-chat__row cap-chat__row--${e.who}" data-msg="${e.id}">${avatar}`
         + `<div class="cap-chat__msg cap-chat__msg--${e.who}${e.err ? ' cap-chat__msg--err' : ''}">${e.html}</div></div>`;
     }
-    // Sin conversación: un saludo del asistente y hasta cuatro preguntas para
-    // arrancar, como tarjetas. Desaparece con el primer mensaje.
+    // Preguntas sugeridas, como tarjetas.
+    function capChatIdeasHTML(ideas, etiqueta) {
+      if (!ideas.length) return '';
+      return `<div class="cap-chat__ideas"><span class="cap-chat__ideas-lbl">${etiqueta}</span>`
+        + ideas.map(q => `<button type="button" class="cap-chat__idea lp-q-btn" data-q="${escapeHtml(q)}">`
+          + `<span>${escapeHtml(q)}</span>${icon('arrow-right')}</button>`).join('')
+        + `</div>`;
+    }
+    // Para comparar preguntas: sin mayúsculas, signos ni espacios de más.
+    const _normPregunta = (q) => String(q).toLowerCase().replace(/[¿?¡!.,;:\s]+/g, ' ').trim();
+    // Las sugeridas que todavía no se preguntaron en este caso, en su orden.
+    function capChatSiguientes(slug, sugerencias, n) {
+      const hechas = new Set((capChats[slug] || []).filter(e => e.pregunta).map(e => _normPregunta(e.pregunta)));
+      return sugerencias.filter(q => !hechas.has(_normPregunta(q))).slice(0, n);
+    }
+    // Después de una respuesta (o de un error), tres preguntas más para
+    // seguir. Mientras se espera la respuesta, ninguna.
+    function capChatSeguirHTML(slug, sugerencias) {
+      const msgs = capChats[slug] || [];
+      const ultimo = msgs[msgs.length - 1];
+      if (!ultimo || ultimo.who !== 'bot' || ultimo.pendiente) return '';
+      return capChatIdeasHTML(capChatSiguientes(slug, sugerencias, 3), 'Podés seguir con');
+    }
+    // Sin conversación: un saludo del asistente y cinco preguntas para
+    // arrancar. Con conversación, los mensajes y las tres para seguir.
     function capChatLogHTML(slug, label, sugerencias = []) {
       const msgs = capChats[slug] || [];
-      if (msgs.length) return msgs.map(capChatFilaHTML).join('');
-      const ideas = sugerencias.slice(0, 4).map(q =>
-        `<button type="button" class="cap-chat__idea lp-q-btn" data-q="${escapeHtml(q)}">`
-        + `<span>${escapeHtml(q)}</span>${icon('arrow-right')}</button>`).join('');
+      if (msgs.length) return msgs.map(capChatFilaHTML).join('') + capChatSeguirHTML(slug, sugerencias);
       return `<div class="cap-chat__empty">`
         + `<div class="cap-chat__row cap-chat__row--bot"><span class="cap-chat__avatar">${icon('spark')}</span>`
         + `<div class="cap-chat__msg cap-chat__msg--bot">Hola. Preguntame lo que quieras sobre `
         + `<strong>${escapeHtml(label)}</strong>, en lenguaje natural: armo la consulta y te respondo `
         + `con los datos reales.</div></div>`
-        + (ideas ? `<div class="cap-chat__ideas"><span class="cap-chat__ideas-lbl">Para empezar</span>${ideas}</div>` : '')
+        + capChatIdeasHTML(sugerencias.slice(0, 5), 'Para empezar')
         + `</div>`;
+    }
+
+    // El desplegable del caso, con el estilo de la plataforma (el <select>
+    // nativo abría la lista del sistema, gris y fuera de estilo). Teclado:
+    // flechas para moverse, Enter o espacio para elegir, Escape para cerrar.
+    // Se cierra al perder el foco, que es tocar afuera.
+    function desplegableDeCaso(raiz, alElegir) {
+      const boton = raiz.querySelector('.cap-caso__boton');
+      const lista = raiz.querySelector('.cap-caso__lista');
+      const opciones = () => [...lista.querySelectorAll('[role="option"]')];
+      const abierto = () => !lista.classList.contains('hidden');
+      const poner = (on) => {
+        lista.classList.toggle('hidden', !on);
+        boton.setAttribute('aria-expanded', String(on));
+        if (on) (opciones().find(o => o.getAttribute('aria-selected') === 'true') || opciones()[0])?.focus();
+      };
+      const elegir = (op) => {
+        const valor = op.dataset.value;
+        opciones().forEach(o => o.setAttribute('aria-selected', String(o === op)));
+        raiz.querySelector('.cap-caso__actual').textContent = op.querySelector('span').textContent;
+        const cambio = raiz.dataset.value !== valor;
+        raiz.dataset.value = valor;
+        poner(false);
+        boton.focus();
+        if (cambio) alElegir(valor);
+      };
+      // Sin tomar el foco al apretar: si no, el foco que se va de la lista la
+      // cerraba y el clic la volvía a abrir.
+      boton.addEventListener('mousedown', (e) => e.preventDefault());
+      boton.addEventListener('click', () => poner(!abierto()));
+      boton.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); poner(true); }
+      });
+      lista.addEventListener('click', (e) => {
+        const op = e.target.closest('[role="option"]');
+        if (op) elegir(op);
+      });
+      lista.addEventListener('keydown', (e) => {
+        const ops = opciones();
+        const i = ops.indexOf(document.activeElement);
+        // En los extremos no hay opción: el foco se queda donde está.
+        if (e.key === 'ArrowDown') { e.preventDefault(); ops[i + 1]?.focus(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); ops[i - 1]?.focus(); }
+        else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (ops[i]) elegir(ops[i]); }
+        else if (e.key === 'Escape') { e.preventDefault(); poner(false); boton.focus(); }
+        else if (e.key === 'Tab') poner(false);
+      });
+      raiz.addEventListener('focusout', (e) => {
+        if (abierto() && !raiz.contains(e.relatedTarget)) poner(false);
+      });
     }
 
     function renderCapabilitiesResult(capsBySlug, anchor) {
@@ -5928,7 +5975,6 @@
       };
       let activeSlugs = [];
       let tabsBar = '';
-      let chipPanels = '';
       let logsHtml = '';
       if (agentReady) {
         for (const [s, c] of entries) {
@@ -5941,24 +5987,25 @@
           const showTabs = activeSlugs.length > 1;
           // La pestaña elegida sobrevive al re-render (antes volvía a la primera).
           const activa = Math.max(0, activeSlugs.indexOf(capChatSlug));
-          const opciones = activeSlugs.map((s, i) => {
-            const label = SLUG_LABELS[s] || s.replace(/-/g, ' ');
-            return `<option value="${escapeHtml(s)}"${i === activa ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-          }).join('');
-          const panelsHtml = activeSlugs.map((s, i) => {
-            const qs = _questionsFor(s).slice(0, 10);
-            return `<div class="lp-tab-panel" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${qs.map(q => `<button type="button" class="lp-q-btn" data-q="${escapeHtml(q)}"><svg class="icon"><use href="#ic-spark"/></svg><span>${escapeHtml(q)}</span></button>`).join('')}</div>`;
-          }).join('');
-          // El caso, en la cabecera del panel: un <select> si hay más de uno.
+          const etiqueta = (s) => SLUG_LABELS[s] || s.replace(/-/g, ' ');
+          const opciones = activeSlugs.map((s, i) =>
+            `<li class="cap-caso__opcion" role="option" data-value="${escapeHtml(s)}" aria-selected="${i === activa}" tabindex="-1">`
+            + `<span>${escapeHtml(etiqueta(s))}</span>${icon('check')}</li>`).join('');
+          // El caso, en la cabecera del panel, si hay más de uno.
           tabsBar = showTabs
-            ? `<div class="cap-flotante__casos"><span class="cap-flotante__casos-lbl">Datos de</span>
-                 <span class="cap-flotante__select"><select class="cap-flotante__caso" id="cap-chat-caso" aria-label="Caso">${opciones}</select>${icon('chevron')}</span></div>`
+            ? `<div class="cap-flotante__casos"><span class="cap-flotante__casos-lbl" id="cap-caso-lbl">Datos de</span>
+                 <div class="cap-caso" id="cap-chat-caso" data-value="${escapeHtml(activeSlugs[activa])}">
+                   <button type="button" class="cap-caso__boton" aria-haspopup="listbox" aria-expanded="false"
+                           aria-controls="cap-caso-lista" aria-labelledby="cap-caso-lbl cap-caso-actual">
+                     <span class="cap-caso__actual" id="cap-caso-actual">${escapeHtml(etiqueta(activeSlugs[activa]))}</span>${icon('chevron')}
+                   </button>
+                   <ul class="cap-caso__lista hidden" id="cap-caso-lista" role="listbox" aria-labelledby="cap-caso-lbl">${opciones}</ul>
+                 </div></div>`
             : '';
           // Un log de chat por caso (conversación separada), armado desde lo
           // guardado: así un re-render devuelve la conversación como estaba.
           logsHtml = activeSlugs.map((s, i) =>
             `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s))}</div>`).join('');
-          chipPanels = `<div class="cap-chat__suggest">${panelsHtml}</div>`;
         }
       }
       // En el paso 3 queda una línea: qué plugins quedaron y el botón para abrir
@@ -5997,7 +6044,6 @@
         ${tabsBar}
         <div class="cap-chat">
           ${logsHtml}
-          <div class="cap-chat__suggest-row">${chipPanels}</div>
           <form class="cap-chat__composer" id="cap-chat-form" autocomplete="off">
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Preguntá sobre tus datos…" aria-label="Tu pregunta">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
@@ -6019,7 +6065,7 @@
       const chatInput = host.querySelector('#cap-chat-input');
       const chatForm = host.querySelector('#cap-chat-form');
       const _activeChatSlug = () =>
-        (host.querySelector('#cap-chat-caso')?.value) || activeSlugs[0];
+        (host.querySelector('#cap-chat-caso')?.dataset.value) || activeSlugs[0];
       const _abrir = (on) => {
         capChatAbierto = on;
         host.classList.toggle('is-abierto', on);
@@ -6028,10 +6074,6 @@
         _navConAsistente(on);
         if (on) chatInput?.focus();
       };
-      // Las sugerencias de abajo, solo cuando ya hay conversación: en el
-      // arranque están arriba, como tarjetas.
-      const _syncVacio = () =>
-        host.classList.toggle('is-vacio', !(capChats[_activeChatSlug()] || []).length);
       lanzador.addEventListener('click', () => _abrir(!capChatAbierto));
       host.querySelector('#cap-flotante-cerrar')?.addEventListener('click', () => _abrir(false));
 
@@ -6048,19 +6090,27 @@
         capChatLimpiar(slug);
         const log = _logDe(slug);
         if (log) log.innerHTML = capChatLogHTML(slug, SLUG_LABELS[slug] || 'tus datos', _questionsFor(slug));
-        _syncVacio();
       };
       // Un mensaje nuevo: se guarda en la conversación DE ESE CASO y se pinta.
       const _agregar = (slug, who, html) => {
         const entry = capChatAgregar(slug, who, html);
         const log = _logDe(slug);
         if (log) {
+          // El saludo y las sugeridas se van con el mensaje nuevo.
           log.querySelector('.cap-chat__empty')?.remove();
+          log.querySelectorAll('.cap-chat__ideas').forEach(n => n.remove());
           log.insertAdjacentHTML('beforeend', capChatFilaHTML(entry));
           log.scrollTop = log.scrollHeight;
         }
-        _syncVacio();
         return entry;
+      };
+      // Terminada una respuesta, tres preguntas más de las que no se hicieron.
+      const _mostrarSiguientes = (slug) => {
+        const log = _logDe(slug);
+        if (!log) return;
+        log.querySelectorAll('.cap-chat__ideas').forEach(n => n.remove());
+        log.insertAdjacentHTML('beforeend', capChatSeguirHTML(slug, _questionsFor(slug)));
+        log.scrollTop = log.scrollHeight;
       };
       // ── Wow: visualización Vega-Lite (el motor del tipo "Vega" de OpenSearch
       // Dashboards) + typewriter de la respuesta ──
@@ -6284,8 +6334,9 @@
         // La memoria del chat: los turnos anteriores de ESTE caso, con la
         // consulta que se usó. Sin esto "¿cómo sabés?" era una pregunta nueva.
         const history = capChatHistorial(slug);
-        _agregar(slug, 'user', escapeHtml(question));
+        _agregar(slug, 'user', escapeHtml(question)).pregunta = question;   // para no volver a sugerirla
         const pend = _agregar(slug, 'bot', '<span class="cap-chat__dots" aria-label="Escribiendo"><i></i><i></i><i></i></span>');
+        pend.pendiente = true;
         capChatBusy = true;
         if (chatInput) chatInput.value = '';
         const _error = (html) => {
@@ -6335,11 +6386,14 @@
           _typeInto(answerEl, data.answer || '', () => {
             if (details) el.insertAdjacentHTML('beforeend', details);
             _scrollLog(el);
+            _mostrarSiguientes(slug);
           });
         } catch (_err) {
           _error('Error de red al consultar el chat.');
         } finally {
           capChatBusy = false;
+          pend.pendiente = false;
+          if (pend.err) _mostrarSiguientes(slug);
         }
       }
       chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
@@ -6349,20 +6403,15 @@
         const qb = e.target.closest('.lp-q-btn');
         if (qb && host.contains(qb)) sendCapChat(qb.dataset.q || '');
       });
-      // El caso: cambia el log (chat separado por caso) y las sugerencias.
-      host.querySelector('#cap-chat-caso')?.addEventListener('change', (e) => {
-        const slug = e.target.value;
+      // El caso: cambia el log (chat separado por caso, con sus sugeridas).
+      const caso = host.querySelector('#cap-chat-caso');
+      if (caso) desplegableDeCaso(caso, (slug) => {
         capChatSlug = slug;
         host.querySelectorAll('.cap-chat__log').forEach(l => {
           l.style.display = (l.dataset.slug === slug) ? 'flex' : 'none';
         });
-        host.querySelectorAll('.lp-tab-panel').forEach(p => {
-          p.style.display = (p.dataset.slug === slug) ? 'flex' : 'none';
-        });
-        _syncVacio();
         if (chatInput) chatInput.focus();
       });
-      _syncVacio();
       // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML
       // guardado trae el lugar, no el SVG.
       for (const s of activeSlugs) {
@@ -6634,8 +6683,14 @@
       btn.disabled = true;
       const prog = _progresoEnStatus(statusEl, 'Creando las reglas DNAT…');
       try {
-        const ok = await _seguirDeploy(
-          await _openDeployStream({ ...body, start_ingestion: false, fresh_deploy: false }), prog);
+        let ok;
+        terraformEnCurso(true);
+        try {
+          ok = await _seguirDeploy(
+            await _openDeployStream({ ...body, start_ingestion: false, fresh_deploy: false }), prog);
+        } finally {
+          terraformEnCurso(false);   // lo que sigue (index template) no es Terraform
+        }
         if (!ok) throw new Error('El despliegue no completó.');
         await hydrateActiveEnv();
         const aplicar = document.getElementById('infra-apply-schema-btn');
@@ -6658,6 +6713,7 @@
       // Barras en vez de una línea "mensaje (N%)": esto también corre Terraform
       // (configura y activa las pipelines) y después espera los documentos.
       const prog = _progresoEnStatus(statusEl, 'Iniciando ingesta con Logstash…');
+      terraformEnCurso(true);
       try {
         // La fase 2 corre siempre sobre un entorno que ya existe: nunca es "fresh".
         const ok = await _seguirDeploy(
@@ -6669,6 +6725,7 @@
       } catch (err) {
         if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
       } finally {
+        terraformEnCurso(false);
         btn.disabled = false;
       }
     }
@@ -6688,6 +6745,7 @@
       if (!ok) return;
 
       if (infraDestroyBtn) { infraDestroyBtn.disabled = true; infraDestroyBtn.textContent = 'Destruyendo… (2-5 min)'; }
+      terraformEnCurso(true);
 
       try {
         // Reenviar creds del form si están a mano (cubre entornos legacy sin
@@ -6746,6 +6804,7 @@
       } finally {
         // infra-destroy-btn se re-renderiza en renderInfraView; no hace falta
         // re-habilitarlo manualmente si el destroy tuvo éxito. En error, sí.
+        terraformEnCurso(false);
         const reBtn = document.getElementById('infra-destroy-btn');
         if (reBtn) { reBtn.disabled = false; reBtn.innerHTML = icon('trash') + ' Destruir entorno'; }
       }
@@ -6848,7 +6907,6 @@
       item.addEventListener('click', () => showView(item.dataset.view));
     });
     document.getElementById('home-infra-btn')?.addEventListener('click', () => showView('infra'));
-    document.getElementById('nav-env-card')?.addEventListener('click', () => showView('infra'));
 
     // Home activation-aware: con entorno activo, el hero ofrece también ir a la
     // infraestructura y el subtítulo refleja el estado real. Lo llama
@@ -7037,18 +7095,12 @@
     // acciones (mismas funciones que usaba el wizard del step 5).
     function renderInfraView(data) {
       const body = document.getElementById('infra-body');
-      const dot = document.getElementById('nav-infra-dot');
       if (!body) return;
 
       const active = !!(data && data.active);
       state.envActive = active;  // el paso 5 usa esto para el modo reuse
-      if (dot) dot.classList.toggle('hidden', !active);
+      pintarPuntoEntorno();
       syncHomeHero(active, (data && Array.isArray(data.pipelines)) ? data.pipelines.length : 0);
-
-      // Mini-card del entorno en el rail: solo visible cuando hay entorno activo
-      // (sin entorno, no se muestra "Sin entorno" en el sidebar).
-      const navEnvCard = document.getElementById('nav-env-card');
-      if (navEnvCard) navEnvCard.classList.toggle('hidden', !active);
 
       // Estado "provisionando": al tocar Desplegar se navega acá al instante y el
       // aprovisionamiento (5-25 min) corre en background; mostramos el progreso.
@@ -7133,12 +7185,6 @@
       // Todo listo → banner de cierre "Entorno operativo" en vez del panel de pasos.
       const allDone = pipelines.length > 0 && schemaDone && ingestDone && (capsDone || !hasCapabilitySlug);
       const showSetup = pipelines.length > 0;
-
-      // Rellenar el detalle de la mini-card del rail (ya visible por el toggle).
-      const navEnvProject = document.getElementById('nav-env-project');
-      const navEnvMeta = document.getElementById('nav-env-meta');
-      if (navEnvProject) navEnvProject.textContent = project;
-      if (navEnvMeta) navEnvMeta.textContent = `${pipelines.length} pipeline${pipelines.length === 1 ? '' : 's'}`;
 
       // Documentos por pipeline: lo único que prueba que la ingesta funciona.
       // Terraform "success" solo dice que la configuración se creó; una pipeline
@@ -7358,6 +7404,7 @@
     async function _vistaPreviaDeploy(paso) {
       for (;;) {
         renderInfraView(null);   // la pantalla de "Provisionando", de cero
+        terraformEnCurso(true);
         let ok = false;
         try {
           const res = await fetch('/api/v1/dev/deploy-preview?paso=' + encodeURIComponent(paso));
@@ -7379,6 +7426,7 @@
           }
         } catch (_) { /* sin backend: se reintenta en la próxima vuelta */ }
         finishDeployProgress(ok);
+        terraformEnCurso(false);
         await new Promise(r => setTimeout(r, 6000));
       }
     }

@@ -51,7 +51,7 @@ def test_la_barra_se_contrae_a_iconos():
     celu = CSS[CSS.index("@media (min-width: 769px) {\n      body.nav-contraida"):]
     celu = celu[:celu.index("\n    }\n")]
     assert "body.nav-contraida { --rail-w: 68px; }" in celu
-    for oculto in (".nav-item__label", ".app-nav__brand-text", ".nav-substeps", ".app-nav__env-detail"):
+    for oculto in (".nav-item__label", ".app-nav__brand-text", ".nav-substeps"):
         assert f"body.nav-contraida {oculto}" in celu, oculto
     assert "@media (max-width: 768px) { .app-nav__pie { display: none; } }" in CSS, "en el celular no"
 
