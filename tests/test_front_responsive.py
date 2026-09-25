@@ -24,7 +24,7 @@ def test_el_area_de_contenido_es_un_container():
 
 
 def test_el_ensanchado_mide_el_contenido_y_nunca_achica():
-    i = CSS.index("    #view-home,\n    #view-infra {")
+    i = CSS.index("    #view-home {\n      --ancho-amplio")
     regla = CSS[i:CSS.index("}", i)]
     assert "--ancho-amplio: min(var(--container-wide), calc(100cqi - 56px))" in regla
     # min(0px, …): los márgenes ensanchan (negativos) o quedan en 0; jamás
@@ -124,10 +124,24 @@ console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_la_vista_del_entorno_se_ensancha_entera():
-    """Ensanchando solo el banner, quedaba más ancho que las tarjetas de abajo."""
-    assert "#view-infra .infra-dash__banner {\n      --ancho-amplio" not in CSS
-    assert "    #view-home,\n    #view-infra {\n      --ancho-amplio" in CSS
+def test_el_entorno_tiene_el_ancho_de_las_demas_paginas():
+    """Ni el banner ni la vista se ensanchan: al contraer la barra, "Entorno
+    desplegado" quedaba más ancho que el resto de las páginas."""
+    assert CSS.count("--ancho-amplio:") == 1
+    i = CSS.index("--ancho-amplio:")
+    selector = CSS[CSS.rindex("*/", 0, i) + 2:i]
+    assert selector.strip() == "#view-home {", selector
+    assert "#view-infra" not in selector and "infra-dash__banner" not in selector
+
+
+def test_el_boton_de_contraer_no_se_mueve_y_cambia_la_linea():
+    """Como en Cloudflare: el botón queda en el mismo lugar; el ícono espeja
+    la línea (izquierda expandida, derecha contraída)."""
+    assert ".app-nav__pie { flex-shrink: 0; padding: 8px 18px;" in CSS
+    assert "body.nav-contraida .app-nav__pie" not in CSS, "contraída no se recentra"
+    celu = CSS[CSS.index("@media (min-width: 769px) {\n      body.nav-contraida"):]
+    celu = celu[:celu.index("\n    }\n")]
+    assert "body.nav-contraida .app-nav__toggle .icon { transform: scaleX(-1); }" in celu
 
 
 def test_la_scrollbar_es_fina_y_roja():

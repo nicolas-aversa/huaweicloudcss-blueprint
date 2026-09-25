@@ -177,10 +177,10 @@
          se corre horizontalmente unos píxeles. */
       scrollbar-gutter: stable;
       padding: 48px 28px;
-      /* Container: el ensanchado del Home y del banner del entorno se calcula
-         con el ancho REAL del área de contenido (100cqi), no con el de la
-         ventana. Con el panel del asistente abierto, las cuentas contra el
-         ancho fijo del contenedor achicaban el banner y apilaban las tarjetas. */
+      /* Container: el ensanchado del Home se calcula con el ancho REAL del
+         área de contenido (100cqi), no con el de la ventana. Con el panel del
+         asistente abierto, las cuentas contra el ancho fijo del contenedor lo
+         achicaban. */
       container-type: inline-size;
       container-name: principal;
     }
@@ -691,8 +691,11 @@
     }
     .app-nav__env:hover { background: var(--bg-primary); border-color: var(--border-default); }
 
-    /* Contraer / expandir la barra: un ícono solo, al pie, como en Cloudflare. */
-    .app-nav__pie { flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--border-subtle); }
+    /* Contraer / expandir la barra: un ícono solo, al pie, como en Cloudflare.
+       No se mueve al contraer: 18 px a la izquierda lo dejan centrado en la
+       barra contraída (68 px) y alineado con los íconos en la expandida. Lo
+       que cambia es la línea del ícono (izquierda / derecha). */
+    .app-nav__pie { flex-shrink: 0; padding: 8px 18px; border-top: 1px solid var(--border-subtle); }
     .app-nav__toggle {
       display: inline-flex; align-items: center; justify-content: center;
       width: 32px; height: 32px; padding: 0;
@@ -724,7 +727,7 @@
       body.nav-contraida .nav-dot { position: absolute; top: 6px; right: 8px; }
       body.nav-contraida .app-nav__env { padding: 12px 0; display: flex; justify-content: center; }
       body.nav-contraida .app-nav__env-head { justify-content: center; }
-      body.nav-contraida .app-nav__pie { display: flex; justify-content: center; padding: 8px 0; }
+      body.nav-contraida .app-nav__toggle .icon { transform: scaleX(-1); }
     }
     @media (max-width: 768px) { .app-nav__pie { display: none; } }
     .app-nav__env-head { display: flex; align-items: center; gap: 8px; }
@@ -1874,17 +1877,17 @@
     }
     .home-logos:hover img { filter: grayscale(0); opacity: 1; }
 
-    /* Ensanchado scoped: Home y el banner de infra activo usan más ancho que
-       el container base (pantallas grandes dejaban demasiado canvas vacío a
-       los costados), sin tocar `.container` global — el wizard/copiloto
-       siguen necesitándolo angosto para que los forms se lean bien. */
+    /* Ensanchado scoped: el Home usa más ancho que el container base
+       (pantallas grandes dejaban demasiado canvas vacío a los costados), sin
+       tocar `.container` global — el wizard/copiloto siguen necesitándolo
+       angosto para que los forms se lean bien.
+       "Entorno desplegado" NO se ensancha: tiene el ancho de las demás
+       páginas, con la barra contraída o no. Solo si el asistente le quita
+       lugar, la barra se contrae para devolvérselo. */
     /* El ancho que se busca: el "wide" si hay lugar, si no todo el área de
        contenido (100cqi) menos el padding lateral de .main-content (28 + 28).
-       Los márgenes nunca pasan de 0: ensanchan, no achican.
-       En "Entorno desplegado" se ensancha la vista ENTERA: ensanchando solo el
-       banner, quedaba más ancho que las tarjetas de abajo. */
-    #view-home,
-    #view-infra {
+       Los márgenes nunca pasan de 0: ensanchan, no achican. */
+    #view-home {
       --ancho-amplio: min(var(--container-wide), calc(100cqi - 56px));
       margin-left: min(0px, calc((100% - var(--ancho-amplio)) / 2));
       margin-right: min(0px, calc((100% - var(--ancho-amplio)) / 2));
