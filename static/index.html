@@ -2182,8 +2182,15 @@
     .cap-chat__msg--bot { background: var(--bg-tertiary); color: var(--text-primary); border-bottom-left-radius: 5px; }
     .cap-chat__msg--rich { width: min(540px, 100%); }
     .cap-chat__msg--err { background: var(--accent-tint); color: var(--accent-hover); }
-    .cap-chat__dots { letter-spacing: 3px; animation: capChatBlink 1s ease-in-out infinite; }
-    @keyframes capChatBlink { 0%,100%{opacity:.3} 50%{opacity:.9} }
+    .cap-chat__dots { display: inline-flex; gap: 4px; padding: 4px 2px; }
+    .cap-chat__dots i {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted);
+      animation: capDot 1.2s ease-in-out infinite;
+    }
+    .cap-chat__dots i:nth-child(2) { animation-delay: .15s; }
+    .cap-chat__dots i:nth-child(3) { animation-delay: .3s; }
+    @keyframes capDot { 0%, 70%, 100% { opacity: .3; } 35% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .cap-chat__dots i { animation: none; opacity: .6; } }
     .cap-chat__det { margin-top: 7px; font-size: var(--fs-xs); }
     .cap-chat__det summary { cursor: pointer; color: var(--text-muted); }
     .cap-chat__ppl { margin: 5px 0; }
@@ -2237,10 +2244,13 @@
     .cap-chat__typing::after { content: '▋'; margin-left: 1px; color: var(--accent); animation: capBlink .8s steps(1) infinite; }
     @keyframes capBlink { 50% { opacity: 0; } }
 
-    /* ── Asistente flotante ──
-       Un botón fijo abajo a la derecha abre el chat en un panel sobre la
-       página, como el chat de soporte de cualquier web. Era una tarjeta dentro
-       de la vista: al aparecer (paso 3) la alargaba de golpe. */
+    /* ── Asistente: panel lateral ──
+       El chat se abre en un panel de altura completa a la derecha (el botón
+       redondo de abajo, o "Abrir asistente" en el paso 3). En pantallas anchas
+       corre el contenido para no taparlo; en las angostas se superpone.
+       Cabecera blanca con estado; conversación sobre un fondo suave, burbujas
+       blancas del asistente y rojas del usuario; un solo campo para escribir,
+       con el enviar adentro. Nada de scrollbars ni controles nativos a la vista. */
     .cap-lanzador {
       position: fixed; right: 24px; bottom: 24px; z-index: 900;
       width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
@@ -2250,56 +2260,120 @@
     }
     .cap-lanzador:hover { filter: brightness(1.06); }
     .cap-lanzador .icon { width: 24px; height: 24px; }
+    :root { --asistente-w: 440px; }
     .cap-flotante {
-      position: fixed; right: 24px; bottom: 92px; z-index: 900;
-      width: min(420px, calc(100vw - 48px)); height: min(640px, calc(100vh - 120px));
+      position: fixed; top: 0; right: 0; bottom: 0; z-index: 900;
+      width: min(var(--asistente-w), 100vw);
       display: none; flex-direction: column; overflow: hidden;
-      background: var(--bg-primary); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
+      background: var(--bg-primary); border-left: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-lg);
     }
     .cap-flotante.is-abierto { display: flex; }
+    /* Abierto, el botón se va (el panel tiene su X). */
+    .cap-lanzador.is-abierto { display: none; }
+    /* Con lugar, el panel corre el contenido en vez de taparlo. */
+    @media (min-width: 1100px) {
+      body.con-asistente .app-shell { padding-right: var(--asistente-w); }
+    }
     .cap-flotante__head {
-      display: flex; align-items: center; gap: 10px; padding: 12px 14px;
-      border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary);
+      display: flex; align-items: center; gap: 10px; padding: 14px 10px 14px 16px;
+      border-bottom: 1px solid var(--border-subtle);
     }
     .cap-flotante__tile {
-      flex: none; width: 34px; height: 34px; border-radius: var(--radius-md);
+      flex: none; width: 38px; height: 38px; border-radius: 50%;
       display: inline-flex; align-items: center; justify-content: center;
       background: var(--accent); color: #fff;
     }
-    .cap-flotante__tile .icon { width: 18px; height: 18px; }
-    .cap-flotante__titulo {
-      flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;
-      font-size: var(--fs-base); color: var(--text-primary);
+    .cap-flotante__tile .icon { width: 19px; height: 19px; }
+    .cap-flotante__titulo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .cap-flotante__titulo strong { font-size: var(--fs-md); color: var(--text-primary); }
+    .cap-flotante__estado { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-muted); }
+    .cap-flotante__estado i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); }
+    .cap-flotante__accion {
+      flex: none; width: 34px; height: 34px; border: none; border-radius: var(--radius-md);
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; color: var(--text-muted); cursor: pointer;
+      transition: background var(--t-fast), color var(--t-fast);
     }
+    .cap-flotante__accion:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .cap-flotante__accion .icon { width: 17px; height: 17px; }
+    .cap-flotante__casos {
+      display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .cap-flotante__casos-lbl { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
+    .cap-flotante__select { position: relative; flex: 1; min-width: 0; display: flex; }
     .cap-flotante__caso {
-      max-width: 100%; font: inherit; font-size: var(--fs-sm); color: var(--text-secondary);
-      padding: 2px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-      background: var(--bg-primary);
+      -webkit-appearance: none; appearance: none; width: 100%; cursor: pointer;
+      padding: 5px 30px 5px 12px; font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-semi);
+      color: var(--text-primary); background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
     }
-    .cap-flotante__sub { font-size: var(--fs-sm); color: var(--text-muted); }
-    .cap-flotante__cerrar {
-      flex: none; border: none; background: transparent; color: var(--text-muted);
-      padding: 6px; border-radius: var(--radius-sm); cursor: pointer;
+    .cap-flotante__caso:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    .cap-flotante__select .icon {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      width: 14px; height: 14px; color: var(--text-muted); pointer-events: none;
     }
-    .cap-flotante__cerrar:hover { color: var(--text-primary); background: var(--bg-tertiary); }
-    .cap-flotante__cerrar .icon { width: 18px; height: 18px; }
-    .cap-flotante .cap-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; padding: 0 12px 10px; }
-    .cap-flotante .cap-chat__log { flex: 1; min-height: 0; max-height: none; margin-top: 0; padding: 12px 2px; }
-    .cap-flotante .cap-chat__msg { max-width: 88%; }
+    .cap-flotante .cap-chat {
+      flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0;
+      background: var(--bg-secondary);
+    }
+    .cap-flotante .cap-chat__log { flex: 1; min-height: 0; max-height: none; margin: 0; padding: 16px 14px; gap: 12px; }
+    .cap-flotante .cap-chat__row { align-items: flex-start; }
+    .cap-flotante .cap-chat__avatar { width: 28px; height: 28px; }
+    .cap-flotante .cap-chat__msg { max-width: 85%; font-size: var(--fs-sm); }
+    .cap-flotante .cap-chat__msg--bot {
+      background: var(--bg-primary); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-xs);
+      border-top-left-radius: 5px; border-bottom-left-radius: var(--radius-lg);
+    }
+    .cap-flotante .cap-chat__msg--user { border-bottom-right-radius: 5px; }
     .cap-flotante .cap-chat__msg--rich { width: 100%; }
-    /* min-width: 0 → la fila de sugerencias (que no se parte) scrollea adentro
-       en vez de ensanchar el panel y sacar el chat de la pantalla. */
+    /* El saludo y las primeras preguntas. */
+    .cap-flotante .cap-chat__empty { align-items: stretch; text-align: left; padding: 0; gap: 14px; color: inherit; }
+    .cap-chat__ideas { display: flex; flex-direction: column; gap: 8px; padding-left: 36px; }
+    .cap-chat__ideas-lbl {
+      font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .06em;
+    }
+    .cap-chat__idea {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 12px; text-align: left; cursor: pointer;
+      font: inherit; font-size: var(--fs-sm); color: var(--text-primary);
+      background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+      transition: border-color var(--t-fast), background var(--t-fast);
+    }
+    .cap-chat__idea .icon { flex: none; width: 14px; height: 14px; color: var(--accent); }
+    .cap-chat__idea:hover { border-color: var(--accent); background: var(--accent-tint); }
+    /* Con conversación, las sugerencias van en una fila sobre el campo. */
+    .cap-flotante.is-vacio .cap-chat__suggest-row { display: none; }
     .cap-flotante .cap-chat__suggest-row, .cap-flotante .cap-chat__suggest { min-width: 0; max-width: 100%; }
-    .cap-flotante .cap-chat__suggest-row { margin-top: 6px; }
-    .cap-flotante .cap-chat__suggest .lp-tab-panel { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+    .cap-flotante .cap-chat__suggest-row { margin: 0; padding: 0 14px; }
+    .cap-flotante .cap-chat__suggest .lp-tab-panel {
+      flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 0 4px;
+      -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+              mask-image: linear-gradient(90deg, #000 88%, transparent);
+    }
+    .cap-flotante .cap-chat__suggest .lp-tab-panel::-webkit-scrollbar { display: none; }
     .cap-flotante .cap-chat__suggest .lp-q-btn { flex: none; white-space: nowrap; }
-    .cap-flotante .cap-chat__form { margin-top: 8px; }
-    .cap-flotante > .cap-assistant__adv { margin: 0; padding: 0 14px 10px; font-size: var(--fs-xs); }
-    /* En un teléfono, el chat ocupa la pantalla y el botón se va mientras está abierto. */
+    /* Un solo campo, con el enviar adentro. */
+    .cap-chat__composer {
+      display: flex; align-items: center; gap: 6px; margin: 8px 14px 6px;
+      padding: 5px 5px 5px 16px; background: var(--bg-primary);
+      border: 1px solid var(--border-default); border-radius: var(--radius-pill); box-shadow: var(--shadow-xs);
+      transition: border-color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .cap-chat__composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    .cap-chat__composer .cap-chat__input {
+      flex: 1; min-width: 0; padding: 7px 0; border: none; border-radius: 0; background: transparent;
+      font-size: var(--fs-sm); box-shadow: none;
+    }
+    .cap-chat__composer .cap-chat__input:focus { box-shadow: none; }
+    .cap-chat__composer .cap-chat__send { width: 36px; height: 36px; box-shadow: none; }
+    .cap-chat__composer .cap-chat__send .icon { width: 16px; height: 16px; }
+    .cap-chat__pie { padding: 0 16px 10px; font-size: var(--fs-xs); color: var(--text-muted); text-align: center; }
+    /* En un teléfono, el chat ocupa la pantalla. */
     @media (max-width: 560px) {
-      .cap-flotante { inset: 0; width: auto; height: auto; border-radius: 0; border: none; }
-      .cap-lanzador.is-abierto { display: none; }
+      .cap-flotante { width: 100vw; border-left: none; }
     }
     /* El paso 3: qué plugins quedaron y el botón para abrir el asistente. */
     .cap-resumen { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -5635,6 +5709,7 @@
     function _quitarAsistente() {
       document.getElementById('deploy-capabilities')?.remove();
       document.getElementById('cap-lanzador')?.remove();
+      document.body.classList.remove('con-asistente');
     }
 
     function capChatAgregar(slug, who, html) {
@@ -5652,11 +5727,21 @@
       return `<div class="cap-chat__row cap-chat__row--${e.who}" data-msg="${e.id}">${avatar}`
         + `<div class="cap-chat__msg cap-chat__msg--${e.who}${e.err ? ' cap-chat__msg--err' : ''}">${e.html}</div></div>`;
     }
-    function capChatLogHTML(slug, label) {
+    // Sin conversación: un saludo del asistente y hasta cuatro preguntas para
+    // arrancar, como tarjetas. Desaparece con el primer mensaje.
+    function capChatLogHTML(slug, label, sugerencias = []) {
       const msgs = capChats[slug] || [];
       if (msgs.length) return msgs.map(capChatFilaHTML).join('');
-      return `<div class="cap-chat__empty"><span class="cap-chat__empty-ic">${icon('spark')}</span>`
-        + `<span class="cap-chat__empty-title">Preguntame sobre ${escapeHtml(label)}</span></div>`;
+      const ideas = sugerencias.slice(0, 4).map(q =>
+        `<button type="button" class="cap-chat__idea lp-q-btn" data-q="${escapeHtml(q)}">`
+        + `<span>${escapeHtml(q)}</span>${icon('arrow-right')}</button>`).join('');
+      return `<div class="cap-chat__empty">`
+        + `<div class="cap-chat__row cap-chat__row--bot"><span class="cap-chat__avatar">${icon('spark')}</span>`
+        + `<div class="cap-chat__msg cap-chat__msg--bot">Hola. Preguntame lo que quieras sobre `
+        + `<strong>${escapeHtml(label)}</strong>, en lenguaje natural: armo la consulta y te respondo `
+        + `con los datos reales.</div></div>`
+        + (ideas ? `<div class="cap-chat__ideas"><span class="cap-chat__ideas-lbl">Para empezar</span>${ideas}</div>` : '')
+        + `</div>`;
     }
 
     function renderCapabilitiesResult(capsBySlug, anchor) {
@@ -5753,12 +5838,13 @@
           }).join('');
           // El caso, en la cabecera del panel: un <select> si hay más de uno.
           tabsBar = showTabs
-            ? `<select class="cap-flotante__caso" id="cap-chat-caso" aria-label="Caso">${opciones}</select>`
-            : `<span class="cap-flotante__sub">${escapeHtml(SLUG_LABELS[activeSlugs[0]] || 'Tus datos')}</span>`;
+            ? `<div class="cap-flotante__casos"><span class="cap-flotante__casos-lbl">Datos de</span>
+                 <span class="cap-flotante__select"><select class="cap-flotante__caso" id="cap-chat-caso" aria-label="Caso">${opciones}</select>${icon('chevron')}</span></div>`
+            : '';
           // Un log de chat por caso (conversación separada), armado desde lo
           // guardado: así un re-render devuelve la conversación como estaba.
           logsHtml = activeSlugs.map((s, i) =>
-            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos')}</div>`).join('');
+            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s))}</div>`).join('');
           chipPanels = `<div class="cap-chat__suggest">${panelsHtml}</div>`;
         }
       }
@@ -5770,7 +5856,15 @@
         <div class="cap-resumen">
           <span class="cap-resumen__lbl">Plugins:</span> ${chips}
           ${hayChat ? '<button type="button" class="btn btn-primary btn-sm" id="cap-abrir">Abrir asistente</button>' : ''}
-        </div>`;
+        </div>
+        ${hayChat && agentId ? `<details class="cap-assistant__adv">
+          <summary>Cómo demostrarlo en Dashboards · Dev Tools (avanzado)</summary>
+          <div class="cap-assistant__adv-body">
+            <strong>En OpenSearch Dashboards:</strong> los <strong>Dashboards</strong> del tipo (volumen, cuentas, funnel) y el <strong>Forecasting</strong> desde su plugin.
+            <code class="cap-assistant__code">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
+{"parameters":{"question":"¿Cuántos eventos hay en total?"}}</code>
+          </div>
+        </details>` : ''}`;
       if (!hayChat) return;
 
       host = document.createElement('div');
@@ -5780,30 +5874,24 @@
       host.setAttribute('aria-label', 'Asistente de datos');
       host.innerHTML = `
         <div class="cap-flotante__head">
-          <span class="cap-flotante__tile">${icon('chat')}</span>
+          <span class="cap-flotante__tile">${icon('spark')}</span>
           <div class="cap-flotante__titulo">
             <strong>Asistente de datos</strong>
-            ${tabsBar}
+            <span class="cap-flotante__estado"><i></i>Responde con tus datos reales</span>
           </div>
-          <button type="button" class="cap-flotante__cerrar" id="cap-flotante-cerrar" aria-label="Cerrar el asistente">${icon('x')}</button>
+          <button type="button" class="cap-flotante__accion" id="cap-chat-clear" title="Nueva conversación" aria-label="Nueva conversación">${icon('refresh')}</button>
+          <button type="button" class="cap-flotante__accion" id="cap-flotante-cerrar" title="Cerrar" aria-label="Cerrar el asistente">${icon('x')}</button>
         </div>
+        ${tabsBar}
         <div class="cap-chat">
           ${logsHtml}
           <div class="cap-chat__suggest-row">${chipPanels}</div>
-          <form class="cap-chat__form" id="cap-chat-form" autocomplete="off">
-            <button class="cap-chat__clear" id="cap-chat-clear" type="button" aria-label="Limpiar este chat" title="Limpiar este chat">${icon('trash')}</button>
-            <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Escribí tu pregunta…">
+          <form class="cap-chat__composer" id="cap-chat-form" autocomplete="off">
+            <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Preguntá sobre tus datos…" aria-label="Tu pregunta">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
-        </div>
-        <details class="cap-assistant__adv">
-          <summary>Cómo demostrar en Dashboards · Dev Tools (avanzado)</summary>
-          <div class="cap-assistant__adv-body">
-            <strong>En OpenSearch Dashboards:</strong> los <strong>Dashboards</strong> del tipo (volumen, cuentas, funnel) y el <strong>Forecasting</strong> desde su plugin.
-            ${agentId ? `<code class="cap-assistant__code">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
-{"parameters":{"question":"¿Cuántos eventos hay en total?"}}</code>` : ''}
-          </div>
-        </details>`;
+          <div class="cap-chat__pie">Responde con consultas PPL sobre tus índices. Puede equivocarse.</div>
+        </div>`;
       const lanzador = document.createElement('button');
       lanzador.id = 'cap-lanzador';
       lanzador.type = 'button';
@@ -5811,6 +5899,7 @@
       lanzador.setAttribute('aria-label', 'Asistente de datos');
       lanzador.innerHTML = icon('chat');
       document.body.append(host, lanzador);
+      document.body.classList.toggle('con-asistente', capChatAbierto);
 
       // \u2500\u2500 Chat NL\u2192PPL nativo: pega a POST /api/v1/capabilities/ppl-chat (orquestado
       // server-side, sin el Assistant de Dashboards). El slug activo = la tab elegida. \u2500\u2500
@@ -5822,8 +5911,13 @@
         capChatAbierto = on;
         host.classList.toggle('is-abierto', on);
         lanzador.classList.toggle('is-abierto', on);
+        document.body.classList.toggle('con-asistente', on);
         if (on) chatInput?.focus();
       };
+      // Las sugerencias de abajo, solo cuando ya hay conversación: en el
+      // arranque están arriba, como tarjetas.
+      const _syncVacio = () =>
+        host.classList.toggle('is-vacio', !(capChats[_activeChatSlug()] || []).length);
       lanzador.addEventListener('click', () => _abrir(!capChatAbierto));
       host.querySelector('#cap-flotante-cerrar')?.addEventListener('click', () => _abrir(false));
       statusEl.querySelector('#cap-abrir')?.addEventListener('click', () => _abrir(true));
@@ -5839,7 +5933,8 @@
         const slug = _activeChatSlug();
         capChatLimpiar(slug);
         const log = _logDe(slug);
-        if (log) log.innerHTML = capChatLogHTML(slug, SLUG_LABELS[slug] || 'tus datos');
+        if (log) log.innerHTML = capChatLogHTML(slug, SLUG_LABELS[slug] || 'tus datos', _questionsFor(slug));
+        _syncVacio();
       };
       // Un mensaje nuevo: se guarda en la conversación DE ESE CASO y se pinta.
       const _agregar = (slug, who, html) => {
@@ -5850,6 +5945,7 @@
           log.insertAdjacentHTML('beforeend', capChatFilaHTML(entry));
           log.scrollTop = log.scrollHeight;
         }
+        _syncVacio();
         return entry;
       };
       // ── Wow: visualización Vega-Lite (el motor del tipo "Vega" de OpenSearch
@@ -5965,7 +6061,7 @@
           return mk({ data: { values }, mark: { type: 'bar', tooltip: true },
             encoding: {
               y: { field: 'label', type: 'nominal', title: null, sort: '-x' },
-              x: { field: 'v', type: 'quantitative', title: null },
+              x: { field: 'v', type: 'quantitative', title: null, axis: { format: '~s', tickCount: 4 } },
               color: { value: t.accent },
             } }, values.length * 26 + 40);
         }
@@ -6019,18 +6115,17 @@
         // Una categórica + medida.
         if (N.length === 1) {
           const n = N[0];
-          // Composición (pocas categorías) → dona.
-          if (n.distinct >= 2 && n.distinct <= 5 && rows.length <= 8) {
-            const values = rows.map(r => ({ k: str(r, n), v: num(r, q) }));
-            return mk({ data: { values }, mark: { type: 'arc', tooltip: true, innerRadius: 55 },
-              encoding: { theta: { field: 'v', type: 'quantitative' }, color: { field: 'k', type: 'nominal', title: n.name } } }, 230);
-          }
+          // Sin dona: en el panel del chat (~300 px de burbuja) la leyenda se
+          // comía el ancho y la dona no se dibujaba. Barras horizontales, que
+          // se leen en cualquier ancho.
           // Ranking/comparación → barras horizontales (top 12).
           const values = rows.slice(0, 12).map(r => ({ label: str(r, n), v: num(r, q) }));
           return mk({ data: { values }, mark: { type: 'bar', tooltip: true },
             encoding: {
               y: { field: 'label', type: 'nominal', title: null, sort: '-x', axis: { labelLimit: 130 } },
-              x: { field: 'v', type: 'quantitative', title: q.name },
+              // Formato corto (10k, 20k) y pocas marcas: en el panel lateral
+              // los números largos del eje se pisaban.
+              x: { field: 'v', type: 'quantitative', title: q.name, axis: { format: '~s', tickCount: 4 } },
               color: { value: t.accent },
             } }, values.length * 26 + 40);
         }
@@ -6076,7 +6171,7 @@
         // consulta que se usó. Sin esto "¿cómo sabés?" era una pregunta nueva.
         const history = capChatHistorial(slug);
         _agregar(slug, 'user', escapeHtml(question));
-        const pend = _agregar(slug, 'bot', '<span class="cap-chat__dots">···</span>');
+        const pend = _agregar(slug, 'bot', '<span class="cap-chat__dots" aria-label="Escribiendo"><i></i><i></i><i></i></span>');
         capChatBusy = true;
         if (chatInput) chatInput.value = '';
         const _error = (html) => {
@@ -6136,8 +6231,9 @@
       chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
       host.querySelector('#cap-chat-clear')?.addEventListener('click', () => { _clearActiveLog(); chatInput?.focus(); });
       // Preguntas sugeridas \u2192 enviar al chat (antes copiaban al clipboard).
-      host.querySelectorAll('.lp-q-btn').forEach(qb => {
-        qb.addEventListener('click', () => sendCapChat(qb.dataset.q || ''));
+      host.addEventListener('click', (e) => {
+        const qb = e.target.closest('.lp-q-btn');
+        if (qb && host.contains(qb)) sendCapChat(qb.dataset.q || '');
       });
       // El caso: cambia el log (chat separado por caso) y las sugerencias.
       host.querySelector('#cap-chat-caso')?.addEventListener('change', (e) => {
@@ -6149,8 +6245,10 @@
         host.querySelectorAll('.lp-tab-panel').forEach(p => {
           p.style.display = (p.dataset.slug === slug) ? 'flex' : 'none';
         });
+        _syncVacio();
         if (chatInput) chatInput.focus();
       });
+      _syncVacio();
       // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML
       // guardado trae el lugar, no el SVG.
       for (const s of activeSlugs) {
@@ -7168,8 +7266,70 @@
       }
     }
 
+    // Vista previa del entorno: ?preview=entorno pinta "Entorno desplegado"
+    // con un estado de ejemplo (dos pipelines con index template e ingesta
+    // hechos y los plugins por provisionar; `&plugins=1`, con todo hecho y el
+    // asistente). Los botones responden con datos de ejemplo: nada sale del
+    // navegador salvo la reproducción de un deploy (/api/v1/dev/deploy-preview).
+    // Sirve para ver la puesta en marcha y el chat sin desplegar.
+    function _vistaPreviaEntorno(params) {
+      const ids = { agent_id: 'vista-previa', ppl_model_id: 'vista-previa', llm_model_id: 'vista-previa',
+                    forecaster_id: 'vista-previa' };
+      const slugs = ['transacciones-billetera', 'ventas-ecommerce'];
+      const conPlugins = () => Object.fromEntries(slugs.map(s => [s, ids]));
+      const estado = {
+        active: true, project_name: 'vista-previa', deployed_seconds_ago: 1260,
+        opensearch_endpoint: '10.0.0.5:9200', logstash_endpoint: '10.0.0.6:9600', dashboards_url: '',
+        pipelines: slugs.map(s => ({ slug: s, index: `${s}-%{+YYYY.MM}`, obs_prefix: `${s}-logs/`,
+                                     active: true, dashboards_imported: true, has_capabilities: true,
+                                     config_status: 'available', config_error: '' })),
+        capabilities: params.get('plugins') === '1' ? conPlugins() : {},
+      };
+      const real = window.fetch.bind(window);
+      const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { 'Content-Type': 'application/json' } });
+      const espera = (ms) => new Promise(r => setTimeout(r, ms));
+      window.fetch = async (url, opts = {}) => {
+        const u = String(url);
+        const metodo = (opts.method || 'GET').toUpperCase();
+        if (u.includes('/api/v1/terraform/status')) return json(estado);
+        if (u.includes('/api/v1/terraform/jobs/vista-previa/stream')) return real('/api/v1/dev/deploy-preview?paso=0.03');
+        if (u.includes('/api/v1/terraform/jobs')) return json({ running: null });
+        if (u.includes('/api/v1/terraform/deploy-job')) return json({ job_id: 'vista-previa' });
+        if (u.includes('/api/v1/onboarding/apply-schema')) {
+          await espera(900);
+          return json({ index_template_applied: true, dashboards_imported: true });
+        }
+        if (u.includes('/api/v1/onboarding/provision-capabilities')) {
+          await espera(1500);
+          estado.capabilities = conPlugins();
+          return json({ status: 'success', capabilities: Object.fromEntries(slugs.map(s => [s, {
+            conversational: { ok: true, agent_id: ids.agent_id }, forecast: { ok: true, forecaster_id: ids.forecaster_id } }])) });
+        }
+        if (u.includes('/api/v1/pipelines/health')) {
+          await espera(700);
+          return json({ reachable: true, pipelines: estado.pipelines.map((p, i) => ({ slug: p.slug, index: p.index, docs: [98037, 41250][i] })) });
+        }
+        if (u.includes('/api/v1/capabilities/ppl-chat')) {
+          await espera(1100);
+          return json({
+            answer: 'Vista previa, con datos de ejemplo: la operación más frecuente es LOGIN (24.492), seguida de las consultas de saldo (19.990) y las transferencias (19.483).',
+            ppl: 'source=transacciones-billetera-* | stats count() as total by transaction.operation_code | sort -total | head 5',
+            result: { schema: [{ name: 'transaction.operation_code', type: 'string' }, { name: 'total', type: 'long' }],
+                      datarows: [['LOGIN', 24492], ['BALANCE_INQUIRY', 19990], ['TRANSFER', 19483], ['QR_PAYMENT', 11659], ['BILL_PAYMENT', 9740]] },
+          });
+        }
+        if (metodo !== 'GET' && u.includes('/api/v1/')) return json({ detail: { message: 'Vista previa: esto no se ejecuta.' } }, 400);
+        return real(url, opts);
+      };
+      state.previewMode = true;
+      if (params.get('chat') === '1') capChatAbierto = true;   // entra con el asistente abierto
+      showView('infra');
+      hydrateActiveEnv();
+    }
+
     (function maybePreviewDeployAnim() {
       const params = new URLSearchParams(location.search);
+      if (params.get('preview') === 'entorno') { _vistaPreviaEntorno(params); return; }
       if (params.get('preview') !== 'deploy') { hydrateActiveEnv(); return; }
       state.previewMode = true;
       state.provisioning = 'new';

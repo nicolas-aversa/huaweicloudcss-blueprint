@@ -23,7 +23,12 @@ const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
 
 // Vacío: la invitación a preguntar, con el nombre del caso.
-check('vacío', capChatLogHTML('ventas', 'Ventas').includes('Preguntame sobre Ventas'));
+check('vacío', capChatLogHTML('ventas', 'Ventas').includes('Preguntame lo que quieras sobre <strong>Ventas</strong>'));
+// El saludo trae hasta cuatro preguntas para arrancar, como tarjetas.
+const saludo = capChatLogHTML('ventas', 'Ventas', ['a', 'b', 'c', 'd', 'e']);
+check('vacío: cuatro ideas', (saludo.match(/class="cap-chat__idea lp-q-btn"/g) || []).length === 4, saludo);
+check('vacío: la idea es la pregunta', saludo.includes('data-q="a"') && !saludo.includes('data-q="e"'));
+check('vacío: sin ideas, sin bloque', !capChatLogHTML('ventas', 'Ventas').includes('cap-chat__ideas'));
 
 // Pregunta en A, mientras se espera la respuesta.
 capChatAgregar('ventas', 'user', 'hola &lt;b&gt;');
@@ -34,11 +39,11 @@ check('ids distintos', pend.id !== capChats.ventas[0].id);
 let a = capChatLogHTML('ventas', 'Ventas');
 check('re-render: la pregunta', a.includes('hola &lt;b&gt;'), a);
 check('re-render: la espera', a.includes('···'));
-check('re-render: sin invitación', !a.includes('Preguntame sobre'));
+check('re-render: sin invitación', !a.includes('Preguntame lo que quieras'));
 check('re-render: cada fila con su id', a.includes(`data-msg="${pend.id}"`));
 
 // B tiene su propia conversación, vacía.
-check('otro caso vacío', capChatLogHTML('fraude', 'Fraude').includes('Preguntame sobre Fraude'));
+check('otro caso vacío', capChatLogHTML('fraude', 'Fraude').includes('<strong>Fraude</strong>'));
 
 // La respuesta llega (quizás con otra pestaña activa): queda en A.
 pend.html = '<span class="cap-chat__answer">Hay 42.</span>';
@@ -55,7 +60,7 @@ check('usuario sin avatar', !capChatFilaHTML(capChats.ventas[0]).includes('<i:sp
 
 // Limpiar solo toca el caso activo.
 capChatLimpiar('ventas');
-check('limpiar A', capChatLogHTML('ventas', 'Ventas').includes('Preguntame sobre Ventas'));
+check('limpiar A', capChatLogHTML('ventas', 'Ventas').includes('<strong>Ventas</strong>'));
 check('B intacto', capChatLogHTML('fraude', 'Fraude').includes('No se pudo responder.'));
 
 // La memoria que va al backend: turnos contestados, sin errores, los últimos 4.
@@ -101,7 +106,7 @@ def _render(html: str) -> str:
 
 def test_el_asistente_se_arma_desde_lo_guardado():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    assert "capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos')" in fn
+    assert "capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s))" in fn
     # La pestaña elegida también sobrevive.
     assert "activeSlugs.indexOf(capChatSlug)" in fn
     assert "capChatSlug = slug;" in fn
@@ -193,4 +198,54 @@ def test_el_css_del_panel():
     lanzador = css[css.index("    .cap-lanzador {"):]
     assert "position: fixed" in lanzador[:lanzador.index("}")]
     celu = css[css.index("@media (max-width: 560px) {\n      .cap-flotante"):]
-    assert "inset: 0" in celu[:200]
+    assert "width: 100vw" in celu[:200]
+
+
+# ── Panel lateral ───────────────────────────────────────────────────────────
+def test_el_asistente_es_un_panel_lateral_que_corre_el_contenido():
+    """Primero fue una tarjeta que alargaba la página, después una burbuja: el
+    pedido fue un panel lateral."""
+    html = _INDEX.read_text(encoding="utf-8")
+    css = html[:html.index("</style>")]
+    panel = css[css.index("    .cap-flotante {"):]
+    panel = panel[:panel.index("}")]
+    assert "top: 0; right: 0; bottom: 0" in panel and "width: min(var(--asistente-w), 100vw)" in panel
+    assert "body.con-asistente .app-shell { padding-right: var(--asistente-w); }" in css
+    assert ".cap-lanzador.is-abierto { display: none; }" in css
+    fn = _render(html)
+    abrir = fn[fn.index("const _abrir = (on) => {"):]
+    assert "document.body.classList.toggle('con-asistente', on);" in abrir[:abrir.index("};")]
+    assert "document.body.classList.toggle('con-asistente', capChatAbierto);" in fn
+    j = html.index("function _quitarAsistente()")
+    assert "document.body.classList.remove('con-asistente');" in html[j:html.index("}", j)]
+
+
+def test_las_sugerencias_se_toman_por_delegacion_y_se_ocultan_al_arrancar():
+    """Las del saludo se vuelven a pintar al limpiar: con listeners por botón
+    quedaban muertas. Abajo, la fila aparece recién con conversación."""
+    html = _INDEX.read_text(encoding="utf-8")
+    fn = _render(html)
+    assert "const qb = e.target.closest('.lp-q-btn');" in fn
+    assert "if (qb && host.contains(qb)) sendCapChat(qb.dataset.q || '');" in fn
+    assert "host.querySelectorAll('.lp-q-btn').forEach" not in fn
+    assert "host.classList.toggle('is-vacio', !(capChats[_activeChatSlug()] || []).length)" in fn
+    assert ".cap-flotante.is-vacio .cap-chat__suggest-row { display: none; }" in html
+    # Sin scrollbar a la vista, y el campo con el enviar adentro.
+    assert "scrollbar-width: none" in html and 'class="cap-chat__composer" id="cap-chat-form"' in fn
+    assert 'id="cap-chat-clear" title="Nueva conversación"' in fn
+
+
+def test_la_vista_previa_del_entorno():
+    """?preview=entorno muestra la vista y el chat sin desplegar; nada sale del
+    navegador salvo la reproducción de un deploy."""
+    html = _INDEX.read_text(encoding="utf-8")
+    assert "if (params.get('preview') === 'entorno') { _vistaPreviaEntorno(params); return; }" in html
+    i = html.index("function _vistaPreviaEntorno(params)")
+    fn = html[i:html.index("\n    }\n", i)]
+    for ruta in ("/api/v1/terraform/status", "/api/v1/onboarding/apply-schema",
+                 "/api/v1/onboarding/provision-capabilities", "/api/v1/pipelines/health",
+                 "/api/v1/capabilities/ppl-chat"):
+        assert ruta in fn, ruta
+    assert "if (metodo !== 'GET' && u.includes('/api/v1/')) return json(" in fn, "ningún POST real"
+    assert "real('/api/v1/dev/deploy-preview?paso=0.03')" in fn
+    assert "if (params.get('chat') === '1') capChatAbierto = true;" in fn
