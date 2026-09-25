@@ -163,15 +163,15 @@ def test_el_estado_dice_que_se_esta_haciendo():
     assert ("activar", "Actualizando") in estados
 
 
-def test_la_fase_es_lo_que_se_esta_esperando():
-    """Con la red ya lista y solo el cluster en curso, la fase es el cluster."""
+def test_la_fase_dice_desplegando_via_terraform_y_cuantos_listos():
+    """Siempre el mismo mensaje: lo que se está creando lo dice la lista."""
     lineas = LOG.splitlines()
     # Hasta el "9m0s" del cluster: la red ya terminó, el cluster sigue.
     _, eventos = _correr("\n".join(lineas[:lineas.index(
         "huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [9m0s elapsed]") + 1]))
     ultima = [e for e in eventos if e["type"] == "apply"][-1]
-    assert ultima["phase"] == "CSS OpenSearch cluster"
-    assert ultima["message"] == "Creando CSS OpenSearch cluster…"
+    assert ultima["phase"] == "Terraform"
+    assert ultima["message"] == "Desplegando vía Terraform… · 3 de 10 listos"   # NAT, EIP y SG
 
 
 def test_un_recurso_que_recien_arranca_ya_esta_en_curso():
@@ -181,7 +181,6 @@ def test_un_recurso_que_recien_arranca_ya_esta_en_curso():
         "huaweicloud_css_logstash_cluster.logstash_cluster: Creating...") + 1]))
     ls = [e for e in eventos if e["type"] == "item" and e["key"] == "logstash"][-1]
     assert ls["estado"] == "Creando" and ls["percent"] == 0
-    assert [e for e in eventos if e["type"] == "apply"][-1]["phase"] == "CSS Logstash cluster"
 
 
 def test_un_reemplazo_primero_elimina_y_despues_crea():
@@ -226,30 +225,20 @@ def test_un_recurso_que_tarda_mas_de_lo_previsto_se_sigue_moviendo():
     assert 0.9 < a < b < 1.0, (a, b)
 
 
-def test_con_varios_en_curso_la_fase_dice_cuantos():
-    """Nombrar solo al que más falta ("Creando OpenSearch cluster…") escondía
-    lo que se creaba al mismo tiempo."""
+def test_con_varios_en_curso_el_mensaje_no_cambia():
+    """Ni "2 servicios en paralelo" ni el nombre del que queda."""
     log = ("  # huaweicloud_css_cluster.opensearch_cluster[0] will be created\n"
            "  # huaweicloud_css_logstash_pipeline.pipeline[0] will be updated in-place\n"
            "Plan: 1 to add, 1 to change, 0 to destroy.\n"
            "huaweicloud_css_cluster.opensearch_cluster[0]: Creating...\n"
            "huaweicloud_css_logstash_pipeline.pipeline[0]: Modifying... [id=p0]\n")
     _, eventos = _correr(log)
-    ultima = [e for e in eventos if e["type"] == "apply"][-1]
-    assert ultima["phase"] == "En paralelo"
-    assert ultima["message"] == "2 servicios en paralelo · 0 de 2 listos"
-
+    assert [e for e in eventos if e["type"] == "apply"][-1]["message"] == \
+        "Desplegando vía Terraform… · 0 de 2 listos"
     _, eventos = _correr(log + "huaweicloud_css_logstash_pipeline.pipeline[0]: "
                                "Modifications complete after 20s [id=p0]\n")
-    ultima = [e for e in eventos if e["type"] == "apply"][-1]
-    assert ultima["message"] == "Creando CSS OpenSearch cluster…", "queda uno: se nombra"
-
-    # En el deploy entero: la EIP ya terminó; el NAT y el cluster siguen.
-    lineas = LOG.splitlines()
-    _, eventos = _correr("\n".join(lineas[:lineas.index(
-        "huaweicloud_css_cluster.opensearch_cluster[0]: Still creating... [10s elapsed]") + 1]))
-    ultima = [e for e in eventos if e["type"] == "apply"][-1]
-    assert ultima["message"] == "2 servicios en paralelo · 1 de 10 listos"
+    assert [e for e in eventos if e["type"] == "apply"][-1]["message"] == \
+        "Desplegando vía Terraform… · 1 de 2 listos"
 
 
 def test_un_data_source_no_es_un_recurso_que_se_crea():

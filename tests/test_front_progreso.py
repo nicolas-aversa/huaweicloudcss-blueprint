@@ -148,6 +148,20 @@ check('fin: el error sigue', r.classList.contains('is-error') && !r.classList.co
 check('fin: cuenta', conError.querySelector('.deploy-progress__cuenta').textContent === '1/2',
       conError.querySelector('.deploy-progress__cuenta').textContent);
 
+// Sin lista (la ingesta): solo la barra global; los `item` no pintan nada.
+const soloBarra = new El();
+soloBarra.innerHTML = progresoHTML('Iniciando…', '', { lista: false });
+check('sin lista: no hay lista', !soloBarra.querySelector('.deploy-progress__list'));
+progresoEvento(soloBarra, { type: 'plan', items: [{ key: 'activar', grupo: 'css', label: 'Activar pipelines',
+                                                     percent: 0, done: false, estado: 'En espera' }] });
+progresoEvento(soloBarra, { type: 'item', key: 'activar', grupo: 'css', label: 'Activar pipelines',
+                            percent: 50, done: false, estado: 'Actualizando' });
+progresoEvento(soloBarra, { type: 'progress', percent: 60, message: 'Desplegando vía Terraform… · 0 de 1 listos' });
+check('sin lista: ninguna fila', soloBarra.querySelectorAll('.deploy-progress__item').length === 0);
+check('sin lista: la barra se mueve', soloBarra.querySelector('.deploy-progress__fill').style.width === '60%');
+progresoFin(soloBarra, true);
+check('sin lista: termina', soloBarra.querySelector('.deploy-progress__pct').textContent === '100%');
+
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -197,3 +211,12 @@ def test_trabajando_no_es_un_recuadro_azul():
     regla = regla[:regla.index("}")]
     assert "59, 130, 246" not in regla and "#3b82f6" not in regla
     assert "var(--bg-primary)" in regla and "var(--border-subtle)" in regla
+
+
+def test_la_ingesta_muestra_solo_la_barra_global():
+    """"Iniciar ingesta" mostraba una segunda barra ("CSS · Activar pipelines")
+    que repetía la de arriba."""
+    html = _INDEX.read_text(encoding="utf-8")
+    fn = _funcion(html, "    function _progresoEnStatus(")
+    assert "progresoHTML(fase, '', { lista: false })" in fn
+    assert "${progresoHTML('Iniciando…', 'deploy-progress')}" in html, "el deploy completo, con lista"

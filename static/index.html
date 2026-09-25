@@ -5214,14 +5214,17 @@
     // `plan` (los componentes, una vez, antes de empezar) e `item` (uno que
     // cambió). Lo usan la puesta en marcha, "Iniciar ingesta" y la
     // reconexión tras un refresh, así que va por un contenedor y no por ids.
-    function progresoHTML(fase = 'Iniciando…', id = '') {
+    // `lista: false` → solo la barra global. La lista por servicio es para el
+    // deploy completo; en "Iniciar ingesta" era una segunda barra ("CSS ·
+    // Activar pipelines") que repetía la de arriba.
+    function progresoHTML(fase = 'Iniciando…', id = '', { lista = true } = {}) {
       return `<div class="deploy-progress"${id ? ` id="${id}"` : ''}>
           <div class="deploy-progress__row">
             <span class="deploy-progress__phase">${escapeHtml(fase)}</span>
             <span class="deploy-progress__pct">0%</span>
           </div>
           <div class="deploy-progress__bar"><div class="deploy-progress__fill"></div></div>
-          <ul class="deploy-progress__list"></ul>
+          ${lista ? '<ul class="deploy-progress__list"></ul>' : ''}
         </div>`;
     }
 
@@ -5354,7 +5357,7 @@
     function _progresoEnStatus(statusEl, fase) {
       if (!statusEl) return null;
       statusEl.className = '';
-      statusEl.innerHTML = progresoHTML(fase);
+      statusEl.innerHTML = progresoHTML(fase, '', { lista: false });
       statusEl.classList.remove('hidden');
       return statusEl.querySelector('.deploy-progress');
     }

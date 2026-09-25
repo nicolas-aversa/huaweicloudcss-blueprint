@@ -24,16 +24,6 @@ def test_cada_componente_de_terraform_tiene_su_servicio():
     assert progreso_tf.ProgresoApply.grupo("algo_nuevo") == "otros"
 
 
-def test_el_nombre_suelto_dice_el_servicio():
-    """Bajo el grupo alcanza "OpenSearch cluster"; en el mensaje de fase, que
-    va solo, tiene que decir CSS."""
-    larga = progreso_tf.ProgresoApply.larga
-    assert larga("opensearch") == "CSS OpenSearch cluster"
-    assert larga("logstash") == "CSS Logstash cluster"
-    assert larga("nat") == "NAT gateway"
-    assert larga("dnat:opensearch") == "DNAT :9200 · OpenSearch"
-
-
 # ── Las Cluster Routes ──────────────────────────────────────────────────────
 def test_las_rutas_se_anuncian_en_la_fase_1(monkeypatch):
     req = main.TerraformDeployRequest(pipeline_conf="input {} output {}")
@@ -213,7 +203,7 @@ def test_el_total_cuenta_las_filas_que_no_son_de_terraform():
                   "huaweicloud_vpc_eip.nat_eip: Creating...\n",
                   "huaweicloud_nat_gateway.nat: Creating...\n"):
         eventos = p.linea(linea)
-    assert eventos[-1]["message"] == "2 servicios en paralelo · 0 de 3 listos"
+    assert eventos[-1]["message"] == "Desplegando vía Terraform… · 0 de 3 listos"
 
 
 def test_la_vista_previa_cuenta_las_rutas():
@@ -241,7 +231,7 @@ def test_el_deploy_cuenta_las_filas_extra_en_el_total(monkeypatch, tmp_path):
     extra = main._item_ruta("rutas:maas", "Rutas → MaaS")
     _, eventos = _correr(main._correr_apply(tmp_path, [], 5, 92, [], extras=[extra]))
     assert [e for e in eventos if e["type"] == "progress"][-1]["message"] == \
-        "2 servicios en paralelo · 0 de 3 listos"
+        "Desplegando vía Terraform… · 0 de 3 listos"
 
 
 def test_preview_deploy_arranca_la_reproduccion():

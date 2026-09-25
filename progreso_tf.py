@@ -63,16 +63,6 @@ _ETIQUETAS = {
     "activar": "Activar pipelines",
     "otros": "Otros recursos",
 }
-# Para el mensaje de fase, que va solo, sin el grupo arriba.
-_LARGAS = {
-    "opensearch": "CSS OpenSearch cluster",
-    "logstash": "CSS Logstash cluster",
-    "nat": "NAT gateway",
-    "eip": "EIP",
-    "snat": "SNAT",
-    "sg": "reglas del security group",
-    "activar": "la activación de pipelines",
-}
 # Una fila por regla DNAT: son las que dan acceso al cluster privado, y cuando
 # falta una conviene verlo en la lista. Cada una con su puerto. Las etiquetas
 # son cortas a propósito: la lista va en dos columnas y "DNAT → OpenSearch
@@ -221,11 +211,6 @@ class ProgresoApply:
             return _DNAT.get(nombre, f"DNAT · {nombre}")
         return _ETIQUETAS.get(componente, componente)
 
-    @classmethod
-    def larga(cls, componente: str) -> str:
-        """El nombre para leer suelto, sin el grupo arriba."""
-        return _LARGAS.get(componente, cls.etiqueta(componente))
-
     @staticmethod
     def grupo(componente: str) -> str:
         return _GRUPO.get(componente.split(":", 1)[0], "otros")
@@ -263,21 +248,14 @@ class ProgresoApply:
         return self.global_
 
     def _fase(self) -> tuple[str, str]:
-        """Lo que está en curso. Con uno solo, cuál; con varios, cuántos en
-        paralelo y cuántos terminaron. Antes se nombraba solo el que más
-        faltaba (casi siempre el cluster de OpenSearch), y "Creando OpenSearch
-        cluster…" escondía la red y el Logstash creándose al mismo tiempo."""
+        """Siempre "Desplegando vía Terraform…", con cuántos componentes están
+        listos. Nombrar lo que estaba en curso ("2 servicios en paralelo",
+        "Creando CSS OpenSearch cluster…") confundía más de lo que aclaraba: lo
+        que se está creando ya lo dice la lista de abajo."""
         comps = self.componentes()
-        activos = [c for c in comps if not c["done"] and c["estado"] != "En espera"]
-        if not activos:
-            return "Terraform apply", "Aplicando infraestructura…"
-        if len(activos) == 1:
-            c = activos[0]
-            nombre = self.larga(c["key"])
-            return nombre, f"{c['estado']} {nombre}…"
         listos = sum(1 for c in comps if c["done"])
-        return ("En paralelo",
-                f"{len(activos)} servicios en paralelo · {listos} de {len(comps) + self.adicionales} listos")
+        return ("Terraform",
+                f"Desplegando vía Terraform… · {listos} de {len(comps) + self.adicionales} listos")
 
     # ── Entrada ──────────────────────────────────────────────────────────
     def linea(self, linea: str) -> list[dict]:
