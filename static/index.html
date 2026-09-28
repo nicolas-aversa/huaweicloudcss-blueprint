@@ -2455,6 +2455,27 @@
     .cap-resumen { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .cap-resumen .status-pill { margin: 0; }
     .cap-resumen__lbl { font-size: var(--fs-sm); color: var(--text-muted); }
+    /* Security Analytics: qué quedó y, a demanda, los hallazgos. */
+    .seguridad__head { margin-bottom: 10px; }
+    .seguridad__head .btn { margin-left: auto; }
+    .seguridad__caso { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
+    .seguridad__caso strong { color: var(--text-primary); }
+    #infra-seguridad-detalle:not(:empty) { margin-top: 12px; }
+    .hallazgos__caso + .hallazgos__caso { margin-top: 14px; }
+    .hallazgos__titulo { margin-bottom: 6px; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
+    .hallazgos__det { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+    .hallazgos__det + .hallazgos__det { margin-top: 8px; }
+    .hallazgos__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-secondary); }
+    .hallazgos__head strong { margin-right: auto; color: var(--text-primary); }
+    .hallazgos__lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .hallazgo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); }
+    .hallazgo__regla { flex: 1; min-width: 160px; color: var(--text-primary); }
+    .hallazgo__meta { font-size: var(--fs-xs); color: var(--text-muted); }
+    .hallazgos__vacio { margin-top: 8px; font-size: var(--fs-sm); color: var(--text-muted); }
+    .sev { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: var(--fw-semi); background: var(--bg-tertiary); color: var(--text-secondary); }
+    .sev--critical { background: var(--accent-tint); color: var(--accent); }
+    .sev--high { background: var(--accent-yellow-tint); color: var(--text-primary); }
+    .sev--low { background: var(--bg-subtle); color: var(--text-muted); }
     /* Qué trae el cluster: las que están, en verde; las que no, apagadas. */
     .cap-funciones { margin: 0 0 10px; }
     .cap-funcion.is-falta { background: var(--bg-tertiary); color: var(--text-muted); }
@@ -5808,6 +5829,9 @@
     let capChatInvestigar = false;   // la próxima pregunta, con varias consultas
     let capChatSeq = 0;
     let capChatAbierto = false;   // el panel flotante, abierto o no
+    // (slug, pregunta, contexto) → true si el asistente la tomó. Lo arma
+    // renderCapabilitiesResult; sin asistente, null. Lo usa "Explicar".
+    let capChatPreguntar = null;
     // Cómo estaba la barra izquierda antes de abrir el asistente (null: el
     // asistente no la tocó). Al cerrarlo vuelve a eso.
     let navAntesDelAsistente = null;
@@ -5825,6 +5849,7 @@
     // Sin entorno no hay asistente: el panel y su botón viven en <body>, fuera
     // de la vista, así que se sacan a mano.
     function _quitarAsistente() {
+      capChatPreguntar = null;
       document.getElementById('deploy-capabilities')?.remove();
       document.getElementById('cap-lanzador')?.remove();
       document.body.classList.remove('con-asistente');
@@ -5971,6 +5996,91 @@
           ? `<span class="status-pill cap-funcion">${escapeHtml(f.nombre)}</span>`
           : `<span class="status-pill cap-funcion is-falta" title="No está en este cluster">${escapeHtml(f.nombre)}</span>`).join('')
         + `</div>`;
+    }
+
+    // Security Analytics (SIEM, FortiAnalyzer): qué quedó provisionado (del
+    // registro, sin tocar el cluster). Los hallazgos se piden a demanda.
+    function seguridadHTML(sa) {
+      const casos = Object.entries(sa || {});
+      if (!casos.length) return '';
+      const suma = (f) => casos.reduce((t, [, c]) => t + f(c), 0);
+      const detectores = suma(c => (c.detectores || []).length);
+      const reglas = suma(c => c.reglas || 0);
+      const corr = suma(c => c.correlaciones || 0);
+      const filas = casos.map(([slug, c]) => `<div class="seguridad__caso"><strong>${escapeHtml(SLUG_LABELS[slug] || slug)}</strong>`
+        + `<span>${(c.detectores || []).map(d => escapeHtml(d.descripcion || d.log_type)).join(' · ')}</span></div>`).join('');
+      return `<div class="section-card" id="infra-seguridad">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('shield')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Security Analytics</span>
+              <span class="section-card__hint">${detectores} detector${detectores === 1 ? '' : 'es'} · ${reglas} reglas Sigma · ${corr} correlaci${corr === 1 ? 'ón' : 'ones'} · en Dashboards: Security Analytics → Findings</span>
+            </span>
+            <button type="button" class="btn btn-primary btn-sm" id="infra-seguridad-ver">Ver hallazgos</button>
+          </div>
+          ${filas}
+          <div id="infra-seguridad-detalle"></div>
+        </div>`;
+    }
+    const _NIVEL = { critical: 'Crítica', high: 'Alta', medium: 'Media', low: 'Baja' };
+    function _fechaCorta(v) {
+      if (!v) return '';
+      const d = new Date(/^\d+$/.test(String(v)) ? Number(v) : v);
+      return isNaN(d) ? String(v) : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    // Lo que devuelve /api/v1/security/resumen: por detector, el total, las
+    // alertas por severidad y los últimos hallazgos, cada uno con "Explicar".
+    function hallazgosHTML(casos) {
+      const bloques = (casos || []).map(c => {
+        const dets = (c.detectores || []).map(d => {
+          const alertas = Object.entries(d.alertas || {}).filter(([, n]) => n)
+            .map(([sev, n]) => `<span class="sev sev--${escapeHtml(sev)}">${n} alerta${n === 1 ? '' : 's'} ${escapeHtml((_NIVEL[sev] || sev).toLowerCase())}${n === 1 ? '' : 's'}</span>`).join('');
+          const recientes = (d.recientes || []).map(h => `<li class="hallazgo">`
+            + `<span class="sev sev--${escapeHtml(h.nivel || '')}">${escapeHtml(_NIVEL[h.nivel] || h.nivel || '—')}</span>`
+            + `<span class="hallazgo__regla">${escapeHtml(h.regla || '')}</span>`
+            + `<span class="hallazgo__meta">${escapeHtml(_fechaCorta(h.hora))}${h.ip ? ' · ' + escapeHtml(h.ip) : ''}</span>`
+            + `<button type="button" class="btn btn-secondary btn-sm hallazgo__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `data-regla="${escapeHtml(h.regla || '')}" data-hora="${escapeHtml(_fechaCorta(h.hora))}" data-ip="${escapeHtml(h.ip || '')}">Explicar</button>`
+            + `</li>`).join('');
+          const cuerpo = d.error
+            ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(d.error)}</div>`
+            : recientes
+              ? `<ul class="hallazgos__lista">${recientes}</ul>`
+              : `<div class="hallazgos__vacio">Sin hallazgos todavía: aparecen a medida que entran los datos. Si la ingesta corrió antes de crear el detector, tocá "Reiniciar ingesta".</div>`;
+          return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(d.descripcion || d.log_type)}</strong>`
+            + `<span>${Number(d.total || 0).toLocaleString('es-AR')} hallazgos</span>${alertas}</div>${cuerpo}</div>`;
+        }).join('');
+        return `<div class="hallazgos__caso"><div class="hallazgos__titulo">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}`
+          + `${c.correlaciones ? ` · ${c.correlaciones} correlaciones entre fuentes` : ''}</div>${dets}</div>`;
+      }).join('');
+      return bloques || '<div class="hallazgos__vacio">No hay detectores de Security Analytics en este entorno.</div>';
+    }
+    // "Explicar" un hallazgo: el asistente lo investiga con la regla, la hora
+    // y la IP ya puestas.
+    function explicarHallazgo(b) {
+      const { slug, regla, hora, ip } = b.dataset;
+      const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
+        `¿Por qué se disparó "${regla}"? ¿Qué más pasó alrededor?`,
+        `Hallazgo de Security Analytics: regla "${regla}"${hora ? `, ${hora}` : ''}${ip ? `, IP de origen ${ip}` : ''}.`));
+      if (!tomada) toast('Para explicarlo hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
+      return tomada;
+    }
+    async function verHallazgos(btn) {
+      const destino = document.getElementById('infra-seguridad-detalle');
+      if (!destino) return;
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo hallazgos y alertas…', 'loading');
+      try {
+        const res = await fetch('/api/v1/security/resumen');
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = hallazgosHTML(data.casos || []);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     function renderCapabilitiesResult(capsBySlug, anchor) {
@@ -6484,13 +6594,30 @@
       });
       // El caso: cambia el log (chat separado por caso, con sus sugeridas).
       const caso = host.querySelector('#cap-chat-caso');
-      if (caso) desplegableDeCaso(caso, (slug) => {
+      const _mostrarCaso = (slug) => {
         capChatSlug = slug;
         host.querySelectorAll('.cap-chat__log').forEach(l => {
           l.style.display = (l.dataset.slug === slug) ? 'flex' : 'none';
         });
-        if (chatInput) chatInput.focus();
-      });
+      };
+      if (caso) desplegableDeCaso(caso, (slug) => { _mostrarCaso(slug); if (chatInput) chatInput.focus(); });
+      // Otras partes de la vista le preguntan al asistente ("Explicar" un
+      // hallazgo): abre el panel en ese caso y la manda en modo Investigar.
+      capChatPreguntar = (slug, pregunta, contexto) => {
+        if (!activeSlugs.includes(slug) || capChatBusy) return false;
+        if (caso) {
+          caso.dataset.value = slug;
+          caso.querySelectorAll('[role="option"]').forEach(o =>
+            o.setAttribute('aria-selected', String(o.dataset.value === slug)));
+          const actual = caso.querySelector('.cap-caso__actual');
+          if (actual) actual.textContent = SLUG_LABELS[slug] || slug.replace(/-/g, ' ');
+        }
+        _mostrarCaso(slug);
+        _abrir(true);
+        _modoInvestigar(true);
+        sendCapChat(pregunta, { contexto });
+        return true;
+      };
       // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML
       // guardado trae el lugar, no el SVG.
       for (const s of activeSlugs) {
@@ -7415,9 +7542,17 @@
           </div>
           <div class="pipe-list">${pipeRows}</div>
         </div>
+        ${seguridadHTML(data.security_analytics)}
         ${funcionesDelClusterHTML(data.cluster_features)}
         <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
         `;
+
+      // Security Analytics: los hallazgos a demanda, y "Explicar" cada uno.
+      body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));
+      body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.hallazgo__explicar');
+        if (b) explicarHallazgo(b);
+      });
 
       // Acciones: reusan las funciones del flujo.
       body.querySelector('#infra-new-pipeline-btn')?.addEventListener('click', () => {
@@ -7516,7 +7651,8 @@
     function _vistaPreviaEntorno(params) {
       const ids = { agent_id: 'vista-previa', ppl_model_id: 'vista-previa', llm_model_id: 'vista-previa',
                     forecaster_id: 'vista-previa' };
-      const slugs = ['transacciones-billetera', 'ventas-ecommerce'];
+      const slugs = ['transacciones-billetera', 'ventas-ecommerce',
+                     ...(params.get('seguridad') === '1' ? ['siem'] : [])];
       const conPlugins = () => Object.fromEntries(slugs.map(s => [s, ids]));
       const estado = {
         active: true, project_name: 'vista-previa', deployed_seconds_ago: 1260,
@@ -7532,6 +7668,14 @@
           { clave: 'alerting', nombre: 'Alerting', ok: true },
           { clave: 'security_analytics', nombre: 'Security Analytics', ok: true },
         ] },
+        // Con `&seguridad=1`, un caso SIEM de ejemplo con sus detectores.
+        security_analytics: params.get('seguridad') === '1' ? { siem: {
+          detectores: [
+            { nombre: 'siem-siem-fortigate', log_type: 'siem_fortigate', descripcion: 'FortiGate: IPS y threat intel (SIEM)' },
+            { nombre: 'siem-siem-auth', log_type: 'siem_auth', descripcion: 'Hosts Linux: SSH y sudo (SIEM)' },
+          ],
+          reglas: 8, correlaciones: 3,
+        } } : {},
       };
       const real = window.fetch.bind(window);
       const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { 'Content-Type': 'application/json' } });
@@ -7587,6 +7731,18 @@
             result: { schema: [{ name: 'transaction.operation_code', type: 'string' }, { name: 'total', type: 'long' }],
                       datarows: [['LOGIN', 24492], ['BALANCE_INQUIRY', 19990], ['TRANSFER', 19483], ['QR_PAYMENT', 11659], ['BILL_PAYMENT', 9740]] },
           });
+        }
+        if (u.includes('/api/v1/security/resumen')) {
+          await espera(800);
+          return json({ casos: [{ slug: 'siem', correlaciones: 3, detectores: [
+            { nombre: 'siem-siem-fortigate', log_type: 'siem_fortigate', descripcion: 'FortiGate: IPS y threat intel (SIEM)',
+              total: 1842, alertas: { critical: 12, high: 30 }, error: '', recientes: [
+                { regla: 'FortiGate IPS: exploit bloqueado', nivel: 'critical', hora: '2025-10-21T03:14:07.000Z', ip: '45.155.205.233' },
+                { regla: 'Threat intel: IP maliciosa conocida', nivel: 'high', hora: '2025-10-21T03:12:40.000Z', ip: '185.220.101.47' },
+              ] },
+            { nombre: 'siem-siem-auth', log_type: 'siem_auth', descripcion: 'Hosts Linux: SSH y sudo (SIEM)',
+              total: 0, alertas: {}, error: '', recientes: [] },
+          ] }] });
         }
         if (metodo !== 'GET' && u.includes('/api/v1/')) return json({ detail: { message: 'Vista previa: esto no se ejecuta.' } }, 400);
         return real(url, opts);

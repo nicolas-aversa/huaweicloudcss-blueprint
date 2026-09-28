@@ -516,4 +516,91 @@ Eventos de 4 fuentes normalizados a ECS. Tráfico, intrusiones, autenticación, 
             {'type': 'bar', 'title': 'Técnicas MITRE ATT&CK', 'field': 'event.technique', 'horizontal': True, 'query': 'event.technique:*'},
         ],
     },
+    # Security Analytics: un tipo de log por fuente, con reglas Sigma sobre los
+    # campos que deja el filter de arriba, y correlaciones entre fuentes para
+    # las tres campañas del dataset (misma campaña en dos fuentes).
+    'security': {
+        'log_types': [
+            {
+                'nombre': 'siem_fortigate',
+                'descripcion': 'FortiGate: IPS y threat intel (SIEM)',
+                'reglas': [
+                    {'titulo': 'FortiGate IPS: exploit bloqueado',
+                     'descripcion': 'El IPS de FortiGate detectó y bloqueó un intento de explotación',
+                     'nivel': 'critical', 'tags': ['attack.initial_access', 'attack.t1190'],
+                     'seleccion': {'event.dataset': 'fortigate', 'event.category': 'intrusion_detection',
+                                   'event.outcome': 'failure'}},
+                    {'titulo': 'Threat intel: IP maliciosa conocida',
+                     'descripcion': 'La IP de origen está en la lista de IPs maliciosas conocidas',
+                     'nivel': 'high', 'tags': ['attack.initial_access'],
+                     'seleccion': {'threat.matched': 'true'}},
+                ],
+            },
+            {
+                'nombre': 'siem_auth',
+                'descripcion': 'Hosts Linux: SSH y sudo (SIEM)',
+                'reglas': [
+                    {'titulo': 'SSH: login fallido',
+                     'descripcion': 'Intento de login SSH fallido (fuerza bruta si se repite)',
+                     'nivel': 'high', 'tags': ['attack.credential_access', 'attack.t1110'],
+                     'seleccion': {'event.action': 'ssh_login', 'event.outcome': 'failure'}},
+                    {'titulo': 'Acceso a /etc/shadow con sudo',
+                     'descripcion': 'Volcado de credenciales: lectura de /etc/shadow con sudo',
+                     'nivel': 'critical', 'tags': ['attack.credential_access', 'attack.t1003'],
+                     'seleccion': {'event.action': 'sudo', 'event.technique': 'T1003'}},
+                ],
+            },
+            {
+                'nombre': 'siem_cloudaudit',
+                'descripcion': 'Huawei Cloud Trace Service (SIEM)',
+                'reglas': [
+                    {'titulo': 'Nube: access key nueva',
+                     'descripcion': 'Se creó una access key (posible persistencia)',
+                     'nivel': 'medium', 'tags': ['attack.persistence', 'attack.t1098'],
+                     'seleccion': {'event.dataset': 'cloudaudit', 'event.action': 'createAccessKey'}},
+                    {'titulo': 'Nube: tracker de auditoría borrado',
+                     'descripcion': 'Se borró un tracker de CTS (evasión de la auditoría)',
+                     'nivel': 'high', 'tags': ['attack.defense_evasion', 'attack.t1562'],
+                     'seleccion': {'event.dataset': 'cloudaudit', 'event.action': 'deleteTracker'}},
+                ],
+            },
+            {
+                'nombre': 'siem_waf',
+                'descripcion': 'Huawei WAF (SIEM)',
+                'reglas': [
+                    {'titulo': 'WAF: SQL injection',
+                     'descripcion': 'El WAF detectó un intento de SQL injection',
+                     'nivel': 'high', 'tags': ['attack.initial_access', 'attack.t1190'],
+                     'seleccion': {'event.dataset': 'waf', 'rule.name': 'sqli'}},
+                    {'titulo': 'WAF: webshell',
+                     'descripcion': 'El WAF detectó la subida o el uso de una webshell',
+                     'nivel': 'critical', 'tags': ['attack.persistence', 'attack.t1505.003'],
+                     'seleccion': {'event.dataset': 'waf', 'rule.name': 'webshell'}},
+                ],
+            },
+        ],
+        'correlaciones': [
+            {'nombre': 'siem-cmp001-compromiso-web',
+             'descripcion': 'Compromiso de app web: webshell y después una access key nueva',
+             'ventana_min': 120,
+             'correlate': [
+                 {'log_type': 'siem_waf', 'query': 'event.campaign:CMP-001 AND rule.name:webshell'},
+                 {'log_type': 'siem_cloudaudit', 'query': 'event.campaign:CMP-001 AND event.action:createAccessKey'},
+             ]},
+            {'nombre': 'siem-cmp002-robo-de-credenciales',
+             'descripcion': 'Robo de credenciales: fuerza bruta SSH y después se borra la auditoría',
+             'ventana_min': 120,
+             'correlate': [
+                 {'log_type': 'siem_auth', 'query': 'event.campaign:CMP-002 AND event.action:ssh_login'},
+                 {'log_type': 'siem_cloudaudit', 'query': 'event.campaign:CMP-002 AND event.action:deleteTracker'},
+             ]},
+            {'nombre': 'siem-cmp003-movimiento-lateral',
+             'descripcion': 'Movimiento lateral: escaneo en el firewall y después fuerza bruta SSH',
+             'ventana_min': 120,
+             'correlate': [
+                 {'log_type': 'siem_fortigate', 'query': 'event.campaign:CMP-003'},
+                 {'log_type': 'siem_auth', 'query': 'event.campaign:CMP-003 AND event.action:ssh_login'},
+             ]},
+        ],
+    },
 }

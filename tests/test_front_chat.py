@@ -219,8 +219,9 @@ def test_el_caso_se_elige_en_la_cabecera_con_un_desplegable_propio():
     assert '<div class="cap-caso" id="cap-chat-caso" data-value=' in fn
     assert 'aria-haspopup="listbox"' in fn and 'role="listbox"' in fn and 'role="option"' in fn
     assert "(host.querySelector('#cap-chat-caso')?.dataset.value) || activeSlugs[0]" in fn
-    cambio = fn[fn.index("if (caso) desplegableDeCaso(caso, (slug) => {"):]
-    assert "capChatSlug = slug;" in cambio[:400]
+    assert "if (caso) desplegableDeCaso(caso, (slug) => { _mostrarCaso(slug);" in fn
+    mostrar = fn[fn.index("const _mostrarCaso = (slug) => {"):]
+    assert "capChatSlug = slug;" in mostrar[:300]
     css = html[:html.index("</style>")]
     assert ".cap-caso__opcion[aria-selected=\"true\"] .icon { visibility: visible; }" in css
     lista = css[css.index("    .cap-caso__lista {"):]

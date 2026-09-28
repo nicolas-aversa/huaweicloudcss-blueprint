@@ -267,7 +267,7 @@ def test_el_stream_no_deja_bajar_el_porcentaje(monkeypatch, tmp_path):
 
 def test_los_tramos_del_global_estan_en_orden():
     assert (main._PCT_APPLY_DESDE < main._PCT_APPLY_HASTA < main._PCT_OUTPUTS
-            <= main._PCT_FINALIZANDO < main._PCT_SECURITY < main._PCT_INGESTA_DESDE
+            <= main._PCT_FINALIZANDO < main._PCT_INGESTA_DESDE
             < main._PCT_INGESTA_HASTA < 100)
     assert main._pct_apply(0) == main._PCT_APPLY_DESDE
     assert main._pct_apply(1) == main._PCT_APPLY_HASTA

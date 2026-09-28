@@ -88,6 +88,12 @@ def dashboard_specs() -> dict:
     return out
 
 
+def security_specs() -> dict:
+    """`slug -> spec` de Security Analytics (tipos de log, reglas Sigma y
+    correlaciones), solo de los casos de seguridad que lo declaran."""
+    return {v["slug"]: v["security"] for v in _VERTICALS if v.get("security")}
+
+
 def demo_dataset_files() -> dict:
     """`slug -> [archivos]` a pre-cargar en OBS (solo verticales visibles con dataset;
     los hidden no se pre-cargan)."""

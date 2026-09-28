@@ -1138,4 +1138,37 @@ Eventos de sistema, SD-WAN y REST API: mensajes, status, latencia, jitter, packe
             ],
         },
     },
+    # Security Analytics: un tipo de log para FortiGate, con reglas Sigma sobre
+    # los campos kv del log (valores verificados contra fortianalyzer.log).
+    'security': {
+        'log_types': [
+            {
+                'nombre': 'fortianalyzer',
+                'descripcion': 'FortiGate vía FortiAnalyzer',
+                'reglas': [
+                    {'titulo': 'FortiGate IPS: firma crítica bloqueada',
+                     'descripcion': 'El IPS bloqueó un ataque de severidad crítica',
+                     'nivel': 'critical', 'tags': ['attack.initial_access', 'attack.t1190'],
+                     'seleccion': {'subtype': 'ips', 'severity': 'critical'}},
+                    {'titulo': 'FortiGate: virus bloqueado',
+                     'descripcion': 'El antivirus bloqueó un archivo infectado',
+                     'nivel': 'high', 'tags': ['attack.execution', 'attack.t1204'],
+                     'seleccion': {'subtype': 'virus', 'action': 'blocked'}},
+                    {'titulo': 'FortiGate: acceso bloqueado a un puerto de administración',
+                     'descripcion': 'Se bloqueó una conexión a SSH (22) o RDP (3389)',
+                     'nivel': 'high', 'tags': ['attack.lateral_movement', 'attack.t1021'],
+                     'seleccion': {'action': ['blocked', 'dropped'], 'dstport': [22, 3389]}},
+                    {'titulo': 'FortiGate: web filter bloqueó un sitio',
+                     'descripcion': 'El web filter bloqueó el acceso a un sitio de una categoría prohibida',
+                     'nivel': 'medium', 'tags': ['attack.command_and_control', 'attack.t1071'],
+                     'seleccion': {'subtype': 'webfilter', 'action': 'blocked'}},
+                    {'titulo': 'FortiGate: login de administrador',
+                     'descripcion': 'Un administrador inició sesión en el FortiGate',
+                     'nivel': 'low', 'tags': ['attack.initial_access', 'attack.t1078'],
+                     'seleccion': {'subtype': 'system', 'action': 'login'}},
+                ],
+            },
+        ],
+        'correlaciones': [],
+    },
 }

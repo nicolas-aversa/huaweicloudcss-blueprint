@@ -2187,6 +2187,9 @@ class TerraformStatusResponse(BaseModel):
     capabilities: dict = Field(default_factory=dict)
     # Qué plugins tiene el cluster (`resumir_capacidades`), si ya se detectó.
     cluster_features: dict | None = None
+    # Lo provisionado en Security Analytics, por caso: detectores (con su tipo
+    # de log), cuántas reglas y correlaciones. Sin tocar el cluster.
+    security_analytics: dict = Field(default_factory=dict)
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -2732,7 +2735,7 @@ def _unmask_against(conf: str, request, refs: list[str]) -> str:
 #
 # Tramos del porcentaje global. El apply ocupa casi todo: es lo que tarda.
 _PCT_APPLY_DESDE, _PCT_APPLY_HASTA = 5.0, 92.0
-_PCT_OUTPUTS, _PCT_FINALIZANDO, _PCT_SECURITY = 93.0, 94.0, 95.0
+_PCT_OUTPUTS, _PCT_FINALIZANDO = 93.0, 94.0
 _PCT_INGESTA_DESDE, _PCT_INGESTA_HASTA = 96.0, 99.0
 
 
@@ -3465,26 +3468,6 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
             yield _sse({"type": "item", **_item_ruta(
                 *_RUTA_FUENTES, "listo" if ok_f else "Falló",
                 done=ok_f, error=not ok_f)})
-
-    # Security Analytics (Sigma rules + detector) para SIEM.
-    # Best-effort: si el plugin no está o falla, no rompe el deploy.
-    target_slugs = {c.slug for c in request.cases} if request.cases else set()
-    if not request.cases and request.pipeline_slug:
-        target_slugs = {request.pipeline_slug}
-    if "siem" in target_slugs and not request.start_ingestion:
-        yield _sse({"type": "progress", "percent": _PCT_SECURITY, "phase": "Security Analytics",
-                    "message": "Provisionando Sigma rules + detector…"})
-        try:
-            sa_result = _provision_security_analytics(
-                cluster, request.opensearch_user or "admin",
-                request.opensearch_password, request.https_enabled,
-            )
-            n_rules = len(sa_result.get("rules", []))
-            has_detector = bool(sa_result.get("detector"))
-            print(f"[deploy-stream] security-analytics: {n_rules} rules, "
-                  f"detector={'sí' if has_detector else 'no'}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[deploy-stream] security-analytics falló (best-effort): {exc!r}")
 
     # Lo primero que hay que saber de un apply: si CSS pudo COMPILAR cada
     # configuration file. Un `.conf` que no compila da "Apply complete!" igual y
@@ -6074,368 +6057,284 @@ def _teardown_capabilities(cluster: dict[str, str], user: str, password: str,
         print(f"[capabilities] teardown de '{slug}' OK")
 
 
-# ── Security Analytics (Sigma rules + detectors + correlation) ───────────────
+# ── Security Analytics (SIEM, FortiAnalyzer) ─────────────────────────────────
+# Lo que se crea sale de la clave `security` de cada vertical (tipos de log,
+# reglas Sigma, correlaciones); los bodies los arma `seguridad.py`. Antes eran 8
+# reglas fijas `network` sobre un índice `siem-all` que no existía, con
+# "correlaciones" de dos consultas iguales, y el paso decía ok si el plugin
+# estaba aunque no se hubiera creado nada.
 
 _SA_BASE = "/_plugins/_security_analytics"
-
-_SA_SIGMA_RULES = [
-    {
-        "name": "siem_ssh_bruteforce",
-        "category": "network",
-        "title": "SSH Brute Force Detection",
-        "description": "Multiple failed SSH login attempts from same source IP",
-        "level": "high",
-        "query": """title: SSH Brute Force
-id: f2c3a1d0-1e2b-4f5a-9c8d-7a6b5c4d3e2f
-status: experimental
-description: Multiple failed SSH login attempts
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: linux
-  service: ssh
-detection:
-  selection:
-    event.action: ssh_login
-    event.outcome: failure
-  condition: selection
-level: high""",
-    },
-    {
-        "name": "siem_sqli_waf",
-        "category": "network",
-        "title": "SQL Injection Attack (WAF)",
-        "description": "WAF detected SQL injection attempt",
-        "level": "high",
-        "query": """title: SQL Injection via WAF
-id: a1b2c3d4-e5f6-4a5b-8c7d-9e0f1a2b3c4d
-status: experimental
-description: WAF blocked SQL injection attempt
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: web
-  service: waf
-detection:
-  selection:
-    event.dataset: waf
-    rule.name: sqli
-  condition: selection
-level: high""",
-    },
-    {
-        "name": "siem_webshell",
-        "category": "network",
-        "title": "Webshell Upload/Access",
-        "description": "WAF detected webshell activity",
-        "level": "critical",
-        "query": """title: Webshell Detection
-id: b2c3d4e5-f6a7-4b6c-9d8e-0f1a2b3c4d5e
-status: experimental
-description: WAF detected webshell upload or access
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: web
-  service: waf
-detection:
-  selection:
-    event.dataset: waf
-    rule.name: webshell
-  condition: selection
-level: critical""",
-    },
-    {
-        "name": "siem_ips_exploit",
-        "category": "network",
-        "title": "IPS Exploit Detection",
-        "description": "FortiGate IPS detected exploit attempt",
-        "level": "critical",
-        "query": """title: IPS Exploit
-id: c3d4e5f6-a7b8-4c7d-9e0f-1a2b3c4d5e6f
-status: experimental
-description: FortiGate IPS triggered on exploit
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: firewall
-  service: ips
-detection:
-  selection:
-    event.dataset: fortigate
-    event.category: intrusion_detection
-    event.outcome: failure
-  condition: selection
-level: critical""",
-    },
-    {
-        "name": "siem_cloud_key_create",
-        "category": "network",
-        "title": "Cloud Access Key Creation",
-        "description": "New cloud access key created (potential persistence)",
-        "level": "medium",
-        "query": """title: Cloud Access Key Creation
-id: d4e5f6a7-b8c9-4d8e-9f0a-2b3c4d5e6f7a
-status: experimental
-description: IAM access key creation event
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: cloud
-  service: iam
-detection:
-  selection:
-    event.dataset: cloudaudit
-    event.action: createAccessKey
-  condition: selection
-level: medium""",
-    },
-    {
-        "name": "siem_cloud_tracker_delete",
-        "category": "network",
-        "title": "Cloud Audit Tracker Deleted",
-        "description": "CTS tracker deleted (defense evasion)",
-        "level": "high",
-        "query": """title: CTS Tracker Deletion
-id: e5f6a7b8-c9d0-4e9f-8a1b-3c4d5e6f7a8b
-status: experimental
-description: Cloud trace service tracker deleted
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: cloud
-  service: audit
-detection:
-  selection:
-    event.dataset: cloudaudit
-    event.action: deleteTracker
-  condition: selection
-level: high""",
-    },
-    {
-        "name": "siem_sudo_shadow",
-        "category": "network",
-        "title": "Shadow File Access via Sudo",
-        "description": "User accessed /etc/shadow via sudo (credential dumping)",
-        "level": "critical",
-        "query": """title: Shadow File Access
-id: f6a7b8c9-d0e1-4f0a-9b2c-4d5e6f7a8b9c
-status: experimental
-description: Credential dumping via sudo
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: linux
-  service: sudo
-detection:
-  selection:
-    event.action: sudo
-    event.technique: T1003
-  condition: selection
-level: critical""",
-    },
-    {
-        "name": "siem_threat_intel_hit",
-        "category": "network",
-        "title": "Threat Intel Match",
-        "description": "Source IP matched known malicious IP feed",
-        "level": "high",
-        "query": """title: Threat Intel Match
-id: a7b8c9d0-e1f2-4a1b-8c3d-5e6f7a8b9c0d
-status: experimental
-description: Source IP in threat intel feed
-author: SIEM Platform
-date: 2025/07/01
-logsource:
-  product: network
-  service: firewall
-detection:
-  selection:
-    threat.matched: true
-  condition: selection
-level: high""",
-    },
-]
-
-_SA_CORRELATIONS = [
-    {
-        "name": "siem_corr_cmp001_web_app_compromise",
-        "campaign": "CMP-001",
-        "description": "Web App Compromise: scan → sqli → webshell → key creation",
-    },
-    {
-        "name": "siem_corr_cmp002_credential_theft",
-        "campaign": "CMP-002",
-        "description": "Credential Theft: cloud recon → SSH brute → shadow → tracker delete",
-    },
-    {
-        "name": "siem_corr_cmp003_lateral_movement",
-        "campaign": "CMP-003",
-        "description": "Lateral Movement: scan → SSH brute → sudo → server creation",
-    },
-]
+_SECURITY_REGISTRY_NAME = ".security_analytics.json"
 
 
-def _provision_security_analytics(
-    cluster: dict[str, str], user: str, password: str, https_enabled: bool,
-) -> dict:
-    """Provisiona Security Analytics (Sigma rules + detector + correlations)
-    para el índice siem-*. Best-effort: si el plugin no está disponible, retorna
-    ``{"available": False}`` sin error."""
+def _read_security(terraform_dir: Path) -> dict:
+    try:
+        data = json.loads((terraform_dir / _SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_security(terraform_dir: Path, registro: dict) -> None:
+    try:
+        (terraform_dir / _SECURITY_REGISTRY_NAME).write_text(
+            json.dumps(registro, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        print(f"[security-analytics] no se pudo persistir: {exc!r}")
+
+
+def _sa_motivo(r) -> str:
+    if r is None:
+        return "sin respuesta del cluster"
+    return f"status {r.status_code}: {(getattr(r, 'text', '') or '')[:200]}"
+
+
+def _sa_ok(r) -> bool:
+    return r is not None and r.status_code in (200, 201)
+
+
+def _sa_id(r) -> str:
+    try:
+        return str((r.json() or {}).get("_id", ""))
+    except (ValueError, AttributeError):
+        return ""
+
+
+def _sa_buscar(base: str, user: str, password: str, ruta: str) -> list[dict]:
+    """Los hits de un `_search` del plugin (log types, reglas, detectores)."""
+    r = _os_req("POST", f"{base}{_SA_BASE}/{ruta}", user, password,
+                json_body={"size": 500, "query": {"match_all": {}}}, timeout=20)
+    if not _sa_ok(r):
+        return []
+    try:
+        return ((r.json() or {}).get("hits") or {}).get("hits") or []
+    except (ValueError, AttributeError):
+        return []
+
+
+def _sa_post_texto(url: str, user: str, password: str, texto: str):
+    """Las reglas van como YAML crudo, no JSON: en UTF-8 explícito (los títulos
+    tienen acentos)."""
     import requests as _requests
+    try:
+        return _requests.post(url, auth=(user, password), data=texto.encode("utf-8"),
+                              headers={"Content-Type": "application/json; charset=utf-8"},
+                              timeout=30, verify=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[security-analytics] POST {url} error: {exc!r}")
+        return None
+
+
+def _descripcion_log_type(specs: dict, slug: str, log_type: str) -> str:
+    """Cómo se muestra un tipo de log ("FortiGate: IPS y threat intel (SIEM)")."""
+    return next((lt.get("descripcion", "") for lt in (specs.get(slug) or {}).get("log_types", [])
+                 if lt["nombre"] == log_type), "") or log_type
+
+
+def _resumen_de_seguridad(terraform_dir: Path) -> dict:
+    """Lo provisionado por caso, para /terraform/status (solo el registro, sin
+    tocar el cluster). Cada detector con la descripción de su tipo de log."""
+    specs = verticals.security_specs()
+    return {slug: {"detectores": [{"nombre": n, "log_type": d.get("log_type", ""),
+                                   "descripcion": _descripcion_log_type(specs, slug, d.get("log_type", ""))}
+                                  for n, d in (reg.get("detectores") or {}).items()],
+                   "reglas": len(reg.get("reglas") or {}),
+                   "correlaciones": len(reg.get("correlaciones") or {})}
+            for slug, reg in _read_security(terraform_dir).items()
+            if reg.get("detectores")}
+
+
+_SEVERIDAD_DE_ALERTA = {"1": "critical", "2": "high", "3": "medium", "4": "low", "5": "low"}
+
+
+def _hallazgo(f: dict, regla_por_id: dict) -> dict:
+    """Un hallazgo para la vista: qué regla, qué severidad, cuándo y desde qué
+    IP. El documento viene como JSON en `document_list`."""
+    reglas = [regla_por_id.get((q or {}).get("id"), {}) for q in f.get("queries") or []]
+    regla = next((r for r in reglas if r), {})
+    doc: dict = {}
+    for d in f.get("document_list") or []:
+        crudo = (d or {}).get("document")
+        try:
+            doc = json.loads(crudo) if isinstance(crudo, str) else (crudo or {})
+        except ValueError:
+            doc = {}
+        if doc:
+            break
+    ip = ((doc.get("source") or {}).get("ip") if isinstance(doc.get("source"), dict) else None) \
+        or doc.get("source.ip") or doc.get("srcip") or ""
+    return {"regla": regla.get("titulo") or ((f.get("queries") or [{}])[0] or {}).get("name", ""),
+            "nivel": regla.get("nivel", ""), "hora": doc.get("@timestamp") or f.get("timestamp") or "",
+            "ip": str(ip), "indice": f.get("index", "")}
+
+
+class ResumenSeguridadResponse(BaseModel):
+    casos: list[dict] = Field(default_factory=list)
+
+
+@app.get("/api/v1/security/resumen", response_model=ResumenSeguridadResponse, tags=["capabilities"])
+def resumen_seguridad() -> ResumenSeguridadResponse:
+    """Hallazgos y alertas de los detectores de Security Analytics, en vivo.
+    Por detector: el total de hallazgos, los 5 últimos y las alertas por
+    severidad. Lo pide la vista a demanda ("Ver hallazgos"); no se guarda."""
+    terraform_dir = _active_terraform_dir()
+    registro = _read_security(terraform_dir)
+    if not registro:
+        return ResumenSeguridadResponse()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "security", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    specs = verticals.security_specs()
+    casos = []
+    for slug, reg in registro.items():
+        regla_por_id = {rid: next((r for lt in (specs.get(slug) or {}).get("log_types", [])
+                                   for r in lt.get("reglas", []) if r["titulo"] == titulo), {"titulo": titulo})
+                        for titulo, rid in (reg.get("reglas") or {}).items()}
+        detectores = []
+        for nombre, d in (reg.get("detectores") or {}).items():
+            rf = _os_req("GET", f"{base}{_SA_BASE}/findings/_search?detector_id={d['id']}"
+                                "&size=5&sortOrder=desc", user, password, timeout=20)
+            hallazgos = rf.json() if _sa_ok(rf) else {}
+            ra = _os_req("GET", f"{base}{_SA_BASE}/alerts?detector_id={d['id']}&size=500",
+                         user, password, timeout=20)
+            alertas: dict[str, int] = {}
+            for a in ((ra.json() if _sa_ok(ra) else {}) or {}).get("alerts") or []:
+                sev = _SEVERIDAD_DE_ALERTA.get(str(a.get("severity")), str(a.get("severity") or ""))
+                alertas[sev] = alertas.get(sev, 0) + 1
+            detectores.append({
+                "nombre": nombre, "log_type": d.get("log_type", ""),
+                "descripcion": _descripcion_log_type(specs, slug, d.get("log_type", "")),
+                "total": int((hallazgos or {}).get("total_findings") or 0),
+                "recientes": [_hallazgo(f, regla_por_id) for f in ((hallazgos or {}).get("findings") or [])[:5]],
+                "alertas": alertas,
+                "error": "" if _sa_ok(rf) else _sa_motivo(rf),
+            })
+        casos.append({"slug": slug, "detectores": detectores,
+                      "correlaciones": len(reg.get("correlaciones") or {})})
+    return ResumenSeguridadResponse(casos=casos)
+
+
+def _provision_security_analytics(cluster: dict, user: str, password: str, https_enabled: bool,
+                                  slug: str, index_pattern: str, spec: dict,
+                                  terraform_dir: Path, run: "dict | None" = None) -> dict:
+    """Tipos de log, reglas, un detector por tipo de log y las correlaciones
+    del caso, sobre su index pattern REAL. Idempotente por nombre; cada pieza
+    queda en Actividad con su motivo real. Se corre al aplicar el index template,
+    antes de la ingesta: el monitor del detector procesa entero un índice que
+    nace después de él."""
+    import seguridad
 
     base = _os_base(cluster, https_enabled)
-    auth = (user, password)
 
-    # Preflight: ¿está el plugin? (la API de rules requiere POST _search, no GET)
-    r = _os_req("POST", f"{base}{_SA_BASE}/rules/_search",
-                user, password, json_body={"size": 1, "query": {"match_all": {}}}, timeout=15)
-    if r is None or r.status_code not in (200, 404):
-        print(f"[security-analytics] plugin no disponible "
-              f"(status {getattr(r, 'status_code', None)}): "
-              f"{(getattr(r, 'text', '') or '')[:160]}")
+    def paso(nombre: str, ok: bool, motivo: str = "") -> None:
+        if run is not None:
+            runs.step(run, f"Security Analytics · {slug} · {nombre}", ok, motivo[:300])
+
+    r = _os_req("POST", f"{base}{_SA_BASE}/rules/_search?pre_packaged=false", user, password,
+                json_body={"size": 1, "query": {"match_all": {}}}, timeout=15)
+    if r is None or r.status_code not in (200, 404):   # 404: todavía sin reglas propias
+        paso("plugin", False, "Security Analytics no está en este cluster")
         return {"available": False}
 
-    print("[security-analytics] plugin detectado, provisionando...")
-    result: dict = {"available": True, "rules": [], "detector": None, "correlations": []}
+    registro = _read_security(terraform_dir)
+    reg = registro.get(slug) or {}
+    reg = {k: dict(reg.get(k) or {}) for k in ("log_types", "reglas", "detectores", "correlaciones")}
 
-    # 1) Buscar custom rules existentes (idempotencia por título)
-    existing_rules: dict[str, str] = {}
-    sr = _os_req("POST", f"{base}{_SA_BASE}/rules/_search?pre_packaged=false",
-                 user, password, json_body={"size": 100, "query": {"match_all": {}}}, timeout=15)
-    if sr and sr.status_code == 200:
-        try:
-            for hit in (sr.json().get("hits", {}).get("hits", []) or []):
-                src = hit.get("_source", {})
-                title = src.get("title", "")
-                rid = hit.get("_id", "")
-                if title:
-                    existing_rules[title] = rid
-        except (ValueError, KeyError):
-            pass
+    # El pattern tiene que matchear un índice (con el mapping del template).
+    cat = _os_req("GET", f"{base}/_cat/indices/{index_pattern}?format=json&h=index", user, password, timeout=15)
+    try:
+        hay_indice = bool(cat.json()) if _sa_ok(cat) else False
+    except ValueError:
+        hay_indice = False
+    if not hay_indice:
+        nombre_ix = seguridad.indice_para_detector(index_pattern)
+        rix = _os_req("PUT", f"{base}/{nombre_ix}", user, password, timeout=20)
+        if not _sa_ok(rix) and "already_exists" not in (getattr(rix, "text", "") or ""):
+            paso("índice", False, f"no se pudo crear {nombre_ix}: {_sa_motivo(rix)}")
 
-    # Crear Sigma rules — la API recibe YAML crudo + category como query param
-    rule_ids: list[str] = []
-    for rule in _SA_SIGMA_RULES:
-        if rule["title"] in existing_rules:
-            rid = existing_rules[rule["title"]]
-            rule_ids.append(rid)
-            print(f"[security-analytics] rule '{rule['name']}' ya existe (id={rid}), salteando")
-            result["rules"].append({"name": rule["name"], "id": rid, "created": False})
+    # Tipos de log propios.
+    existentes = {(h.get("_source") or {}).get("name"): h.get("_id")
+                  for h in _sa_buscar(base, user, password, "logtype/_search")}
+    fallos = []
+    for lt in spec.get("log_types", []):
+        if existentes.get(lt["nombre"]):
+            reg["log_types"][lt["nombre"]] = existentes[lt["nombre"]]
             continue
-
-        url = f"{base}{_SA_BASE}/rules?category={rule['category']}"
-        try:
-            rr = _requests.post(url, auth=auth, data=rule["query"],
-                                headers={"Content-Type": "application/json"},
-                                timeout=30, verify=False)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[security-analytics] rule '{rule['name']}' error: {exc!r}")
-            rr = None
-        if rr and rr.status_code in (200, 201):
-            try:
-                rid = rr.json().get("_id", "")
-            except (ValueError, KeyError):
-                rid = ""
-            rule_ids.append(rid)
-            result["rules"].append({"name": rule["name"], "id": rid, "created": True})
-            print(f"[security-analytics] rule '{rule['name']}' creada (id={rid})")
+        rl = _os_req("POST", f"{base}{_SA_BASE}/logtype", user, password,
+                     json_body=seguridad.build_log_type(lt), timeout=20)
+        if _sa_ok(rl):
+            reg["log_types"][lt["nombre"]] = _sa_id(rl)
         else:
-            print(f"[security-analytics] rule '{rule['name']}' falló: "
-                  f"status {getattr(rr, 'status_code', None)}: "
-                  f"{(getattr(rr, 'text', '') or '')[:200]}")
+            fallos.append(f"{lt['nombre']}: {_sa_motivo(rl)}")
+    paso("tipos de log", not fallos, "; ".join(fallos))
 
-    if not rule_ids:
-        print("[security-analytics] no se crearon rules, saltando detector")
-        return result
+    # Reglas Sigma, por título.
+    existentes = {(h.get("_source") or {}).get("title"): h.get("_id")
+                  for h in _sa_buscar(base, user, password, "rules/_search?pre_packaged=false")}
+    fallos, por_tipo, total = [], {}, 0
+    for lt in spec.get("log_types", []):
+        por_tipo[lt["nombre"]] = []
+        for regla in lt.get("reglas", []):
+            total += 1
+            rid = existentes.get(regla["titulo"])
+            if not rid:
+                rr = _sa_post_texto(f"{base}{_SA_BASE}/rules?category={lt['nombre']}", user, password,
+                                    seguridad.sigma_yaml(regla, lt["nombre"]))
+                rid = _sa_id(rr) if _sa_ok(rr) else ""
+                if not rid:
+                    fallos.append(f"{regla['titulo']}: {_sa_motivo(rr)}")
+            if rid:
+                reg["reglas"][regla["titulo"]] = rid
+                por_tipo[lt["nombre"]].append((rid, regla["nivel"]))
+    creadas = sum(len(v) for v in por_tipo.values())
+    paso(f"{creadas} de {total} reglas", not fallos, "; ".join(fallos))
 
-    # 2) Crear detector (idempotente: busca por nombre via _search)
-    detector_name = "siem-unified-detector"
-    existing_detector_id = ""
-    dr_search = _os_req("POST", f"{base}{_SA_BASE}/detectors/_search",
-                        user, password, json_body={"size": 50, "query": {"match_all": {}}}, timeout=15)
-    if dr_search and dr_search.status_code == 200:
-        try:
-            for hit in (dr_search.json().get("hits", {}).get("hits", []) or []):
-                src = hit.get("_source", hit.get("detector", {}))
-                if src.get("name") == detector_name:
-                    existing_detector_id = hit.get("_id", "")
-                    break
-        except (ValueError, KeyError):
-            pass
-
-    if existing_detector_id:
-        result["detector"] = {"name": detector_name, "id": existing_detector_id, "created": False}
-        print(f"[security-analytics] detector '{detector_name}' ya existe (id={existing_detector_id})")
-    else:
-        detector_body = {
-            "enabled": True,
-            "name": detector_name,
-            "detector_type": "network",
-            "schedule": {"period": {"interval": 5, "unit": "MINUTES"}},
-            "inputs": [{
-                "detector_input": {
-                    "description": "SIEM unified (FortiGate + Auth + CTS + WAF)",
-                    "custom_rules": [{"id": rid} for rid in rule_ids],
-                    "indices": ["siem-all"],
-                }
-            }],
-            "triggers": [
-                {"id": "siem-trig-critical", "name": "Critical alerts", "severity": "1",
-                 "ids": rule_ids, "sev_levels": ["critical"], "tags": [], "actions": []},
-                {"id": "siem-trig-high", "name": "High alerts", "severity": "2",
-                 "ids": rule_ids, "sev_levels": ["high"], "tags": [], "actions": []},
-            ],
-        }
-        dr = _os_req("POST", f"{base}{_SA_BASE}/detectors", user, password,
-                     json_body=detector_body, timeout=20)
-        if dr and dr.status_code in (200, 201):
-            try:
-                did = dr.json().get("_id", "")
-            except (ValueError, KeyError):
-                did = ""
-            result["detector"] = {"name": detector_name, "id": did, "created": True}
-            print(f"[security-analytics] detector '{detector_name}' creado (id={did})")
-        else:
-            print(f"[security-analytics] detector falló: "
-                  f"status {getattr(dr, 'status_code', None)}: "
-                  f"{(getattr(dr, 'text', '') or '')[:200]}")
-
-    # 3) Crear correlation rules para campañas multi-stage
-    # Correlation API: cada regla necesita ≥2 queries (index + log type + field + value)
-    for corr in _SA_CORRELATIONS:
-        corr_name = corr["name"]
-        # Idempotente: no hay _search para correlations, se crean directo
-        # (si ya existe, la API devuelve el mismo _id)
-        already_exists = False
-        if already_exists:
-            print(f"[security-analytics] correlation '{corr_name}' ya existe")
+    # Un detector por tipo de log, sobre el index pattern del caso.
+    existentes = {}
+    for h in _sa_buscar(base, user, password, "detectors/_search"):
+        fuente = h.get("_source") or {}
+        existentes[(fuente.get("detector") or fuente).get("name")] = h.get("_id")
+    for lt in spec.get("log_types", []):
+        nombre_d = seguridad.nombre_de_detector(slug, lt["nombre"])
+        if existentes.get(nombre_d):
+            reg["detectores"][nombre_d] = {"id": existentes[nombre_d], "log_type": lt["nombre"]}
+            paso(f"detector {lt['nombre']}", True, "ya estaba")
             continue
+        if not por_tipo.get(lt["nombre"]):
+            paso(f"detector {lt['nombre']}", False, "sin reglas creadas")
+            continue
+        rd = _os_req("POST", f"{base}{_SA_BASE}/detectors", user, password, timeout=30,
+                     json_body=seguridad.build_detector(slug, lt["nombre"], index_pattern,
+                                                        por_tipo[lt["nombre"]]))
+        if _sa_ok(rd):
+            reg["detectores"][nombre_d] = {"id": _sa_id(rd), "log_type": lt["nombre"]}
+        paso(f"detector {lt['nombre']}", _sa_ok(rd), "" if _sa_ok(rd) else _sa_motivo(rd))
 
-        # Correlation API: POST /correlation/rules con body {"correlate": [...]}
-        # Cada item: index + query (Lucene) + category (log type)
-        # Idempotente: buscar si ya existe (GET /correlations lista por time window)
-        corr_body = {
-            "correlate": [
-                {"index": "siem-all", "query": f"event.campaign:{corr['campaign']}", "category": "network"},
-                {"index": "siem-all", "query": f"event.campaign:{corr['campaign']}", "category": "network"},
-            ]
-        }
-        rcr = _os_req("POST", f"{base}{_SA_BASE}/correlation/rules", user, password,
-                      json_body=corr_body, timeout=30)
-        if rcr and rcr.status_code in (200, 201):
-            result["correlations"].append({"name": corr_name, "created": True})
-            print(f"[security-analytics] correlation '{corr_name}' creada")
-        else:
-            print(f"[security-analytics] correlation '{corr_name}' falló: "
-                  f"status {getattr(rcr, 'status_code', None)}")
+    # Correlaciones entre tipos de log.
+    correlaciones = spec.get("correlaciones", [])
+    if correlaciones:
+        ya = {(h.get("_source") or {}).get("name"): h.get("_id")
+              for h in _sa_buscar(base, user, password, "correlation/rules/_search")}
+        fallos = []
+        for c in correlaciones:
+            if reg["correlaciones"].get(c["nombre"]) or ya.get(c["nombre"]):
+                reg["correlaciones"][c["nombre"]] = reg["correlaciones"].get(c["nombre"]) or ya[c["nombre"]]
+                continue
+            rc = _os_req("POST", f"{base}{_SA_BASE}/correlation/rules", user, password, timeout=30,
+                         json_body=seguridad.build_correlacion(c, index_pattern))
+            if _sa_ok(rc):
+                reg["correlaciones"][c["nombre"]] = _sa_id(rc)
+            else:
+                fallos.append(f"{c['nombre']}: {_sa_motivo(rc)}")
+        paso(f"{len(reg['correlaciones'])} de {len(correlaciones)} correlaciones", not fallos, "; ".join(fallos))
 
-    n_rules = sum(1 for r in result["rules"] if r.get("created"))
-    n_corr = sum(1 for c in result["correlations"] if c.get("created"))
-    print(f"[security-analytics] OK: {n_rules} rules nuevas, "
-          f"detector={'nuevo' if (result.get('detector') or {}).get('created') else 'existente'}, "
-          f"{n_corr} correlations nuevas")
-    return result
+    registro[slug] = reg
+    _write_security(terraform_dir, registro)
+    return {"available": True, **reg}
 
 
 @app.post(
@@ -6583,28 +6482,29 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
     # en un paso separado (POST /api/v1/onboarding/provision-capabilities) DESPUÉS
     # de que Logstash ingiere datos: AD/forecast necesitan documentos en el índice.
 
-    # Security Analytics (Sigma rules + detector + correlations) para SIEM.
-    # Best-effort: si el plugin no está, se saltea sin error.
-    sa_result: dict = {}
-    target_slugs = {s for s, _, _ in targets}
-    if "siem" in target_slugs:
+    # Security Analytics para los casos que lo declaran (SIEM, FortiAnalyzer):
+    # acá, antes de la ingesta, para que el detector vea todos los documentos.
+    specs_seguridad = verticals.security_specs()
+    detectores_sa = 0
+    for slug_t, _campos_t, index_name_t in targets:
+        spec_sa = specs_seguridad.get(slug_t)
+        if not spec_sa:
+            continue
         try:
-            sa_result = _provision_security_analytics(
-                cluster, request.opensearch_user or "admin",
-                request.opensearch_password, request.https_enabled,
-            )
-            runs.step(run, "Security Analytics", bool(sa_result.get("available")),
-                      "" if sa_result.get("available") else "el plugin no está disponible")
+            res_sa = _provision_security_analytics(cluster, os_user, request.opensearch_password,
+                                                   request.https_enabled, slug_t,
+                                                   index_pattern_from_name(index_name_t), spec_sa,
+                                                   terraform_dir, run)
+            detectores_sa += len(res_sa.get("detectores") or {})
         except Exception as exc:  # noqa: BLE001
-            print(f"[apply-schema] security-analytics falló (best-effort): {exc!r}")
-            runs.step(run, "Security Analytics", False, repr(exc)[:300])
+            print(f"[apply-schema] security-analytics '{slug_t}' falló: {exc!r}")
+            runs.step(run, f"Security Analytics · {slug_t}", False, repr(exc)[:300])
 
     msg = "Index template aplicado" if index_template_applied else "El index template no se pudo aplicar"
     if dashboards_imported:
         msg += " · dashboards importados"
-    if sa_result.get("available"):
-        n_rules = len(sa_result.get("rules", []))
-        msg += f" · security analytics ({n_rules} rules)"
+    if detectores_sa:
+        msg += f" · Security Analytics ({detectores_sa} detector{'es' if detectores_sa != 1 else ''})"
     runs.finish(run, "complete" if index_template_applied else "error", detail=msg)
     audit.record("apply_schema", msg[:200])
     return ApplySchemaResponse(
@@ -7514,6 +7414,7 @@ def terraform_status() -> TerraformStatusResponse:
         dashboards_imported=any_dashboards_imported,
         capabilities=_read_capabilities(terraform_dir),
         cluster_features=_read_cluster_features(terraform_dir) or None,
+        security_analytics=_resumen_de_seguridad(terraform_dir),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
 
@@ -7660,7 +7561,7 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
     _remove_pipelines_registry(terraform_dir)
     _remove_capabilities(terraform_dir)
     for tmp in (_INDEX_TEMPLATE_ARTIFACT_NAME, _DESTROY_CREDS_NAME, "deploy.auto.tfvars.json",
-                _CLUSTER_FEATURES_NAME):
+                _CLUSTER_FEATURES_NAME, _SECURITY_REGISTRY_NAME):
         try:
             (terraform_dir / tmp).unlink(missing_ok=True)
         except OSError:
