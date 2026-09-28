@@ -458,6 +458,81 @@ def build_forecaster(index_pattern: str, volume_field: str,
     return body
 
 
+# ── Anomaly Detection + Alerting ─────────────────────────────────────────────
+# Estaban sacados: con ventanas fijas los detectores no veían los datos de las
+# demos (fechas del pasado). Ahora se dimensionan del rango real del índice y se
+# corre un análisis HISTÓRICO sobre ese rango.
+
+def features_de_anomalias(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Las features del detector: las de los forecasts del caso (volumen,
+    fallos, entidades únicas), que ya están probadas contra sus datos. Sin
+    forecasts, el volumen. Hasta tres."""
+    out = []
+    for fc in spec.get("forecasts") or []:
+        agg = fc.get("aggregation_query") or {fc["feature_name"]: {"value_count": {"field": spec.get("volume_field", "")}}}
+        out.append({"feature_name": fc["feature_name"], "aggregation_query": agg})
+    if not out and spec.get("volume_field"):
+        out = [{"feature_name": "volumen", "aggregation_query": {"volumen": {"value_count": {"field": spec["volume_field"]}}}}]
+    return out[:3]
+
+
+def nombre_de_detector_ad(slug: str) -> str:
+    return f"{slug}-anomalias"
+
+
+def nombre_de_monitor_ad(slug: str) -> str:
+    return f"{slug}-anomalias-alerta"
+
+
+def build_ad_detector(slug: str, index_pattern: str, features: list[dict[str, Any]],
+                      interval_minutes: int, window_delay_minutes: int = 1,
+                      time_field: str = "@timestamp") -> dict[str, Any]:
+    """`POST _plugins/_anomaly_detection/detectors`, de una sola entidad (sin
+    category_field): con datos sintéticos, los de alta cardinalidad no llegan a
+    entrenar."""
+    return {
+        "name": nombre_de_detector_ad(slug),
+        "description": f"Anomalias de {slug} (autogenerado por la plataforma)",
+        "time_field": time_field,
+        "indices": [index_pattern],
+        "feature_attributes": [{"feature_name": f["feature_name"], "feature_enabled": True,
+                                "aggregation_query": f["aggregation_query"]} for f in features],
+        "detection_interval": {"period": {"interval": interval_minutes, "unit": "Minutes"}},
+        "window_delay": {"period": {"interval": window_delay_minutes, "unit": "Minutes"}},
+        "shingle_size": 8,
+    }
+
+
+def build_monitor_de_anomalias(slug: str, detector_id: str, umbral: float = 0.7) -> dict[str, Any]:
+    """Un monitor de Alerting sobre los resultados del detector: alerta si hay
+    anomalías de grado >= `umbral`. Sin ventana de tiempo: en las demos los
+    resultados son del análisis histórico, y así la alerta aparece."""
+    condicion = (
+        "return ctx.results != null && ctx.results.length > 0 "
+        "&& ctx.results[0].hits.total.value > 0"
+    )
+    return {
+        "type": "monitor",
+        "monitor_type": "query_level_monitor",
+        "name": nombre_de_monitor_ad(slug),
+        "enabled": True,
+        "schedule": {"period": {"interval": 10, "unit": "MINUTES"}},
+        "inputs": [{"search": {
+            "indices": [".opendistro-anomaly-results*"],
+            "query": {"size": 0, "track_total_hits": True, "query": {"bool": {"filter": [
+                {"term": {"detector_id": detector_id}},
+                {"range": {"anomaly_grade": {"gte": umbral}}},
+            ]}}},
+        }}],
+        "triggers": [{"query_level_trigger": {
+            "name": f"Anomalias en {slug}",
+            "severity": "2",
+            "condition": {"script": {"source": condicion, "lang": "painless"}},
+            "actions": [],
+        }}],
+    }
+
+
 # ── Specs por vertical ───────────────────────────────────────────────────────
 # Specs por vertical: se leen del registro declarativo verticals/ (cada vertical
 # aporta su `capability` + `extra_capabilities` backend-only). Antes vivían acá

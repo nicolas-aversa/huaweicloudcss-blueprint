@@ -2460,7 +2460,8 @@
     .seguridad__head .btn { margin-left: auto; }
     .seguridad__caso { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
     .seguridad__caso strong { color: var(--text-primary); }
-    #infra-seguridad-detalle:not(:empty) { margin-top: 12px; }
+    #infra-seguridad-detalle:not(:empty),
+    #infra-anomalias-detalle:not(:empty) { margin-top: 12px; }
     .hallazgos__caso + .hallazgos__caso { margin-top: 14px; }
     .hallazgos__titulo { margin-bottom: 6px; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
     .hallazgos__det { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
@@ -5814,6 +5815,8 @@
     const CAP_LABELS = {
       conversational: 'Copiloto (NL→PPL)',
       forecast: 'Forecast de volumen',
+      anomalias: 'Detección de anomalías',
+      alertas: 'Alertas',
     };
     // CAPABILITY_SLUGS y SLUG_LABELS se derivan del registro en
     // applyVerticalsPayload() (se re-derivan al crear/borrar un caso).
@@ -6064,6 +6067,79 @@
         `Hallazgo de Security Analytics: regla "${regla}"${hora ? `, ${hora}` : ''}${ip ? `, IP de origen ${ip}` : ''}.`));
       if (!tomada) toast('Para explicarlo hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
       return tomada;
+    }
+    // Anomaly Detection: qué casos tienen detector (del registro, sin tocar el
+    // cluster). Las anomalías se piden a demanda.
+    function anomaliasHTML(capabilities) {
+      const casos = Object.entries(capabilities || {}).filter(([, ids]) => ids && ids.detector_id);
+      if (!casos.length) return '';
+      const conAlerta = casos.filter(([, ids]) => ids.monitor_id).length;
+      return `<div class="section-card" id="infra-anomalias">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('activity')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Anomaly Detection</span>
+              <span class="section-card__hint">${casos.length} detector${casos.length === 1 ? '' : 'es'} · análisis histórico sobre todo el rango de datos${conAlerta ? ` · ${conAlerta} con alerta (grado ≥ 0,7)` : ''} · en Dashboards: Anomaly Detection</span>
+            </span>
+            <button type="button" class="btn btn-primary btn-sm" id="infra-anomalias-ver">Ver anomalías</button>
+          </div>
+          <div class="seguridad__caso"><span>${casos.map(([slug]) => escapeHtml(SLUG_LABELS[slug] || slug)).join(' · ')}</span></div>
+          <div id="infra-anomalias-detalle"></div>
+        </div>`;
+    }
+    const _ESTADO_AD = { FINISHED: 'Análisis terminado', RUNNING: 'Analizando…', INIT: 'Analizando…', CREATED: 'Analizando…',
+                         FAILED: 'El análisis falló', INIT_FAILURE: 'El análisis falló', STOPPED: 'Análisis detenido' };
+    // Lo que devuelve /api/v1/anomalias/resumen: por caso, el estado, cuántas
+    // hay y las de mayor grado, cada una con "Explicar".
+    function anomaliasDetalleHTML(casos) {
+      const bloques = (casos || []).map(c => {
+        const top = (c.top || []).map(a => {
+          const valores = (a.valores || []).map(v => `${v.nombre}: ${typeof v.valor === 'number' ? v.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : v.valor}`).join(' · ');
+          return `<li class="hallazgo">`
+            + `<span class="sev ${a.grado >= 0.7 ? 'sev--critical' : 'sev--high'}">${Math.round((a.grado || 0) * 100)} %</span>`
+            + `<span class="hallazgo__regla">${escapeHtml(a.inicio)} → ${escapeHtml((a.fin || '').slice(11))}</span>`
+            + `<span class="hallazgo__meta">${escapeHtml(valores)}</span>`
+            + `<button type="button" class="btn btn-secondary btn-sm anomalia__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `data-inicio="${escapeHtml(a.inicio)}" data-fin="${escapeHtml(a.fin)}" data-grado="${Math.round((a.grado || 0) * 100)}" `
+            + `data-valores="${escapeHtml(valores)}">Explicar</button></li>`;
+        }).join('');
+        const cuerpo = c.error
+          ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(c.error)}</div>`
+          : top
+            ? `<ul class="hallazgos__lista">${top}</ul>`
+            : `<div class="hallazgos__vacio">Sin anomalías todavía${c.estado === 'FINISHED' ? ': el análisis terminó y no encontró ninguna.' : ': el análisis histórico sigue corriendo.'}</div>`;
+        return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}</strong>`
+          + `<span>${escapeHtml(_ESTADO_AD[c.estado] || c.estado || '')}</span>`
+          + `<span>${Number(c.total || 0).toLocaleString('es-AR')} anomalía${c.total === 1 ? '' : 's'}</span></div>${cuerpo}</div>`;
+      }).join('');
+      return bloques || '<div class="hallazgos__vacio">No hay detectores de anomalías en este entorno.</div>';
+    }
+    // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
+    function explicarAnomalia(b) {
+      const { slug, inicio, fin, grado, valores } = b.dataset;
+      const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
+        '¿Qué pasó en ese intervalo? ¿Por qué es una anomalía?',
+        `Anomalía detectada entre ${inicio} y ${fin} (UTC), grado ${grado} %${valores ? `; valores: ${valores}` : ''}. `
+        + `Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.`));
+      if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
+      return tomada;
+    }
+    async function verAnomalias(btn) {
+      const destino = document.getElementById('infra-anomalias-detalle');
+      if (!destino) return;
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo las anomalías…', 'loading');
+      try {
+        const res = await fetch('/api/v1/anomalias/resumen');
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = anomaliasDetalleHTML(data.casos || []);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     }
     async function verHallazgos(btn) {
       const destino = document.getElementById('infra-seguridad-detalle');
@@ -7543,6 +7619,7 @@
           <div class="pipe-list">${pipeRows}</div>
         </div>
         ${seguridadHTML(data.security_analytics)}
+        ${anomaliasHTML(data.capabilities)}
         ${funcionesDelClusterHTML(data.cluster_features)}
         <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
         `;
@@ -7552,6 +7629,12 @@
       body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
         const b = e.target.closest('.hallazgo__explicar');
         if (b) explicarHallazgo(b);
+      });
+      // Anomaly Detection: igual, a demanda y con "Explicar".
+      body.querySelector('#infra-anomalias-ver')?.addEventListener('click', (e) => verAnomalias(e.currentTarget));
+      body.querySelector('#infra-anomalias-detalle')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.anomalia__explicar');
+        if (b) explicarAnomalia(b);
       });
 
       // Acciones: reusan las funciones del flujo.
@@ -7589,6 +7672,8 @@
               ? {ok: true, agent_id: ids.agent_id, ppl_model_id: ids.ppl_model_id, llm_model_id: ids.llm_model_id}
               : {ok: false, reason: 'no provisionado'},
             forecast: ids.forecaster_id ? {ok: true, forecaster_id: ids.forecaster_id} : {ok: false, reason: 'no provisionado'},
+            anomalias: ids.detector_id ? {ok: true, detector_id: ids.detector_id} : {ok: false, reason: 'no provisionado'},
+            alertas: ids.monitor_id ? {ok: true, monitor_id: ids.monitor_id} : {ok: false, reason: 'no provisionado'},
           };
         }
         renderCapabilitiesResult(capsBySlug);
@@ -7650,7 +7735,7 @@
     // Sirve para ver la puesta en marcha y el chat sin desplegar.
     function _vistaPreviaEntorno(params) {
       const ids = { agent_id: 'vista-previa', ppl_model_id: 'vista-previa', llm_model_id: 'vista-previa',
-                    forecaster_id: 'vista-previa' };
+                    forecaster_id: 'vista-previa', detector_id: 'vista-previa', monitor_id: 'vista-previa' };
       const slugs = ['transacciones-billetera', 'ventas-ecommerce',
                      ...(params.get('seguridad') === '1' ? ['siem'] : [])];
       const conPlugins = () => Object.fromEntries(slugs.map(s => [s, ids]));
@@ -7731,6 +7816,18 @@
             result: { schema: [{ name: 'transaction.operation_code', type: 'string' }, { name: 'total', type: 'long' }],
                       datarows: [['LOGIN', 24492], ['BALANCE_INQUIRY', 19990], ['TRANSFER', 19483], ['QR_PAYMENT', 11659], ['BILL_PAYMENT', 9740]] },
           });
+        }
+        if (u.includes('/api/v1/anomalias/resumen')) {
+          await espera(800);
+          return json({ casos: [
+            { slug: 'transacciones-billetera', estado: 'FINISHED', total: 37, error: '', top: [
+              { inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00', grado: 0.93, confianza: 0.88,
+                valores: [{ nombre: 'txn_volume', valor: 1840 }, { nombre: 'failed_txns', valor: 412 }] },
+              { inicio: '2025-03-02 19:40:00', fin: '2025-03-02 19:50:00', grado: 0.61, confianza: 0.8,
+                valores: [{ nombre: 'txn_volume', valor: 95 }, { nombre: 'failed_txns', valor: 3 }] },
+            ] },
+            { slug: 'ventas-ecommerce', estado: 'RUNNING', total: 0, error: '', top: [] },
+          ] });
         }
         if (u.includes('/api/v1/security/resumen')) {
           await espera(800);

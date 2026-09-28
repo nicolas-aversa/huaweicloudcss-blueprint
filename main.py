@@ -5414,6 +5414,78 @@ def _forecaster_window(min_ms: float, max_ms: float, now_ms: float,
     return interval, window_delay, history
 
 
+def _intervalo_de_anomalias(min_ms: float, max_ms: float) -> int:
+    """Minutos por intervalo para ~1000 intervalos sobre el rango de los datos:
+    el detector necesita varios cientos para entrenar y dar resultados."""
+    span_min = max(1, int((max_ms - min_ms) // 60000))
+    return max(1, span_min // 1000)
+
+
+# Estados del análisis histórico de un detector: en curso, terminado o fallido.
+_AD_TERMINADOS = {"FINISHED", "FAILED", "STOPPED", "INIT_FAILURE"}
+_AD_FALLIDOS = {"FAILED", "INIT_FAILURE"}
+_AD_ESPERA_S = 3.0
+
+
+def _estado_historico(base: str, user: str, password: str, detector_id: str,
+                      intentos: int = 4) -> str:
+    """El estado del análisis histórico (`?task=true`). Se espera poco: si
+    arrancó bien sigue solo; lo que importa acá es no decir ok si falló."""
+    estado = "DESCONOCIDO"
+    for i in range(intentos):
+        r = _os_req("GET", f"{base}/_plugins/_anomaly_detection/detectors/{detector_id}?task=true",
+                    user, password, timeout=20)
+        if _resp_ok(r):
+            try:
+                tarea = (r.json() or {}).get("historical_analysis_task") or {}
+            except ValueError:
+                tarea = {}
+            estado = str(tarea.get("state") or estado)
+            if estado in _AD_TERMINADOS:
+                break
+        if i < intentos - 1:
+            time.sleep(_AD_ESPERA_S)
+    return estado
+
+
+def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index_pattern: str,
+                           spec: dict, ids: dict) -> dict:
+    """El detector del caso, dimensionado con el rango real del índice, y el
+    análisis histórico sobre ese rango (los datos de las demos son del pasado:
+    en tiempo real no habría nada que mirar). Deja el id en `ids`."""
+    import capabilities as caps
+    features = caps.features_de_anomalias(spec)
+    if not features:
+        return {"ok": False, "reason": "el caso no tiene qué medir (sin forecasts ni campo de volumen)"}
+    listo, motivo = _index_ready_for_capabilities(base, user, password, index_pattern,
+                                                  spec.get("volume_field", ""), need_docs=True)
+    if not listo:
+        return {"ok": False, "reason": motivo}
+    rango = _index_time_bounds(base, user, password, index_pattern)
+    if not rango:
+        return {"ok": False, "reason": "el índice no tiene un rango de @timestamp utilizable — anomalías omitidas"}
+    min_ms, max_ms, _docs = rango
+    intervalo = _intervalo_de_anomalias(min_ms, max_ms)
+    rd = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors", user, password, timeout=30,
+                 json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo))
+    detector_id = _resp_id(rd) if _resp_ok(rd) else ""
+    if not detector_id:
+        return {"ok": False, "reason": f"no se pudo crear el detector: {_resp_motivo(rd)}"}
+    ids["detector_id"] = detector_id
+    rs = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/{detector_id}/_start", user, password,
+                 json_body={"start_time": int(min_ms), "end_time": int(max_ms) + intervalo * 60000}, timeout=30)
+    if not _resp_ok(rs):
+        return {"ok": False, "detector_id": detector_id,
+                "reason": f"el detector quedó creado pero el análisis histórico no arrancó: {_resp_motivo(rs)}"}
+    estado = _estado_historico(base, user, password, detector_id)
+    if estado in _AD_FALLIDOS:
+        return {"ok": False, "detector_id": detector_id, "estado": estado,
+                "reason": f"el análisis histórico terminó en {estado}"}
+    return {"ok": True, "detector_id": detector_id, "estado": estado, "intervalo_min": intervalo,
+            "note": f"análisis histórico {'terminado' if estado == 'FINISHED' else 'en curso'}, "
+                    f"de a {intervalo} min, con {len(features)} medida{'s' if len(features) != 1 else ''}"}
+
+
 # Estados del _profile de un forecaster tras run_once. TEST_COMPLETE = el backtest
 # corrió con datos (lo que queremos). Los de "esperando datos"/"init" son
 # transitorios; el resto no-OK es error terminal.
@@ -5594,6 +5666,15 @@ def _ml_predict(base: str, user: str, password: str, model_id: str,
         return None
 
 
+def _borrar_detector_ad(base: str, user: str, password: str, detector_id: str) -> None:
+    """Parar el análisis histórico y el de tiempo real antes de borrar: con
+    una tarea corriendo, el DELETE se rechaza."""
+    ruta = f"{base}/_plugins/_anomaly_detection/detectors/{detector_id}"
+    _os_req("POST", f"{ruta}/_stop?historical=true", user, password, timeout=20)
+    _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
+    _os_req("DELETE", ruta, user, password, timeout=20)
+
+
 def _teardown_slug_caps(base: str, user: str, password: str, ids: dict) -> None:
     """Borra los artefactos de capabilities de un slug (best-effort). Orden inverso."""
     if ids.get("monitor_id"):
@@ -5607,8 +5688,7 @@ def _teardown_slug_caps(base: str, user: str, password: str, ids: dict) -> None:
         _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{ids['forecaster_id']}/_stop", user, password, timeout=20)
         _os_req("DELETE", f"{base}/_plugins/_forecast/forecasters/{ids['forecaster_id']}", user, password, timeout=20)
     if ids.get("detector_id"):
-        _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/{ids['detector_id']}/_stop", user, password, timeout=20)
-        _os_req("DELETE", f"{base}/_plugins/_anomaly_detection/detectors/{ids['detector_id']}", user, password, timeout=20)
+        _borrar_detector_ad(base, user, password, ids["detector_id"])
     if ids.get("agent_id"):
         _os_req("DELETE", f"{base}/_plugins/_ml/agents/{ids['agent_id']}", user, password, timeout=20)
     for mid in ids.get("model_ids", []) or []:
@@ -5651,6 +5731,14 @@ def _teardown_orphans_by_name(base: str, user: str, password: str) -> None:
         for fid in _search_ids(base, user, password, "/_plugins/_forecast/forecasters/_search", fc_name):
             _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fid}/_stop", user, password, timeout=20)
             _os_req("DELETE", f"{base}/_plugins/_forecast/forecasters/{fid}", user, password, timeout=20)
+    # Monitores de anomalías ANTES que sus detectores, de todos los casos.
+    for s in caps.get_capability_slugs():
+        for mid in _search_ids(base, user, password, "/_plugins/_alerting/monitors/_search",
+                               caps.nombre_de_monitor_ad(s), name_field="monitor.name.keyword"):
+            _os_req("DELETE", f"{base}/_plugins/_alerting/monitors/{mid}", user, password, timeout=20)
+        for did in _search_ids(base, user, password, "/_plugins/_anomaly_detection/detectors/_search",
+                               caps.nombre_de_detector_ad(s)):
+            _borrar_detector_ad(base, user, password, did)
     # Agente ANTES de los modelos (referencia al llm/ppl model).
     for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search", "Platform Conversational Root"):
         _os_req("DELETE", f"{base}/_plugins/_ml/agents/{aid}", user, password, timeout=20)
@@ -5938,9 +6026,6 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
         except Exception as exc:  # noqa: BLE001
             result["conversational"] = {"ok": False, "reason": repr(exc)}
 
-    # ── Anomaly detection — deshabilitado ───────────────────────────────────
-    # AD y alerting eliminados por decisión de diseño. Solo conversational + forecast.
-
     # ── Forecasting ──────────────────────────────────────────────────────────
     forecast_specs = spec.get("forecasts")
     if not forecast_specs:
@@ -6006,8 +6091,32 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             f"(estados: {', '.join(states)})")
                     result["forecast"] = fc_result
 
-    # ── Alerting — deshabilitado ─────────────────────────────────────────────
-    # AD y alerting eliminados por decisión de diseño.
+    # ── Anomaly Detection + Alerting ─────────────────────────────────────────
+    # Estaban sacados: con ventanas fijas no veían los datos de las demos (del
+    # pasado). Ahora el intervalo sale del rango real y se corre un análisis
+    # histórico sobre ese rango; el monitor alerta con las anomalías altas.
+    feats = _read_cluster_features(terraform_dir)
+    if feats and not feats.get("ad"):
+        result["anomalias"] = {"ok": False, "reason": "Anomaly Detection no está en este cluster"}
+    elif ids.get("detector_id"):
+        result["anomalias"] = {"ok": True, "detector_id": ids["detector_id"], "reason": "ya provisionado"}
+    else:
+        result["anomalias"] = _provisionar_anomalias(base, user, password, slug, ip, spec, ids)
+    if not ids.get("detector_id"):
+        result["alertas"] = {"ok": False, "reason": "sin detector de anomalías"}
+    elif feats and not feats.get("alerting"):
+        result["alertas"] = {"ok": False, "reason": "Alerting no está en este cluster"}
+    elif ids.get("monitor_id"):
+        result["alertas"] = {"ok": True, "monitor_id": ids["monitor_id"], "reason": "ya provisionado"}
+    else:
+        rm = _os_req("POST", f"{base}/_plugins/_alerting/monitors", user, password, timeout=30,
+                     json_body=caps.build_monitor_de_anomalias(slug, ids["detector_id"]))
+        if _resp_id(rm) and _resp_ok(rm):
+            ids["monitor_id"] = _resp_id(rm)
+            result["alertas"] = {"ok": True, "monitor_id": ids["monitor_id"],
+                                 "note": "alerta cuando hay anomalías de grado alto (≥ 0,7)"}
+        else:
+            result["alertas"] = {"ok": False, "reason": f"no se pudo crear el monitor: {_resp_motivo(rm)}"}
 
     # Persistir IDs acumulados.
     registry[slug] = ids
@@ -6041,8 +6150,7 @@ def _teardown_capabilities(cluster: dict[str, str], user: str, password: str,
             _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{ids['forecaster_id']}/_stop", user, password, timeout=20)
             _os_req("DELETE", f"{base}/_plugins/_forecast/forecasters/{ids['forecaster_id']}", user, password, timeout=20)
         if ids.get("detector_id"):
-            _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/{ids['detector_id']}/_stop", user, password, timeout=20)
-            _os_req("DELETE", f"{base}/_plugins/_anomaly_detection/detectors/{ids['detector_id']}", user, password, timeout=20)
+            _borrar_detector_ad(base, user, password, ids["detector_id"])
         if ids.get("agent_id"):
             _os_req("DELETE", f"{base}/_plugins/_ml/agents/{ids['agent_id']}", user, password, timeout=20)
         for mid in ids.get("model_ids", []) or []:
@@ -6084,17 +6192,17 @@ def _write_security(terraform_dir: Path, registro: dict) -> None:
         print(f"[security-analytics] no se pudo persistir: {exc!r}")
 
 
-def _sa_motivo(r) -> str:
+def _resp_motivo(r) -> str:
     if r is None:
         return "sin respuesta del cluster"
     return f"status {r.status_code}: {(getattr(r, 'text', '') or '')[:200]}"
 
 
-def _sa_ok(r) -> bool:
+def _resp_ok(r) -> bool:
     return r is not None and r.status_code in (200, 201)
 
 
-def _sa_id(r) -> str:
+def _resp_id(r) -> str:
     try:
         return str((r.json() or {}).get("_id", ""))
     except (ValueError, AttributeError):
@@ -6105,7 +6213,7 @@ def _sa_buscar(base: str, user: str, password: str, ruta: str) -> list[dict]:
     """Los hits de un `_search` del plugin (log types, reglas, detectores)."""
     r = _os_req("POST", f"{base}{_SA_BASE}/{ruta}", user, password,
                 json_body={"size": 500, "query": {"match_all": {}}}, timeout=20)
-    if not _sa_ok(r):
+    if not _resp_ok(r):
         return []
     try:
         return ((r.json() or {}).get("hits") or {}).get("hits") or []
@@ -6169,6 +6277,72 @@ def _hallazgo(f: dict, regla_por_id: dict) -> dict:
             "ip": str(ip), "indice": f.get("index", "")}
 
 
+def _fecha_ppl(ms) -> str:
+    """Epoch ms → 'YYYY-MM-DD HH:mm:ss' (UTC): se lee y se puede pegar en un
+    filtro PPL sobre @timestamp tal cual."""
+    try:
+        return datetime.fromtimestamp(float(ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def _anomalia(fuente: dict) -> dict:
+    """Un resultado del detector para la vista: cuándo, qué tan anómalo y los
+    valores de cada medida en ese intervalo."""
+    return {
+        "inicio": _fecha_ppl(fuente.get("data_start_time")),
+        "fin": _fecha_ppl(fuente.get("data_end_time")),
+        "grado": round(float(fuente.get("anomaly_grade") or 0), 2),
+        "confianza": round(float(fuente.get("confidence") or 0), 2),
+        "valores": [{"nombre": f.get("feature_name", ""), "valor": f.get("data")}
+                    for f in fuente.get("feature_data") or []],
+    }
+
+
+class ResumenAnomaliasResponse(BaseModel):
+    casos: list[dict] = Field(default_factory=list)
+
+
+@app.get("/api/v1/anomalias/resumen", response_model=ResumenAnomaliasResponse, tags=["capabilities"])
+def resumen_anomalias() -> ResumenAnomaliasResponse:
+    """Las anomalías más fuertes de cada detector, en vivo: el estado del
+    análisis histórico, cuántas hay y las 5 de mayor grado. A demanda ("Ver
+    anomalías"); no se guarda."""
+    terraform_dir = _active_terraform_dir()
+    con_detector = {s: ids for s, ids in _read_capabilities(terraform_dir).items() if ids.get("detector_id")}
+    if not con_detector:
+        return ResumenAnomaliasResponse()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "anomalias", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    casos = []
+    for slug, ids in con_detector.items():
+        did = ids["detector_id"]
+        r = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/results/_search", user, password,
+                    json_body={"size": 5, "track_total_hits": True,
+                               "query": {"bool": {"filter": [{"term": {"detector_id": did}},
+                                                             {"range": {"anomaly_grade": {"gt": 0}}}]}},
+                               "sort": [{"anomaly_grade": {"order": "desc"}}]}, timeout=20)
+        hits: dict = {}
+        if _resp_ok(r):
+            try:
+                hits = (r.json() or {}).get("hits") or {}
+            except ValueError:
+                hits = {}
+        total = hits.get("total") or {}
+        casos.append({
+            "slug": slug,
+            "estado": _estado_historico(base, user, password, did, intentos=1),
+            "total": int(total.get("value", 0) if isinstance(total, dict) else total or 0),
+            "top": [_anomalia(h.get("_source") or {}) for h in (hits.get("hits") or [])[:5]],
+            "error": "" if _resp_ok(r) else _resp_motivo(r),
+        })
+    return ResumenAnomaliasResponse(casos=casos)
+
+
 class ResumenSeguridadResponse(BaseModel):
     casos: list[dict] = Field(default_factory=list)
 
@@ -6198,11 +6372,11 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
         for nombre, d in (reg.get("detectores") or {}).items():
             rf = _os_req("GET", f"{base}{_SA_BASE}/findings/_search?detector_id={d['id']}"
                                 "&size=5&sortOrder=desc", user, password, timeout=20)
-            hallazgos = rf.json() if _sa_ok(rf) else {}
+            hallazgos = rf.json() if _resp_ok(rf) else {}
             ra = _os_req("GET", f"{base}{_SA_BASE}/alerts?detector_id={d['id']}&size=500",
                          user, password, timeout=20)
             alertas: dict[str, int] = {}
-            for a in ((ra.json() if _sa_ok(ra) else {}) or {}).get("alerts") or []:
+            for a in ((ra.json() if _resp_ok(ra) else {}) or {}).get("alerts") or []:
                 sev = _SEVERIDAD_DE_ALERTA.get(str(a.get("severity")), str(a.get("severity") or ""))
                 alertas[sev] = alertas.get(sev, 0) + 1
             detectores.append({
@@ -6211,7 +6385,7 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
                 "total": int((hallazgos or {}).get("total_findings") or 0),
                 "recientes": [_hallazgo(f, regla_por_id) for f in ((hallazgos or {}).get("findings") or [])[:5]],
                 "alertas": alertas,
-                "error": "" if _sa_ok(rf) else _sa_motivo(rf),
+                "error": "" if _resp_ok(rf) else _resp_motivo(rf),
             })
         casos.append({"slug": slug, "detectores": detectores,
                       "correlaciones": len(reg.get("correlaciones") or {})})
@@ -6247,14 +6421,14 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
     # El pattern tiene que matchear un índice (con el mapping del template).
     cat = _os_req("GET", f"{base}/_cat/indices/{index_pattern}?format=json&h=index", user, password, timeout=15)
     try:
-        hay_indice = bool(cat.json()) if _sa_ok(cat) else False
+        hay_indice = bool(cat.json()) if _resp_ok(cat) else False
     except ValueError:
         hay_indice = False
     if not hay_indice:
         nombre_ix = seguridad.indice_para_detector(index_pattern)
         rix = _os_req("PUT", f"{base}/{nombre_ix}", user, password, timeout=20)
-        if not _sa_ok(rix) and "already_exists" not in (getattr(rix, "text", "") or ""):
-            paso("índice", False, f"no se pudo crear {nombre_ix}: {_sa_motivo(rix)}")
+        if not _resp_ok(rix) and "already_exists" not in (getattr(rix, "text", "") or ""):
+            paso("índice", False, f"no se pudo crear {nombre_ix}: {_resp_motivo(rix)}")
 
     # Tipos de log propios.
     existentes = {(h.get("_source") or {}).get("name"): h.get("_id")
@@ -6266,10 +6440,10 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
             continue
         rl = _os_req("POST", f"{base}{_SA_BASE}/logtype", user, password,
                      json_body=seguridad.build_log_type(lt), timeout=20)
-        if _sa_ok(rl):
-            reg["log_types"][lt["nombre"]] = _sa_id(rl)
+        if _resp_ok(rl):
+            reg["log_types"][lt["nombre"]] = _resp_id(rl)
         else:
-            fallos.append(f"{lt['nombre']}: {_sa_motivo(rl)}")
+            fallos.append(f"{lt['nombre']}: {_resp_motivo(rl)}")
     paso("tipos de log", not fallos, "; ".join(fallos))
 
     # Reglas Sigma, por título.
@@ -6284,9 +6458,9 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
             if not rid:
                 rr = _sa_post_texto(f"{base}{_SA_BASE}/rules?category={lt['nombre']}", user, password,
                                     seguridad.sigma_yaml(regla, lt["nombre"]))
-                rid = _sa_id(rr) if _sa_ok(rr) else ""
+                rid = _resp_id(rr) if _resp_ok(rr) else ""
                 if not rid:
-                    fallos.append(f"{regla['titulo']}: {_sa_motivo(rr)}")
+                    fallos.append(f"{regla['titulo']}: {_resp_motivo(rr)}")
             if rid:
                 reg["reglas"][regla["titulo"]] = rid
                 por_tipo[lt["nombre"]].append((rid, regla["nivel"]))
@@ -6310,9 +6484,9 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
         rd = _os_req("POST", f"{base}{_SA_BASE}/detectors", user, password, timeout=30,
                      json_body=seguridad.build_detector(slug, lt["nombre"], index_pattern,
                                                         por_tipo[lt["nombre"]]))
-        if _sa_ok(rd):
-            reg["detectores"][nombre_d] = {"id": _sa_id(rd), "log_type": lt["nombre"]}
-        paso(f"detector {lt['nombre']}", _sa_ok(rd), "" if _sa_ok(rd) else _sa_motivo(rd))
+        if _resp_ok(rd):
+            reg["detectores"][nombre_d] = {"id": _resp_id(rd), "log_type": lt["nombre"]}
+        paso(f"detector {lt['nombre']}", _resp_ok(rd), "" if _resp_ok(rd) else _resp_motivo(rd))
 
     # Correlaciones entre tipos de log.
     correlaciones = spec.get("correlaciones", [])
@@ -6326,10 +6500,10 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
                 continue
             rc = _os_req("POST", f"{base}{_SA_BASE}/correlation/rules", user, password, timeout=30,
                          json_body=seguridad.build_correlacion(c, index_pattern))
-            if _sa_ok(rc):
-                reg["correlaciones"][c["nombre"]] = _sa_id(rc)
+            if _resp_ok(rc):
+                reg["correlaciones"][c["nombre"]] = _resp_id(rc)
             else:
-                fallos.append(f"{c['nombre']}: {_sa_motivo(rc)}")
+                fallos.append(f"{c['nombre']}: {_resp_motivo(rc)}")
         paso(f"{len(reg['correlaciones'])} de {len(correlaciones)} correlaciones", not fallos, "; ".join(fallos))
 
     registro[slug] = reg
