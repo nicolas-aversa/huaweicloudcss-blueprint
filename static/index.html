@@ -4318,6 +4318,7 @@
     let DEMO_VERTICALS = [];
     let EXAMPLE_DATA = {};
     let CAPABILITY_SLUGS = new Set();
+    let SECURITY_SLUGS = new Set();   // los casos con Security Analytics (SIEM, FortiAnalyzer)
     let SLUG_LABELS = {};
 
     function applyVerticalsPayload(data) {
@@ -4352,6 +4353,7 @@
       // Slugs con bundle de capabilities en el backend + labels. SLUG_LABELS es
       // global: lo usan el panel del chatbot y el deploy.
       CAPABILITY_SLUGS = new Set(_VVIS.filter(v => v.hasCapability).map(v => v.slug));
+      SECURITY_SLUGS = new Set(_VVIS.filter(v => v.hasSecurity).map(v => v.slug));
       SLUG_LABELS = Object.fromEntries(_VVIS.map(v => [v.slug, v.fullLabel]));
 
     }
@@ -4962,13 +4964,15 @@
         const isBuilder = soloGuarda();
         const labels = types.map(id => (LOG_EXAMPLES.find(e => e.id === id)?.label) || id);
         const hasCaps = types.some(t => CAPABILITY_SLUGS.has(t)) || state.deployMode === 'custom';
+        const conSeguridad = types.filter(t => SECURITY_SLUGS.has(t))
+          .map(t => (LOG_EXAMPLES.find(e => e.id === t)?.label) || t);
         const li = (ic, txt) => `<li style="display:flex; align-items:center; gap:9px; font-size:var(--fs-base); color:var(--text-secondary); padding:4px 0;">
           <span style="width:26px;height:26px;border-radius:7px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none;">${icon(ic)}</span>
           <span>${txt}</span></li>`;
         const items = isBuilder ? [
           li('code', 'Configuration file de Logstash (con tu origen elegido)'),
           li('dashboard', 'Index template + dashboards de tus campos'),
-          li('spark', 'Chatbot (NL→PPL) + forecasts sobre tus datos'),
+          li('spark', 'Chatbot (NL→PPL), forecasts, detección de anomalías y alertas sobre tus datos'),
           li('plus', 'Queda como una card más del grid, lista para desplegar cuando quieras'),
         ].join('') : [
           ...(reuse ? [] : [
@@ -4977,7 +4981,8 @@
           ]),
           li('database', `${types.length} pipeline ETL${types.length > 1 ? 's' : ''} de Logstash: ${escapeHtml(labels.join(', '))}`),
           li('dashboard', 'Index template + dashboards por tipo'),
-          ...(hasCaps ? [li('spark', 'Plugins de OpenSearch: agente conversacional (NL→PPL) + forecasts')] : []),
+          ...(hasCaps ? [li('spark', 'Plugins de OpenSearch: agente conversacional (NL→PPL), forecasts, detección de anomalías y alertas')] : []),
+          ...(conSeguridad.length ? [li('shield', `Security Analytics para ${escapeHtml(conSeguridad.join(' y '))}: reglas Sigma, detectores${types.includes('siem') ? ' y correlaciones entre fuentes' : ''}`)] : []),
         ].join('');
         closureEl.innerHTML = `
           <div class="deploy-panel">

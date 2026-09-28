@@ -134,6 +134,7 @@ def front_payload() -> dict:
             "dedupId": v.get("dedup_id", ""),
             "hidden": bool(v.get("hidden")),
             "hasCapability": "capability" in v,
+            "hasSecurity": bool(v.get("security")),
             "sample": v.get("sample", ""),
             "filterCode": v.get("filter_code", ""),
             "fields": v.get("fields", []),
