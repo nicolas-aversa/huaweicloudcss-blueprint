@@ -24,6 +24,9 @@ from typing import Any
 # Severidad Sigma → la del trigger del detector (1 es la más alta).
 _SEVERIDAD_TRIGGER = {"critical": "1", "high": "2", "medium": "3", "low": "4"}
 NIVELES = tuple(_SEVERIDAD_TRIGGER)
+# Security Analytics exige `date` en la regla (sin él, el alta falla con un 500
+# "Cannot invoke java.util.Date.getTime()"). Fija, para que la regla no cambie.
+FECHA_DE_LAS_REGLAS = "2026/09/28"
 
 
 def _yaml_escalar(v: Any) -> str:
@@ -54,6 +57,7 @@ def sigma_yaml(regla: dict, log_type: str) -> str:
         "status: experimental",
         f"description: {_yaml_escalar(regla.get('descripcion') or regla['titulo'])}",
         "author: CSS Blueprint",
+        f"date: {FECHA_DE_LAS_REGLAS}",
     ]
     if regla.get("tags"):
         lineas.append("tags:")

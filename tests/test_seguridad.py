@@ -73,6 +73,8 @@ def test_la_regla_en_yaml_sigma():
     assert y.startswith('title: "Acceso \\"raro\\": SSH"\n')
     assert f"id: {seguridad.id_de_regla(regla['titulo'])}\n" in y
     assert 'description: "Línea: con dos puntos"' in y
+    # Sin fecha, Security Analytics rechaza la regla con un 500 (visto en CSS 3.4).
+    assert "\ndate: 2026/09/28\n" in y
     assert "tags:\n  - attack.t1021\n" in y
     assert "logsource:\n  product: fortianalyzer\n" in y
     assert '    action:\n      - "blocked"\n      - "dropped"\n' in y
