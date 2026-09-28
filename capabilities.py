@@ -85,6 +85,60 @@ def build_cluster_settings(endpoint: str | None = None) -> dict[str, Any]:
     }
 
 
+# ── Qué tiene el cluster ─────────────────────────────────────────────────────
+
+# Lo que la plataforma sabe usar, con el nombre que se muestra, en este orden.
+FUNCIONES_DEL_CLUSTER = {
+    "ml": "ML Commons",
+    "ppl_v3": "PPL 3 (Calcite)",
+    "ad": "Anomaly Detection",
+    "alerting": "Alerting",
+    "security_analytics": "Security Analytics",
+}
+
+# La palabra que identifica a cada plugin en el `component` de `_cat/plugins`
+# (opensearch-ml, opensearch-anomaly-detection, opensearch-notifications-core…).
+_PLUGIN_DE = {
+    "ml": "ml",
+    "ppl": "sql",
+    "skills": "skills",
+    "ad": "anomaly-detection",
+    "alerting": "alerting",
+    "notifications": "notifications",
+    "security_analytics": "security-analytics",
+}
+
+
+def _calcite(settings: dict) -> bool | None:
+    """El valor efectivo de `plugins.calcite.enabled` (transient > persistent >
+    default), plano o anidado. None si el cluster no lo informa."""
+    for nivel in ("transient", "persistent", "defaults"):
+        bloque = (settings or {}).get(nivel) or {}
+        valor = bloque.get("plugins.calcite.enabled")
+        if valor is None:
+            valor = ((bloque.get("plugins") or {}).get("calcite") or {}).get("enabled")
+        if valor is not None:
+            return str(valor).lower() == "true"
+    return None
+
+
+def resumir_capacidades(plugins: list, settings: dict) -> dict[str, Any]:
+    """Qué funciones de OpenSearch hay en el cluster, desde `_cat/plugins` y los
+    settings. Un plugin cuenta si su palabra aparece ENTERA entre guiones: "ml"
+    es opensearch-ml, no cualquier componente que contenga esas letras."""
+    componentes = sorted({str(p.get("component")) for p in plugins or []
+                          if isinstance(p, dict) and p.get("component")})
+    tiene = lambda palabra: any(f"-{palabra}-" in f"-{c}-" for c in componentes)  # noqa: E731
+    out: dict[str, Any] = {clave: tiene(palabra) for clave, palabra in _PLUGIN_DE.items()}
+    # PPL 3 corre sobre Calcite (prendido por defecto desde 3.3).
+    out["calcite"] = _calcite(settings)
+    out["ppl_v3"] = out["ppl"] and out["calcite"] is True
+    out["plugins"] = componentes
+    out["funciones"] = [{"clave": k, "nombre": n, "ok": bool(out[k])}
+                        for k, n in FUNCIONES_DEL_CLUSTER.items()]
+    return out
+
+
 # ── Connectors (MaaS, OpenAI-compat) ─────────────────────────────────────────
 
 # El path del cluster a MaaS sale por el NAT/SNAT (ver terraform): el primer hop

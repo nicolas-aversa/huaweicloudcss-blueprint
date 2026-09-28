@@ -2185,6 +2185,8 @@ class TerraformStatusResponse(BaseModel):
     # Capabilities provisionadas por slug (agent_id, detector_id, etc.). El
     # copiloto lo usa para habilitar el modo "preguntá a tus datos".
     capabilities: dict = Field(default_factory=dict)
+    # Qué plugins tiene el cluster (`resumir_capacidades`), si ya se detectó.
+    cluster_features: dict | None = None
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -4405,6 +4407,27 @@ def _write_capabilities(terraform_dir: Path, registry: dict[str, dict]) -> None:
         print(f"[capabilities] no se pudo persistir el registro: {exc!r}")
 
 
+# Qué plugins tiene el cluster (lo detecta `_registrar_capacidades`). Aparte de
+# `.capabilities.json`, que es slug → IDs: acá no hay slugs.
+_CLUSTER_FEATURES_NAME = ".cluster_features.json"
+
+
+def _read_cluster_features(terraform_dir: Path) -> dict:
+    try:
+        data = json.loads((terraform_dir / _CLUSTER_FEATURES_NAME).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_cluster_features(terraform_dir: Path, feats: dict) -> None:
+    try:
+        (terraform_dir / _CLUSTER_FEATURES_NAME).write_text(
+            json.dumps(feats, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        print(f"[capacidades] no se pudo persistir: {exc!r}")
+
+
 def _remove_capabilities(terraform_dir: Path) -> None:
     try:
         (terraform_dir / _CAPABILITIES_REGISTRY_NAME).unlink(missing_ok=True)
@@ -5205,6 +5228,45 @@ def _ml_commons_available(base: str, user: str, password: str) -> bool:
     print(f"[capabilities] preflight ml-commons no disponible "
           f"(status {getattr(r, 'status_code', None)}): {(getattr(r, 'text', '') or '')[:160]}")
     return False
+
+
+def _detectar_capacidades(base: str, user: str, password: str) -> "dict | None":
+    """Qué plugins tiene el cluster y si PPL corre sobre Calcite. Lee SOLO
+    metadatos (`_cat/plugins` y un setting), nunca datos del cliente. None si el
+    cluster no contestó: no se sabe, que no es lo mismo que "no hay nada"."""
+    import capabilities as caps
+    r = _os_req("GET", f"{base}/_cat/plugins?format=json&h=component", user, password, timeout=15)
+    if r is None or r.status_code != 200:
+        print(f"[capacidades] _cat/plugins status {getattr(r, 'status_code', None)}")
+        return None
+    try:
+        plugins = r.json()
+    except ValueError:
+        return None
+    settings: dict = {}
+    s = _os_req("GET", f"{base}/_cluster/settings?include_defaults=true"
+                       "&filter_path=**.plugins.calcite.enabled", user, password, timeout=15)
+    if s is not None and s.status_code == 200:
+        try:
+            settings = s.json() or {}
+        except ValueError:
+            settings = {}
+    return caps.resumir_capacidades(plugins if isinstance(plugins, list) else [], settings)
+
+
+def _registrar_capacidades(cluster: dict, user: str, password: str, https_enabled: bool,
+                           terraform_dir: Path, run: "dict | None" = None) -> "dict | None":
+    """Detecta, guarda (lo lee /terraform/status) y lo anota en Actividad."""
+    feats = _detectar_capacidades(_os_base(cluster, https_enabled), user, password)
+    if feats is None:
+        if run is not None:
+            runs.step(run, "Plugins del cluster", False, "el cluster no respondió a _cat/plugins")
+        return None
+    _write_cluster_features(terraform_dir, feats)
+    if run is not None:
+        faltan = [f["nombre"] for f in feats["funciones"] if not f["ok"]]
+        runs.step(run, "Plugins del cluster", True, ("sin " + ", ".join(faltan)) if faltan else "")
+    return feats
 
 
 def _index_ready_for_capabilities(base: str, user: str, password: str,
@@ -6432,6 +6494,9 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
 
     os_base = _os_base(cluster, request.https_enabled)
     os_user = request.opensearch_user or "admin"
+    # Qué plugins hay: lo usan el chat (PPL 3) y la vista del entorno.
+    _registrar_capacidades(cluster, os_user, request.opensearch_password,
+                           request.https_enabled, terraform_dir, run)
 
     dashboards_imported = False
     gmin = gmax = None
@@ -6596,6 +6661,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
     # cuanto el browser cerraba la pestaña.
     run = runs.start("capabilities", detail=", ".join(slugs))
+    _registrar_capacidades(cluster, user, password, request.https_enabled, terraform_dir, run)
     for slug in slugs:
         has_spec = _caps.get_capability_spec(slug) is not None
         has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
@@ -7216,6 +7282,7 @@ def terraform_status() -> TerraformStatusResponse:
         pipelines=pipelines,
         dashboards_imported=any_dashboards_imported,
         capabilities=_read_capabilities(terraform_dir),
+        cluster_features=_read_cluster_features(terraform_dir) or None,
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
 
@@ -7361,7 +7428,8 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
     _remove_platform_marker(terraform_dir)
     _remove_pipelines_registry(terraform_dir)
     _remove_capabilities(terraform_dir)
-    for tmp in (_INDEX_TEMPLATE_ARTIFACT_NAME, _DESTROY_CREDS_NAME, "deploy.auto.tfvars.json"):
+    for tmp in (_INDEX_TEMPLATE_ARTIFACT_NAME, _DESTROY_CREDS_NAME, "deploy.auto.tfvars.json",
+                _CLUSTER_FEATURES_NAME):
         try:
             (terraform_dir / tmp).unlink(missing_ok=True)
         except OSError:

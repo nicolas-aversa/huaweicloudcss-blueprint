@@ -43,6 +43,7 @@ terraform/.pipelines.json
 terraform/.platform_deploy.json
 terraform/.index_template.json
 terraform/.capabilities.json
+terraform/.cluster_features.json
 # Backend remoto del state (OBS): lo genera tfstate.prepare() por workspace y
 # lleva las AK/SK del bucket en claro, igual que destroy.auto.tfvars.json.
 terraform/backend.tf

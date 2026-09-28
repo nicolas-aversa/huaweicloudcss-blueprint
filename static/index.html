@@ -2437,6 +2437,9 @@
     .cap-resumen { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .cap-resumen .status-pill { margin: 0; }
     .cap-resumen__lbl { font-size: var(--fs-sm); color: var(--text-muted); }
+    /* Qué trae el cluster: las que están, en verde; las que no, apagadas. */
+    .cap-funciones { margin: 0 0 10px; }
+    .cap-funcion.is-falta { background: var(--bg-tertiary); color: var(--text-muted); }
     @media (prefers-reduced-motion: reduce) {
       .cap-chart, .cap-chat__typing::after { animation: none; }
     }
@@ -5911,6 +5914,19 @@
       });
     }
 
+    // Qué trae el cluster de OpenSearch. Lo detecta el backend al aplicar el
+    // index template y al provisionar plugins (/terraform/status →
+    // cluster_features): las que no están quedan apagadas.
+    function funcionesDelClusterHTML(feats) {
+      const funciones = (feats && feats.funciones) || [];
+      if (!funciones.length) return '';
+      return `<div class="cap-resumen cap-funciones"><span class="cap-resumen__lbl">OpenSearch:</span> `
+        + funciones.map(f => f.ok
+          ? `<span class="status-pill cap-funcion">${escapeHtml(f.nombre)}</span>`
+          : `<span class="status-pill cap-funcion is-falta" title="No está en este cluster">${escapeHtml(f.nombre)}</span>`).join('')
+        + `</div>`;
+    }
+
     function renderCapabilitiesResult(capsBySlug, anchor) {
       const statusEl = anchor || document.getElementById('infra-capabilities-result');
       if (!statusEl) return;
@@ -7343,6 +7359,7 @@
           </div>
           <div class="pipe-list">${pipeRows}</div>
         </div>
+        ${funcionesDelClusterHTML(data.cluster_features)}
         <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
         `;
 
@@ -7452,6 +7469,13 @@
                                      active: true, dashboards_imported: true, has_capabilities: true,
                                      config_status: 'available', config_error: '' })),
         capabilities: params.get('plugins') === '1' ? conPlugins() : {},
+        cluster_features: { funciones: [
+          { clave: 'ml', nombre: 'ML Commons', ok: true },
+          { clave: 'ppl_v3', nombre: 'PPL 3 (Calcite)', ok: true },
+          { clave: 'ad', nombre: 'Anomaly Detection', ok: true },
+          { clave: 'alerting', nombre: 'Alerting', ok: true },
+          { clave: 'security_analytics', nombre: 'Security Analytics', ok: true },
+        ] },
       };
       const real = window.fetch.bind(window);
       const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { 'Content-Type': 'application/json' } });
