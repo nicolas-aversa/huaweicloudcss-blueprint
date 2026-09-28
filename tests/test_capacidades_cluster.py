@@ -127,11 +127,10 @@ def test_se_detecta_al_aplicar_y_al_provisionar_y_se_expone():
     assert "terraform/.cluster_features.json" in gi
 
 
-def test_el_front_muestra_las_funciones():
+def test_la_vista_no_repite_lo_que_dicen_los_plugins():
+    """La línea "OpenSearch:" repetía las fichas de "Plugins:" (Anomaly
+    Detection, Alerting). Lo que falta en el cluster ya lo dice cada ficha con
+    su motivo; la detección queda para el chat (PPL 3) y esos motivos."""
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert "${funcionesDelClusterHTML(data.cluster_features)}" in html
-    i = html.index("function funcionesDelClusterHTML(feats) {")
-    fn = html[i:html.index("\n    }\n", i)]
-    assert "if (!funciones.length) return '';" in fn
-    assert 'cap-funcion is-falta" title="No está en este cluster"' in fn
-    assert ".cap-funcion.is-falta { background: var(--bg-tertiary); color: var(--text-muted); }" in html
+    assert "funcionesDelClusterHTML" not in html and "cap-funcion" not in html
+    assert 'reason": "Anomaly Detection no está en este cluster"' in pathlib.Path(main.__file__).read_text(encoding="utf-8")
