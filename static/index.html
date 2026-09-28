@@ -2416,7 +2416,7 @@
     /* Un solo campo, con el enviar adentro. */
     .cap-chat__composer {
       display: flex; align-items: center; gap: 6px; margin: 8px 14px 6px;
-      padding: 5px 5px 5px 16px; background: var(--bg-primary);
+      padding: 5px 5px 5px 6px; background: var(--bg-primary);
       border: 1px solid var(--border-default); border-radius: var(--radius-pill); box-shadow: var(--shadow-xs);
       transition: border-color var(--t-fast), box-shadow var(--t-fast);
     }
@@ -2429,6 +2429,24 @@
     .cap-chat__composer .cap-chat__send { width: 36px; height: 36px; box-shadow: none; }
     .cap-chat__composer .cap-chat__send .icon { width: 16px; height: 16px; }
     .cap-chat__pie { padding: 0 16px 10px; font-size: var(--fs-xs); color: var(--text-muted); text-align: center; }
+    /* Investigar: un modo de un solo uso, prendido en rojo. */
+    .cap-chat__modo {
+      flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; cursor: pointer;
+      font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--text-muted);
+      background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
+      transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+    }
+    .cap-chat__modo .icon { width: 13px; height: 13px; }
+    .cap-chat__modo:hover { color: var(--text-primary); }
+    .cap-chat__modo[aria-pressed="true"] { color: var(--accent); background: var(--accent-tint); border-color: var(--accent); }
+    .cap-chat__investigacion {
+      display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+      font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--accent);
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .cap-chat__investigacion .icon { width: 13px; height: 13px; }
+    .cap-chat__consulta + .cap-chat__consulta { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+    .cap-chat__fallo { font-size: var(--fs-xs); color: var(--text-muted); }
     /* En un teléfono, el chat ocupa la pantalla. */
     @media (max-width: 560px) {
       .cap-flotante { width: 100vw; border-left: none; }
@@ -5787,6 +5805,7 @@
     const capChats = {};        // slug → [{id, who, html, result, err}]
     let capChatSlug = '';       // la pestaña elegida
     let capChatBusy = false;    // una pregunta a la vez, aunque el form se rearme
+    let capChatInvestigar = false;   // la próxima pregunta, con varias consultas
     let capChatSeq = 0;
     let capChatAbierto = false;   // el panel flotante, abierto o no
     // Cómo estaba la barra izquierda antes de abrir el asistente (null: el
@@ -5826,6 +5845,33 @@
       const avatar = e.who === 'bot' ? `<span class="cap-chat__avatar">${icon('spark')}</span>` : '';
       return `<div class="cap-chat__row cap-chat__row--${e.who}" data-msg="${e.id}">${avatar}`
         + `<div class="cap-chat__msg cap-chat__msg--${e.who}${e.err ? ' cap-chat__msg--err' : ''}">${e.html}</div></div>`;
+    }
+    // Una tabla con las primeras 20 filas de un resultado PPL.
+    function capChatTablaHTML(result) {
+      const rows = (result && result.datarows) || [];
+      const cols = (result && result.schema) || [];
+      if (!rows.length) return '';
+      return `<table class="cap-chat__table"><thead><tr>${cols.map(c => `<th>${escapeHtml(c.name || c.field || '')}</th>`).join('')}</tr></thead>`
+        + `<tbody>${rows.slice(0, 20).map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    // Una investigación se anuncia arriba de la respuesta, con cuántas consultas.
+    function capChatCabeceraHTML(data) {
+      const n = ((data && data.consultas) || []).length;
+      return n ? `<div class="cap-chat__investigacion">${icon('search')} Investigación · ${n} consultas</div>` : '';
+    }
+    // "ver PPL / datos": la consulta y su tabla; en una investigación, cada
+    // consulta con la suya (o con su error).
+    function capChatDetallesHTML(data) {
+      const consultas = (data && data.consultas) || [];
+      if (consultas.length) {
+        const cada = consultas.map((c, i) => `<div class="cap-chat__consulta"><div class="cap-chat__ppl">${i + 1}. <code>${escapeHtml(c.ppl || '')}</code></div>`
+          + (c.ok ? capChatTablaHTML(c.result) : `<div class="cap-chat__fallo">No corrió: ${escapeHtml(c.error || '')}</div>`) + `</div>`).join('');
+        return `<details class="cap-chat__det"><summary>ver las ${consultas.length} consultas</summary>${cada}</details>`;
+      }
+      const table = capChatTablaHTML(data && data.result);
+      return (data && data.ppl) || table
+        ? `<details class="cap-chat__det"><summary>ver PPL / datos</summary>${data.ppl ? `<div class="cap-chat__ppl"><code>${escapeHtml(data.ppl)}</code></div>` : ''}${table}</details>`
+        : '';
     }
     // Preguntas sugeridas, como tarjetas.
     function capChatIdeasHTML(ideas, etiqueta) {
@@ -6068,6 +6114,8 @@
         <div class="cap-chat">
           ${logsHtml}
           <form class="cap-chat__composer" id="cap-chat-form" autocomplete="off">
+            <button type="button" class="cap-chat__modo" id="cap-chat-investigar" aria-pressed="false"
+                    title="Investigar: cruza varias consultas para entender un porqué">${icon('search')} Investigar</button>
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Preguntá sobre tus datos…" aria-label="Tu pregunta">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
@@ -6268,8 +6316,10 @@
             encoding: { x: xEnc, y: { field: 'v', type: 'quantitative', title: q.name } } }, 150);
         }
 
-        // Dispersión: 2+ medidas (correlación), sin temporal.
-        if (Q.length >= 2 && rows.length >= 3) {
+        // Dispersión: 2+ medidas (correlación), sin temporal ni categoría. Con
+        // una categoría ("fallidas y % por código", típico de PPL 3) van barras:
+        // tres puntos sueltos no se leen.
+        if (Q.length >= 2 && rows.length >= 3 && !N.length) {
           const q2 = Q[1], s = N[0];
           const values = rows.slice(0, 300).map(r => { const o = { x: num(r, q), y: num(r, q2) }; if (s) o.k = str(r, s); return o; });
           const enc = { x: { field: 'x', type: 'quantitative', title: q.name }, y: { field: 'y', type: 'quantitative', title: q2.name } };
@@ -6348,9 +6398,12 @@
         };
         step();
       }
-      async function sendCapChat(question) {
+      async function sendCapChat(question, { contexto = '' } = {}) {
         question = (question || '').trim();
         if (!question || capChatBusy) return;
+        // Investigar vale para esta pregunta sola: después vuelve al modo normal.
+        const investigar = capChatInvestigar;
+        _modoInvestigar(false);
         // El caso de la PREGUNTA: la respuesta va a su conversación aunque
         // mientras tanto se cambie de pestaña o se rearme la vista.
         const slug = _activeChatSlug();
@@ -6372,7 +6425,7 @@
           const res = await fetch('/api/v1/capabilities/ppl-chat', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              question, slug, history,
+              question, slug, history, investigar, contexto,
               opensearch_password: state.osPassword || '',
               opensearch_user: state.osUser || 'admin',
               https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del state
@@ -6387,23 +6440,17 @@
             _error(`${escapeHtml(msg)}${ppl}`);
             return;
           }
-          const rows = (data.result && data.result.datarows) || [];
-          const cols = (data.result && data.result.schema) || [];
-          const table = rows.length
-            ? `<table class="cap-chat__table"><thead><tr>${cols.map(c => `<th>${escapeHtml(c.name || c.field || '')}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 20).map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v))}</td>`).join('')}</tr>`).join('')}</tbody></table>`
-            : '';
-          const details = (data.ppl || table)
-            ? `<details class="cap-chat__det"><summary>ver PPL / datos</summary>${data.ppl ? `<div class="cap-chat__ppl"><code>${escapeHtml(data.ppl)}</code></div>` : ''}${table}</details>`
-            : '';
+          const details = capChatDetallesHTML(data);
+          const cabecera = capChatCabeceraHTML(data);
           // Lo que queda guardado es la respuesta entera: el typewriter es solo
           // la primera vez; un re-render la muestra completa, con su gráfico.
-          pend.html = `<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
+          pend.html = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
           pend.result = data.result || null;
           pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };
           const el = _msgDe(pend);
           if (!el) return;   // el caso no está en pantalla: se pinta al volver
           // Visualización Vega-Lite (motor de OpenSearch) + respuesta con typewriter + details.
-          el.innerHTML = `<div class="cap-chart-host"></div><span class="cap-chat__answer"></span>`;
+          el.innerHTML = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer"></span>`;
           _renderCapChartInto(el.querySelector('.cap-chart-host'), data.result);
           const answerEl = el.querySelector('.cap-chat__answer');
           _typeInto(answerEl, data.answer || '', () => {
@@ -6420,6 +6467,15 @@
         }
       }
       chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
+      // El botón Investigar prende o apaga el modo para la próxima pregunta.
+      const botonInvestigar = host.querySelector('#cap-chat-investigar');
+      function _modoInvestigar(on) {
+        capChatInvestigar = on;
+        botonInvestigar?.setAttribute('aria-pressed', String(on));
+        if (chatInput) chatInput.placeholder = on ? '¿Qué querés entender?' : 'Preguntá sobre tus datos…';
+      }
+      botonInvestigar?.addEventListener('click', () => { _modoInvestigar(!capChatInvestigar); chatInput?.focus(); });
+      _modoInvestigar(capChatInvestigar);
       host.querySelector('#cap-chat-clear')?.addEventListener('click', () => { _clearActiveLog(); chatInput?.focus(); });
       // Preguntas sugeridas \u2192 enviar al chat (antes copiaban al clipboard).
       host.addEventListener('click', (e) => {
@@ -7506,6 +7562,25 @@
         }
         if (u.includes('/api/v1/capabilities/ppl-chat')) {
           await espera(1100);
+          // Un "¿por qué?" (o Investigar) contesta con varias consultas, como el backend.
+          let pedido = {};
+          try { pedido = JSON.parse(opts.body || '{}'); } catch (_) { /* sin body */ }
+          if (pedido.investigar || /por\s*qu[eé]|a\s+qu[eé]\s+se\s+deb/i.test(pedido.question || '')) {
+            const porCodigo = { schema: [{ name: 'transaction.response_code', type: 'string' }, { name: 'fallidas', type: 'long' }, { name: 'pct', type: 'double' }],
+                                datarows: [['51', 2210, 41.2], ['91', 1350, 25.2], ['05', 980, 18.3]] };
+            const porCanal = { schema: [{ name: 'channel', type: 'string' }, { name: 'fallidas', type: 'long' }, { name: 'pct', type: 'double' }],
+                               datarows: [['APP', 3890, 6.1], ['WEB', 1470, 3.2]] };
+            return json({
+              answer: 'Vista previa, con datos de ejemplo: la mayoría de los fallos son por saldo insuficiente (código 51, 2.210, el 41,2 %), seguidos por el emisor no disponible (91, 1.350). La app falla casi el doble que la web (6,1 % contra 3,2 %). Los datos no dicen por qué la app falla más: solo que ahí se concentran.',
+              ppl: 'source=transacciones-billetera-* | where transaction.status=\'FAILED\' | stats count() as fallidas by transaction.response_code\nsource=transacciones-billetera-* | stats count() as total, sum(fallo) as fallidas by channel',
+              result: porCodigo,
+              consultas: [
+                { ppl: 'source=transacciones-billetera-* | where transaction.status=\'FAILED\' | stats count() as fallidas by transaction.response_code | eventstats sum(fallidas) as total | eval pct = round(fallidas * 100.0 / total, 1) | sort -fallidas | head 3', ok: true, result: porCodigo, error: '' },
+                { ppl: 'source=transacciones-billetera-* | eval fallo=if(transaction.status=\'FAILED\',1,0) | stats sum(fallo) as fallidas, count() as total by channel | eval pct = round(fallidas * 100.0 / total, 1)', ok: true, result: porCanal, error: '' },
+                { ppl: 'source=transacciones-billetera-* | stats count() by device.os', ok: false, result: {}, error: 'Field [device.os] not found.' },
+              ],
+            });
+          }
           return json({
             answer: 'Vista previa, con datos de ejemplo: la operación más frecuente es LOGIN (24.492), seguida de las consultas de saldo (19.990) y las transferencias (19.483).',
             ppl: 'source=transacciones-billetera-* | stats count() as total by transaction.operation_code | sort -total | head 5',

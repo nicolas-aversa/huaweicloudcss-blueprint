@@ -6,6 +6,8 @@ qué ofrecer: PPL 3 en el chat, Anomaly Detection, Alerting, Security Analytics.
 import json
 import pathlib
 
+import pytest
+
 import capabilities as caps
 import main
 
@@ -88,6 +90,17 @@ def test_si_el_cluster_no_contesta_no_se_guarda_nada(monkeypatch, tmp_path):
     assert pasos == [("Plugins del cluster", False, "el cluster no respondió a _cat/plugins")]
 
 
+@pytest.mark.parametrize("respuesta", [{}, [], {"error": "x"}])
+def test_una_respuesta_rara_no_es_que_no_hay_nada(monkeypatch, tmp_path, respuesta):
+    """Un cluster real siempre lista plugins: vacío o no-lista es "no se sabe".
+    Un test del chat con un fake que contestaba {} a todo dejaba guardado "no
+    hay ningún plugin" en el terraform/ real."""
+    monkeypatch.setattr(main, "_os_req", lambda *a, **k: _Resp(200, respuesta))
+    assert main._detectar_capacidades("http://x:9200", "admin", "pw") is None
+    assert main._registrar_capacidades({"public_endpoint": "x:9200"}, "admin", "pw", False, tmp_path) is None
+    assert not (tmp_path / main._CLUSTER_FEATURES_NAME).exists()
+
+
 def test_el_paso_dice_que_falta(monkeypatch, tmp_path):
     solo_ml = [{"component": "opensearch-ml"}]
     monkeypatch.setattr(main, "_os_req",
@@ -104,7 +117,8 @@ def test_se_detecta_al_aplicar_y_al_provisionar_y_se_expone():
     i = src.index("def apply_schema(")
     assert "_registrar_capacidades(cluster, os_user, request.opensearch_password," in src[i:i + 5000]
     j = src.index("def provision_capabilities(")
-    assert "_registrar_capacidades(cluster, user, password, request.https_enabled, terraform_dir, run)" in src[j:j + 3500]
+    assert ("_registrar_capacidades(cluster, user, password, request.https_enabled,\n"
+            "                                            terraform_dir, run))") in src[j:j + 3800]
     assert "cluster_features=_read_cluster_features(terraform_dir) or None," in src
     # Al destruir el entorno se va con él, y nunca va al repo.
     k = src.index("_remove_capabilities(terraform_dir)\n    for tmp in")

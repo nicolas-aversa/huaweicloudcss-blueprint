@@ -171,7 +171,7 @@ def test_el_chat_agrega_sus_reglas_al_prompt_del_indice():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def ppl_chat(")
     cuerpo = src[i:src.index("\nclass ", i)]
-    assert "_sp += _REGLAS_DEL_CHAT" in cuerpo
+    assert "_sp += _reglas_del_chat(ppl_v3)" in cuerpo
     assert "return _conversar(request.question, request.history" in cuerpo
     assert main._SIN_CONSULTA in main._REGLAS_DEL_CHAT and main._SIN_DATO in main._REGLAS_DEL_CHAT
 

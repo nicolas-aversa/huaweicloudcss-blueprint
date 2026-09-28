@@ -5243,6 +5243,10 @@ def _detectar_capacidades(base: str, user: str, password: str) -> "dict | None":
         plugins = r.json()
     except ValueError:
         return None
+    # Un cluster real siempre lista plugins: una lista vacía o algo que no es
+    # una lista no dice "no hay nada", dice que no se sabe.
+    if not isinstance(plugins, list) or not plugins:
+        return None
     settings: dict = {}
     s = _os_req("GET", f"{base}/_cluster/settings?include_defaults=true"
                        "&filter_path=**.plugins.calcite.enabled", user, password, timeout=15)
@@ -5251,7 +5255,7 @@ def _detectar_capacidades(base: str, user: str, password: str) -> "dict | None":
             settings = s.json() or {}
         except ValueError:
             settings = {}
-    return caps.resumir_capacidades(plugins if isinstance(plugins, list) else [], settings)
+    return caps.resumir_capacidades(plugins, settings)
 
 
 def _registrar_capacidades(cluster: dict, user: str, password: str, https_enabled: bool,
@@ -5267,6 +5271,24 @@ def _registrar_capacidades(cluster: dict, user: str, password: str, https_enable
         faltan = [f["nombre"] for f in feats["funciones"] if not f["ok"]]
         runs.step(run, "Plugins del cluster", True, ("sin " + ", ".join(faltan)) if faltan else "")
     return feats
+
+
+def _asegurar_ppl_v3(cluster: dict, user: str, password: str, https_enabled: bool,
+                     terraform_dir: Path, run: "dict | None", feats: "dict | None") -> "dict | None":
+    """PPL 3 viene prendido desde 3.3; si alguien apagó Calcite, se prende (el
+    setting es dinámico). Solo si el cluster DICE que está apagado: sin dato, no
+    se toca nada."""
+    if not feats or not feats.get("ppl") or feats.get("calcite") is not False:
+        return feats
+    r = _os_req("PUT", f"{_os_base(cluster, https_enabled)}/_cluster/settings", user, password,
+                json_body={"persistent": {"plugins.calcite.enabled": True}}, timeout=30)
+    ok = r is not None and r.status_code == 200
+    if run is not None:
+        runs.step(run, "PPL 3 (Calcite)", ok,
+                  "" if ok else f"no se pudo prender: status {getattr(r, 'status_code', None)}")
+    if not ok:
+        return feats
+    return _registrar_capacidades(cluster, user, password, https_enabled, terraform_dir) or feats
 
 
 def _index_ready_for_capabilities(base: str, user: str, password: str,
@@ -6661,7 +6683,9 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
     # cuanto el browser cerraba la pestaña.
     run = runs.start("capabilities", detail=", ".join(slugs))
-    _registrar_capacidades(cluster, user, password, request.https_enabled, terraform_dir, run)
+    _asegurar_ppl_v3(cluster, user, password, request.https_enabled, terraform_dir, run,
+                     _registrar_capacidades(cluster, user, password, request.https_enabled,
+                                            terraform_dir, run))
     for slug in slugs:
         has_spec = _caps.get_capability_spec(slug) is not None
         has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
@@ -6712,12 +6736,20 @@ class PplChatRequest(BaseModel):
     # la tardanza?" se procesaba como una pregunta nueva: se repetía la consulta
     # y el modelo inventaba una justificación.
     history: list[ChatTurno] = Field(default_factory=list, max_length=40)
+    # Modo Investigar: varias consultas cruzadas en vez de una. Los "¿por qué?"
+    # lo usan solos; esto lo pide para cualquier pregunta.
+    investigar: bool = False
+    # Lo que ya se sabe de lo que se pregunta (p. ej. "Explicar" un hallazgo:
+    # la ventana de tiempo y la IP).
+    contexto: str = Field(default="", max_length=500)
 
 
 class PplChatResponse(BaseModel):
     answer: str
     ppl: str = ""
     result: dict = Field(default_factory=dict)
+    # En una investigación, cada consulta con su resultado o su error.
+    consultas: list[dict] = Field(default_factory=list)
 
 
 def _index_time_window(base: str, user: str, password: str, index_pattern: str):
@@ -6758,23 +6790,43 @@ def _index_time_window(base: str, user: str, password: str, index_pattern: str):
 _TURNOS_DE_MEMORIA = 4
 _SIN_CONSULTA = "NO_QUERY"
 _SIN_DATO = "NO_DATA"
-_REGLAS_DEL_CHAT = (
-    "\n\nCONVERSATION RULES:\n"
-    f"A. If the user asks HOW or WHY a previous answer was obtained, or asks about that "
-    f"previous result itself instead of new data, output exactly {_SIN_CONSULTA}\n"
-    f"B. If answering needs information that is NOT in FIELDS and NO field is related, output "
-    f"exactly {_SIN_DATO}: <the missing information>. NEVER invent a field name. If a related "
-    "field exists, answer with it instead.\n"
-    "C. Use the CONVERSATION (if any) to resolve references like 'esas', 'ese puntaje', "
-    "'and by month?'.\n"
-    "D. WHY questions (reasons, causes, what went wrong, complaints, topics, what people say, "
-    "or the language of a text): (1) if there is a FREE-TEXT field, do NOT aggregate: return "
+# Ante un "¿por qué?" con texto libre: con el motor viejo, leer muestras; con
+# PPL 3, primero agrupar los textos parecidos para CONTAR qué dicen (si no
+# agrupan, `_conversar` cae a las muestras igual).
+_D1_MUESTRA = (
+    "(1) if there is a FREE-TEXT field, do NOT aggregate: return "
     "sample rows of it so they can be read, e.g. source=<index> | where <filters> and "
-    "isnotnull(<text_field>) | fields <text_field> | head 30; (2) otherwise, if there are fields "
-    "that explain the outcome (response, error or status codes, the failed step), aggregate the "
-    "bad outcomes by them, e.g. source=<index> | where <failure condition> | stats count() as "
-    "total by <code_field> | sort -total | head 10. Output NO_DATA only if no field relates."
-)
+    "isnotnull(<text_field>) | fields <text_field> | head 30; ")
+_D1_PATRONES = (
+    "(1) if there is a FREE-TEXT field, group similar texts to COUNT what they say, e.g. "
+    "source=<index> | where <filters> and isnotnull(<text_field>) | patterns <text_field> "
+    "method=brain mode=aggregation | sort -pattern_count | head 10; ")
+
+
+def _reglas_con(d1: str) -> str:
+    return (
+        "\n\nCONVERSATION RULES:\n"
+        f"A. If the user asks HOW or WHY a previous answer was obtained, or asks about that "
+        f"previous result itself instead of new data, output exactly {_SIN_CONSULTA}\n"
+        f"B. If answering needs information that is NOT in FIELDS and NO field is related, output "
+        f"exactly {_SIN_DATO}: <the missing information>. NEVER invent a field name. If a related "
+        "field exists, answer with it instead.\n"
+        "C. Use the CONVERSATION (if any) to resolve references like 'esas', 'ese puntaje', "
+        "'and by month?'.\n"
+        "D. WHY questions (reasons, causes, what went wrong, complaints, topics, what people say, "
+        "or the language of a text): " + d1 + "(2) otherwise, if there are fields "
+        "that explain the outcome (response, error or status codes, the failed step), aggregate the "
+        "bad outcomes by them, e.g. source=<index> | where <failure condition> | stats count() as "
+        "total by <code_field> | sort -total | head 10. Output NO_DATA only if no field relates."
+    )
+
+
+_REGLAS_DEL_CHAT = _reglas_con(_D1_MUESTRA)
+_REGLAS_DEL_CHAT_V3 = _reglas_con(_D1_PATRONES)
+
+
+def _reglas_del_chat(ppl_v3: bool) -> str:
+    return _REGLAS_DEL_CHAT_V3 if ppl_v3 else _REGLAS_DEL_CHAT
 # Una consulta de filas (sin `stats`, con `head`) trae texto para LEER, no un
 # número: con el tope, la respuesta no manda miles de comentarios al modelo.
 _MAX_FILAS_DE_MUESTRA = 50
@@ -6805,6 +6857,160 @@ def _con_tope(ppl: str) -> str:
     return re.sub(r"(\|\s*head\s+)(\d+)",
                   lambda m: m.group(1) + str(min(int(m.group(2)), _MAX_FILAS_DE_MUESTRA)),
                   ppl, flags=re.I)
+
+
+# ── `patterns` (PPL 3): textos parecidos, agrupados y contados ───────────────
+def _es_patrones(ppl: str) -> bool:
+    return re.search(r"\|\s*patterns\b", ppl, re.I) is not None
+
+
+_VARIABLE = re.compile(r"<\*>|<token\d+>")
+
+
+def _grupos_utiles(result: dict) -> bool:
+    """¿Agrupó de verdad? `patterns` está hecho para mensajes de máquina; sobre
+    texto escrito por personas (reseñas) los grupos quedan de a uno o son puro
+    `<*>`. Útil = algún grupo con más de un texto y al menos dos palabras fijas."""
+    columnas = [c.get("name") for c in result.get("schema", [])]
+    if "patterns_field" not in columnas or "pattern_count" not in columnas:
+        return False
+    i_grupo, i_cant = columnas.index("patterns_field"), columnas.index("pattern_count")
+    for fila in result.get("datarows", []):
+        try:
+            cantidad = int(fila[i_cant])
+        except (TypeError, ValueError, IndexError):
+            continue
+        fijas = [p for p in _VARIABLE.sub(" ", str(fila[i_grupo])).split() if len(p) > 1]
+        if cantidad > 1 and len(fijas) >= 2:
+            return True
+    return False
+
+
+def _muestra_en_vez_de_patrones(ppl: str) -> "str | None":
+    """La misma consulta, leyendo filas del campo en vez de agruparlo."""
+    m = re.match(r"(.*?)\|\s*patterns\s+([\w.@]+)", ppl, re.I | re.S)
+    return f"{m.group(1).rstrip()} | fields {m.group(2)} | head 30" if m else None
+
+
+def _prompt_de_patrones(pregunta: str, ppl: str, result: dict, memoria: str) -> str:
+    """Contar qué dicen los grupos, en palabras, sin copiar los `<*>`."""
+    import json as _json
+    columnas = [c.get("name", "") for c in result.get("schema", [])]
+    col = {n: columnas.index(n) for n in ("patterns_field", "pattern_count", "sample_logs") if n in columnas}
+    grupos = []
+    for fila in result.get("datarows", []):
+        ejemplos = fila[col["sample_logs"]] if "sample_logs" in col else []
+        ejemplos = ejemplos if isinstance(ejemplos, list) else [ejemplos]
+        grupos.append({
+            "grupo": str(fila[col["patterns_field"]])[:_TEXTO_DE_MUESTRA] if "patterns_field" in col else "",
+            "cantidad": fila[col["pattern_count"]] if "pattern_count" in col else None,
+            "ejemplos": [str(e)[:200] for e in ejemplos[:2]],
+        })
+    return (
+        (memoria + "\n\n" if memoria else "")
+        + f"Pregunta del usuario: {pregunta}\n"
+        f"Consulta PPL que se ejecutó: {ppl}\n"
+        f"Grupos de textos parecidos ({len(grupos)}), con cuántos textos tiene cada uno y ejemplos: "
+        f"{_json.dumps(grupos, ensure_ascii=False)}\n\n"
+        "Respondé en el MISMO idioma que el usuario: contá en palabras de qué hablan los 3 a 5 "
+        "grupos más grandes, con su cantidad (separador de miles). En cada grupo, <*> marca lo que "
+        "cambia de un texto a otro: no lo copies, explicalo. Citá entre comillas un ejemplo corto de "
+        "los más grandes, en su idioma original. Los textos se agruparon por parecido de palabras, "
+        "no por significado: si dos grupos dicen lo mismo, sumalos y decilo."
+    )
+
+
+# ── Investigar: varias consultas para un "¿por qué?" ────────────────────────
+_MAX_CONSULTAS_DE_INVESTIGACION = 3
+_POR_QUE = re.compile(r"\b(por\s*qu[eé]|a\s+qu[eé]\s+se\s+deb\w*|qu[eé]\s+caus\w*|why|what\s+caus\w*)\b", re.I)
+
+
+def _es_por_que(pregunta: str) -> bool:
+    return _POR_QUE.search(pregunta or "") is not None
+
+
+def _plan_de_investigacion(texto: "str | None") -> list[str]:
+    """Las consultas que propuso el modelo: un array JSON o, si no vino así, las
+    líneas que empiezan con `source=`. Sin repetir y hasta tres."""
+    import json as _json
+    crudo = _limpiar_ppl(texto)
+    consultas: list = []
+    m = re.search(r"\[.*\]", crudo, re.S)
+    if m:
+        try:
+            arr = _json.loads(m.group(0))
+            consultas = [c for c in arr if isinstance(c, str)] if isinstance(arr, list) else []
+        except ValueError:
+            consultas = []
+    if not consultas:
+        consultas = crudo.splitlines()
+    fuera: list[str] = []
+    for c in consultas:
+        c = c.strip().rstrip(",").strip().strip('"').strip()
+        if c.lower().startswith("source=") and c not in fuera:
+            fuera.append(c)
+    return fuera[:_MAX_CONSULTAS_DE_INVESTIGACION]
+
+
+def _prompt_de_investigacion(pregunta: str, hechas: list[dict], memoria: str, contexto: str) -> str:
+    import json as _json
+    partes = []
+    for i, h in enumerate(hechas, 1):
+        if h["ok"]:
+            columnas = [c.get("name", "") for c in h["result"].get("schema", [])]
+            filas = [[(str(v)[:200] if isinstance(v, str) else v) for v in fila]
+                     for fila in h["result"].get("datarows", [])[:20]]
+            partes.append(f"Consulta {i}: {h['ppl']}\nColumnas {columnas}: {_json.dumps(filas, ensure_ascii=False)}")
+        else:
+            partes.append(f"Consulta {i}: {h['ppl']}\nFalló: {h['error']}")
+    return (
+        (memoria + "\n\n" if memoria else "")
+        + (f"Contexto: {contexto}\n" if contexto else "")
+        + f"Pregunta del usuario: {pregunta}\n\n" + "\n\n".join(partes) + "\n\n"
+        "Respondé en el MISMO idioma que el usuario, con un párrafo corto y hasta tres viñetas: qué "
+        "muestra cada corte, con sus números (separador de miles), y la conclusión que los datos "
+        "sostienen. Separá lo que los datos muestran de lo que no alcanzan a explicar: no inventes "
+        "causas. Si una consulta falló, no la menciones salvo que haga falta para responder. No "
+        "muestres JSON ni las consultas."
+    )
+
+
+def _investigar(pregunta: str, historial: list, campos: dict[str, str], predecir_ppl,
+                predecir_llm, ejecutar, contexto: str = "") -> "PplChatResponse | None":
+    """Hasta tres consultas que, juntas, expliquen un "¿por qué?", y una
+    respuesta que las cruza. None si no hay plan o no corrió ninguna: entonces
+    se contesta con una sola consulta, como siempre."""
+    memoria = _memoria(historial)
+    crudo = _limpiar_ppl(predecir_ppl(
+        (memoria + "\n\n" if memoria else "")
+        + (f"CONTEXT: {contexto}\n" if contexto else "")
+        + f"INVESTIGATION: {pregunta}\n"
+        "Output ONLY a JSON array with 2 or 3 PPL queries (strings), each starting with source=, "
+        "that together explain it: break the outcome down by the most relevant fields in FIELDS, "
+        "and compare it against the rest or against another period. If there is a FREE-TEXT field, "
+        "one of them may read or group it. Use ONLY fields in FIELDS. If the question is about a "
+        f"previous answer, or the information does not exist, follow the CONVERSATION RULES "
+        f"({_SIN_CONSULTA} / {_SIN_DATO})."))
+    if crudo.upper().startswith(_SIN_CONSULTA):
+        return _sobre_lo_anterior(pregunta, historial, memoria, predecir_llm)
+    if crudo.upper().startswith(_SIN_DATO):
+        return _falta_el_dato(crudo, campos, pregunta, memoria, predecir_llm)
+    consultas = _plan_de_investigacion(crudo)
+    if len(consultas) < 2:
+        return None
+    hechas = []
+    for c in consultas:
+        c = _con_tope(c)
+        ok, cuerpo = ejecutar(c)
+        hechas.append({"ppl": c, "ok": bool(ok), "result": cuerpo if ok else {},
+                       "error": "" if ok else str(cuerpo)[:300]})
+    buenas = [h for h in hechas if h["ok"]]
+    if not buenas:
+        return None
+    answer = predecir_llm(_prompt_de_investigacion(pregunta, hechas, memoria, contexto))
+    return PplChatResponse(
+        answer=answer or "No pude redactar la investigación: los datos están en el detalle.",
+        ppl="\n".join(h["ppl"] for h in buenas), result=buenas[0]["result"], consultas=hechas)
 
 
 def _prompt_de_muestra(pregunta: str, ppl: str, result: dict, memoria: str) -> str:
@@ -6897,12 +7103,21 @@ def _falta_el_dato(salida: str, campos: dict[str, str], pregunta: str = "", memo
 
 
 def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str],
-               predecir_ppl, predecir_llm, ejecutar) -> "PplChatResponse":
+               predecir_ppl, predecir_llm, ejecutar, investigar: bool = False,
+               contexto: str = "") -> "PplChatResponse":
     """La conversación, sin HTTP ni cluster: `predecir_ppl(prompt)` y
     `predecir_llm(prompt)` devuelven texto (o None); `ejecutar(ppl)` devuelve
-    `(True, {schema, datarows})` o `(False, error)`."""
+    `(True, {schema, datarows})` o `(False, error)`. Un "¿por qué?" (o el modo
+    Investigar) se contesta con varias consultas; si no sale, con una."""
+    if investigar or _es_por_que(pregunta):
+        investigado = _investigar(pregunta, historial, campos, predecir_ppl, predecir_llm,
+                                  ejecutar, contexto)
+        if investigado is not None:
+            return investigado
     memoria = _memoria(historial)
     prompt = (memoria + "\n\nPREGUNTA ACTUAL: " + pregunta) if memoria else pregunta
+    if contexto:
+        prompt += f"\nCONTEXT: {contexto}"
     ppl = _limpiar_ppl(predecir_ppl(prompt))
     if ppl.upper().startswith(_SIN_CONSULTA):
         return _sobre_lo_anterior(pregunta, historial, memoria, predecir_llm)
@@ -6932,9 +7147,18 @@ def _conversar(pregunta: str, historial: list[ChatTurno], campos: dict[str, str]
                                 detail={"stage": "ppl_chat",
                                         "message": f"El PPL no se pudo ejecutar: {str(cuerpo)[:300]}",
                                         "ppl": ppl})
+    if _es_patrones(ppl) and not _grupos_utiles(cuerpo):
+        # Los textos no se dejaron agrupar (típico de reseñas): se leen muestras.
+        muestra = _muestra_en_vez_de_patrones(ppl)
+        if muestra:
+            ok_m, cuerpo_m = ejecutar(muestra)
+            if ok_m:
+                ppl, cuerpo = muestra, cuerpo_m
     result = cuerpo
-    # Un "¿por qué?" o "¿de qué se quejan?" trae filas: se leen, no se cuentan.
-    armar = _prompt_de_muestra if _es_muestra(ppl) else _prompt_de_respuesta
+    # Un "¿por qué?" o "¿de qué se quejan?" trae grupos o filas: se cuentan los
+    # grupos, las filas se leen.
+    armar = (_prompt_de_patrones if _es_patrones(ppl)
+             else _prompt_de_muestra if _es_muestra(ppl) else _prompt_de_respuesta)
     answer = predecir_llm(armar(pregunta, ppl, result, memoria))
     return PplChatResponse(answer=answer or f"Resultado: {result['datarows']}", ppl=ppl, result=result)
 
@@ -6979,6 +7203,11 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     # tiene los verticals del repo, así que un caso creado desde el Builder se
     # quedaba sin system_prompt y el chat respondía sobre el índice de otro.
     _spec = _resolve_capability_spec(request.slug, base, user, password, terraform_dir)
+    # PPL 3 (Calcite): lo que detectó F0. Un entorno de antes de la detección
+    # se detecta acá, una vez (dos GET de metadatos), y queda guardado.
+    feats = (_read_cluster_features(terraform_dir)
+             or _registrar_capacidades(cluster, user, password, https, terraform_dir) or {})
+    ppl_v3 = bool(feats.get("ppl_v3"))
     if _spec:
         index_pattern = _spec.get("index_pattern", f"{request.slug}*")
         _sp = caps.build_ppl_system_prompt(
@@ -6987,6 +7216,7 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
             _spec.get("fields", {}),
             _spec.get("success_code", ""),
             _spec.get("label", request.slug),
+            ppl_v3=ppl_v3,
         )
         # Ventana temporal real del índice → el modelo elige el AÑO correcto cuando el
         # usuario menciona un mes/período sin año (evita rangos vacíos).
@@ -6996,7 +7226,7 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
                 f"\n\nDATA TIME WINDOW: @timestamp ranges from {tw[0]} to {tw[1]}. "
                 "If the user names a month or period without a year, choose the year that falls within this window."
             )
-        _sp += _REGLAS_DEL_CHAT
+        _sp += _reglas_del_chat(ppl_v3)
         predict_params["system_prompt"] = _sp.replace("\n", "\\n")
 
     def _predecir_ppl(prompt: str):
@@ -7013,7 +7243,8 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
         return True, {"schema": body.get("schema", []), "datarows": body.get("datarows", [])}
 
     return _conversar(request.question, request.history, (_spec or {}).get("fields", {}),
-                      _predecir_ppl, _predecir_llm, _ejecutar)
+                      _predecir_ppl, _predecir_llm, _ejecutar,
+                      investigar=request.investigar, contexto=request.contexto)
 
 
 class DatasetPreviewResponse(BaseModel):

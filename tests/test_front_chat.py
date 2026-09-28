@@ -150,12 +150,12 @@ def test_el_asistente_se_arma_desde_lo_guardado():
 
 def test_la_respuesta_va_al_caso_de_la_pregunta_y_al_asistente_actual():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question)"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     assert "const pend = _agregar(slug, 'bot'" in envio
     # Se guarda la respuesta entera y se busca su burbuja en lo que está en
     # pantalla ahora, no en la que había al preguntar.
-    assert "pend.html = `<div class=\"cap-chart-host\"></div>" in envio
+    assert "pend.html = `${cabecera}<div class=\"cap-chart-host\"></div>" in envio
     assert "pend.result = data.result" in envio
     assert "const el = _msgDe(pend);" in envio
     assert "document.querySelector(`#deploy-capabilities [data-msg=" in fn
@@ -174,7 +174,7 @@ def test_solo_en_memoria_y_se_borra_con_el_entorno():
 
 def test_la_pregunta_manda_la_memoria_de_su_caso():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question)"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     # El historial se toma ANTES de agregar la pregunta nueva.
     assert envio.index("const history = capChatHistorial(slug);") < envio.index("_agregar(slug, 'user'")
@@ -311,7 +311,7 @@ console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
 
 def test_despues_de_cada_respuesta_vuelven_las_sugeridas():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question)"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     # La pregunta queda anotada (para no volver a sugerirla) y la respuesta,
     # pendiente hasta que llega.
@@ -418,3 +418,80 @@ def test_la_vista_previa_del_entorno():
     assert "if (metodo !== 'GET' && u.includes('/api/v1/')) return json(" in fn, "ningún POST real"
     assert "real('/api/v1/dev/deploy-preview?paso=0.03')" in fn
     assert "if (params.get('chat') === '1') capChatAbierto = true;" in fn
+
+
+# ── Investigar ──────────────────────────────────────────────────────────────
+_ARNES_INVESTIGAR = r"""
+const icon = (n) => `<i:${n}>`;
+const escapeHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+""" + "{STORE}" + r"""
+const fallos = [];
+const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
+const res = (rows) => ({ schema: [{ name: 'c' }, { name: 'n' }], datarows: rows });
+const inv = { ppl: 'source=a\nsource=b', result: res([['x', 1]]), consultas: [
+  { ppl: 'source=a | stats count() by c', ok: true, result: res([['x', 1]]), error: '' },
+  { ppl: 'source=b | where a<1', ok: false, result: {}, error: 'Field [z] <not> found' },
+  { ppl: 'source=c', ok: true, result: res([['y', 2]]), error: '' },
+] };
+const cab = capChatCabeceraHTML(inv);
+check('cabecera', cab.includes('Investigación · 3 consultas') && cab.includes('<i:search>'), cab);
+check('sin investigación, sin cabecera', capChatCabeceraHTML({ ppl: 'source=a' }) === '' && capChatCabeceraHTML(null) === '');
+const det = capChatDetallesHTML(inv);
+check('cada consulta', (det.match(/class="cap-chat__consulta"/g) || []).length === 3, det);
+check('resumen', det.includes('ver las 3 consultas') && !det.includes('ver PPL / datos'));
+check('la que falló, con su error escapado', det.includes('No corrió: Field [z] &lt;not&gt; found'), det);
+check('la consulta escapada', det.includes('source=b | where a&lt;1'));
+check('las que corrieron, con su tabla', (det.match(/<table/g) || []).length === 2);
+const uno = capChatDetallesHTML({ ppl: 'source=a', result: res([['x', 1]]) });
+check('una consulta: ver PPL / datos', uno.includes('ver PPL / datos') && uno.includes('<code>source=a</code>') && uno.includes('<table'));
+check('nada que mostrar', capChatDetallesHTML({ answer: 'x' }) === '');
+const muchas = capChatTablaHTML(res(Array.from({ length: 30 }, (_, i) => ['r' + i, i])));
+check('tabla: hasta 20 filas', (muchas.match(/<tr>/g) || []).length === 21, muchas.length);
+check('tabla vacía', capChatTablaHTML(res([])) === '' && capChatTablaHTML(null) === '');
+console.log(fallos.join('\n'));
+process.exit(fallos.length ? 1 : 0);
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
+def test_una_investigacion_se_muestra_con_cada_consulta(tmp_path):
+    html = _INDEX.read_text(encoding="utf-8")
+    js = tmp_path / "inv.mjs"
+    js.write_text(_ARNES_INVESTIGAR.replace("{STORE}", _store(html)), encoding="utf-8")
+    res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
+
+
+def test_el_boton_investigar_vale_para_una_pregunta():
+    html = _INDEX.read_text(encoding="utf-8")
+    fn = _render(html)
+    i = fn.index('<form class="cap-chat__composer" id="cap-chat-form"')
+    form = fn[i:fn.index("</form>", i)]
+    assert 'id="cap-chat-investigar" aria-pressed="false"' in form
+    assert form.index('id="cap-chat-investigar"') < form.index('id="cap-chat-input"'), "a la izquierda del campo"
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
+    envio = envio[:envio.index("\n      }\n")]
+    # Se lee el modo, se apaga, y viaja con la pregunta (y el contexto).
+    assert envio.index("const investigar = capChatInvestigar;") < envio.index("_modoInvestigar(false);")
+    assert "question, slug, history, investigar, contexto," in envio
+    modo = fn[fn.index("function _modoInvestigar(on) {"):]
+    modo = modo[:modo.index("\n      }\n")]
+    assert "capChatInvestigar = on;" in modo and "setAttribute('aria-pressed', String(on))" in modo
+    assert "'¿Qué querés entender?'" in modo
+    assert "botonInvestigar?.addEventListener('click', () => { _modoInvestigar(!capChatInvestigar);" in fn
+    assert "_modoInvestigar(capChatInvestigar);" in fn, "un re-render respeta el modo"
+    # La respuesta: cabecera arriba y detalles por consulta.
+    assert "pend.html = `${cabecera}<div class=\"cap-chart-host\">" in envio
+    assert "el.innerHTML = `${cabecera}<div class=\"cap-chart-host\">" in envio
+    css = html[:html.index("</style>")]
+    assert '.cap-chat__modo[aria-pressed="true"] { color: var(--accent);' in css
+    # "fallidas y % por código" (PPL 3): barras por categoría, no dispersión.
+    assert "if (Q.length >= 2 && rows.length >= 3 && !N.length) {" in fn
+
+
+def test_la_vista_previa_tambien_investiga():
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function _vistaPreviaEntorno(params)")
+    fn = html[i:html.index("\n    }\n", i)]
+    assert r"if (pedido.investigar || /por\s*qu[eé]|a\s+qu[eé]\s+se\s+deb/i.test(pedido.question || ''))" in fn
+    assert "consultas: [" in fn and "ok: false" in fn

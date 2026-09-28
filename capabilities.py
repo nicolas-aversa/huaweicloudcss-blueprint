@@ -254,12 +254,38 @@ _AGENT_REACT_PROMPT = (
 )
 
 
+# Con PPL 3 (Calcite) las cuentas se pueden hacer en la consulta: `eval` después
+# de `stats`, `eventstats`, `top`/`rare` y `patterns`. Las reglas 1-3 y 6 del
+# prompt eran para el motor viejo, que no lo permitía.
+_REGLAS_PPL_V2 = (
+    "1. NEVER use eval AFTER stats. NEVER calculate rates or percentages in the query.\n"
+    "2. NEVER use: JOIN, subqueries, append, row_number(), arithmetic after stats.\n"
+    "3. eval ONLY before stats for binary flags.\n"
+    "4. NEVER use head unless the user asks for top N.\n"
+    "5. Single quotes for strings.\n"
+    "6. Return raw numbers only - let the LLM calculate rates.\n"
+)
+_REGLAS_PPL_V3 = (
+    "1. Rates and percentages CAN be computed in the query, with eval AFTER stats: "
+    "stats sum(failed) as failed, count() as total by <field> | eval failed_pct = round(failed * 100.0 / total, 2).\n"
+    "2. NEVER use: JOIN, lookup, subqueries, append. Use eventstats to compare each row or group "
+    "against the total, and top / rare for the most / least frequent values.\n"
+    "3. eval can go before stats (flags) or after it (rates).\n"
+    "4. NEVER use head unless the user asks for top N.\n"
+    "5. Single quotes for strings.\n"
+    "6. To COUNT what similar texts say (log messages, errors, comments), group them with "
+    "patterns: source=<index> | where isnotnull(<text_field>) | patterns <text_field> method=brain "
+    "mode=aggregation | sort -pattern_count | head 10\n"
+)
+
+
 def build_ppl_system_prompt(index_pattern: str, operations: list[str],
                             fields: dict[str, str], success_code: str = "",
-                            label: str = "") -> str:
+                            label: str = "", ppl_v3: bool = False) -> str:
     """System prompt del PPLTool: enseña el índice, campos y enum de operaciones,
     con reglas PPL. Generado desde el schema (mismo estilo que el prompt curado
-    del operador). Genérico: funciona para cualquier vertical."""
+    del operador). Genérico: funciona para cualquier vertical. Con `ppl_v3`, las
+    reglas y ejemplos del motor nuevo (cuentas en la consulta, `patterns`)."""
     ops = ", ".join(operations) if operations else "(a definir)"
     field_lines = "\n".join(f"- {path}: {desc}" for path, desc in fields.items()) if fields else "(a definir)"
     examples = ""
@@ -274,6 +300,14 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
                 f"# Success vs failure:\nsource={index_pattern} | eval ok=if(transaction.response_code='{success_code}',1,0) | stats sum(ok) as success, count() as total\n\n"
                 f"# Failures breakdown:\nsource={index_pattern} | eval failed=if(transaction.response_code!='{success_code}',1,0) | stats sum(failed) as failed, count() as total by {first_field} | sort -failed\n\n"
             )
+            if ppl_v3:
+                examples += (
+                    f"# Failure rate by field (PPL 3):\nsource={index_pattern} | eval failed=if(transaction.response_code!='{success_code}',1,0) | stats sum(failed) as failed, count() as total by {first_field} | eval failed_pct = round(failed * 100.0 / total, 2) | sort -failed_pct\n\n"
+                )
+        if ppl_v3:
+            examples += (
+                f"# Share of the total (PPL 3):\nsource={index_pattern} | stats count() as total by {first_field} | eventstats sum(total) as grand_total | eval pct = round(total * 100.0 / grand_total, 2) | sort -total\n\n"
+            )
     return (
         "You are a PPL query generator for OpenSearch. Output ONLY the raw PPL query. "
         "No explanation, no markdown, no backticks. "
@@ -282,12 +316,7 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         f"OPERATIONS:\n{ops}\n\n"
         f"FIELDS:\n{field_lines}\n\n"
         "CRITICAL RULES:\n"
-        "1. NEVER use eval AFTER stats. NEVER calculate rates or percentages in the query.\n"
-        "2. NEVER use: JOIN, subqueries, append, row_number(), arithmetic after stats.\n"
-        "3. eval ONLY before stats for binary flags.\n"
-        "4. NEVER use head unless the user asks for top N.\n"
-        "5. Single quotes for strings.\n"
-        "6. Return raw numbers only - let the LLM calculate rates.\n"
+        + (_REGLAS_PPL_V3 if ppl_v3 else _REGLAS_PPL_V2) +
         "7. To filter by date/time, COMPARE @timestamp with literals 'YYYY-MM-DD HH:mm:ss'. "
         "NEVER use match(), like() or wildcards ('2025-03-*') on @timestamp or any date field - it fails.\n"
         "8. For a whole month use a half-open range: @timestamp >= 'YYYY-MM-01 00:00:00' and @timestamp < '(next month)-01 00:00:00'. "
