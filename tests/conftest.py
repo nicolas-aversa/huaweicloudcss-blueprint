@@ -26,3 +26,9 @@ def _settings_aislados(tmp_path, monkeypatch):
     # pasaba a fallar. Los tests que necesitan un store lo vuelven a mover.
     (tmp_path / "data").mkdir(exist_ok=True)
     monkeypatch.setattr(_auth, "DATA_ROOT", tmp_path / "data")
+    # Las esperas entre sondeos al cluster (backtest de forecast, análisis
+    # histórico de AD) son de segundos: con un fake que nunca termina, un test
+    # dormía minutos de verdad. Los que las miden, las miden igual.
+    import main as _main
+    monkeypatch.setattr(_main, "_FORECAST_ESPERA_S", 0.0)
+    monkeypatch.setattr(_main, "_AD_ESPERA_S", 0.0)

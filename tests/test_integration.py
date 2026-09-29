@@ -4037,9 +4037,12 @@ def test_provision_capabilities_full_sequence(monkeypatch):
                     "aggregations": {"tmin": {"value": 1.5e12}, "tmax": {"value": 1.6e12}},
                     "hits": {"total": {"value": 5000}}})
             return _FakeResp(200, {"aggregations": {}})   # _discover_enums (terms)
-        # _profile del forecaster tras run_once: backtest completo.
+        # Como en CSS 3.4: el backtest completo está en run_once_task; el perfil
+        # (el forecast en tiempo real, que no se arranca) dice DISABLED.
+        if "/_plugins/_forecast/forecasters/" in url and url.endswith("?task=true"):
+            return _FakeResp(200, {"run_once_task": {"state": "TEST_COMPLETE"}})
         if "/_plugins/_forecast/forecasters/" in url and url.endswith("/_profile"):
-            return _FakeResp(200, {"forecaster_state": "TEST_COMPLETE"})
+            return _FakeResp(200, {"state": "DISABLED"})
         # Config os_chat: apunta el Assistant al agente root.
         if method == "PUT" and url.endswith("/.plugins-ml-config/_doc/os_chat"):
             os_chat_cfg.append((kwargs.get("json") or {}))
@@ -4057,8 +4060,8 @@ def test_provision_capabilities_full_sequence(monkeypatch):
     assert result["conversational"]["llm_model_id"] == "M2"
     # El agente queda apuntado al Assistant automáticamente (config os_chat).
     assert os_chat_cfg == [{"type": "os_chat_root_agent", "configuration": {"agent_id": "AG"}}]
-    # Los 3 forecasts del spec se crean, disparan run-once (backtest) y el
-    # _profile confirma TEST_COMPLETE (ya no se reporta ok a ciegas).
+    # Los 3 forecasts del spec se crean, disparan run-once (backtest) y su
+    # tarea confirma TEST_COMPLETE (ya no se reporta ok a ciegas).
     assert result["forecast"]["ok"]
     assert result["forecast"]["forecaster_ids"] == ["FC1", "FC2", "FC3"]
     assert "backtest" in result["forecast"]["note"].lower()
@@ -4101,16 +4104,75 @@ def test_build_forecaster_omits_low_seasonality_and_takes_window():
     assert C.build_forecaster("i-*", "f", suggested_seasonality=48)["suggested_seasonality"] == 48
 
 
-def test_forecast_test_state_reads_profile(monkeypatch):
-    """_forecast_test_state pollea el _profile: TEST_COMPLETE → ok; un estado de
-    espera/INIT → no ok (y no cuelga)."""
-    monkeypatch.setattr("requests.request",
-                        lambda m, u, **k: _FakeResp(200, {"forecaster_state": "TEST_COMPLETE"}))
-    assert main._forecast_test_state("http://x:9200", "a", "p", "FC", tries=1, delay=0) == (True, "TEST_COMPLETE")
-    monkeypatch.setattr("requests.request",
-                        lambda m, u, **k: _FakeResp(200, {"forecaster_state": "AWAITING_DATA_TO_INIT"}))
-    ok, state = main._forecast_test_state("http://x:9200", "a", "p", "FC", tries=2, delay=0)
-    assert ok is False and state == "AWAITING_DATA_TO_INIT"
+def _forecaster_fake(monkeypatch, tareas, resultados=0):
+    """El forecaster de mentira: `tareas` es la secuencia de run_once_task que
+    devuelve `?task=true`; el perfil siempre dice DISABLED, como en CSS 3.4."""
+    tareas = list(tareas)
+    pedidos, esperas = [], []
+
+    def fake(method, url, **kwargs):
+        pedidos.append((method, url, kwargs.get("json")))
+        if url.endswith("?task=true"):
+            return _FakeResp(200, {"run_once_task": tareas.pop(0) if len(tareas) > 1 else tareas[0]})
+        if url.endswith("/_profile"):
+            return _FakeResp(200, {"state": "DISABLED"})
+        if "opensearch-forecast-results" in url:
+            return _FakeResp(200, {"count": resultados})
+        return _FakeResp(404, {})
+
+    monkeypatch.setattr("requests.request", fake)
+    monkeypatch.setattr(main.time, "sleep", lambda s: esperas.append(s))
+    return pedidos, esperas
+
+
+def test_forecast_lee_la_tarea_del_backtest_no_el_perfil(monkeypatch):
+    """El caso del primer deploy real: perfil DISABLED, backtest TEST_COMPLETE."""
+    pedidos, esperas = _forecaster_fake(monkeypatch, [{"task_id": "T1", "state": "TEST_COMPLETE"}])
+    assert main._forecast_test_state("http://x", "a", "p", "FC", "T1", tries=3, delay=7) == (True, "TEST_COMPLETE")
+    assert [u for m, u, j in pedidos] == ["http://x/_plugins/_forecast/forecasters/FC?task=true"]
+    assert esperas == []
+
+
+def test_forecast_espera_mientras_corre(monkeypatch):
+    _, esperas = _forecaster_fake(monkeypatch, [{"state": "INIT_TEST"}, {"state": "RUNNING"},
+                                                {"state": "TEST_COMPLETE"}])
+    assert main._forecast_test_state("http://x", "a", "p", "FC", tries=5, delay=7) == (True, "TEST_COMPLETE")
+    assert esperas == [7, 7]
+
+
+def test_forecast_que_falla_dice_por_que(monkeypatch):
+    _forecaster_fake(monkeypatch, [{"state": "FAILED", "error": "No data in the history window"}])
+    assert main._forecast_test_state("http://x", "a", "p", "FC", tries=3, delay=0) == (
+        False, "FAILED: No data in the history window")
+    _forecaster_fake(monkeypatch, [{"state": "STOPPED"}])
+    assert main._forecast_test_state("http://x", "a", "p", "FC", tries=3, delay=0) == (False, "STOPPED")
+
+
+def test_forecast_sin_tarea_pero_con_resultados(monkeypatch):
+    pedidos, _ = _forecaster_fake(monkeypatch, [{}], resultados=17781)
+    assert main._forecast_test_state("http://x", "a", "p", "FC", "T9", tries=2, delay=0) == (True, "TEST_COMPLETE")
+    cuenta = next(j for m, u, j in pedidos if "opensearch-forecast-results" in u)
+    assert cuenta == {"query": {"term": {"task_id": "T9"}}}
+
+
+def test_forecast_de_otra_corrida_no_cuenta(monkeypatch):
+    _forecaster_fake(monkeypatch, [{"task_id": "VIEJA", "state": "TEST_COMPLETE"}])
+    ok, estado = main._forecast_test_state("http://x", "a", "p", "FC", "NUEVA", tries=2, delay=0)
+    assert ok is False and estado == "EN_CURSO (sin tarea todavía)"
+
+
+def test_forecast_siempre_en_curso_no_es_error(monkeypatch):
+    _, esperas = _forecaster_fake(monkeypatch, [{"state": "INIT_TEST"}])
+    assert main._forecast_test_state("http://x", "a", "p", "FC", tries=4, delay=1) == (False, "EN_CURSO (INIT_TEST)")
+    assert esperas == [1, 1, 1], "entre sondeos, no después del último"
+
+
+def test_forecast_usa_el_task_id_del_run_once_y_arma_el_mensaje():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    i = src.index('task_id = str((r1.json() or {}).get("taskId") or "")')
+    assert "_forecast_test_state(base, user, password, fc_id, task_id)" in src[i:i + 400]
+    assert "los forecasters quedaron en INIT / sin datos" not in src
+    assert 'fc_ok = n_ok > 0 or (bool(en_curso) and not fallidos)' in src
 
 
 def test_forecast_omitted_without_event_timestamp(monkeypatch):

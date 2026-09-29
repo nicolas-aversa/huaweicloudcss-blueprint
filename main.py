@@ -5486,38 +5486,60 @@ def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index
                     f"de a {intervalo} min, con {len(features)} medida{'s' if len(features) != 1 else ''}"}
 
 
-# Estados del _profile de un forecaster tras run_once. TEST_COMPLETE = el backtest
-# corrió con datos (lo que queremos). Los de "esperando datos"/"init" son
-# transitorios; el resto no-OK es error terminal.
+# El backtest de `_run_once` es una TAREA del forecaster: su estado está en
+# `?task=true` → `run_once_task`. El `state` del `_profile` es el del forecast en
+# tiempo real, que la plataforma no arranca: da DISABLED aunque el backtest haya
+# terminado bien. Visto en CSS 3.4: run_once_task en TEST_COMPLETE, ~17.800
+# resultados, y el perfil en DISABLED; se leía el perfil y se daba por fallido.
 _FORECAST_STATE_OK = {"TEST_COMPLETE"}
-_FORECAST_STATE_PENDING = {"INIT_TEST", "INITIALIZING_TEST", "AWAITING_DATA_TO_INIT",
-                           "AWAITING_DATA_TO_RESTART", "INIT", "INITIALIZING_FORECAST"}
+_FORECAST_STATE_FALLIDO = {"FAILED", "STOPPED", "INIT_FAILURE"}
+FORECAST_EN_CURSO = "EN_CURSO"
+_FORECAST_ESPERA_S = 5.0
 
 
-def _forecast_test_state(base: str, user: str, password: str, fc_id: str,
-                         tries: int = 8, delay: float = 5.0) -> "tuple[bool, str]":
-    """Pollea `GET /_plugins/_forecast/forecasters/<id>/_profile` tras `_run_once`
-    y devuelve ``(ok, state)``. ``ok`` = el backtest completó con datos
-    (``TEST_COMPLETE``). Así dejamos de reportar "ok" a ciegas: si el forecaster
-    queda en INIT vacío, el estado real llega al front."""
-    last = "UNKNOWN"
-    for _ in range(tries):
-        r = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_profile",
+def _hay_resultados_forecast(base: str, user: str, password: str, task_id: str) -> bool:
+    """¿El backtest ya escribió resultados? Respaldo por si la tarea no aparece."""
+    r = _os_req("POST", f"{base}/opensearch-forecast-results*/_count", user, password,
+                json_body={"query": {"term": {"task_id": task_id}}}, timeout=20)
+    try:
+        return _resp_ok(r) and int((r.json() or {}).get("count", 0)) > 0
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _forecast_test_state(base: str, user: str, password: str, fc_id: str, task_id: str = "",
+                         tries: int = 8, delay: "float | None" = None) -> "tuple[bool, str]":
+    """``(ok, estado)`` del backtest que lanzó `_run_once` (su `task_id`).
+    TEST_COMPLETE es ok; FAILED/STOPPED o un `error` de la tarea, falla con ese
+    texto; lo demás está en curso y se espera. Si al agotar los intentos sigue
+    corriendo: ``(False, "EN_CURSO (<último estado>)")``, que no es un error."""
+    ultimo = ""
+    delay = _FORECAST_ESPERA_S if delay is None else delay
+    for i in range(tries):
+        r = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{fc_id}?task=true",
                     user, password, timeout=20)
-        if r is not None and r.status_code == 200:
+        tarea: dict = {}
+        if _resp_ok(r):
             try:
-                body = r.json() or {}
-            except (ValueError, TypeError):
-                body = {}
-            state = str(body.get("forecaster_state") or body.get("state") or "").upper()
-            if state:
-                last = state
-                if state in _FORECAST_STATE_OK:
-                    return True, state
-                if state not in _FORECAST_STATE_PENDING and "INIT" not in state and "AWAIT" not in state:
-                    return False, state   # terminal no-OK (error / failure)
-        time.sleep(delay)
-    return False, last
+                tarea = (r.json() or {}).get("run_once_task") or {}
+            except (ValueError, AttributeError):
+                tarea = {}
+        if task_id and tarea.get("task_id") not in (None, "", task_id):
+            tarea = {}   # es de otra corrida
+        estado = str(tarea.get("state") or "").upper()
+        if estado:
+            ultimo = estado
+            if estado in _FORECAST_STATE_OK:
+                return True, estado
+            if tarea.get("error"):
+                return False, f"{estado}: {str(tarea['error'])[:200]}"
+            if estado in _FORECAST_STATE_FALLIDO:
+                return False, estado
+        elif task_id and _hay_resultados_forecast(base, user, password, task_id):
+            return True, "TEST_COMPLETE"
+        if i < tries - 1:
+            time.sleep(delay)
+    return False, f"{FORECAST_EN_CURSO} ({ultimo or 'sin tarea todavía'})"
 
 
 def _epoch_ms_to_iso(ms: float) -> str:
@@ -6067,28 +6089,42 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                                                             history=fc_history,
                                                             window_delay_minutes=window_delay_m), "_id")
                     if fc_id:
-                        _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once", user, password, timeout=30)
-                        _ok_fc, state = _forecast_test_state(base, user, password, fc_id)
+                        r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once",
+                                     user, password, timeout=30)
+                        task_id = ""
+                        if _resp_ok(r1):
+                            try:
+                                task_id = str((r1.json() or {}).get("taskId") or "")
+                            except (ValueError, AttributeError):
+                                task_id = ""
+                        _ok_fc, state = _forecast_test_state(base, user, password, fc_id, task_id)
                         states.append(f"{fc_spec['name']}={state}")
                         forecaster_ids.append(fc_id)
                 ids["forecaster_ids"] = forecaster_ids
                 ids["forecaster_id"] = forecaster_ids[0] if forecaster_ids else None
-                n_ok = sum(1 for s in states if s.endswith("TEST_COMPLETE"))
+                n_ok = sum(1 for s in states if s.endswith("=TEST_COMPLETE"))
+                en_curso = [s for s in states if f"={FORECAST_EN_CURSO}" in s]
+                fallidos = [s for s in states if not s.endswith("=TEST_COMPLETE") and s not in en_curso]
                 if not forecaster_ids:
                     result["forecast"] = {"ok": False, "reason": "no se pudo crear ningún forecaster"}
                 else:
+                    # En curso no es falla: el backtest sigue solo y los
+                    # resultados aparecen en Dashboards → Forecasting.
+                    partes = []
+                    if n_ok:
+                        partes.append(f"backtest OK ({n_ok}/{len(states)})")
+                    if en_curso:
+                        partes.append(f"{len(en_curso)} en curso: en unos minutos se ven en Dashboards → Forecasting")
+                    if fallidos:
+                        partes.append("fallaron: " + ", ".join(fallidos))
+                    fc_ok = n_ok > 0 or (bool(en_curso) and not fallidos)
                     fc_result = {
-                        "ok": n_ok > 0,
+                        "ok": fc_ok,
                         "forecaster_ids": forecaster_ids,
                         "states": states,
                         "window": {"interval_min": interval_m, "window_delay_min": window_delay_m, "history": hist},
+                        ("note" if fc_ok else "reason"): " · ".join(partes),
                     }
-                    if n_ok:
-                        fc_result["note"] = f"backtest OK ({n_ok}/{len(states)})"
-                    else:
-                        fc_result["reason"] = (
-                            "los forecasters quedaron en INIT / sin datos en la ventana "
-                            f"(estados: {', '.join(states)})")
                     result["forecast"] = fc_result
 
     # ── Anomaly Detection + Alerting ─────────────────────────────────────────
