@@ -6862,6 +6862,52 @@ class ProvisionCapabilitiesResponse(BaseModel):
     message: str = ""
 
 
+def _indices_sin_deteccion(base: str, user: str, password: str, pattern: str,
+                           spec: dict) -> "list[str] | None":
+    """Los índices del caso que NO estaban entre los meses declarados del dataset
+    (`security.meses`): los creó Logstash durante la ingesta, después de los
+    detectores, y de esos Security Analytics solo evaluó los primeros minutos.
+    None si no se pudo listar."""
+    import seguridad
+
+    esperados = set(seguridad.indices_mensuales(pattern, spec["meses"])) if spec.get("meses") else set()
+    r = _os_req("GET", f"{base}/_cat/indices/{pattern}?format=json&h=index", user, password, timeout=15)
+    if not _resp_ok(r):
+        return None
+    try:
+        hay = {row.get("index") for row in (r.json() or []) if row.get("index")}
+    except ValueError:
+        return None
+    return sorted(i for i in hay - esperados if not i.startswith("."))
+
+
+def _revisar_meses_de_seguridad(cluster: dict, user: str, password: str, https_enabled: bool,
+                                slugs: list[str], terraform_dir: Path, run: dict) -> None:
+    """Después de la ingesta: ¿algún mes quedó sin detección? Un evento fuera de
+    los meses declarados hace que Logstash cree ese índice sobre la marcha, y
+    sin esto el hueco no se veía en ningún lado."""
+    specs = verticals.security_specs()
+    registro = _read_security(terraform_dir)
+    pipe_reg = _read_pipelines_registry(terraform_dir)
+    base = _os_base(cluster, https_enabled)
+    for slug in slugs:
+        if slug not in specs or not registro.get(slug):
+            continue
+        indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
+        extras = _indices_sin_deteccion(base, user, password, index_pattern_from_name(indice), specs[slug])
+        if extras is None:
+            runs.step(run, f"Security Analytics · {slug} · meses", False,
+                      "no se pudieron listar los índices del caso para revisar la cobertura")
+        elif extras:
+            runs.step(run, f"Security Analytics · {slug} · meses", False, (
+                f"{', '.join(extras)}: lo creó Logstash durante la ingesta, después de los detectores, "
+                "así que Security Analytics no evaluó sus eventos. Sumá ese mes a security.meses del caso "
+                "y volvé a iniciar la ingesta.")[:300])
+        else:
+            runs.step(run, f"Security Analytics · {slug} · meses", True,
+                      "todos los meses del dataset tenían su índice antes que los detectores")
+
+
 @app.post(
     "/api/v1/onboarding/provision-capabilities",
     response_model=ProvisionCapabilitiesResponse,
@@ -6934,6 +6980,11 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
+    try:
+        _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
+                                    list(slugs), terraform_dir, run)
+    except Exception as exc:  # noqa: BLE001 — es una revisión, no frena el paso
+        print(f"[provision-capabilities] revisión de meses falló: {exc!r}")
 
     msg = "Plugins provisionados" if any_ok else "No se provisionó ningún plugin"
     runs.finish(run, "complete" if any_ok else "error", detail=msg)

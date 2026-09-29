@@ -653,3 +653,61 @@ def test_los_casos_de_seguridad_siguen_con_indice_mensual():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("function caseMeta(id)")
     assert ": `${meta.indexBase}-%{+YYYY.MM}`;" in html[i:html.index("\n    }\n", i)]
+
+
+# ── Después de la ingesta: ¿algún mes quedó sin detección? ──────────────────
+def _revisar(monkeypatch, tmp_path, cluster, slugs=("siem", "transacciones-billetera"), registrar=True):
+    monkeypatch.setattr(main, "_os_req", cluster.req)
+    pasos = []
+    monkeypatch.setattr(main.runs, "step", lambda run, name, ok, reason="": pasos.append((name, ok, reason)))
+    if registrar:
+        main._write_security(tmp_path, {"siem": {"detectores": {"siem-siem-auth": {"id": "D"}}}})
+    main._revisar_meses_de_seguridad({"public_endpoint": "x:9200"}, "admin", "pw", False,
+                                     list(slugs), tmp_path, {"id": "r"})
+    return pasos
+
+
+def test_si_todos_los_meses_estaban_se_dice_en_verde(monkeypatch, tmp_path):
+    pasos = _revisar(monkeypatch, tmp_path, _Cluster(indices=MESES_SIEM))
+    assert pasos == [("Security Analytics · siem · meses", True,
+                      "todos los meses del dataset tenían su índice antes que los detectores")]
+
+
+def test_un_mes_que_creo_logstash_se_avisa(monkeypatch, tmp_path):
+    """Un evento fuera de `security.meses`: Logstash creó el índice durante la
+    ingesta, después de los detectores, y sus eventos no se evaluaron."""
+    c = _Cluster(indices=MESES_SIEM + ["siem-2026.08", ".kibana_1"])
+    pasos = _revisar(monkeypatch, tmp_path, c)
+    assert len(pasos) == 1 and pasos[0][:2] == ("Security Analytics · siem · meses", False)
+    assert pasos[0][2].startswith("siem-2026.08: lo creó Logstash durante la ingesta")
+    assert "security.meses" in pasos[0][2] and ".kibana" not in pasos[0][2]
+
+
+def test_si_no_se_puede_listar_se_dice(monkeypatch, tmp_path):
+    class _SinCat(_Cluster):
+        def req(self, method, url, *a, **k):
+            return _Resp(500, text="boom") if "/_cat/indices/" in url else super().req(method, url, *a, **k)
+    pasos = _revisar(monkeypatch, tmp_path, _SinCat())
+    assert pasos == [("Security Analytics · siem · meses", False,
+                      "no se pudieron listar los índices del caso para revisar la cobertura")]
+
+
+def test_sin_security_analytics_provisionado_no_se_revisa(monkeypatch, tmp_path):
+    c = _Cluster(indices=MESES_SIEM + ["siem-2026.08"])
+    assert _revisar(monkeypatch, tmp_path, c, registrar=False) == []
+    assert c.pedidos == []
+
+
+def test_la_revision_usa_el_indice_del_deploy(monkeypatch, tmp_path):
+    main._write_pipelines_registry(tmp_path, {"siem": {"index": "siem-%{+YYYY.MM}"}})
+    c = _Cluster(indices=MESES_SIEM)
+    _revisar(monkeypatch, tmp_path, c)
+    assert c.pedidos == [("GET", "http://x:9200/_cat/indices/siem-*?format=json&h=index")]
+
+
+def test_la_revision_corre_al_provisionar_plugins():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    i = src.index("def provision_capabilities(")
+    cuerpo = src[i:src.index("\n    msg = ", i)]
+    assert "_revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,\n" in cuerpo
+    assert "list(slugs), terraform_dir, run)" in cuerpo
