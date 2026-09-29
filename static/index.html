@@ -4788,7 +4788,8 @@
         : (meta.obsPrefix || `${meta.indexBase}-logs/`);
       const index = isCustom
         ? (document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}')
-        : `${meta.indexBase}-%{+YYYY.MM}`;
+        // Un caso con Security Analytics escribe en un índice fijo (outputIndex).
+        : (meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`);
       const fieldsCount = isCustom ? (state.fields || []).length : (data?.fields || []).length;
       return { bucket, prefix, index, fieldsCount, ownBucket,
                label: meta?.label || 'Tu log', isCustom };
@@ -7431,6 +7432,15 @@
       const dashUrl = data.dashboards_url || '';
       const pipelines = Array.isArray(data.pipelines) ? data.pipelines : [];
       const hasCapabilitySlug = pipelines.some(p => p.has_capabilities);
+      // Con SIEM o FortiAnalyzer el paso 1 también crea el índice y los
+      // detectores de Security Analytics: tienen que existir antes que los datos.
+      const paso1 = pipelines.some(p => SECURITY_SLUGS.has(p.slug))
+        ? { titulo: 'Index template, dashboards y detectores',
+            texto: 'Define los tipos, importa los dashboards y crea los detectores de Security Analytics, antes de ingestar.',
+            boton: 'Aplicar template, dashboards y detectores' }
+        : { titulo: 'Index template + dashboards',
+            texto: 'Define los tipos en OpenSearch e importa los dashboards, antes de ingestar.',
+            boton: 'Aplicar index template + dashboards' };
 
       // Puesta en marcha: qué queda pendiente tras aprovisionar. El /terraform/status
       // trae por pipeline `dashboards_imported` (schema) y `active` (ingesta); y
@@ -7524,9 +7534,8 @@
           </summary>
           <div class="setup-card__body">
           <div class="form-hint" style="margin:0 0 8px;">Completá la secuencia para dejar el entorno operativo. Cada paso es reintentable.</div>
-          ${setupStep(1, schemaDone, !schemaDone, 'Index template + dashboards',
-            'Define los tipos en OpenSearch e importa los dashboards, antes de ingestar.',
-            'infra-apply-schema-btn', 'Aplicar index template + dashboards', 'Volver a aplicar')}
+          ${setupStep(1, schemaDone, !schemaDone, paso1.titulo, paso1.texto,
+            'infra-apply-schema-btn', paso1.boton, 'Volver a aplicar')}
           ${setupStep(2, ingestDone, schemaDone && !ingestDone, 'Iniciar ingesta',
             !schemaDone ? 'Aplicá primero el index template.'
               : rechazadas.length ? `CSS rechazó el configuration file de ${rechazadas.map(p => escapeHtml(p.slug)).join(', ')}: al reintentar se manda de nuevo.`

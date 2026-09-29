@@ -116,8 +116,13 @@ def front_payload() -> dict:
          "members": _members(g["id"])}
         for g in GROUPS
     ]
+    import seguridad
+
     verticals = []
     for v in _VERTICALS:
+        # Con Security Analytics el caso escribe en un índice fijo (ver
+        # seguridad.py): el output y la línea del filter que lo arma.
+        sa = bool(v.get("security"))
         verticals.append({
             "slug": v["slug"],
             "label": v.get("label", ""),
@@ -125,6 +130,7 @@ def front_payload() -> dict:
             "group": v.get("group", ""),
             "icon": v.get("icon", ""),
             "indexBase": v.get("index_base", ""),
+            "outputIndex": seguridad.indice_de_salida(v["index_base"]) if sa else "",
             # Origen propio del vertical. Vacíos = el default de siempre: el
             # bucket de demos del SA y el prefijo `<indexBase>-logs/`. Solo los
             # declara un caso cuyo dato NO es un dataset que la plataforma sube.
@@ -136,7 +142,8 @@ def front_payload() -> dict:
             "hasCapability": "capability" in v,
             "hasSecurity": bool(v.get("security")),
             "sample": v.get("sample", ""),
-            "filterCode": v.get("filter_code", ""),
+            "filterCode": (seguridad.filtro_con_indice(v.get("filter_code", "")) if sa
+                           else v.get("filter_code", "")),
             "fields": v.get("fields", []),
             "questions": v.get("suggested_questions", []),
         })

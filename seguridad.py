@@ -145,15 +145,41 @@ def alias_del_caso(index_pattern: str) -> str:
     return index_pattern.rstrip("*").rstrip("-._") + "-seguridad"
 
 
-def indice_para_detector(index_pattern: str) -> str:
-    """El índice que se crea si el pattern todavía no matchea ninguno.
+# El índice ÚNICO de un caso con Security Analytics. El monitor de un detector
+# (doc-level, CSS 3.4) solo sigue bien a un índice que ya existía cuando se
+# creó: de ahí en adelante procesa todo lo que entra. Un índice que se suma al
+# alias DESPUÉS lo lee solo durante sus primeros minutos y nunca guarda hasta
+# dónde llegó (medido en un cluster real: la tanda que llegó 3 min después no
+# se evaluó). Con índices mensuales cada mes nace durante la ingesta, así que
+# de cada uno se procesaba solo el comienzo. Por eso estos casos escriben en un
+# único índice fijo, que se crea antes que los detectores.
+SUFIJO_DEL_INDICE = "eventos"
+# Logstash arma el nombre con un campo de metadata que pone el filter: el
+# output conserva el `%{`, del que la plataforma deriva el slug (`siem`) y el
+# index pattern (`siem-*`), y en OpenSearch el índice queda `siem-eventos`.
+CAMPO_DEL_INDICE = "[@metadata][indice_sa]"
 
-    Security Analytics valida los campos de las reglas contra el mapping del
-    índice, y el detector tiene que existir ANTES de la ingesta: su monitor
-    procesa entero un índice que nace después de él, pero de uno que ya existía
-    solo ve lo nuevo. Un índice vacío que matchea el pattern (y toma el index
-    template) resuelve las dos cosas. Si el pattern es un nombre fijo, es ese.
-    """
+
+def indice_del_caso(index_pattern: str) -> str:
+    """`siem-*` → `siem-eventos`. Si el pattern es un nombre fijo, es ese."""
     if not index_pattern.endswith("*"):
         return index_pattern
-    return index_pattern.rstrip("*").rstrip("-._") + "-sa-bootstrap"
+    return index_pattern.rstrip("*").rstrip("-._") + "-" + SUFIJO_DEL_INDICE
+
+
+def indice_de_salida(index_base: str) -> str:
+    """El `index` del output de Logstash: `siem` → `siem-%{[@metadata][indice_sa]}`."""
+    return f"{index_base}-%{{{CAMPO_DEL_INDICE}}}"
+
+
+def filtro_con_indice(filter_code: str) -> str:
+    """El filter del caso, con la línea que fija el sufijo del índice como
+    primera instrucción: así la lleva todo evento, pase por la rama que pase."""
+    if not filter_code or CAMPO_DEL_INDICE in filter_code:
+        return filter_code
+    cabeza, llave, resto = filter_code.partition("{")
+    if not llave:
+        return filter_code
+    linea = (f"  # Security Analytics: todo va a un índice fijo (ver seguridad.py).\n"
+             f'  mutate {{ add_field => {{ "{CAMPO_DEL_INDICE}" => "{SUFIJO_DEL_INDICE}" }} }}\n')
+    return f"{cabeza}{{\n{linea}{resto.lstrip(chr(10))}"

@@ -49,8 +49,8 @@ def test_cada_paso_hecho_se_puede_rehacer():
     paso = vista[i:vista.index("</div>`;", i)]
     hecho = paso[paso.index("${done"):paso.index(": `<button class=\"btn ${enabled")]
     assert "Hecho" in hecho and 'id="${btnId}">${redoLabel}</button>' in hecho
-    for boton, texto, rehacer in (("infra-apply-schema-btn", "Aplicar index template + dashboards", "Volver a aplicar"),
-                                  ("infra-ingest-btn", "Iniciar ingesta con Logstash", "Reiniciar ingesta"),
+    assert "'infra-apply-schema-btn', paso1.boton, 'Volver a aplicar')" in vista
+    for boton, texto, rehacer in (("infra-ingest-btn", "Iniciar ingesta con Logstash", "Reiniciar ingesta"),
                                   ("infra-capabilities-btn", "Provisionar plugins", "Volver a provisionar plugins")):
         assert f"'{boton}', '{texto}', '{rehacer}')" in vista, boton
 
@@ -122,3 +122,16 @@ def test_verificar_ingesta_es_rojo_y_dice_todos_los_pipelines():
     i = HTML.index("async function verificarIngesta(btn)")
     assert "'Todos los pipelines tienen documentos.'" in HTML[i:i + 4000]
     assert "Todas las pipelines" not in HTML
+
+
+def test_con_seguridad_el_paso_1_dice_que_crea_los_detectores():
+    """El paso 1 crea el índice y los detectores de Security Analytics: su
+    nombre lo tiene que decir, porque tienen que existir antes que los datos."""
+    vista = _vista()
+    i = vista.index("const paso1 = ")
+    bloque = vista[i:vista.index("};", vista.index(": { titulo:", i)) + 2]
+    assert "pipelines.some(p => SECURITY_SLUGS.has(p.slug))" in bloque
+    con, sin = bloque.split(": { titulo:", 1)
+    assert "'Index template, dashboards y detectores'" in con and "Security Analytics" in con
+    assert "'Aplicar template, dashboards y detectores'" in con
+    assert "'Index template + dashboards'" in sin and "'Aplicar index template + dashboards'" in sin

@@ -128,10 +128,50 @@ def test_el_template_de_un_caso_de_seguridad_lleva_el_alias(monkeypatch):
     assert "aliases" not in enviados["p-transacciones-billetera"]["template"]
 
 
-def test_el_indice_para_el_detector():
-    assert seguridad.indice_para_detector("siem-*") == "siem-sa-bootstrap"
-    assert seguridad.indice_para_detector("fortianalyzer*") == "fortianalyzer-sa-bootstrap"
-    assert seguridad.indice_para_detector("transacciones") == "transacciones"
+def test_el_indice_fijo_del_caso():
+    assert seguridad.indice_del_caso("siem-*") == "siem-eventos"
+    assert seguridad.indice_del_caso("fortianalyzer*") == "fortianalyzer-eventos"
+    assert seguridad.indice_del_caso("transacciones") == "transacciones"
+
+
+def test_el_output_conserva_el_slug_y_el_pattern():
+    """El output lleva `%{`: de ahí salen el slug y el pattern de todo lo demás
+    (terraform, dashboards, anomalías). Un nombre fijo a secas los rompía."""
+    salida = seguridad.indice_de_salida("siem")
+    assert salida == "siem-%{[@metadata][indice_sa]}"
+    assert main._slug_from_index(salida) == "siem"
+    assert main.index_pattern_from_name(salida) == "siem-*"
+    assert seguridad.indice_del_caso(main.index_pattern_from_name(salida)) == "siem-eventos"
+
+
+def test_el_filtro_arma_el_indice_en_su_primera_linea():
+    f = seguridad.filtro_con_indice('filter {\n  kv { source => "message" }\n}')
+    assert f.splitlines()[0] == "filter {"
+    assert f.splitlines()[2] == '  mutate { add_field => { "[@metadata][indice_sa]" => "eventos" } }'
+    assert f.endswith('  kv { source => "message" }\n}')
+    assert seguridad.filtro_con_indice(f) == f, "no se agrega dos veces"
+    assert seguridad.filtro_con_indice("") == ""
+
+
+@pytest.mark.parametrize("slug", sorted(SPECS))
+def test_cada_caso_de_seguridad_escribe_en_su_indice_fijo(slug):
+    v = next(x for x in verticals.front_payload()["verticals"] if x["slug"] == slug)
+    assert v["outputIndex"] == f"{slug}-%{{[@metadata][indice_sa]}}"
+    assert '"[@metadata][indice_sa]" => "eventos"' in v["filterCode"]
+    otro = next(x for x in verticals.front_payload()["verticals"] if x["slug"] == "transacciones-billetera")
+    assert otro["outputIndex"] == "" and "indice_sa" not in otro["filterCode"]
+
+
+def test_el_backend_fuerza_el_indice_fijo_aunque_el_body_traiga_el_mensual():
+    """El body de "Reiniciar ingesta" se rearma del registro del deploy, que
+    trae `siem-%{+YYYY.MM}` de antes."""
+    req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x", cases=[
+        main.PipelineCase(slug="siem", index_name="siem-%{+YYYY.MM}", filter_code="filter {\n}"),
+        main.PipelineCase(slug="transacciones-billetera", index_name="tb-%{+YYYY.MM}", filter_code="filter {\n}")])
+    main._casos_de_seguridad_al_indice_fijo(req)
+    assert req.cases[0].index_name == "siem-%{[@metadata][indice_sa]}"
+    assert "indice_sa" in req.cases[0].filter_code
+    assert req.cases[1].index_name == "tb-%{+YYYY.MM}" and req.cases[1].filter_code == "filter {\n}"
 
 
 # ── Provisionar ─────────────────────────────────────────────────────────────
@@ -167,10 +207,23 @@ class _Cluster:
             return _Resp(200, {"hits": {"hits": [{"_id": i, "_source": {"title": t}} for t, i in self.reglas.items()]}})
         if ruta.startswith("/_cat/indices/"):
             return _Resp(200, [{"index": i} for i in self.indices])
+        if method == "HEAD":
+            return _Resp(200 if ruta.strip("/") in self.indices else 404)
+        if method == "DELETE" and ruta.startswith("/_plugins/_security_analytics/detectors/"):
+            did = ruta.rsplit("/", 1)[1]
+            self.detectores = {n: i for n, i in self.detectores.items() if i != did}
+            self.creados.append(("borrado_detector", did))
+            return _Resp(200)
+        if method == "DELETE":
+            self.indices.remove(ruta.strip("/"))
+            self.creados.append(("borrado_indice", ruta.strip("/")))
+            return _Resp(200)
         if ruta == "/_aliases":
             self.creados.append(("alias", json_body))
             return _Resp(200, {"acknowledged": True})
         if method == "PUT":
+            if ruta.strip("/") in self.indices:
+                return _Resp(400, text="resource_already_exists_exception")
             self.indices.append(ruta.strip("/"))
             self.creados.append(("indice", ruta.strip("/")))
             return _Resp(200, {"acknowledged": True})
@@ -222,9 +275,9 @@ def test_sin_el_plugin_se_dice(monkeypatch, tmp_path):
 def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     c = _Cluster()
     res, pasos = _provisionar(monkeypatch, tmp_path, c)
-    # Primero el índice (el pattern no matcheaba ninguno), después tipos, reglas, detectores y correlaciones.
+    # Primero el índice fijo, después tipos, reglas, detectores y correlaciones.
     tipos = [x[0] for x in c.creados]
-    assert tipos[0] == "indice" and c.creados[0][1] == "siem-sa-bootstrap"
+    assert tipos[0] == "indice" and c.creados[0][1] == "siem-eventos"
     assert tipos.index("log_type") < tipos.index("regla") < tipos.index("detector") < tipos.index("correlacion")
     assert [x[1]["name"] for x in c.creados if x[0] == "log_type"] == [
         "siem_fortigate", "siem_auth", "siem_cloudaudit", "siem_waf"]
@@ -240,7 +293,7 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     # not supported for doc level monitors", CSS 3.4).
     assert auth["indices"] == ["siem-seguridad"]
     alias = next(x[1] for x in c.creados if x[0] == "alias")
-    assert alias == {"actions": [{"add": {"index": "siem-*", "alias": "siem-seguridad"}}]}
+    assert alias == {"actions": [{"add": {"index": "siem-eventos", "alias": "siem-seguridad"}}]}
     assert tipos.index("alias") < tipos.index("detector")
     assert {r["id"] for r in auth["custom_rules"]} == {c.reglas["SSH: login fallido"], c.reglas["Acceso a /etc/shadow con sudo"]}
     corr = [x[1] for x in c.creados if x[0] == "correlacion"]
@@ -252,6 +305,7 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     assert ("Security Analytics · siem · detector siem_waf", True, "") in pasos
     assert ("Security Analytics · siem · alias siem-seguridad", True, "") in pasos
     assert ("Security Analytics · siem · 3 de 3 correlaciones", True, "") in pasos
+    assert ("Security Analytics · siem · índice siem-eventos", True, "creado antes que los detectores") in pasos
     assert all(ok for _, ok, _ in pasos)
     # Y queda registrado (lo lee la vista).
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
@@ -273,10 +327,25 @@ def test_la_segunda_vez_no_duplica_nada(monkeypatch, tmp_path):
     assert len(json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]["correlaciones"]) == 3
 
 
-def test_con_indice_no_se_crea_el_de_arranque(monkeypatch, tmp_path):
-    c = _Cluster(indices=["siem-2025.10"])
+def test_si_el_indice_es_nuevo_los_detectores_se_recrean(monkeypatch, tmp_path):
+    """La ingesta borra el índice para arrancar limpia: un detector que ya
+    estaba quedó sobre un índice que no existe, y del que se cree después solo
+    vería los primeros minutos."""
+    c = _Cluster()
     _provisionar(monkeypatch, tmp_path, c)
-    assert not [x for x in c.creados if x[0] == "indice"]
+    viejos = dict(c.detectores)
+    c.indices.remove("siem-eventos")
+    c.creados.clear()
+    _, pasos = _provisionar(monkeypatch, tmp_path, c)
+    tipos = [x[0] for x in c.creados]
+    assert tipos[0] == "indice"
+    assert sorted(x[1] for x in c.creados if x[0] == "borrado_detector") == sorted(viejos.values())
+    assert tipos.index("indice") < tipos.index("borrado_detector") < tipos.index("detector")
+    assert set(c.detectores) == set(viejos) and not set(c.detectores.values()) & set(viejos.values())
+    assert ("Security Analytics · siem · detector siem_auth", True, "recreado sobre el índice nuevo") in pasos
+    reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
+    assert reg["detectores"]["siem-siem-auth"]["id"] == c.detectores["siem-siem-auth"]
+    assert not [x for x in c.creados if x[0] == "log_type"], "tipos y reglas no se tocan"
 
 
 def test_una_regla_que_falla_se_dice_con_el_motivo(monkeypatch, tmp_path):
@@ -304,7 +373,7 @@ def test_fortianalyzer_sin_correlaciones(monkeypatch, tmp_path):
     assert [x[1]["name"] for x in c.creados if x[0] == "detector"] == ["fortianalyzer-fortianalyzer"]
     assert not [x for x in c.creados if x[0] == "correlacion"]
     assert not [p for p in pasos if "correlaciones" in p[0]]
-    assert c.creados[0] == ("indice", "fortianalyzer-sa-bootstrap")
+    assert c.creados[0] == ("indice", "fortianalyzer-eventos")
 
 
 def test_se_provisiona_al_aplicar_para_cada_caso_de_seguridad():
@@ -314,7 +383,8 @@ def test_se_provisiona_al_aplicar_para_cada_caso_de_seguridad():
     assert "specs_seguridad = verticals.security_specs()" in cuerpo
     assert "index_pattern_from_name(index_name_t), spec_sa," in cuerpo
     # Una sola llamada: el deploy ya no lo corre (lo hacía antes de que existiera el template).
-    assert src.count("_provision_security_analytics(") == 2   # la definición y la de apply-schema
+    # La definición, la de apply-schema y la de la ingesta (índice + detectores antes de Logstash).
+    assert src.count("_provision_security_analytics(") == 3
     for rastro in ("_SA_SIGMA_RULES", "_SA_CORRELATIONS", "siem-unified-detector", "_PCT_SECURITY"):
         assert rastro not in src, rastro
 
@@ -504,3 +574,86 @@ def test_que_se_va_a_crear_lo_dice():
     payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
     assert payload["siem"]["hasSecurity"] and payload["fortianalyzer"]["hasSecurity"]
     assert not payload["transacciones-billetera"]["hasSecurity"]
+
+
+# ── Iniciar ingesta: índice y detectores antes de Logstash ──────────────────
+def _preparar(monkeypatch, tmp_path, cluster, casos):
+    monkeypatch.setattr(main, "_os_req", cluster.req)
+    monkeypatch.setattr(main, "_sa_post_texto", cluster.post_texto)
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
+    req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x",
+                                      cases=[main.PipelineCase(slug=s, index_name=i) for s, i in casos])
+    main._casos_de_seguridad_al_indice_fijo(req)
+    return [json.loads(e[len("data: "):]) for e in main._preparar_seguridad_para_ingesta(req, tmp_path)]
+
+
+def test_la_ingesta_migra_los_indices_mensuales_al_fijo(monkeypatch, tmp_path):
+    """Un entorno de antes: índices por mes y detectores sobre ellos. Logstash
+    relee todo el bucket al reiniciar, así que los mensuales se borran."""
+    c = _Cluster(indices=["siem-2025.07", "siem-2025.08", "siem-sa-bootstrap"])
+    c.detectores = {"siem-siem-auth": "VIEJO"}
+    eventos = _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}"), ("transacciones-billetera", "tb-%{+YYYY.MM}")])
+    assert sorted(x[1] for x in c.creados if x[0] == "borrado_indice") == ["siem-2025.07", "siem-2025.08", "siem-sa-bootstrap"]
+    assert c.indices == ["siem-eventos"]
+    assert ("borrado_detector", "VIEJO") in c.creados and "VIEJO" not in c.detectores.values()
+    tipos = [x[0] for x in c.creados]
+    assert tipos.index("borrado_indice") < tipos.index("indice") < tipos.index("detector")
+    assert eventos == [{"type": "step", "name": "Security Analytics · siem", "ok": True,
+                        "reason": "índice siem-eventos y 4 detectores listos antes de la ingesta; "
+                                  "se borraron 3 índices anteriores del caso (se reingestan)"}]
+    assert not [u for _, u in c.pedidos if "/tb" in u], "un caso sin seguridad no se toca"
+
+
+def test_con_el_indice_fijo_la_ingesta_no_toca_nada(monkeypatch, tmp_path):
+    c = _Cluster(indices=["siem-eventos"])
+    assert _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}")]) == []
+    assert [(m, u.split(":9200")[1]) for m, u in c.pedidos] == [("HEAD", "/siem-eventos")] and not c.creados
+
+
+def test_sin_casos_de_seguridad_la_ingesta_no_consulta(monkeypatch, tmp_path):
+    c = _Cluster()
+    assert _preparar(monkeypatch, tmp_path, c, [("transacciones-billetera", "tb-%{+YYYY.MM}")]) == []
+    assert c.pedidos == []
+
+
+def test_en_la_ingesta_va_despues_de_limpiar_y_antes_de_terraform():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    i = src.index("def _deploy_stream_gen_raw(")
+    cuerpo = src[i:src.index("\ndef ", i + 10)]
+    limpiar = cuerpo.index("_clear_case_indices(request")
+    preparar = cuerpo.index("yield from _preparar_seguridad_para_ingesta(request, terraform_dir)")
+    assert limpiar < preparar < cuerpo.index('["terraform", "init"')
+    # Dentro de la fase 2: con el deploy (fase 1) no hay Logstash que arrancar.
+    fase2 = cuerpo.index("if request.start_ingestion:\n        if request.clear_indices:")
+    assert fase2 < preparar < cuerpo.index("    else:\n        yield _sse({\"type\": \"progress\", \"percent\": 2")
+
+
+def test_el_front_despliega_el_indice_fijo():
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("function caseMeta(id)")
+    cuerpo = html[i:html.index("\n    }\n", i)]
+    assert "(meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`)" in cuerpo
+
+
+def test_si_el_head_no_responde_el_indice_fijo_no_se_borra(monkeypatch, tmp_path):
+    """Sin respuesta del HEAD se toma como que falta; pero el índice fijo nunca
+    está entre los "anteriores" a borrar."""
+    class _SinHead(_Cluster):
+        def req(self, method, url, *a, **k):
+            if method == "HEAD":
+                self.pedidos.append((method, url))
+                return None
+            return super().req(method, url, *a, **k)
+    c = _SinHead(indices=["siem-eventos", "siem-2025.07"])
+    _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}")])
+    assert [x[1] for x in c.creados if x[0] == "borrado_indice"] == ["siem-2025.07"]
+    assert "siem-eventos" in c.indices
+
+
+def test_el_deploy_y_el_schema_normalizan_los_casos_al_entrar():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    for funcion, siguiente in (("def _deploy_stream_gen(", "for raw in _deploy_stream_gen_raw("),
+                               ("def apply_schema(", "terraform_dir = _active_terraform_dir()")):
+        i = src.index(funcion)
+        cuerpo = src[i:src.index(siguiente, i)]
+        assert "_casos_de_seguridad_al_indice_fijo(request)" in cuerpo, funcion
