@@ -164,3 +164,16 @@ def test_la_scrollbar_es_fina_y_roja():
     # porque en Chrome anularían los pseudo-elementos.
     ff = CSS[CSS.index("@supports not selector(::-webkit-scrollbar) {"):]
     assert "scrollbar-width: thin; scrollbar-color: var(--accent) transparent;" in ff[:200]
+
+
+def test_las_pestanas_de_casos_no_se_salen_con_muchos_casos():
+    """Con 9 casos las etiquetas se partían en dos líneas y la última pestaña
+    se salía de la tarjeta: una sola fila, sin cortes, que se desplaza."""
+    html = (pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
+    i = html.index("    .case-tabs {")
+    tabs = html[i:html.index("}", i)]
+    tab = html[html.index("    .case-tab {"):html.index("}", html.index("    .case-tab {"))]
+    assert "overflow-x: auto" in tabs and "box-shadow: inset 0 -2px 0 var(--border-subtle)" in tabs
+    assert "border-bottom: 2px" not in tabs
+    assert "white-space: nowrap" in tab and "flex: 1 0 auto" in tab and "margin-bottom: -2px" not in tab
+    assert html.count("tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });") == 2
