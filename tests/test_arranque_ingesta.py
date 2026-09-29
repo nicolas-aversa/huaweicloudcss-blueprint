@@ -218,3 +218,26 @@ def test_el_target_apunta_al_recurso_de_la_activacion():
     recurso = main._TARGET_ACTIVACION.split("=", 1)[1]
     tipo, nombre = recurso.split(".")
     assert f'resource "{tipo}" "{nombre}"' in tf
+
+
+def test_el_apply_no_manda_mas_de_4_configuraciones_a_la_vez(monkeypatch, tmp_path):
+    """CSS rechaza una configuración si ya hay 5 verificándose (CSS.5090); con
+    10 casos, el paralelismo por defecto de Terraform (10) la hacía chocar."""
+    vistos = []
+
+    class _Popen:
+        returncode = 0
+
+        def __init__(self, cmd, *a, **k):
+            vistos.append(cmd)
+            self.stdout = __import__("io").StringIO("")
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(main.subprocess, "Popen", _Popen)
+    list(main._correr_apply(tmp_path, ["-target=x"], 0, 1, []))
+    assert vistos and vistos[0][:6] == ["terraform", "apply", "-auto-approve", "-input=false",
+                                        "-no-color", "-parallelism=4"]
+    assert vistos[0][-1] == "-target=x"
+    assert main._PARALELISMO_APPLY < 5

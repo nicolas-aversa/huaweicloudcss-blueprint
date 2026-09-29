@@ -2994,6 +2994,14 @@ def _eventos_de_linea(progreso: "progreso_tf.ProgresoApply", line: str, desde: f
             yield _sse(ev)
 
 
+# CSS no acepta más de 5 configuraciones de Logstash "en verificación" a la vez
+# ("CSS.5090 ... more than 5 configs in the checking state"). Terraform crea de
+# a 10 en paralelo: con 10 casos la sexta en entrar se rechazaba. Cada alta
+# espera a que CSS termine de verificarla, así que con 4 en paralelo nunca hay
+# más de 4 verificándose (y queda margen si CSS tarda en liberar una).
+_PARALELISMO_APPLY = 4
+
+
 def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
                   tf_lines: list[str], plan: bool = True, extras: list[dict] | None = None):
     """Un `terraform apply`, streameado: eventos SSE mientras corre y, al
@@ -3002,7 +3010,8 @@ def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: flo
     completa otro: sus recursos se actualizan en la lista que ya está)."""
     progreso = progreso_tf.ProgresoApply(adicionales=len(extras or []))
     process = subprocess.Popen(
-        ["terraform", "apply", "-auto-approve", "-input=false", "-no-color", *args],
+        ["terraform", "apply", "-auto-approve", "-input=false", "-no-color",
+         f"-parallelism={_PARALELISMO_APPLY}", *args],
         cwd=terraform_dir,
         env=tfstate.tf_env(),
         stdout=subprocess.PIPE,
