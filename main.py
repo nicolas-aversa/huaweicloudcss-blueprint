@@ -5375,6 +5375,10 @@ def _discover_enums(base: str, user: str, password: str, index_pattern: str,
     return {path: values for _n, path, values in found}
 
 
+_RANGO_INTENTOS = 3
+_RANGO_ESPERA_S = 3.0
+
+
 def _index_time_bounds(base: str, user: str, password: str, index_pattern: str,
                        time_field: str = "@timestamp") -> "tuple[float, float, int] | None":
     """Rango real de la serie: ``(min_epoch_ms, max_epoch_ms, doc_count)`` de
@@ -5382,12 +5386,25 @@ def _index_time_bounds(base: str, user: str, password: str, index_pattern: str,
 
     Lo usa el forecaster para caer su ventana de análisis SOBRE los datos
     (ver `_forecaster_window`) — el fallo de "INIT vacío" es no encontrar serie.
+
+    Si el cluster no contesta se reintenta: justo al provisionar suele estar
+    ocupado (ingesta en curso, backtests de forecast recién lanzados). En el
+    primer deploy real, SIEM se quedó sin anomalías por un único 'no respondió'
+    que se leía igual que "el índice no tiene fechas".
     """
-    r = _os_req("POST", f"{base}/{index_pattern}/_search", user, password,
-                json_body={"size": 0, "track_total_hits": True, "aggs": {
-                    "tmin": {"min": {"field": time_field}},
-                    "tmax": {"max": {"field": time_field}},
-                }}, timeout=30)
+    r = None
+    for intento in range(_RANGO_INTENTOS):
+        r = _os_req("POST", f"{base}/{index_pattern}/_search", user, password,
+                    json_body={"size": 0, "track_total_hits": True, "aggs": {
+                        "tmin": {"min": {"field": time_field}},
+                        "tmax": {"max": {"field": time_field}},
+                    }}, timeout=30)
+        if r is not None and r.status_code in (200, 201):
+            break
+        print(f"[capabilities] rango de @timestamp de '{index_pattern}' (intento {intento + 1}): "
+              f"{_resp_motivo(r)}")
+        if intento < _RANGO_INTENTOS - 1:
+            time.sleep(_RANGO_ESPERA_S * (intento + 1))
     if r is None or r.status_code not in (200, 201):
         return None
     try:
@@ -5477,7 +5494,9 @@ def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index
         return {"ok": False, "reason": motivo}
     rango = _index_time_bounds(base, user, password, index_pattern)
     if not rango:
-        return {"ok": False, "reason": "el índice no tiene un rango de @timestamp utilizable — anomalías omitidas"}
+        return {"ok": False, "reason": "no se pudo leer el rango de @timestamp del índice (el cluster no "
+                                       "respondió o el índice no tiene fechas) — anomalías omitidas; "
+                                       "reintentá con «Volver a provisionar plugins»"}
     min_ms, max_ms, _docs = rango
     intervalo = _intervalo_de_anomalias(min_ms, max_ms)
     rd = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors", user, password, timeout=30,

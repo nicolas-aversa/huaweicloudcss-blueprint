@@ -32,3 +32,4 @@ def _settings_aislados(tmp_path, monkeypatch):
     import main as _main
     monkeypatch.setattr(_main, "_FORECAST_ESPERA_S", 0.0)
     monkeypatch.setattr(_main, "_AD_ESPERA_S", 0.0)
+    monkeypatch.setattr(_main, "_RANGO_ESPERA_S", 0.0)

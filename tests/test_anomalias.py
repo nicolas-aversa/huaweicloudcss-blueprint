@@ -126,7 +126,7 @@ def test_en_curso_tambien_esta_bien(monkeypatch):
 
 @pytest.mark.parametrize("kw, motivo", [
     ({"listo": (False, "índice sin documentos aún")}, "índice sin documentos aún"),
-    ({"rango": None}, "rango de @timestamp utilizable"),
+    ({"rango": None}, "no se pudo leer el rango de @timestamp del índice"),
     ({"crear": 400}, "no se pudo crear el detector: status 400: bad feature"),
 ])
 def test_lo_que_impide_crearlo_se_dice(monkeypatch, kw, motivo):
@@ -375,3 +375,48 @@ def test_la_vista_la_pinta_con_sus_fichas():
     k = html.index("async function verAnomalias(btn) {")
     ver = html[k:html.index("\n    }\n", k)]
     assert "fetch('/api/v1/anomalias/resumen')" in ver and "destino.innerHTML = anomaliasDetalleHTML(data.casos || []);" in ver
+
+
+# ── El rango de fechas, con reintentos ──────────────────────────────────────
+def _rango_fake(monkeypatch, respuestas):
+    respuestas = list(respuestas)
+    pedidos = []
+
+    def fake(method, url, user, password, json_body=None, timeout=30):
+        pedidos.append(url)
+        return respuestas.pop(0) if respuestas else None
+
+    monkeypatch.setattr(main, "_os_req", fake)
+    return pedidos
+
+
+_RANGO_OK = {"aggregations": {"tmin": {"value": 1000.0}, "tmax": {"value": 5000.0}}, "hits": {"total": {"value": 42}}}
+
+
+def test_el_rango_reintenta_si_el_cluster_no_responde(monkeypatch):
+    """En el primer deploy real SIEM se quedó sin anomalías por un 'no
+    respondió' puntual (ingesta en curso y backtests recién lanzados)."""
+    pedidos = _rango_fake(monkeypatch, [_Resp(429, text="rejected"), None, _Resp(200, _RANGO_OK)])
+    assert main._index_time_bounds("http://x", "a", "p", "siem*") == (1000.0, 5000.0, 42)
+    assert pedidos == ["http://x/siem*/_search"] * 3
+
+
+def test_el_rango_se_rinde_despues_de_tres(monkeypatch):
+    pedidos = _rango_fake(monkeypatch, [_Resp(503, text="busy")] * 5)
+    assert main._index_time_bounds("http://x", "a", "p", "siem*") is None
+    assert len(pedidos) == main._RANGO_INTENTOS == 3
+
+
+def test_un_indice_sin_fechas_no_se_reintenta(monkeypatch):
+    vacio = {"aggregations": {"tmin": {"value": None}, "tmax": {"value": None}}, "hits": {"total": {"value": 0}}}
+    pedidos = _rango_fake(monkeypatch, [_Resp(200, vacio)])
+    assert main._index_time_bounds("http://x", "a", "p", "x*") is None and len(pedidos) == 1
+
+
+def test_el_rango_espera_cada_vez_mas(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(main, "_RANGO_ESPERA_S", 3.0)
+    monkeypatch.setattr(main.time, "sleep", lambda s: esperas.append(s))
+    _rango_fake(monkeypatch, [None, None, None])
+    main._index_time_bounds("http://x", "a", "p", "x*")
+    assert esperas == [3.0, 6.0], "entre intentos, no después del último"
