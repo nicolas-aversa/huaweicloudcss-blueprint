@@ -94,7 +94,7 @@ def test_las_rutas_se_llaman_como_en_la_consola():
     assert main._RUTA_MAAS == ("rutas:maas", "Rutas del cluster · IPs servicio MaaS")
     assert main._RUTA_FUENTES == ("rutas:fuentes", "Rutas del Logstash · IPs de las fuentes")
     assert progreso_tf._ETIQUETAS["snat"] == "SNAT · salida a MaaS"
-    assert progreso_tf._ETIQUETAS["nat"] == "Public Gateway"
+    assert progreso_tf._ETIQUETAS["nat"] == "Public gateway"
 
 
 def test_los_logos_son_los_oficiales_de_draw_io():
