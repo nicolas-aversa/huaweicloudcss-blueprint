@@ -1141,6 +1141,9 @@ Eventos de sistema, SD-WAN y REST API: mensajes, status, latencia, jitter, packe
     # Security Analytics: un tipo de log para FortiGate, con reglas Sigma sobre
     # los campos kv del log (valores verificados contra fortianalyzer.log).
     'security': {
+        # Meses del dataset (UTC, como los nombra Logstash): sus índices se crean
+        # antes que los detectores (ver seguridad.indices_mensuales).
+        'meses': ('2025-07', '2026-07'),
         'log_types': [
             {
                 'nombre': 'fortianalyzer',

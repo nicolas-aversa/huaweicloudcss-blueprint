@@ -4788,8 +4788,7 @@
         : (meta.obsPrefix || `${meta.indexBase}-logs/`);
       const index = isCustom
         ? (document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}')
-        // Un caso con Security Analytics escribe en un índice fijo (outputIndex).
-        : (meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`);
+        : `${meta.indexBase}-%{+YYYY.MM}`;
       const fieldsCount = isCustom ? (state.fields || []).length : (data?.fields || []).length;
       return { bucket, prefix, index, fieldsCount, ownBucket,
                label: meta?.label || 'Tu log', isCustom };
@@ -7432,7 +7431,7 @@
       const dashUrl = data.dashboards_url || '';
       const pipelines = Array.isArray(data.pipelines) ? data.pipelines : [];
       const hasCapabilitySlug = pipelines.some(p => p.has_capabilities);
-      // Con SIEM o FortiAnalyzer el paso 1 también crea el índice y los
+      // Con SIEM o FortiAnalyzer el paso 1 también crea los índices y los
       // detectores de Security Analytics: tienen que existir antes que los datos.
       const paso1 = pipelines.some(p => SECURITY_SLUGS.has(p.slug))
         ? { titulo: 'Index template, dashboards y detectores',

@@ -520,6 +520,9 @@ Eventos de 4 fuentes normalizados a ECS. Tráfico, intrusiones, autenticación, 
     # campos que deja el filter de arriba, y correlaciones entre fuentes para
     # las tres campañas del dataset (misma campaña en dos fuentes).
     'security': {
+        # Meses del dataset (UTC, como los nombra Logstash): sus índices se crean
+        # antes que los detectores (ver seguridad.indices_mensuales).
+        'meses': ('2025-07', '2026-07'),
         'log_types': [
             {
                 'nombre': 'siem_fortigate',

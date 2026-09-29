@@ -128,50 +128,52 @@ def test_el_template_de_un_caso_de_seguridad_lleva_el_alias(monkeypatch):
     assert "aliases" not in enviados["p-transacciones-billetera"]["template"]
 
 
-def test_el_indice_fijo_del_caso():
-    assert seguridad.indice_del_caso("siem-*") == "siem-eventos"
-    assert seguridad.indice_del_caso("fortianalyzer*") == "fortianalyzer-eventos"
-    assert seguridad.indice_del_caso("transacciones") == "transacciones"
+MESES_SIEM = [f"siem-{a}.{m:02d}" for a, m in [(2025, x) for x in range(7, 13)] + [(2026, x) for x in range(1, 8)]]
 
 
-def test_el_output_conserva_el_slug_y_el_pattern():
-    """El output lleva `%{`: de ahí salen el slug y el pattern de todo lo demás
-    (terraform, dashboards, anomalías). Un nombre fijo a secas los rompía."""
-    salida = seguridad.indice_de_salida("siem")
-    assert salida == "siem-%{[@metadata][indice_sa]}"
-    assert main._slug_from_index(salida) == "siem"
-    assert main.index_pattern_from_name(salida) == "siem-*"
-    assert seguridad.indice_del_caso(main.index_pattern_from_name(salida)) == "siem-eventos"
+def test_los_indices_mensuales_del_caso():
+    assert seguridad.indices_mensuales("siem-*", ("2025-11", "2026-02")) == [
+        "siem-2025.11", "siem-2025.12", "siem-2026.01", "siem-2026.02"]
+    assert seguridad.indices_mensuales("fortianalyzer*", ("2026-07", "2026-07")) == ["fortianalyzer-2026.07"]
+    # Con el mismo nombre que les pone Logstash (`<caso>-%{+YYYY.MM}`).
+    assert seguridad.indices_mensuales(main.index_pattern_from_name("siem-%{+YYYY.MM}"), ("2025-07", "2026-07")) == MESES_SIEM
 
 
-def test_el_filtro_arma_el_indice_en_su_primera_linea():
-    f = seguridad.filtro_con_indice('filter {\n  kv { source => "message" }\n}')
-    assert f.splitlines()[0] == "filter {"
-    assert f.splitlines()[2] == '  mutate { add_field => { "[@metadata][indice_sa]" => "eventos" } }'
-    assert f.endswith('  kv { source => "message" }\n}')
-    assert seguridad.filtro_con_indice(f) == f, "no se agrega dos veces"
-    assert seguridad.filtro_con_indice("") == ""
+_MES_DEL_EVENTO = (
+    (re.compile(r"date=(\d{4})-(\d{2})-"), None),           # FortiGate / FortiAnalyzer
+    (re.compile(r"^<\d+>(\d{4})-(\d{2})-"), None),         # syslog (auth)
+    (re.compile(r'"time":\s*(\d{13})'), "ms"),               # cloudaudit / waf
+)
+
+
+def _meses_del_archivo(path: pathlib.Path) -> set[str]:
+    import datetime as dt
+    meses = set()
+    for linea in path.read_text(encoding="utf-8").splitlines():
+        for rx, tipo in _MES_DEL_EVENTO:
+            m = rx.search(linea)
+            if m:
+                if tipo == "ms":
+                    t = dt.datetime.fromtimestamp(int(m.group(1)) / 1000, dt.timezone.utc)
+                    meses.add(f"{t.year:04d}-{t.month:02d}")
+                else:
+                    meses.add(f"{m.group(1)}-{m.group(2)}")
+                break
+    return meses
 
 
 @pytest.mark.parametrize("slug", sorted(SPECS))
-def test_cada_caso_de_seguridad_escribe_en_su_indice_fijo(slug):
-    v = next(x for x in verticals.front_payload()["verticals"] if x["slug"] == slug)
-    assert v["outputIndex"] == f"{slug}-%{{[@metadata][indice_sa]}}"
-    assert '"[@metadata][indice_sa]" => "eventos"' in v["filterCode"]
-    otro = next(x for x in verticals.front_payload()["verticals"] if x["slug"] == "transacciones-billetera")
-    assert otro["outputIndex"] == "" and "indice_sa" not in otro["filterCode"]
-
-
-def test_el_backend_fuerza_el_indice_fijo_aunque_el_body_traiga_el_mensual():
-    """El body de "Reiniciar ingesta" se rearma del registro del deploy, que
-    trae `siem-%{+YYYY.MM}` de antes."""
-    req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x", cases=[
-        main.PipelineCase(slug="siem", index_name="siem-%{+YYYY.MM}", filter_code="filter {\n}"),
-        main.PipelineCase(slug="transacciones-billetera", index_name="tb-%{+YYYY.MM}", filter_code="filter {\n}")])
-    main._casos_de_seguridad_al_indice_fijo(req)
-    assert req.cases[0].index_name == "siem-%{[@metadata][indice_sa]}"
-    assert "indice_sa" in req.cases[0].filter_code
-    assert req.cases[1].index_name == "tb-%{+YYYY.MM}" and req.cases[1].filter_code == "filter {\n}"
+def test_los_meses_declarados_cubren_el_dataset(slug):
+    """Un mes del dataset fuera del rango lo crearía Logstash durante la
+    ingesta, y de ese índice el detector solo vería el comienzo."""
+    desde, hasta = SPECS[slug]["meses"]
+    archivos = [main._DATASETS_DIR / f for f in verticals.get_vertical(slug)["dataset_files"]]
+    presentes = [a for a in archivos if a.is_file()]
+    if not presentes:
+        pytest.skip("el dataset no está en este checkout (vive en el bucket de demos)")
+    meses = set().union(*(_meses_del_archivo(a) for a in presentes))
+    assert meses, "no se reconoció la fecha de ningún evento"
+    assert desde <= min(meses) and max(meses) <= hasta, (min(meses), max(meses))
 
 
 # ── Provisionar ─────────────────────────────────────────────────────────────
@@ -275,9 +277,9 @@ def test_sin_el_plugin_se_dice(monkeypatch, tmp_path):
 def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     c = _Cluster()
     res, pasos = _provisionar(monkeypatch, tmp_path, c)
-    # Primero el índice fijo, después tipos, reglas, detectores y correlaciones.
+    # Primero los índices de cada mes, después tipos, reglas, detectores y correlaciones.
     tipos = [x[0] for x in c.creados]
-    assert tipos[0] == "indice" and c.creados[0][1] == "siem-eventos"
+    assert [x[1] for x in c.creados[:13]] == MESES_SIEM and set(tipos[:13]) == {"indice"}
     assert tipos.index("log_type") < tipos.index("regla") < tipos.index("detector") < tipos.index("correlacion")
     assert [x[1]["name"] for x in c.creados if x[0] == "log_type"] == [
         "siem_fortigate", "siem_auth", "siem_cloudaudit", "siem_waf"]
@@ -293,7 +295,7 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     # not supported for doc level monitors", CSS 3.4).
     assert auth["indices"] == ["siem-seguridad"]
     alias = next(x[1] for x in c.creados if x[0] == "alias")
-    assert alias == {"actions": [{"add": {"index": "siem-eventos", "alias": "siem-seguridad"}}]}
+    assert alias == {"actions": [{"add": {"index": "siem-*", "alias": "siem-seguridad"}}]}
     assert tipos.index("alias") < tipos.index("detector")
     assert {r["id"] for r in auth["custom_rules"]} == {c.reglas["SSH: login fallido"], c.reglas["Acceso a /etc/shadow con sudo"]}
     corr = [x[1] for x in c.creados if x[0] == "correlacion"]
@@ -305,7 +307,7 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     assert ("Security Analytics · siem · detector siem_waf", True, "") in pasos
     assert ("Security Analytics · siem · alias siem-seguridad", True, "") in pasos
     assert ("Security Analytics · siem · 3 de 3 correlaciones", True, "") in pasos
-    assert ("Security Analytics · siem · índice siem-eventos", True, "creado antes que los detectores") in pasos
+    assert ("Security Analytics · siem · 13 índices mensuales", True, "creados antes que los detectores") in pasos
     assert all(ok for _, ok, _ in pasos)
     # Y queda registrado (lo lee la vista).
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
@@ -328,24 +330,34 @@ def test_la_segunda_vez_no_duplica_nada(monkeypatch, tmp_path):
 
 
 def test_si_el_indice_es_nuevo_los_detectores_se_recrean(monkeypatch, tmp_path):
-    """La ingesta borra el índice para arrancar limpia: un detector que ya
-    estaba quedó sobre un índice que no existe, y del que se cree después solo
-    vería los primeros minutos."""
+    """La ingesta borra los índices para arrancar limpia: un detector que ya
+    estaba no sigue a los que se crean después (solo vería sus primeros minutos)."""
     c = _Cluster()
     _provisionar(monkeypatch, tmp_path, c)
     viejos = dict(c.detectores)
-    c.indices.remove("siem-eventos")
+    c.indices.remove("siem-2026.01")
     c.creados.clear()
     _, pasos = _provisionar(monkeypatch, tmp_path, c)
     tipos = [x[0] for x in c.creados]
-    assert tipos[0] == "indice"
+    assert c.creados[0] == ("indice", "siem-2026.01")
     assert sorted(x[1] for x in c.creados if x[0] == "borrado_detector") == sorted(viejos.values())
     assert tipos.index("indice") < tipos.index("borrado_detector") < tipos.index("detector")
     assert set(c.detectores) == set(viejos) and not set(c.detectores.values()) & set(viejos.values())
-    assert ("Security Analytics · siem · detector siem_auth", True, "recreado sobre el índice nuevo") in pasos
+    assert ("Security Analytics · siem · detector siem_auth", True, "recreado: hay índices nuevos") in pasos
+    assert ("Security Analytics · siem · 1 índices mensuales", True, "creados antes que los detectores") in pasos
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
     assert reg["detectores"]["siem-siem-auth"]["id"] == c.detectores["siem-siem-auth"]
     assert not [x for x in c.creados if x[0] == "log_type"], "tipos y reglas no se tocan"
+
+
+def test_sin_meses_declarados_se_dice(monkeypatch, tmp_path):
+    spec = {k: v for k, v in SPECS["siem"].items() if k != "meses"}
+    monkeypatch.setitem(SPECS, "siem", spec)
+    c = _Cluster()
+    _, pasos = _provisionar(monkeypatch, tmp_path, c)
+    assert ("Security Analytics · siem · índices", False,
+            "el caso no declara los meses de su dataset (security.meses)") in pasos
+    assert not [x for x in c.creados if x[0] == "indice"]
 
 
 def test_una_regla_que_falla_se_dice_con_el_motivo(monkeypatch, tmp_path):
@@ -373,7 +385,7 @@ def test_fortianalyzer_sin_correlaciones(monkeypatch, tmp_path):
     assert [x[1]["name"] for x in c.creados if x[0] == "detector"] == ["fortianalyzer-fortianalyzer"]
     assert not [x for x in c.creados if x[0] == "correlacion"]
     assert not [p for p in pasos if "correlaciones" in p[0]]
-    assert c.creados[0] == ("indice", "fortianalyzer-eventos")
+    assert c.creados[0] == ("indice", "fortianalyzer-2025.07")
 
 
 def test_se_provisiona_al_aplicar_para_cada_caso_de_seguridad():
@@ -576,38 +588,44 @@ def test_que_se_va_a_crear_lo_dice():
     assert not payload["transacciones-billetera"]["hasSecurity"]
 
 
-# ── Iniciar ingesta: índice y detectores antes de Logstash ──────────────────
+# ── Iniciar ingesta: índices y detectores antes de Logstash ─────────────────
 def _preparar(monkeypatch, tmp_path, cluster, casos):
     monkeypatch.setattr(main, "_os_req", cluster.req)
     monkeypatch.setattr(main, "_sa_post_texto", cluster.post_texto)
     monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
     req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x",
                                       cases=[main.PipelineCase(slug=s, index_name=i) for s, i in casos])
-    main._casos_de_seguridad_al_indice_fijo(req)
     return [json.loads(e[len("data: "):]) for e in main._preparar_seguridad_para_ingesta(req, tmp_path)]
 
 
-def test_la_ingesta_migra_los_indices_mensuales_al_fijo(monkeypatch, tmp_path):
-    """Un entorno de antes: índices por mes y detectores sobre ellos. Logstash
-    relee todo el bucket al reiniciar, así que los mensuales se borran."""
-    c = _Cluster(indices=["siem-2025.07", "siem-2025.08", "siem-sa-bootstrap"])
+def test_la_ingesta_crea_los_indices_y_recrea_los_detectores(monkeypatch, tmp_path):
+    """"Iniciar ingesta" borra los índices del caso para arrancar limpia: antes
+    de que Logstash escriba, vuelven a existir y los detectores son posteriores."""
+    c = _Cluster()
     c.detectores = {"siem-siem-auth": "VIEJO"}
     eventos = _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}"), ("transacciones-billetera", "tb-%{+YYYY.MM}")])
-    assert sorted(x[1] for x in c.creados if x[0] == "borrado_indice") == ["siem-2025.07", "siem-2025.08", "siem-sa-bootstrap"]
-    assert c.indices == ["siem-eventos"]
+    assert sorted(c.indices) == MESES_SIEM
     assert ("borrado_detector", "VIEJO") in c.creados and "VIEJO" not in c.detectores.values()
     tipos = [x[0] for x in c.creados]
-    assert tipos.index("borrado_indice") < tipos.index("indice") < tipos.index("detector")
+    auth = next(n for n, x in enumerate(c.creados) if x[0] == "detector" and x[1]["name"] == "siem-siem-auth")
+    assert tipos.index("indice") < tipos.index("borrado_detector") < auth
     assert eventos == [{"type": "step", "name": "Security Analytics · siem", "ok": True,
-                        "reason": "índice siem-eventos y 4 detectores listos antes de la ingesta; "
-                                  "se borraron 3 índices anteriores del caso (se reingestan)"}]
+                        "reason": "13 índices mensuales y 4 detectores listos antes de la ingesta"}]
     assert not [u for _, u in c.pedidos if "/tb" in u], "un caso sin seguridad no se toca"
 
 
-def test_con_el_indice_fijo_la_ingesta_no_toca_nada(monkeypatch, tmp_path):
-    c = _Cluster(indices=["siem-eventos"])
+def test_con_los_indices_la_ingesta_no_toca_nada(monkeypatch, tmp_path):
+    c = _Cluster(indices=MESES_SIEM)
     assert _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}")]) == []
-    assert [(m, u.split(":9200")[1]) for m, u in c.pedidos] == [("HEAD", "/siem-eventos")] and not c.creados
+    assert [(m, u.split(":9200")[1]) for m, u in c.pedidos] == [("GET", "/_cat/indices/siem-*?format=json&h=index")]
+    assert not c.creados
+
+
+def test_si_falta_un_mes_la_ingesta_lo_crea(monkeypatch, tmp_path):
+    c = _Cluster(indices=[i for i in MESES_SIEM if i != "siem-2025.09"])
+    eventos = _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}")])
+    assert [x[1] for x in c.creados if x[0] == "indice"] == ["siem-2025.09"]
+    assert eventos[0]["ok"] is True
 
 
 def test_sin_casos_de_seguridad_la_ingesta_no_consulta(monkeypatch, tmp_path):
@@ -628,32 +646,10 @@ def test_en_la_ingesta_va_despues_de_limpiar_y_antes_de_terraform():
     assert fase2 < preparar < cuerpo.index("    else:\n        yield _sse({\"type\": \"progress\", \"percent\": 2")
 
 
-def test_el_front_despliega_el_indice_fijo():
+def test_los_casos_de_seguridad_siguen_con_indice_mensual():
+    payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
+    for slug in SPECS:
+        assert "outputIndex" not in payload[slug] and "indice_sa" not in payload[slug]["filterCode"]
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("function caseMeta(id)")
-    cuerpo = html[i:html.index("\n    }\n", i)]
-    assert "(meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`)" in cuerpo
-
-
-def test_si_el_head_no_responde_el_indice_fijo_no_se_borra(monkeypatch, tmp_path):
-    """Sin respuesta del HEAD se toma como que falta; pero el índice fijo nunca
-    está entre los "anteriores" a borrar."""
-    class _SinHead(_Cluster):
-        def req(self, method, url, *a, **k):
-            if method == "HEAD":
-                self.pedidos.append((method, url))
-                return None
-            return super().req(method, url, *a, **k)
-    c = _SinHead(indices=["siem-eventos", "siem-2025.07"])
-    _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}")])
-    assert [x[1] for x in c.creados if x[0] == "borrado_indice"] == ["siem-2025.07"]
-    assert "siem-eventos" in c.indices
-
-
-def test_el_deploy_y_el_schema_normalizan_los_casos_al_entrar():
-    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
-    for funcion, siguiente in (("def _deploy_stream_gen(", "for raw in _deploy_stream_gen_raw("),
-                               ("def apply_schema(", "terraform_dir = _active_terraform_dir()")):
-        i = src.index(funcion)
-        cuerpo = src[i:src.index(siguiente, i)]
-        assert "_casos_de_seguridad_al_indice_fijo(request)" in cuerpo, funcion
+    assert ": `${meta.indexBase}-%{+YYYY.MM}`;" in html[i:html.index("\n    }\n", i)]

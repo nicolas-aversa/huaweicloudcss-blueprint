@@ -3142,24 +3142,6 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _casos_de_seguridad_al_indice_fijo(request: "TerraformDeployRequest") -> None:
-    """Los casos con Security Analytics escriben en un índice fijo (ver
-    `seguridad.indice_del_caso`): su output y la línea del filter que lo arma.
-
-    Se fuerza acá, y no solo en el front, porque el body de un entorno ya
-    desplegado se rearma del registro del deploy, que trae el índice mensual de
-    antes: "Reiniciar ingesta" lo volvería a mandar."""
-    import seguridad
-
-    specs = verticals.security_specs()
-    for caso in request.cases or []:
-        v = verticals.get_vertical(caso.slug) if caso.slug in specs else None
-        if not v or not v.get("index_base"):
-            continue
-        caso.index_name = seguridad.indice_de_salida(v["index_base"])
-        caso.filter_code = seguridad.filtro_con_indice(caso.filter_code)
-
-
 def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                        logstash_flavor: str | None, opensearch_flavor: str | None):
     """Generador que corre el deploy y emite eventos SSE con progreso real.
@@ -3173,7 +3155,6 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     borrar desde siempre sin que nadie lo hiciera. Lo que el destroy necesita
     (creds + IDs de infra) vive en `destroy.auto.tfvars.json`.
     """
-    _casos_de_seguridad_al_indice_fijo(request)
     secrets = _deploy_secret_literals(request)
     # El porcentaje global nunca baja, lo emita quien lo emita. Los tramos de
     # cada paso ya están en orden (`_PCT_*`), pero esto es lo que garantiza que
@@ -3262,7 +3243,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                 _clear_case_indices(request, _cluster_with_public_access(terraform_dir))
             except Exception as exc:
                 print(f"[deploy-stream] clear-index falló (best-effort): {exc!r}")
-        # Security Analytics: su índice y sus detectores, ANTES de que Logstash
+        # Security Analytics: sus índices y sus detectores, ANTES de que Logstash
         # arranque (el detector solo sigue a un índice que ya existía).
         yield from _preparar_seguridad_para_ingesta(request, terraform_dir)
     else:
@@ -4695,8 +4676,8 @@ def _apply_index_templates(
         print("[index-template] no hay fields — nada para aplicar")
         return False
 
-    # Los casos con Security Analytics llevan su alias en el template: así su
-    # índice fijo (siem-eventos) entra al alias del detector apenas se crea.
+    # Los casos con Security Analytics llevan su alias en el template: así cada
+    # índice mensual (siem-2025.08, …) entra al alias del detector apenas se crea.
     import seguridad
     con_seguridad = verticals.security_specs()
     casos = request.cases or []
@@ -4895,13 +4876,9 @@ def _verificar_ingesta(request: "TerraformDeployRequest", cluster: dict[str, str
 
 def _preparar_seguridad_para_ingesta(request: "TerraformDeployRequest", terraform_dir: Path):
     """Antes de arrancar Logstash, cada caso con Security Analytics tiene que
-    tener su índice fijo y detectores creados DESPUÉS de él. Si el índice no
-    está (la ingesta lo acaba de borrar para arrancar limpia, o el entorno
-    viene de cuando el caso escribía un índice por mes), se recrean los dos.
-
-    Los índices mensuales de antes se borran: Logstash relee todo el bucket al
-    reiniciar la pipeline (sincedb en /dev/null), así que quedarían duplicados
-    de lo que ahora entra al índice fijo. Emite un `step` por caso."""
+    tener sus índices mensuales y detectores creados DESPUÉS de ellos. Si falta
+    alguno (la ingesta los acaba de borrar para arrancar limpia), se crean y los
+    detectores se recrean. Emite un `step` por caso."""
     import seguridad
 
     specs = verticals.security_specs()
@@ -4913,24 +4890,20 @@ def _preparar_seguridad_para_ingesta(request: "TerraformDeployRequest", terrafor
     user, pw = request.opensearch_user or "admin", request.opensearch_password
     for caso in casos:
         nombre = f"Security Analytics · {caso.slug}"
+        spec = specs[caso.slug]
         try:
             pattern = index_pattern_from_name(caso.index_name)
-            indice = seguridad.indice_del_caso(pattern)
-            r = _os_req("HEAD", f"{base}/{indice}", user, pw, timeout=15)
-            if r is not None and r.status_code == 200:
-                continue
+            esperados = seguridad.indices_mensuales(pattern, spec["meses"]) if spec.get("meses") else []
             cat = _os_req("GET", f"{base}/_cat/indices/{pattern}?format=json&h=index", user, pw, timeout=15)
-            viejos = [row.get("index") for row in ((cat.json() or []) if _resp_ok(cat) else [])
-                      if row.get("index") and row.get("index") != indice]
-            for ix in viejos:
-                _os_req("DELETE", f"{base}/{ix}", user, pw, timeout=30)
+            hay = {row.get("index") for row in ((cat.json() or []) if _resp_ok(cat) else [])}
+            if esperados and set(esperados) <= hay:
+                continue
             res = _provision_security_analytics(cluster, user, pw, request.https_enabled, caso.slug,
-                                                pattern, specs[caso.slug], terraform_dir)
+                                                pattern, spec, terraform_dir)
             n = len(res.get("detectores") or {})
-            motivo = (f"índice {indice} y {n} detector{'es' if n != 1 else ''} listos antes de la ingesta"
-                      if res.get("available") else "Security Analytics no está en este cluster")
-            if viejos:
-                motivo += f"; se borraron {len(viejos)} índices anteriores del caso (se reingestan)"
+            motivo = (f"{len(esperados)} índices mensuales y {n} detector{'es' if n != 1 else ''} "
+                      "listos antes de la ingesta" if res.get("available")
+                      else "Security Analytics no está en este cluster")
             yield _sse({"type": "step", "name": nombre, "ok": bool(res.get("available")) and n > 0,
                         "reason": motivo[:300]})
         except Exception as exc:  # noqa: BLE001 — no frena la ingesta
@@ -6553,16 +6526,16 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
 def _provision_security_analytics(cluster: dict, user: str, password: str, https_enabled: bool,
                                   slug: str, index_pattern: str, spec: dict,
                                   terraform_dir: Path, run: "dict | None" = None) -> dict:
-    """El índice fijo del caso, tipos de log, reglas, un detector por tipo de log
-    y las correlaciones. Idempotente por nombre; cada pieza queda en Actividad
-    con su motivo real.
+    """Los índices mensuales del dataset, tipos de log, reglas, un detector por
+    tipo de log y las correlaciones. Idempotente por nombre; cada pieza queda en
+    Actividad con su motivo real.
 
     El orden importa: el monitor de un detector procesa todo lo que entra a un
     índice que YA existía cuando se creó, y de uno que se suma después solo ve
-    sus primeros minutos (ver `seguridad.indice_del_caso`). Por eso primero el
-    índice y después los detectores; y si el índice se acaba de crear (primera
-    vez, o la ingesta lo borró para arrancar limpia), los detectores que ya
-    estaban se recrean: quedaron apuntando a un índice que ya no existe."""
+    sus primeros minutos (ver `seguridad.indices_mensuales`). Por eso primero los
+    índices y después los detectores; y si algún índice se acaba de crear
+    (primera vez, o la ingesta los borró para arrancar limpia), los detectores
+    que ya estaban se recrean: no lo siguen."""
     import seguridad
 
     base = _os_base(cluster, https_enabled)
@@ -6581,20 +6554,28 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
     reg = registro.get(slug) or {}
     reg = {k: dict(reg.get(k) or {}) for k in ("log_types", "reglas", "detectores", "correlaciones")}
 
-    # El índice fijo del caso (toma el mapping y el alias del index template).
-    indice = seguridad.indice_del_caso(index_pattern)
-    rix = _os_req("PUT", f"{base}/{indice}", user, password, timeout=20)
-    indice_nuevo = _resp_ok(rix)
-    if not indice_nuevo and "already_exists" not in (getattr(rix, "text", "") or ""):
-        paso(f"índice {indice}", False, f"no se pudo crear: {_resp_motivo(rix)}")
-    elif indice_nuevo:
-        paso(f"índice {indice}", True, "creado antes que los detectores")
+    # Los índices por mes del dataset (toman el mapping y el alias del template).
+    meses = spec.get("meses")
+    indices = seguridad.indices_mensuales(index_pattern, meses) if meses else []
+    nuevos, fallos = [], []
+    for indice in indices:
+        rix = _os_req("PUT", f"{base}/{indice}", user, password, timeout=20)
+        if _resp_ok(rix):
+            nuevos.append(indice)
+        elif "already_exists" not in (getattr(rix, "text", "") or ""):
+            fallos.append(f"{indice}: {_resp_motivo(rix)}")
+    indice_nuevo = bool(nuevos)
+    if not indices:
+        paso("índices", False, "el caso no declara los meses de su dataset (security.meses)")
+    elif fallos or nuevos:
+        paso(f"{len(nuevos)} índices mensuales", not fallos,
+             "; ".join(fallos) if fallos else "creados antes que los detectores")
 
     # El detector no acepta un pattern: va al alias del caso. El template se lo
-    # pone al índice al crearlo; esto cubre uno creado antes del template.
+    # pone a cada índice al crearlo; esto cubre los creados antes del template.
     alias = seguridad.alias_del_caso(index_pattern)
     ra = _os_req("POST", f"{base}/_aliases", user, password, timeout=20,
-                 json_body={"actions": [{"add": {"index": indice, "alias": alias}}]})
+                 json_body={"actions": [{"add": {"index": index_pattern, "alias": alias}}]})
     paso(f"alias {alias}", _resp_ok(ra), "" if _resp_ok(ra) else _resp_motivo(ra))
 
     # Tipos de log propios.
@@ -6659,7 +6640,7 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
         if _resp_ok(rd):
             reg["detectores"][nombre_d] = {"id": _resp_id(rd), "log_type": lt["nombre"]}
         paso(f"detector {lt['nombre']}", _resp_ok(rd),
-             _resp_motivo(rd) if not _resp_ok(rd) else ("recreado sobre el índice nuevo" if recreado else ""))
+             _resp_motivo(rd) if not _resp_ok(rd) else ("recreado: hay índices nuevos" if recreado else ""))
 
     # Correlaciones entre tipos de log.
     correlaciones = spec.get("correlaciones", [])
@@ -6699,7 +6680,6 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
     Lee el cluster + la EIP del NAT desde el tfstate. Best-effort: si el index
     template falla, `index_template_applied=False` y el operador puede reintentar.
     """
-    _casos_de_seguridad_al_indice_fijo(request)
     terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
