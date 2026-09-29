@@ -134,6 +134,17 @@ def campos_de_reglas(spec: dict) -> set[str]:
             for campo in r["seleccion"]}
 
 
+def alias_del_caso(index_pattern: str) -> str:
+    """El alias al que apuntan el detector y las correlaciones del caso.
+
+    Security Analytics (CSS 3.4) rechaza un index pattern en el detector: "Index
+    patterns are not supported for doc level monitors". Un alias sí: lo lleva
+    cada índice del caso desde el index template (los nuevos) y un `_aliases`
+    (los que ya estaban). `siem-*` → `siem-seguridad`.
+    """
+    return index_pattern.rstrip("*").rstrip("-._") + "-seguridad"
+
+
 def indice_para_detector(index_pattern: str) -> str:
     """El índice que se crea si el pattern todavía no matchea ninguno.
 

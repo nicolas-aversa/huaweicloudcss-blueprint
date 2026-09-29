@@ -4673,6 +4673,20 @@ def _apply_index_templates(
         print("[index-template] no hay fields — nada para aplicar")
         return False
 
+    # Los casos con Security Analytics llevan su alias en el template: así cada
+    # índice nuevo (siem-2025.08, …) entra solo al alias del detector.
+    import seguridad
+    con_seguridad = verticals.security_specs()
+    casos = request.cases or []
+    for i, (name, tpl) in enumerate(templates):
+        caso = next((c for c in casos if f"{base_name}-{c.slug}" == name), None)
+        if caso is None or caso.slug not in con_seguridad:
+            continue
+        tpl = json.loads(json.dumps(tpl))   # copia: el curado no se toca
+        alias = seguridad.alias_del_caso(index_pattern_from_name(caso.index_name))
+        tpl.setdefault("template", {}).setdefault("aliases", {})[alias] = {}
+        templates[i] = (name, tpl)
+
     proto = "https" if request.https_enabled else "http"
     user = request.opensearch_user or "admin"
     if cluster.get("public_endpoint"):
@@ -6466,6 +6480,13 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
         if not _resp_ok(rix) and "already_exists" not in (getattr(rix, "text", "") or ""):
             paso("índice", False, f"no se pudo crear {nombre_ix}: {_resp_motivo(rix)}")
 
+    # El detector no acepta un pattern: va al alias del caso. Los índices nuevos
+    # lo toman del template; acá se suma a los que ya existen.
+    alias = seguridad.alias_del_caso(index_pattern)
+    ra = _os_req("POST", f"{base}/_aliases", user, password, timeout=20,
+                 json_body={"actions": [{"add": {"index": index_pattern, "alias": alias}}]})
+    paso(f"alias {alias}", _resp_ok(ra), "" if _resp_ok(ra) else _resp_motivo(ra))
+
     # Tipos de log propios.
     existentes = {(h.get("_source") or {}).get("name"): h.get("_id")
                   for h in _sa_buscar(base, user, password, "logtype/_search")}
@@ -6518,7 +6539,7 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
             paso(f"detector {lt['nombre']}", False, "sin reglas creadas")
             continue
         rd = _os_req("POST", f"{base}{_SA_BASE}/detectors", user, password, timeout=30,
-                     json_body=seguridad.build_detector(slug, lt["nombre"], index_pattern,
+                     json_body=seguridad.build_detector(slug, lt["nombre"], alias,
                                                         por_tipo[lt["nombre"]]))
         if _resp_ok(rd):
             reg["detectores"][nombre_d] = {"id": _resp_id(rd), "log_type": lt["nombre"]}
@@ -6535,7 +6556,7 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
                 reg["correlaciones"][c["nombre"]] = reg["correlaciones"].get(c["nombre"]) or ya[c["nombre"]]
                 continue
             rc = _os_req("POST", f"{base}{_SA_BASE}/correlation/rules", user, password, timeout=30,
-                         json_body=seguridad.build_correlacion(c, index_pattern))
+                         json_body=seguridad.build_correlacion(c, alias))
             if _resp_ok(rc):
                 reg["correlaciones"][c["nombre"]] = _resp_id(rc)
             else:

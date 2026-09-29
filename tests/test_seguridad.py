@@ -102,6 +102,32 @@ def test_la_correlacion():
                               for p in c["correlate"]]
 
 
+def test_el_alias_del_caso():
+    assert seguridad.alias_del_caso("siem-*") == "siem-seguridad"
+    assert seguridad.alias_del_caso("fortianalyzer-*") == "fortianalyzer-seguridad"
+
+
+def test_el_template_de_un_caso_de_seguridad_lleva_el_alias(monkeypatch):
+    """Así cada índice nuevo del caso (siem-2025.08, …) entra solo al alias."""
+    enviados = {}
+
+    class _R:
+        status_code = 200
+        text = "{}"
+
+    def fake_put(url, json=None, **k):
+        enviados[url.rsplit("/", 1)[1]] = json
+        return _R()
+
+    monkeypatch.setattr("requests.put", fake_put)
+    caso = lambda slug, idx: main.PipelineCase(slug=slug, index_name=idx, fields=[{"field_path": "a", "type": "keyword"}])
+    req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x",
+                                      cases=[caso("siem", "siem-%{+YYYY.MM}"), caso("transacciones-billetera", "tb-%{+YYYY.MM}")])
+    assert main._apply_index_templates(req, {"public_endpoint": "x:9200"})
+    assert enviados["p-siem"]["template"]["aliases"] == {"siem-seguridad": {}}
+    assert "aliases" not in enviados["p-transacciones-billetera"]["template"]
+
+
 def test_el_indice_para_el_detector():
     assert seguridad.indice_para_detector("siem-*") == "siem-sa-bootstrap"
     assert seguridad.indice_para_detector("fortianalyzer*") == "fortianalyzer-sa-bootstrap"
@@ -141,6 +167,9 @@ class _Cluster:
             return _Resp(200, {"hits": {"hits": [{"_id": i, "_source": {"title": t}} for t, i in self.reglas.items()]}})
         if ruta.startswith("/_cat/indices/"):
             return _Resp(200, [{"index": i} for i in self.indices])
+        if ruta == "/_aliases":
+            self.creados.append(("alias", json_body))
+            return _Resp(200, {"acknowledged": True})
         if method == "PUT":
             self.indices.append(ruta.strip("/"))
             self.creados.append(("indice", ruta.strip("/")))
@@ -207,15 +236,21 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     dets = {x[1]["name"]: x[1] for x in c.creados if x[0] == "detector"}
     assert set(dets) == {"siem-siem-fortigate", "siem-siem-auth", "siem-siem-cloudaudit", "siem-siem-waf"}
     auth = dets["siem-siem-auth"]["inputs"][0]["detector_input"]
-    assert auth["indices"] == ["siem-*"]
+    # Al alias del caso: el detector no acepta un pattern ("Index patterns are
+    # not supported for doc level monitors", CSS 3.4).
+    assert auth["indices"] == ["siem-seguridad"]
+    alias = next(x[1] for x in c.creados if x[0] == "alias")
+    assert alias == {"actions": [{"add": {"index": "siem-*", "alias": "siem-seguridad"}}]}
+    assert tipos.index("alias") < tipos.index("detector")
     assert {r["id"] for r in auth["custom_rules"]} == {c.reglas["SSH: login fallido"], c.reglas["Acceso a /etc/shadow con sudo"]}
     corr = [x[1] for x in c.creados if x[0] == "correlacion"]
-    assert len(corr) == 3 and all(p["index"] == "siem-*" for x in corr for p in x["correlate"])
+    assert len(corr) == 3 and all(p["index"] == "siem-seguridad" for x in corr for p in x["correlate"])
     # En Actividad, cada pieza con su resultado.
     nombres = [p[0] for p in pasos]
     assert "Security Analytics · siem · tipos de log" in nombres
     assert ("Security Analytics · siem · 8 de 8 reglas", True, "") in pasos
     assert ("Security Analytics · siem · detector siem_waf", True, "") in pasos
+    assert ("Security Analytics · siem · alias siem-seguridad", True, "") in pasos
     assert ("Security Analytics · siem · 3 de 3 correlaciones", True, "") in pasos
     assert all(ok for _, ok, _ in pasos)
     # Y queda registrado (lo lee la vista).
@@ -228,10 +263,12 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
 def test_la_segunda_vez_no_duplica_nada(monkeypatch, tmp_path):
     c = _Cluster()
     _provisionar(monkeypatch, tmp_path, c)
-    antes = len(c.creados)
+    antes = len([x for x in c.creados if x[0] != "alias"])
     (tmp_path / main._SECURITY_REGISTRY_NAME).unlink()   # aunque se pierda el registro
     _, pasos = _provisionar(monkeypatch, tmp_path, c)
-    assert len(c.creados) == antes, "todo se encuentra por nombre o título"
+    # El alias se vuelve a sumar (en OpenSearch agregarlo de nuevo no cambia nada);
+    # lo demás no se duplica.
+    assert len([x for x in c.creados if x[0] != "alias"]) == antes, "todo se encuentra por nombre o título"
     assert ("Security Analytics · siem · detector siem_auth", True, "ya estaba") in pasos
     assert len(json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]["correlaciones"]) == 3
 
