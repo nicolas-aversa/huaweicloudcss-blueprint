@@ -342,13 +342,29 @@ def test_un_hallazgo_para_la_vista():
          "document_list": [{"document": json.dumps({"@timestamp": "2025-10-21T03:14:07Z",
                                                     "source": {"ip": "1.2.3.4"}})}]}
     assert main._hallazgo(f, regla_por_id) == {"regla": "SSH: login fallido", "nivel": "high",
-                                               "hora": "2025-10-21T03:14:07Z", "ip": "1.2.3.4",
+                                               "hora": "2025-10-21T03:14:07Z",
+                                               "hora_ppl": "2025-10-21 03:14:07", "ip": "1.2.3.4",
                                                "indice": "siem-2025.10"}
     # FortiAnalyzer: la IP es `srcip`; sin documento, la hora del hallazgo.
     forti = {"queries": [{"id": "?", "name": "regla-x"}], "timestamp": 222,
              "document_list": [{"document": {"srcip": "5.6.7.8"}}]}
     h = main._hallazgo(forti, {})
     assert h["ip"] == "5.6.7.8" and h["regla"] == "regla-x" and h["hora"] == 222 and h["nivel"] == ""
+    assert h["hora_ppl"] == "1970-01-01 00:00:00"
+
+
+@pytest.mark.parametrize("valor, esperado", [
+    ("2026-02-28T12:26:30.000Z", "2026-02-28 12:26:30"),       # así llega @timestamp: UTC
+    ("2026-02-28T09:26:30-03:00", "2026-02-28 12:26:30"),      # con zona: se pasa a UTC
+    ("2026-02-28T12:26:30", "2026-02-28 12:26:30"),            # sin zona: se toma UTC
+    (1741918200000, "2025-03-14 02:10:00"),
+    ("1741918200000", "2025-03-14 02:10:00"),
+    ("basura", ""),
+])
+def test_la_hora_para_el_asistente_es_utc_y_con_anio(valor, esperado):
+    """La vista mostraba "28/2, 09:26" (hora local, sin año) y eso iba al
+    asistente: filtró 2025-02-28 09:26 cuando el evento era 2026-02-28 12:26 UTC."""
+    assert main._hora_utc_ppl(valor) == esperado
 
 
 def test_el_resumen_en_vivo(monkeypatch, tmp_path):
@@ -365,7 +381,9 @@ def test_el_resumen_en_vivo(monkeypatch, tmp_path):
         if "/findings/_search" in url:
             return _Resp(200, {"total_findings": 1234, "findings": [
                 {"queries": [{"id": "R1"}], "document_list": [{"document": json.dumps({"source": {"ip": "9.9.9.9"}})}]}] * 7})
-        return _Resp(200, {"alerts": [{"severity": "1"}, {"severity": "2"}, {"severity": "2"}]})
+        return _Resp(200, {"alerts": [{"severity": "1"}, {"severity": "2"}, {"severity": "2"},
+                                      {"severity": "", "state": "ERROR",
+                                       "error_message": "IndexNotFoundException[no such index [siem-seguridad]]"}]})
 
     monkeypatch.setattr(main, "_os_req", fake)
     from fastapi.testclient import TestClient
@@ -375,6 +393,8 @@ def test_el_resumen_en_vivo(monkeypatch, tmp_path):
     assert det["total"] == 1234 and len(det["recientes"]) == 5 and det["recientes"][0]["ip"] == "9.9.9.9"
     assert det["recientes"][0]["regla"] == "SSH: login fallido" and det["recientes"][0]["nivel"] == "high"
     assert det["alertas"] == {"critical": 1, "high": 2} and det["error"] == ""
+    # Una alerta en ERROR es el detector que no pudo correr: va aparte.
+    assert det["fallas"] == ["IndexNotFoundException[no such index [siem-seguridad]]"]
     assert det["descripcion"] == "Hosts Linux: SSH y sudo (SIEM)"
     assert r.json()["casos"][0]["correlaciones"] == 1
     assert all(m == "GET" for m, _ in pedidos) and "detector_id=D1" in pedidos[0][1]
@@ -416,7 +436,7 @@ check('singular', uno.includes('1 detector · 1 reglas Sigma · 1 correlación')
 
 const h = hallazgosHTML([{ slug: 'siem', correlaciones: 3, detectores: [
   { descripcion: 'FortiGate', total: 1842, alertas: { critical: 1, high: 30, low: 0 }, error: '', recientes: [
-    { regla: 'IPS "raro"', nivel: 'critical', hora: '2025-10-21T03:14:07.000Z', ip: '1.2.3.4' }] },
+    { regla: 'IPS "raro"', nivel: 'critical', hora: '2025-10-21T03:14:07.000Z', hora_ppl: '2026-02-28 12:26:30', ip: '1.2.3.4' }] },
   { descripcion: 'Auth', total: 0, alertas: {}, error: '', recientes: [] },
   { descripcion: 'WAF', total: 0, alertas: {}, error: 'status 500: boom', recientes: [] },
 ] }]);
@@ -431,13 +451,16 @@ check('correlaciones', h.includes('SIEM · 3 correlaciones entre fuentes'));
 check('nada', hallazgosHTML([]).includes('No hay detectores'));
 
 // Explicar: le pregunta al asistente con la regla, la hora y la IP.
-const b = { dataset: { slug: 'siem', regla: 'SSH', hora: '21/10 03:14', ip: '1.2.3.4' } };
+const b = { dataset: { slug: 'siem', regla: 'SSH', hora: '2026-02-28 12:26:30', ip: '1.2.3.4' } };
 check('sin asistente, avisa', explicarHallazgo(b) === false && toasts.length === 1 && toasts[0].includes('Provisionar plugins'));
 let pedido = null;
 capChatPreguntar = (slug, pregunta, contexto) => { pedido = { slug, pregunta, contexto }; return true; };
 check('con asistente', explicarHallazgo(b) === true && toasts.length === 1);
 check('la pregunta', pedido.slug === 'siem' && pedido.pregunta === '¿Por qué se disparó "SSH"? ¿Qué más pasó alrededor?', pedido.pregunta);
-check('el contexto', pedido.contexto === 'Hallazgo de Security Analytics: regla "SSH", 21/10 03:14, IP de origen 1.2.3.4.', pedido.contexto);
+check('el contexto', pedido.contexto === 'Hallazgo de Security Analytics: regla "SSH", evento del 2026-02-28 12:26:30 (UTC, como @timestamp), IP de origen 1.2.3.4. Mirá qué más hizo esa IP en todo el período y en las horas cercanas (no solo ese minuto).', pedido.contexto);
+check('explicar lleva la hora UTC', h.includes('data-hora="2026-02-28 12:26:30"'), h);
+const conFalla = hallazgosHTML([{ slug: 'siem', detectores: [{ descripcion: 'Auth', total: 0, alertas: {}, fallas: ['no such index <x>'], error: '', recientes: [] }] }]);
+check('la falla del detector, aparte', conFalla.includes('el detector falló 1 vez') && conFalla.includes('title="no such index &lt;x&gt;"'), conFalla);
 capChatPreguntar = () => false;
 check('asistente ocupado, avisa', explicarHallazgo(b) === false && toasts.length === 2);
 console.log(fallos.join('\n'));

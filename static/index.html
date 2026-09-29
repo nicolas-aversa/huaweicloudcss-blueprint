@@ -6021,7 +6021,7 @@
             + `<span class="hallazgo__regla">${escapeHtml(h.regla || '')}</span>`
             + `<span class="hallazgo__meta">${escapeHtml(_fechaCorta(h.hora))}${h.ip ? ' · ' + escapeHtml(h.ip) : ''}</span>`
             + `<button type="button" class="btn btn-secondary btn-sm hallazgo__explicar" data-slug="${escapeHtml(c.slug)}" `
-            + `data-regla="${escapeHtml(h.regla || '')}" data-hora="${escapeHtml(_fechaCorta(h.hora))}" data-ip="${escapeHtml(h.ip || '')}">Explicar</button>`
+            + `data-regla="${escapeHtml(h.regla || '')}" data-hora="${escapeHtml(h.hora_ppl || '')}" data-ip="${escapeHtml(h.ip || '')}">Explicar</button>`
             + `</li>`).join('');
           const cuerpo = d.error
             ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(d.error)}</div>`
@@ -6029,7 +6029,9 @@
               ? `<ul class="hallazgos__lista">${recientes}</ul>`
               : `<div class="hallazgos__vacio">Sin hallazgos todavía: aparecen a medida que entran los datos. Si la ingesta corrió antes de crear el detector, tocá "Reiniciar ingesta".</div>`;
           return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(d.descripcion || d.log_type)}</strong>`
-            + `<span>${Number(d.total || 0).toLocaleString('es-AR')} hallazgos</span>${alertas}</div>${cuerpo}</div>`;
+            + `<span>${Number(d.total || 0).toLocaleString('es-AR')} hallazgos</span>${alertas}`
+            + ((d.fallas || []).length ? `<span class="sev" title="${escapeHtml(d.fallas[0])}">el detector falló ${d.fallas.length} ${d.fallas.length === 1 ? 'vez' : 'veces'}</span>` : '')
+            + `</div>${cuerpo}</div>`;
         }).join('');
         return `<div class="hallazgos__caso"><div class="hallazgos__titulo">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}`
           + `${c.correlaciones ? ` · ${c.correlaciones} correlaciones entre fuentes` : ''}</div>${dets}</div>`;
@@ -6042,7 +6044,9 @@
       const { slug, regla, hora, ip } = b.dataset;
       const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
         `¿Por qué se disparó "${regla}"? ¿Qué más pasó alrededor?`,
-        `Hallazgo de Security Analytics: regla "${regla}"${hora ? `, ${hora}` : ''}${ip ? `, IP de origen ${ip}` : ''}.`));
+        `Hallazgo de Security Analytics: regla "${regla}"${hora ? `, evento del ${hora} (UTC, como @timestamp)` : ''}`
+        + `${ip ? `, IP de origen ${ip}` : ''}. Mirá qué más hizo esa IP en todo el período y en las horas `
+        + `cercanas (no solo ese minuto).`));
       if (!tomada) toast('Para explicarlo hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
       return tomada;
     }

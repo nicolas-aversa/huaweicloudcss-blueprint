@@ -6341,9 +6341,25 @@ def _hallazgo(f: dict, regla_por_id: dict) -> dict:
             break
     ip = ((doc.get("source") or {}).get("ip") if isinstance(doc.get("source"), dict) else None) \
         or doc.get("source.ip") or doc.get("srcip") or ""
+    hora = doc.get("@timestamp") or f.get("timestamp") or ""
     return {"regla": regla.get("titulo") or ((f.get("queries") or [{}])[0] or {}).get("name", ""),
-            "nivel": regla.get("nivel", ""), "hora": doc.get("@timestamp") or f.get("timestamp") or "",
+            "nivel": regla.get("nivel", ""), "hora": hora, "hora_ppl": _hora_utc_ppl(hora),
             "ip": str(ip), "indice": f.get("index", "")}
+
+
+def _hora_utc_ppl(valor) -> str:
+    """La hora del evento como la guarda @timestamp: UTC, 'YYYY-MM-DD HH:mm:ss'.
+    Es lo que va al asistente en "Explicar": la vista la muestra en hora local
+    y sin año ("28/2, 09:26"), y el modelo filtraba otra hora y otro año."""
+    if isinstance(valor, (int, float)) or (isinstance(valor, str) and valor.isdigit()):
+        return _fecha_ppl(valor)
+    try:
+        t = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _fecha_ppl(ms) -> str:
@@ -6445,7 +6461,13 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
             ra = _os_req("GET", f"{base}{_SA_BASE}/alerts?detector_id={d['id']}&size=500",
                          user, password, timeout=20)
             alertas: dict[str, int] = {}
+            fallas: list[str] = []
             for a in ((ra.json() if _resp_ok(ra) else {}) or {}).get("alerts") or []:
+                # Una alerta en ERROR no es un hallazgo: es el detector que no
+                # pudo correr (p. ej. el alias todavía no existía). Va aparte.
+                if str(a.get("state", "")).upper() == "ERROR":
+                    fallas.append(str(a.get("error_message") or "error del detector")[:200])
+                    continue
                 sev = _SEVERIDAD_DE_ALERTA.get(str(a.get("severity")), str(a.get("severity") or ""))
                 alertas[sev] = alertas.get(sev, 0) + 1
             detectores.append({
@@ -6454,6 +6476,7 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
                 "total": int((hallazgos or {}).get("total_findings") or 0),
                 "recientes": [_hallazgo(f, regla_por_id) for f in ((hallazgos or {}).get("findings") or [])[:5]],
                 "alertas": alertas,
+                "fallas": fallas,
                 "error": "" if _resp_ok(rf) else _resp_motivo(rf),
             })
         casos.append({"slug": slug, "detectores": detectores,
