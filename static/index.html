@@ -1789,17 +1789,24 @@
     #log-file-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
     /* Una sola fila: con pocos casos las pestañas reparten el ancho; con muchos
        (9 en un deploy) conservan su ancho y la fila se desplaza. Antes cada
-       etiqueta se partía en dos líneas y la última se salía de la tarjeta. La
-       línea de base es una sombra y no un borde: con overflow, la pestaña
-       activa que se montaba sobre el borde (margin -2px) quedaba recortada. */
+       etiqueta se partía en dos líneas y la última se salía de la tarjeta.
+       - La barra de desplazamiento va ARRIBA de las pestañas: la fila se da
+         vuelta en vertical (la barra, que el navegador pone abajo, queda
+         arriba) y cada pestaña se vuelve a dar vuelta para leerse bien. Por
+         eso la línea de base es una sombra en el borde de ARRIBA de la fila:
+         dada vuelta, queda abajo. Una sombra y no un borde: con overflow, la
+         pestaña activa que se montaba sobre el borde (margin -2px) se recortaba.
+       - Sin `scrollbar-width`: en Chrome anula `::-webkit-scrollbar` y la barra
+         salía gris y con flechas en vez de la finita roja de la app. */
     .case-tabs {
       display: flex; gap: 4px; margin-bottom: 20px;
-      box-shadow: inset 0 -2px 0 var(--border-subtle);
-      padding-bottom: 0;
+      box-shadow: inset 0 2px 0 var(--border-subtle);
+      padding-bottom: 6px;
       overflow-x: auto; overflow-y: hidden;
-      scrollbar-width: thin;
+      transform: scaleY(-1);
     }
     .case-tab {
+      transform: scaleY(-1);
       flex: 1 0 auto;
       white-space: nowrap;
       display: flex; align-items: center; justify-content: center; gap: 8px;

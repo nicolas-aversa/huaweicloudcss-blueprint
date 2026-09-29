@@ -173,7 +173,12 @@ def test_las_pestanas_de_casos_no_se_salen_con_muchos_casos():
     i = html.index("    .case-tabs {")
     tabs = html[i:html.index("}", i)]
     tab = html[html.index("    .case-tab {"):html.index("}", html.index("    .case-tab {"))]
-    assert "overflow-x: auto" in tabs and "box-shadow: inset 0 -2px 0 var(--border-subtle)" in tabs
-    assert "border-bottom: 2px" not in tabs
+    assert "overflow-x: auto" in tabs and "border-bottom: 2px" not in tabs
+    # La barra arriba: la fila dada vuelta y cada pestaña otra vez al derecho;
+    # la línea de base, en el borde de arriba de la fila (dada vuelta, abajo).
+    assert "transform: scaleY(-1)" in tabs and "transform: scaleY(-1)" in tab
+    assert "box-shadow: inset 0 2px 0 var(--border-subtle)" in tabs
+    # Roja como el resto: `scrollbar-width` en Chrome anula ::-webkit-scrollbar.
+    assert "scrollbar-width" not in tabs.split("*/", 1)[-1]
     assert "white-space: nowrap" in tab and "flex: 1 0 auto" in tab and "margin-bottom: -2px" not in tab
     assert html.count("tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });") == 2
