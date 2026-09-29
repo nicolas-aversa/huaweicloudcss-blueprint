@@ -462,8 +462,8 @@ def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
     i = html.index("      capChatPreguntar = (slug, pregunta, contexto) => {")
     fn = html[i:html.index("\n      };\n", i)]
     assert "if (!activeSlugs.includes(slug) || capChatBusy) return false;" in fn
-    assert fn.index("_mostrarCaso(slug);") < fn.index("_abrir(true);") < fn.index("_modoInvestigar(true);") \
-        < fn.index("sendCapChat(pregunta, { contexto });")
+    assert fn.index("_mostrarCaso(slug);") < fn.index("_abrir(true);") \
+        < fn.index("sendCapChat(pregunta, { contexto, investigar: true });")
     j = html.index("function _quitarAsistente() {")
     assert "capChatPreguntar = null;" in html[j:html.index("\n    }\n", j)]
     k = html.index("async function verHallazgos(btn) {")

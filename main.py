@@ -7053,7 +7053,11 @@ def _prompt_de_patrones(pregunta: str, ppl: str, result: dict, memoria: str) -> 
 
 # ── Investigar: varias consultas para un "¿por qué?" ────────────────────────
 _MAX_CONSULTAS_DE_INVESTIGACION = 3
-_POR_QUE = re.compile(r"\b(por\s*qu[eé]|a\s+qu[eé]\s+se\s+deb\w*|qu[eé]\s+caus\w*|why|what\s+caus\w*)\b", re.I)
+# Preguntas que piden entender algo (no contar): van a Investigar solas.
+_POR_QUE = re.compile(
+    r"\b(por\s*qu[eé]|a\s+qu[eé]\s+se\s+deb\w*|qu[eé]\s+caus\w*|qu[eé]\s+pas[oó]"
+    r"|c[oó]mo\s+se\s+explica\w*|expl[ií]ca\w*|motivos?|raz[oó]n(es)?|a\s+qu[eé]\s+se\s+atribu\w*"
+    r"|why|what\s+caus\w*|what\s+happened|explain\w*)\b", re.I)
 
 
 def _es_por_que(pregunta: str) -> bool:

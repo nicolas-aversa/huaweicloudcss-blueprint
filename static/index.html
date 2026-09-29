@@ -2416,7 +2416,7 @@
     /* Un solo campo, con el enviar adentro. */
     .cap-chat__composer {
       display: flex; align-items: center; gap: 6px; margin: 8px 14px 6px;
-      padding: 5px 5px 5px 6px; background: var(--bg-primary);
+      padding: 5px 5px 5px 16px; background: var(--bg-primary);
       border: 1px solid var(--border-default); border-radius: var(--radius-pill); box-shadow: var(--shadow-xs);
       transition: border-color var(--t-fast), box-shadow var(--t-fast);
     }
@@ -2429,16 +2429,6 @@
     .cap-chat__composer .cap-chat__send { width: 36px; height: 36px; box-shadow: none; }
     .cap-chat__composer .cap-chat__send .icon { width: 16px; height: 16px; }
     .cap-chat__pie { padding: 0 16px 10px; font-size: var(--fs-xs); color: var(--text-muted); text-align: center; }
-    /* Investigar: un modo de un solo uso, prendido en rojo. */
-    .cap-chat__modo {
-      flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; cursor: pointer;
-      font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--text-muted);
-      background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
-      transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
-    }
-    .cap-chat__modo .icon { width: 13px; height: 13px; }
-    .cap-chat__modo:hover { color: var(--text-primary); }
-    .cap-chat__modo[aria-pressed="true"] { color: var(--accent); background: var(--accent-tint); border-color: var(--accent); }
     .cap-chat__investigacion {
       display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
       font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--accent);
@@ -5831,7 +5821,6 @@
     const capChats = {};        // slug → [{id, who, html, result, err}]
     let capChatSlug = '';       // la pestaña elegida
     let capChatBusy = false;    // una pregunta a la vez, aunque el form se rearme
-    let capChatInvestigar = false;   // la próxima pregunta, con varias consultas
     let capChatSeq = 0;
     let capChatAbierto = false;   // el panel flotante, abierto o no
     // (slug, pregunta, contexto) → true si el asistente la tomó. Lo arma
@@ -6289,8 +6278,6 @@
         <div class="cap-chat">
           ${logsHtml}
           <form class="cap-chat__composer" id="cap-chat-form" autocomplete="off">
-            <button type="button" class="cap-chat__modo" id="cap-chat-investigar" aria-pressed="false"
-                    title="Investigar: cruza varias consultas para entender un porqué">${icon('search')} Investigar</button>
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Preguntá sobre tus datos…" aria-label="Tu pregunta">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
@@ -6573,12 +6560,11 @@
         };
         step();
       }
-      async function sendCapChat(question, { contexto = '' } = {}) {
+      // `investigar` lo fuerza "Explicar"; si no, lo decide el backend por la
+      // pregunta (un "¿por qué…?", "¿qué pasó…?", "explicame…").
+      async function sendCapChat(question, { contexto = '', investigar = false } = {}) {
         question = (question || '').trim();
         if (!question || capChatBusy) return;
-        // Investigar vale para esta pregunta sola: después vuelve al modo normal.
-        const investigar = capChatInvestigar;
-        _modoInvestigar(false);
         // El caso de la PREGUNTA: la respuesta va a su conversación aunque
         // mientras tanto se cambie de pestaña o se rearme la vista.
         const slug = _activeChatSlug();
@@ -6642,15 +6628,6 @@
         }
       }
       chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });
-      // El botón Investigar prende o apaga el modo para la próxima pregunta.
-      const botonInvestigar = host.querySelector('#cap-chat-investigar');
-      function _modoInvestigar(on) {
-        capChatInvestigar = on;
-        botonInvestigar?.setAttribute('aria-pressed', String(on));
-        if (chatInput) chatInput.placeholder = on ? '¿Qué querés entender?' : 'Preguntá sobre tus datos…';
-      }
-      botonInvestigar?.addEventListener('click', () => { _modoInvestigar(!capChatInvestigar); chatInput?.focus(); });
-      _modoInvestigar(capChatInvestigar);
       host.querySelector('#cap-chat-clear')?.addEventListener('click', () => { _clearActiveLog(); chatInput?.focus(); });
       // Preguntas sugeridas \u2192 enviar al chat (antes copiaban al clipboard).
       host.addEventListener('click', (e) => {
@@ -6679,8 +6656,7 @@
         }
         _mostrarCaso(slug);
         _abrir(true);
-        _modoInvestigar(true);
-        sendCapChat(pregunta, { contexto });
+        sendCapChat(pregunta, { contexto, investigar: true });
         return true;
       };
       // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML

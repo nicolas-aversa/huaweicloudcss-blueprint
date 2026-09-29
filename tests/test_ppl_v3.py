@@ -148,7 +148,14 @@ def test_si_la_muestra_falla_quedan_los_grupos():
     ("¿A qué se deben las malas reseñas?", True),
     ("¿Qué causa los rechazos?", True),
     ("Why are payments failing?", True),
+    ("¿Qué pasó el martes?", True),
+    ("Explicame la caída de ventas", True),
+    ("¿Cómo se explica el pico de marzo?", True),
+    ("¿Cuál es el motivo de los rechazos?", True),
+    ("What happened yesterday?", True),
     ("¿Cuántas transacciones hay?", False),
+    ("¿Qué pasa con la app?", False),
+    ("Top 10 IPs de origen", False),
     ("porcentaje de fallos por canal", False),
 ])
 def test_que_es_un_por_que(pregunta, es):

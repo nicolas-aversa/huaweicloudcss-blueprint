@@ -150,7 +150,7 @@ def test_el_asistente_se_arma_desde_lo_guardado():
 
 def test_la_respuesta_va_al_caso_de_la_pregunta_y_al_asistente_actual():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     assert "const pend = _agregar(slug, 'bot'" in envio
     # Se guarda la respuesta entera y se busca su burbuja en lo que está en
@@ -174,7 +174,7 @@ def test_solo_en_memoria_y_se_borra_con_el_entorno():
 
 def test_la_pregunta_manda_la_memoria_de_su_caso():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     # El historial se toma ANTES de agregar la pregunta nueva.
     assert envio.index("const history = capChatHistorial(slug);") < envio.index("_agregar(slug, 'user'")
@@ -312,7 +312,7 @@ console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
 
 def test_despues_de_cada_respuesta_vuelven_las_sugeridas():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     # La pregunta queda anotada (para no volver a sugerirla) y la respuesta,
     # pendiente hasta que llega.
@@ -463,29 +463,24 @@ def test_una_investigacion_se_muestra_con_cada_consulta(tmp_path):
     assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
 
 
-def test_el_boton_investigar_vale_para_una_pregunta():
+def test_investigar_lo_decide_la_pregunta_sin_boton():
+    """El botón "Investigar" se fue: el backend lo decide por la pregunta
+    ("¿por qué…?", "¿qué pasó…?", "explicame…") y "Explicar" lo fuerza."""
     html = _INDEX.read_text(encoding="utf-8")
     fn = _render(html)
     i = fn.index('<form class="cap-chat__composer" id="cap-chat-form"')
     form = fn[i:fn.index("</form>", i)]
-    assert 'id="cap-chat-investigar" aria-pressed="false"' in form
-    assert form.index('id="cap-chat-investigar"') < form.index('id="cap-chat-input"'), "a la izquierda del campo"
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '' } = {})"):]
+    assert "investigar" not in form.lower()
+    for rastro in ("cap-chat__modo", "_modoInvestigar", "capChatInvestigar", "cap-chat-investigar"):
+        assert rastro not in html, rastro
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
-    # Se lee el modo, se apaga, y viaja con la pregunta (y el contexto).
-    assert envio.index("const investigar = capChatInvestigar;") < envio.index("_modoInvestigar(false);")
     assert "question, slug, history, investigar, contexto," in envio
-    modo = fn[fn.index("function _modoInvestigar(on) {"):]
-    modo = modo[:modo.index("\n      }\n")]
-    assert "capChatInvestigar = on;" in modo and "setAttribute('aria-pressed', String(on))" in modo
-    assert "'¿Qué querés entender?'" in modo
-    assert "botonInvestigar?.addEventListener('click', () => { _modoInvestigar(!capChatInvestigar);" in fn
-    assert "_modoInvestigar(capChatInvestigar);" in fn, "un re-render respeta el modo"
+    assert "sendCapChat(pregunta, { contexto, investigar: true });" in fn
+    assert "chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });" in fn
     # La respuesta: cabecera arriba y detalles por consulta.
     assert "pend.html = `${cabecera}<div class=\"cap-chart-host\">" in envio
     assert "el.innerHTML = `${cabecera}<div class=\"cap-chart-host\">" in envio
-    css = html[:html.index("</style>")]
-    assert '.cap-chat__modo[aria-pressed="true"] { color: var(--accent);' in css
     # "fallidas y % por código" (PPL 3): barras por categoría, no dispersión.
     assert "if (Q.length >= 2 && rows.length >= 3 && !N.length) {" in fn
 
