@@ -5760,6 +5760,12 @@ def _ml_predict(base: str, user: str, password: str, model_id: str,
                 if isinstance(v, str) and v.strip():
                     content = v
                     break
+                # Si el modelo contestó JSON válido (el plan de una investigación:
+                # un array de consultas), ml-commons lo entrega ya parseado. Se
+                # descartaba, y "¿por qué?" caía a una sola consulta con un descargo.
+                if isinstance(v, (list, dict)) and v:
+                    content = json.dumps(v, ensure_ascii=False)
+                    break
         if not isinstance(content, str):
             print(f"[ppl-chat] _predict {model_id} sin content; dataAsMap={str(data)[:400]}")
             return None
