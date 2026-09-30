@@ -6630,15 +6630,23 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
     creadas = sum(len(v) for v in por_tipo.values())
     paso(f"{creadas} de {total} reglas", not fallos, "; ".join(fallos))
 
-    # Un detector por tipo de log, sobre el index pattern del caso.
-    existentes = {}
+    # Un detector por tipo de log, sobre los índices mensuales POR NOMBRE: con
+    # el alias el monitor no guarda hasta dónde leyó (ver indices_mensuales).
+    # Sin meses declarados no hay índices que nombrar: queda el alias.
+    entrada = indices or [alias]
+    existentes, entrada_de = {}, {}
     for h in _sa_buscar(base, user, password, "detectors/_search"):
         fuente = h.get("_source") or {}
-        existentes[(fuente.get("detector") or fuente).get("name")] = h.get("_id")
+        det = fuente.get("detector") or fuente
+        existentes[det.get("name")] = h.get("_id")
+        entrada_de[det.get("name")] = sorted(
+            ((det.get("inputs") or [{}])[0].get("detector_input") or {}).get("indices") or [])
     for lt in spec.get("log_types", []):
         nombre_d = seguridad.nombre_de_detector(slug, lt["nombre"])
         recreado = False
-        if existentes.get(nombre_d) and indice_nuevo:
+        # Se recrea si hay índices nuevos (no los sigue) o si apunta a otra
+        # cosa (p. ej. el alias de antes).
+        if existentes.get(nombre_d) and (indice_nuevo or entrada_de.get(nombre_d) != sorted(entrada)):
             _os_req("DELETE", f"{base}{_SA_BASE}/detectors/{existentes[nombre_d]}", user, password, timeout=30)
             reg["detectores"].pop(nombre_d, None)
             recreado = True
@@ -6650,12 +6658,12 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
             paso(f"detector {lt['nombre']}", False, "sin reglas creadas")
             continue
         rd = _os_req("POST", f"{base}{_SA_BASE}/detectors", user, password, timeout=30,
-                     json_body=seguridad.build_detector(slug, lt["nombre"], alias,
+                     json_body=seguridad.build_detector(slug, lt["nombre"], entrada,
                                                         por_tipo[lt["nombre"]]))
         if _resp_ok(rd):
             reg["detectores"][nombre_d] = {"id": _resp_id(rd), "log_type": lt["nombre"]}
         paso(f"detector {lt['nombre']}", _resp_ok(rd),
-             _resp_motivo(rd) if not _resp_ok(rd) else ("recreado: hay índices nuevos" if recreado else ""))
+             _resp_motivo(rd) if not _resp_ok(rd) else ("recreado sobre los índices del caso" if recreado else ""))
 
     # Correlaciones entre tipos de log.
     correlaciones = spec.get("correlaciones", [])

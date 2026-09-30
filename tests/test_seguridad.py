@@ -85,10 +85,11 @@ def test_la_regla_en_yaml_sigma():
 
 
 def test_el_detector_va_al_index_pattern_real_con_un_trigger_por_severidad():
-    d = seguridad.build_detector("siem", "siem_auth", "siem-*", [("R1", "high"), ("R2", "critical"), ("R3", "high")])
+    d = seguridad.build_detector("siem", "siem_auth", ["siem-2025.07", "siem-2025.08"],
+                                 [("R1", "high"), ("R2", "critical"), ("R3", "high")])
     assert d["name"] == "siem-siem-auth" and d["detector_type"] == "siem_auth" and d["enabled"] is True
     entrada = d["inputs"][0]["detector_input"]
-    assert entrada["indices"] == ["siem-*"] and entrada["custom_rules"] == [{"id": "R1"}, {"id": "R2"}, {"id": "R3"}]
+    assert entrada["indices"] == ["siem-2025.07", "siem-2025.08"] and entrada["custom_rules"] == [{"id": "R1"}, {"id": "R2"}, {"id": "R3"}]
     assert [(t["sev_levels"], t["severity"]) for t in d["triggers"]] == [(["critical"], "1"), (["high"], "2")]
     assert all(t["ids"] == [] for t in d["triggers"]), "por nivel, no por id"
     assert "siem-all" not in json.dumps(d)
@@ -194,6 +195,7 @@ class _Cluster:
         self.plugin, self.indices, self.fallar_regla = plugin, list(indices), fallar_regla
         self.fallar_categoria = fallar_categoria
         self.log_types, self.reglas, self.detectores, self.correlaciones = {}, {}, {}, {}
+        self.entradas = {}
         self.creados, self.pedidos, self.n = [], [], 0
 
     def _id(self):
@@ -235,9 +237,11 @@ class _Cluster:
             i = self._id(); self.log_types[json_body["name"]] = i; self.creados.append(("log_type", json_body))
             return _Resp(201, {"_id": i})
         if ruta == "/_plugins/_security_analytics/detectors/_search":
-            return _Resp(200, {"hits": {"hits": [{"_id": i, "_source": {"detector": {"name": n}}} for n, i in self.detectores.items()]}})
+            return _Resp(200, {"hits": {"hits": [{"_id": i, "_source": {"detector": {"name": n, "inputs": self.entradas.get(i, [])}}}
+                                                 for n, i in self.detectores.items()]}})
         if ruta == "/_plugins/_security_analytics/detectors":
             i = self._id(); self.detectores[json_body["name"]] = i; self.creados.append(("detector", json_body))
+            self.entradas[i] = json_body["inputs"]
             return _Resp(201, {"_id": i})
         if ruta == "/_plugins/_security_analytics/correlation/rules/_search":
             return _Resp(200, {"hits": {"hits": [{"_id": i, "_source": {"name": n}} for n, i in self.correlaciones.items()]}})
@@ -291,9 +295,10 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     dets = {x[1]["name"]: x[1] for x in c.creados if x[0] == "detector"}
     assert set(dets) == {"siem-siem-fortigate", "siem-siem-auth", "siem-siem-cloudaudit", "siem-siem-waf"}
     auth = dets["siem-siem-auth"]["inputs"][0]["detector_input"]
-    # Al alias del caso: el detector no acepta un pattern ("Index patterns are
-    # not supported for doc level monitors", CSS 3.4).
-    assert auth["indices"] == ["siem-seguridad"]
+    # A los índices mensuales POR NOMBRE: no acepta un pattern ("Index patterns
+    # are not supported for doc level monitors", CSS 3.4) y con el alias el
+    # monitor no guarda hasta dónde leyó.
+    assert auth["indices"] == MESES_SIEM
     alias = next(x[1] for x in c.creados if x[0] == "alias")
     assert alias == {"actions": [{"add": {"index": "siem-*", "alias": "siem-seguridad"}}]}
     assert tipos.index("alias") < tipos.index("detector")
@@ -343,7 +348,7 @@ def test_si_el_indice_es_nuevo_los_detectores_se_recrean(monkeypatch, tmp_path):
     assert sorted(x[1] for x in c.creados if x[0] == "borrado_detector") == sorted(viejos.values())
     assert tipos.index("indice") < tipos.index("borrado_detector") < tipos.index("detector")
     assert set(c.detectores) == set(viejos) and not set(c.detectores.values()) & set(viejos.values())
-    assert ("Security Analytics · siem · detector siem_auth", True, "recreado: hay índices nuevos") in pasos
+    assert ("Security Analytics · siem · detector siem_auth", True, "recreado sobre los índices del caso") in pasos
     assert ("Security Analytics · siem · 1 índices mensuales", True, "creados antes que los detectores") in pasos
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
     assert reg["detectores"]["siem-siem-auth"]["id"] == c.detectores["siem-siem-auth"]
@@ -711,3 +716,25 @@ def test_la_revision_corre_al_provisionar_plugins():
     cuerpo = src[i:src.index("\n    msg = ", i)]
     assert "_revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,\n" in cuerpo
     assert "list(slugs), terraform_dir, run)" in cuerpo
+
+
+def test_un_detector_sobre_el_alias_se_recrea_sobre_los_indices(monkeypatch, tmp_path):
+    """Un entorno de antes: el detector apuntaba al alias. Medido en CSS 3.4:
+    sobre el alias el monitor no guarda hasta dónde leyó y no ve lo que entra."""
+    c = _Cluster(indices=MESES_SIEM)
+    c.detectores = {"siem-siem-auth": "VIEJO"}
+    c.entradas = {"VIEJO": [{"detector_input": {"indices": ["siem-seguridad"]}}]}
+    _, pasos = _provisionar(monkeypatch, tmp_path, c)
+    assert ("borrado_detector", "VIEJO") in c.creados
+    auth = next(x[1] for x in c.creados if x[0] == "detector" and x[1]["name"] == "siem-siem-auth")
+    assert auth["inputs"][0]["detector_input"]["indices"] == MESES_SIEM
+    assert ("Security Analytics · siem · detector siem_auth", True, "recreado sobre los índices del caso") in pasos
+
+
+def test_sin_meses_el_detector_queda_sobre_el_alias(monkeypatch, tmp_path):
+    spec = {k: v for k, v in SPECS["siem"].items() if k != "meses"}
+    monkeypatch.setitem(SPECS, "siem", spec)
+    c = _Cluster()
+    _provisionar(monkeypatch, tmp_path, c)
+    auth = next(x[1] for x in c.creados if x[0] == "detector" and x[1]["name"] == "siem-siem-auth")
+    assert auth["inputs"][0]["detector_input"]["indices"] == ["siem-seguridad"]

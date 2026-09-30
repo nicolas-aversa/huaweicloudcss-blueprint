@@ -88,12 +88,12 @@ def nombre_de_detector(slug: str, log_type: str) -> str:
     return f"{slug}-{log_type}".replace("_", "-")
 
 
-def build_detector(slug: str, log_type: str, index_pattern: str,
+def build_detector(slug: str, log_type: str, indices: list[str],
                    reglas: list[tuple[str, str]]) -> dict[str, Any]:
-    """`POST _plugins/_security_analytics/detectors`, sobre el index pattern REAL
-    del caso. `reglas`: [(id de la regla creada, nivel)]. Un trigger por cada
-    severidad que haya, por nivel y no por id: así cada alerta sale con su
-    severidad y una regla nueva del mismo nivel entra sola."""
+    """`POST _plugins/_security_analytics/detectors`, sobre los índices del caso
+    POR NOMBRE (ver `indices_mensuales`). `reglas`: [(id de la regla creada,
+    nivel)]. Un trigger por cada severidad que haya, por nivel y no por id: así
+    cada alerta sale con su severidad y una regla nueva del mismo nivel entra sola."""
     niveles = [n for n in NIVELES if any(nv == n for _, nv in reglas)]
     return {
         "type": "detector",
@@ -103,7 +103,7 @@ def build_detector(slug: str, log_type: str, index_pattern: str,
         "schedule": {"period": {"interval": 1, "unit": "MINUTES"}},
         "inputs": [{"detector_input": {
             "description": f"{slug}: {log_type}",
-            "indices": [index_pattern],
+            "indices": list(indices),
             "custom_rules": [{"id": rid} for rid, _ in reglas],
             "pre_packaged_rules": [],
         }}],
@@ -156,6 +156,11 @@ def indices_mensuales(index_pattern: str, meses: "tuple[str, str] | list[str]") 
     minutos y nunca guarda hasta dónde llegó (medido en un cluster real: la
     tanda que llegó 3 min después no se evaluó). Si Logstash creara cada mes
     durante la ingesta, de cada uno se procesaría solo el comienzo.
+
+    Y el detector va a estos índices POR NOMBRE, no al alias del caso: con un
+    alias el monitor tampoco guarda hasta dónde leyó (medido: mismos índices y
+    mismos datos, el detector por nombre vio 7 de 7 en dos tandas y guardó su
+    avance; el del alias, 0 y nunca lo guardó).
     """
     base = index_pattern.rstrip("*").rstrip("-._")
     desde, hasta = meses
