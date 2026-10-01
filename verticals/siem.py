@@ -141,6 +141,9 @@ VERTICAL = {
       "[network][iana_number]" => "integer"
       "[event][risk_score]" => "integer"
     }
+    # El grok de auth deja el fin de línea pegado a la campaña (CMP-003 más un
+    # salto de línea): la misma campaña quedaba partida en dos.
+    strip => ["[event][campaign]", "[event][campaign_name]"]
     remove_field => ["message", "@version", "_ts", "date", "time", "path", "tz", "vd", "logid", "eventtime", "sessionid", "trace_rating", "api_version", "technique", "campaign", "campaign_name", "kill_chain_phase", "risk_score"]
   }
 }""",
@@ -587,26 +590,25 @@ Eventos de 4 fuentes normalizados a ECS. Tráfico, intrusiones, autenticación, 
             },
         ],
         'correlaciones': [
+            # Por campaña y fuente, como están en los datos: los eventos de cada
+            # campaña traen sus propias acciones (create_access_key, no el
+            # createAccessKey del resto del CloudAudit), así que filtrar por la
+            # acción no encontraba nada. CMP-002 no va: solo tiene eventos de
+            # CloudAudit y una correlación cruza dos fuentes distintas (se ve
+            # igual en la línea de tiempo de campañas).
             {'nombre': 'siem-cmp001-compromiso-web',
-             'descripcion': 'Compromiso de app web: webshell y después una access key nueva',
+             'descripcion': 'Compromiso de app web: bloqueos en el WAF y después una access key nueva',
              'ventana_min': 120,
              'correlate': [
-                 {'log_type': 'siem_waf', 'query': 'event.campaign:CMP-001 AND rule.name:webshell'},
-                 {'log_type': 'siem_cloudaudit', 'query': 'event.campaign:CMP-001 AND event.action:createAccessKey'},
-             ]},
-            {'nombre': 'siem-cmp002-robo-de-credenciales',
-             'descripcion': 'Robo de credenciales: fuerza bruta SSH y después se borra la auditoría',
-             'ventana_min': 120,
-             'correlate': [
-                 {'log_type': 'siem_auth', 'query': 'event.campaign:CMP-002 AND event.action:ssh_login'},
-                 {'log_type': 'siem_cloudaudit', 'query': 'event.campaign:CMP-002 AND event.action:deleteTracker'},
+                 {'log_type': 'siem_waf', 'query': 'event.campaign:CMP-001 AND event.dataset:waf'},
+                 {'log_type': 'siem_cloudaudit', 'query': 'event.campaign:CMP-001 AND event.dataset:cloudaudit'},
              ]},
             {'nombre': 'siem-cmp003-movimiento-lateral',
-             'descripcion': 'Movimiento lateral: escaneo en el firewall y después fuerza bruta SSH',
-             'ventana_min': 120,
+             'descripcion': 'Movimiento lateral: bloqueo en el firewall y después un servidor nuevo en la nube',
+             'ventana_min': 300,
              'correlate': [
-                 {'log_type': 'siem_fortigate', 'query': 'event.campaign:CMP-003'},
-                 {'log_type': 'siem_auth', 'query': 'event.campaign:CMP-003 AND event.action:ssh_login'},
+                 {'log_type': 'siem_fortigate', 'query': 'event.campaign:CMP-003 AND event.dataset:fortigate'},
+                 {'log_type': 'siem_cloudaudit', 'query': 'event.campaign:CMP-003 AND event.dataset:cloudaudit'},
              ]},
         ],
     },

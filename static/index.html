@@ -1837,6 +1837,13 @@
       opacity: 0.7;
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
+    /* Campañas: los pasos en orden, como una línea de tiempo. */
+    .campana__pasos { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--accent-tint); display: grid; gap: 6px; }
+    .campana__paso { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); position: relative; }
+    .campana__paso::before { content: ''; position: absolute; left: -19px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .campana__hora { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+    .campana__fuente { font-weight: 600; text-transform: uppercase; font-size: var(--fs-xs); letter-spacing: 0.04em; color: var(--text-secondary); }
+    .campana__explicar { margin-left: auto; }
     /* Forecasting: los casos como botones; el elegido, marcado. */
     .pron__casos { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
     .pron__caso.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
@@ -6030,6 +6037,71 @@
           <div id="infra-seguridad-detalle"></div>
         </div>`;
     }
+    // Campañas: la línea de tiempo de cada una, desde los datos (event.campaign).
+    // Solo los casos que declaran correlaciones (hoy el SIEM).
+    function campanasHTML(sa) {
+      const casos = Object.entries(sa || {}).filter(([, c]) => (c.correlaciones || 0) > 0);
+      if (!casos.length) return '';
+      return `<div class="section-card" id="infra-campanas">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('layers')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Campañas</span>
+              <span class="section-card__hint">Cada ataque contado en orden: qué pasó en cada fuente y desde qué IP · ${casos.map(([s]) => escapeHtml(SLUG_LABELS[s] || s)).join(' · ')} · en Dashboards: Security Analytics → Correlations</span>
+            </span>
+            <button type="button" class="btn btn-primary btn-sm" id="infra-campanas-ver">Ver campañas</button>
+          </div>
+          <div id="infra-campanas-detalle"></div>
+        </div>`;
+    }
+    // ISO del agregado ("2025-09-16T20:46:10.000Z") → como @timestamp en PPL.
+    const _horaPpl = (iso) => String(iso || '').replace('T', ' ').slice(0, 19);
+    function campanasDetalleHTML(casos) {
+      const bloques = (casos || []).map(c => {
+        if (c.error) return `<div class="hallazgos__det"><div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(c.error)}</div></div>`;
+        return (c.campanas || []).map(k => {
+          const pasos = (k.pasos || []).map(p =>
+            `<li class="campana__paso"><span class="campana__hora">${escapeHtml(_horaPpl(p.inicio))}</span>`
+            + `<span class="campana__fuente">${escapeHtml(p.fuente)}</span><span class="hallazgo__regla">${escapeHtml(p.accion)}</span>`
+            + `<span class="hallazgo__meta">${p.eventos} evento${p.eventos === 1 ? '' : 's'}</span></li>`).join('');
+          return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(k.id)}${k.nombre ? ` · ${escapeHtml(k.nombre)}` : ''}</strong>`
+            + `<span class="hallazgos__total">${k.eventos} evento${k.eventos === 1 ? '' : 's'} en ${(k.fuentes || []).length} fuente${(k.fuentes || []).length === 1 ? '' : 's'}${(k.ips || []).length ? ` · desde ${escapeHtml(k.ips.join(', '))}` : ''}</span>`
+            + `<button type="button" class="btn btn-secondary btn-sm campana__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `data-campana="${escapeHtml(k.id)}" data-nombre="${escapeHtml(k.nombre || '')}" data-desde="${escapeHtml(_horaPpl(k.desde))}" `
+            + `data-hasta="${escapeHtml(_horaPpl(k.hasta))}" data-ips="${escapeHtml((k.ips || []).join(', '))}">Explicar</button></div>`
+            + `<ol class="campana__pasos">${pasos}</ol></div>`;
+        }).join('') || `<div class="hallazgos__det"><div class="hallazgos__vacio">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}: sin eventos de campaña en los datos.</div></div>`;
+      }).join('');
+      return bloques || '<div class="hallazgos__vacio">No hay casos con campañas.</div>';
+    }
+    // "Explicar" una campaña: el asistente mide qué cambió en esa ventana.
+    function explicarCampana(b) {
+      const { slug, campana, nombre, desde, hasta, ips } = b.dataset;
+      const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
+        `¿Qué pasó en la campaña ${campana}${nombre ? ` (${nombre})` : ''}?`,
+        `Campaña ${campana}${nombre ? ` "${nombre}"` : ''} entre ${desde} y ${hasta} (UTC)${ips ? `, desde ${ips}` : ''}. `
+        + `Contá qué hizo en cada fuente y en qué orden.`,
+        { desde, hasta }));
+      if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
+      return tomada;
+    }
+    async function verCampanas(btn) {
+      const destino = document.getElementById('infra-campanas-detalle');
+      if (!destino) return;
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo las campañas…', 'loading');
+      try {
+        const res = await fetch('/api/v1/security/campanas');
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = campanasDetalleHTML(data.casos || []);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
     const _NIVEL = { critical: 'Crítica', high: 'Alta', medium: 'Media', low: 'Baja' };
     function _fechaCorta(v) {
       if (!v) return '';
@@ -7752,7 +7824,7 @@
               <div class="pipe-list">${pipeRows}</div>
             </div>
             <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>` },
-          { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) },
+          { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) },
         ], infraSeccionGuardada())}
@@ -7767,6 +7839,12 @@
       body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
         const b = e.target.closest('.hallazgo__explicar');
         if (b) explicarHallazgo(b);
+      });
+      // Campañas: a demanda, y "Explicar" cada una.
+      body.querySelector('#infra-campanas-ver')?.addEventListener('click', (e) => verCampanas(e.currentTarget));
+      body.querySelector('#infra-campanas-detalle')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.campana__explicar');
+        if (b) explicarCampana(b);
       });
       // Forecasting: por caso, a demanda.
       body.querySelector('#infra-pronosticos')?.addEventListener('click', (e) => {

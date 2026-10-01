@@ -59,9 +59,18 @@ def test_las_correlaciones_cruzan_fuentes_de_verdad(slug):
 
 
 def test_las_campanas_del_siem_son_las_del_dataset():
+    """Como están en los datos: los eventos de cada campaña traen sus propias
+    acciones (create_access_key, no createAccessKey), así que se correlaciona por
+    campaña y fuente. CMP-002 solo tiene eventos de CloudAudit: no hay dos fuentes."""
     queries = " ".join(p["query"] for c in SPECS["siem"]["correlaciones"] for p in c["correlate"])
-    for cmp_ in ("CMP-001", "CMP-002", "CMP-003"):
+    for cmp_ in ("CMP-001", "CMP-003"):
         assert f"event.campaign:{cmp_}" in queries
+    assert "CMP-002" not in queries
+    assert "event.action" not in queries and "rule.name" not in queries
+    for c in SPECS["siem"]["correlaciones"]:
+        for par in c["correlate"]:
+            fuente = par["log_type"].removeprefix("siem_")
+            assert f"event.dataset:{fuente}" in par["query"], par
 
 
 # ── Los builders ────────────────────────────────────────────────────────────
@@ -310,20 +319,20 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     assert tipos.index("alias") < tipos.index("detector")
     assert {r["id"] for r in auth["custom_rules"]} == {c.reglas["SSH: login fallido"], c.reglas["Acceso a /etc/shadow con sudo"]}
     corr = [x[1] for x in c.creados if x[0] == "correlacion"]
-    assert len(corr) == 3 and all(p["index"] == "siem-seguridad" for x in corr for p in x["correlate"])
+    assert len(corr) == 2 and all(p["index"] == "siem-seguridad" for x in corr for p in x["correlate"])
     # En Actividad, cada pieza con su resultado.
     nombres = [p[0] for p in pasos]
     assert "Security Analytics · siem · tipos de log" in nombres
     assert ("Security Analytics · siem · 8 de 8 reglas", True, "") in pasos
     assert ("Security Analytics · siem · detector siem_waf", True, "") in pasos
     assert ("Security Analytics · siem · alias siem-seguridad", True, "") in pasos
-    assert ("Security Analytics · siem · 3 de 3 correlaciones", True, "") in pasos
+    assert ("Security Analytics · siem · 2 de 2 correlaciones", True, "") in pasos
     assert ("Security Analytics · siem · 13 índices mensuales", True, "creados antes que los detectores") in pasos
     assert all(ok for _, ok, _ in pasos)
     # Y queda registrado (lo lee la vista).
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
     assert set(reg["detectores"]) == set(dets) and reg["detectores"]["siem-siem-auth"]["log_type"] == "siem_auth"
-    assert len(reg["reglas"]) == 8 and len(reg["correlaciones"]) == 3
+    assert len(reg["reglas"]) == 8 and len(reg["correlaciones"]) == 2
     assert res["available"] is True
 
 
@@ -337,7 +346,7 @@ def test_la_segunda_vez_no_duplica_nada(monkeypatch, tmp_path):
     # lo demás no se duplica.
     assert len([x for x in c.creados if x[0] != "alias"]) == antes, "todo se encuentra por nombre o título"
     assert ("Security Analytics · siem · detector siem_auth", True, "ya estaba") in pasos
-    assert len(json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]["correlaciones"]) == 3
+    assert len(json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]["correlaciones"]) == 2
 
 
 def test_si_el_indice_es_nuevo_los_detectores_se_recrean(monkeypatch, tmp_path):
@@ -573,7 +582,7 @@ def test_la_tarjeta_y_los_hallazgos_en_node(tmp_path):
 
 def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) }," in html
+    assert "{ id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) }," in html
     assert "body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));" in html
     assert "const b = e.target.closest('.hallazgo__explicar');\n        if (b) explicarHallazgo(b);" in html
     i = html.index("      capChatPreguntar = (slug, pregunta, contexto, explicar = null) => {")

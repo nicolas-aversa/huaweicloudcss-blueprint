@@ -6573,6 +6573,42 @@ def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int
             "" if _resp_ok(r) else _resp_motivo(r))
 
 
+class CampanasResponse(BaseModel):
+    casos: list[dict] = Field(default_factory=list)
+
+
+@app.get("/api/v1/security/campanas", response_model=CampanasResponse, tags=["capabilities"])
+def campanas_de_seguridad() -> CampanasResponse:
+    """La línea de tiempo de cada campaña de los casos de seguridad que las
+    declaran (correlaciones), desde los datos: qué pasó, en qué orden, en qué
+    fuentes y desde qué IPs. En vivo y a demanda."""
+    import seguridad
+
+    terraform_dir = _active_terraform_dir()
+    registro = _read_security(terraform_dir)
+    specs = verticals.security_specs()
+    con_campanas = [s for s in registro if (specs.get(s) or {}).get("correlaciones")]
+    if not con_campanas:
+        return CampanasResponse()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "campanas", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    casos = []
+    for slug in con_campanas:
+        indice = ((verticals.capability_specs().get(slug) or {}).get("index_pattern")) or f"{slug}*"
+        r = _os_req("POST", f"{base}/{indice}/_search", user, password,
+                    json_body=seguridad.consulta_de_campanas(), timeout=30)
+        try:
+            lista = seguridad.campanas(r.json() or {}) if _resp_ok(r) else []
+        except ValueError:
+            lista = []
+        casos.append({"slug": slug, "campanas": lista, "error": "" if _resp_ok(r) else _resp_motivo(r)})
+    return CampanasResponse(casos=casos)
+
+
 class ResumenSeguridadResponse(BaseModel):
     casos: list[dict] = Field(default_factory=list)
 
