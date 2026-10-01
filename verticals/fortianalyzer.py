@@ -666,6 +666,7 @@ Sesiones por acción, ancho de banda, top aplicaciones, firmas IPS y países de 
             {'type': 'metric', 'title': 'Bytes Enviados', 'agg': 'sum', 'field': 'sentbyte', 'label': 'Bytes Enviados'},
             {'type': 'metric', 'title': 'Amenazas IPS', 'agg': 'count', 'label': 'Amenazas IPS', 'query': 'attack:*'},
             {'type': 'area', 'title': 'Sesiones en el tiempo por acción', 'metric': 'count', 'split': 'action', 'w': 48},
+            {'type': 'region_map', 'title': 'Sesiones por país de origen', 'field': 'srccountry', 'w': 48},
             {'type': 'line', 'title': 'Ancho de banda en el tiempo (bytes enviados)', 'metric': 'sum', 'field': 'sentbyte'},
             {'type': 'area', 'title': 'Eventos UTM en el tiempo', 'metric': 'count', 'query': 'type:utm'},
             {'type': 'bar', 'title': 'Top Aplicaciones', 'field': 'app', 'horizontal': True},

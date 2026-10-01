@@ -284,6 +284,44 @@ def _vs_input_controls(title: str, controls: list[dict[str, str]]) -> dict[str, 
     }
 
 
+# La capa de países del servicio de mapas de OpenSearch (maps.opensearch.org,
+# la carga el navegador): tal como la arma OpenSearch Dashboards para una Region
+# Map. Se fija la capa y el campo de unión: si no, Dashboards toma el primero,
+# `iso2`, y los datos traen el NOMBRE del país ("Canada", "Netherlands").
+_CAPA_DE_PAISES: dict[str, Any] = {
+    "name": "World Countries", "origin": "elastic_maps_service", "id": "world_countries",
+    "attribution": "Made with NaturalEarth",
+    "fields": [
+        {"type": "id", "name": "iso2", "description": "ISO 3166-1 alpha-2 Code"},
+        {"type": "id", "name": "iso3", "description": "ISO 3166-1 alpha-3 Code"},
+        {"type": "name", "name": "name", "description": "Name"},
+    ],
+    "format": {"type": "geojson"}, "layerId": "elastic_maps_service.World Countries", "isEMS": True,
+}
+
+
+def _vs_region_map(title: str, field: str, size: int = 100) -> dict[str, Any]:
+    """Mapa por país (Region Map / `region_map`): un terms sobre el campo con el
+    nombre del país, unido por nombre con la capa World Countries."""
+    return {
+        "title": title, "type": "region_map",
+        "aggs": [
+            _metric_agg("count", None, None),
+            {"id": "2", "enabled": True, "type": "terms", "schema": "segment",
+             "params": {"field": field, "size": size, "order": "desc", "orderBy": "1",
+                        "otherBucket": False, "missingBucket": False}},
+        ],
+        "params": {
+            "layerChosenByUser": "default", "legendPosition": "bottomright", "addTooltip": True,
+            "colorSchema": "Reds", "emsHotLink": "", "isDisplayWarning": False,
+            "wms": {"enabled": False, "options": {"format": "image/png", "transparent": True}},
+            "mapZoom": 2, "mapCenter": [20, 0], "outlineWeight": 1, "showAllShapes": True,
+            "selectedLayer": _CAPA_DE_PAISES,
+            "selectedJoinField": {"type": "name", "name": "name", "description": "Name"},
+        },
+    }
+
+
 def _panel_to_vis_state(panel: dict[str, Any]) -> dict[str, Any]:
     """Despacha un panel (spec rich) a su visState."""
     t = panel["type"]
@@ -294,6 +332,8 @@ def _panel_to_vis_state(panel: dict[str, Any]) -> dict[str, Any]:
         return _vs_input_controls(title, _normalize_controls(panel["controls"]))
     if t == "map":
         return _vs_coordinate_map(title, panel["field"], panel.get("precision", 3))
+    if t == "region_map":
+        return _vs_region_map(title, panel["field"])
     if t == "metric":
         return _vs_metric(title, panel["agg"], panel.get("field"), panel.get("label"))
     if t == "pie":
@@ -407,7 +447,7 @@ def _controls_viz_obj(slug: str, vis_id: str, title: str, vis_state: dict[str, A
 _DEFAULT_WH: dict[str, tuple[int, int]] = {
     "markdown": (48, 4), "controls": (48, 6), "metric": (12, 8),
     "pie": (16, 15), "bar": (24, 15), "table": (24, 15),
-    "area": (24, 14), "line": (24, 14), "tagcloud": (16, 15), "map": (24, 18),
+    "area": (24, 14), "line": (24, 14), "tagcloud": (16, 15), "map": (24, 18), "region_map": (24, 18),
 }
 
 
