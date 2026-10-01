@@ -268,14 +268,37 @@ _REGLAS_PPL_V2 = (
 _REGLAS_PPL_V3 = (
     "1. Rates and percentages CAN be computed in the query, with eval AFTER stats: "
     "stats sum(failed) as failed, count() as total by <field> | eval failed_pct = round(failed * 100.0 / total, 2).\n"
-    "2. NEVER use: JOIN, lookup, subqueries, append. Use eventstats to compare each row or group "
-    "against the total, and top / rare for the most / least frequent values.\n"
+    "2. NEVER use: lookup, subqueries, append. Use eventstats to compare each row or group "
+    "against the total, and top / rare for the most / least frequent values. JOIN only to "
+    "CORRELATE two subsets of the same index by a shared key (see rule 11).\n"
     "3. eval can go before stats (flags) or after it (rates).\n"
     "4. NEVER use head unless the user asks for top N.\n"
     "5. Single quotes for strings.\n"
     "6. To COUNT what similar texts say (log messages, errors, comments), group them with "
     "patterns: source=<index> | where isnotnull(<text_field>) | patterns <text_field> method=brain "
     "mode=aggregation | sort -pattern_count | head 10\n"
+)
+
+
+# PPL 3 también hace ML y correlación dentro de la consulta. Cada forma se probó
+# sobre los datos de demo en CSS 3.4: kmeans segmentó los pedidos en 3 grupos, ad
+# marcó las horas raras de producción y join cruzó WAF con firewall por IP.
+# kmeans va SIN head: el tope de filas del chat lo bajaría a 50 y el modelo
+# entrenaría con eso.
+_REGLAS_PPL_V3_ML = (
+    "11. To CORRELATE two subsets (two sources, two kinds of events) by a shared key, join two "
+    "aggregations of the same index; keys with dots go in backticks: source=<index> | where <condition A> "
+    "| stats count() as a by <key> | join left=x right=y ON x.`<key>` = y.`<key>` [ source=<index> | "
+    "where <condition B> | stats count() as b by <key> ] | sort -a | head 10\n"
+    "12. To SEGMENT or group similar records (segments, profiles, clusters), use kmeans on 2 or 3 "
+    "NUMERIC fields, without head, and describe each group: source=<index> | where isnotnull(<n1>) "
+    "and isnotnull(<n2>) | fields <n1>, <n2> | kmeans centroids=3 | stats count() as total, avg(<n1>) "
+    "as avg_<n1>, avg(<n2>) as avg_<n2> by ClusterID\n"
+    "13. To find UNUSUAL periods (spikes, drops, anomalies) on the fly: source=<index> | stats "
+    "count() as total by span(@timestamp, 1h) as t | sort t | ad time_field='t' | where anomaly_grade > 0 "
+    "| sort -anomaly_grade | head 10 (use sum(<numeric field>) instead of count() to measure a quantity).\n"
+    "14. For a TREND or moving average: source=<index> | stats count() as total by span(@timestamp, 1d) "
+    "as dia | sort dia | trendline sma(7, total) as tendencia\n"
 )
 
 
@@ -328,7 +351,8 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         # comentario vacío no es '', es un campo AUSENTE. "¿Cuántas sin
         # comentario?" daba 0 comparando con ''.
         "10. Empty or missing values are stored as ABSENT fields: count them with isnull(field) "
-        "and non-empty ones with isnotnull(field). NEVER compare a field with ''.\n\n"
+        "and non-empty ones with isnotnull(field). NEVER compare a field with ''.\n"
+        + (_REGLAS_PPL_V3_ML.replace("<index>", index_pattern) if ppl_v3 else "") + "\n"
         "CORRECT PATTERNS:\n"
         f"{examples}"
         f"# Filter a month (never match/wildcards on dates):\nsource={index_pattern} | where @timestamp >= '2025-03-01 00:00:00' and @timestamp < '2025-04-01 00:00:00' | stats count() as total\n\n"

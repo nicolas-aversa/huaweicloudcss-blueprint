@@ -364,3 +364,38 @@ def test_si_no_se_puede_prender_se_dice(monkeypatch, tmp_path):
     feats = {"ppl": True, "calcite": False}
     assert main._asegurar_ppl_v3({"public_endpoint": "x:9200"}, "admin", "pw", False, tmp_path, {"id": "r"}, feats) == feats
     assert pasos == [("PPL 3 (Calcite)", False, "no se pudo prender: status 403")]
+
+
+# ── ML y correlación dentro de PPL 3 (probado sobre los datos de demo) ──────
+def test_con_ppl3_el_modelo_aprende_ml_y_correlacion():
+    sp = caps.build_ppl_system_prompt("siem*", [], {"source.ip": "ip"}, ppl_v3=True)
+    for regla in ("11. To CORRELATE", "12. To SEGMENT", "13. To find UNUSUAL periods", "14. For a TREND"):
+        assert regla in sp, regla
+    assert "join left=x right=y ON x.`<key>` = y.`<key>` [ source=siem* |" in sp
+    assert "| ad time_field='t' | where anomaly_grade > 0" in sp
+    assert "| trendline sma(7, total) as tendencia" in sp
+    # kmeans SIN head: el tope de filas del chat (50) lo dejaría entrenando con 50.
+    kmeans = sp[sp.index("12. To SEGMENT"):sp.index("13. To find")]
+    ejemplo = kmeans[kmeans.index("source="):]
+    assert "| kmeans centroids=3 |" in ejemplo and "| head" not in ejemplo and "without head" in kmeans
+    assert "NEVER use: lookup, subqueries, append." in sp and "NEVER use: JOIN" not in sp
+
+
+def test_sin_ppl3_no_hay_ml_ni_join():
+    sp = caps.build_ppl_system_prompt("siem*", [], {"source.ip": "ip"}, ppl_v3=False)
+    assert "11. To CORRELATE" not in sp and "kmeans" not in sp and "trendline" not in sp
+
+
+def test_las_sugeridas_muestran_lo_nuevo_entre_las_primeras():
+    import herramientas_chat as hc
+    import verticals
+    q = {v["slug"]: v["suggested_questions"] for v in verticals.visible_verticals()}
+    primeras = {s: qs[:5] for s, qs in q.items()}
+    assert "¿Qué IPs atacaron la web (WAF) y además aparecen en el firewall?" in primeras["siem"]
+    assert "Segmentá los pedidos en 3 grupos por monto y cantidad" in primeras["ventas-ecommerce"]
+    assert "¿Cuál es la tendencia semanal de reproducciones?" in primeras["streaming-ott"]
+    assert "¿En qué horas la producción de petróleo fue anómala?" in primeras["produccion-pozos"]
+    # Va a la herramienta (los resultados del detector), no a PPL…
+    assert hc.pide_listado("¿Qué anomalías encontró el detector?") == "anomalias"
+    # …y esta la resuelve PPL con `ad`.
+    assert hc.pide_listado("¿En qué horas la producción de petróleo fue anómala?") == ""

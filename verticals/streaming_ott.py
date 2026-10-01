@@ -109,6 +109,7 @@ VERTICAL = {
     'suggested_questions': [
         '¿Cuántos eventos de reproducción hay en total?',
         '¿Cuáles son los 10 títulos más reproducidos?',
+        '¿Cuál es la tendencia semanal de reproducciones?',
         '¿Cuántos eventos hay por género?',
         '¿Cuántos eventos hay por dispositivo?',
         '¿Cuántos eventos hay por país?',

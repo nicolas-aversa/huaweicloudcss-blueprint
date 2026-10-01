@@ -379,6 +379,7 @@ VERTICAL = {
     'suggested_questions': [
         '¿Cuántos eventos de seguridad hay en total?',
         '¿Cuántos eventos hay por fuente (fortigate, auth, cloudaudit, waf)?',
+        '¿Qué IPs atacaron la web (WAF) y además aparecen en el firewall?',
         '¿Cuáles son las 10 IPs de origen más frecuentes?',
         '¿Cuántos eventos hay por país de origen?',
         '¿Cuántos eventos hay por severidad?',

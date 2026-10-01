@@ -130,6 +130,8 @@ VERTICAL = {
     'suggested_questions': [
         '¿Cuántas lecturas de producción hay en total?',
         '¿Cuál es el volumen de petróleo producido por pozo?',
+        '¿En qué horas la producción de petróleo fue anómala?',
+        '¿Qué anomalías encontró el detector?',
         '¿Cuántas horas en producción tuvo cada pozo?',
         '¿Cuántas lecturas hay por estado (FLOWING, INJECTING, DOWN)?',
         '¿Cuál es el volumen total de gas producido?',

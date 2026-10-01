@@ -152,6 +152,7 @@ VERTICAL = {
     'suggested_questions': [
         '¿Cuántas órdenes hay en total?',
         '¿Cuál es el ingreso total en EUR?',
+        'Segmentá los pedidos en 3 grupos por monto y cantidad',
         '¿Cuántas órdenes hay por categoría?',
         '¿Cuáles son las 10 marcas más vendidas?',
         '¿Cuántas órdenes hay por estado (completada, devuelta, cancelada)?',
