@@ -6475,26 +6475,32 @@ def resumen_anomalias() -> ResumenAnomaliasResponse:
     casos = []
     for slug, ids in con_detector.items():
         did = ids["detector_id"]
-        r = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/results/_search", user, password,
-                    json_body={"size": 5, "track_total_hits": True,
-                               "query": {"bool": {"filter": [{"term": {"detector_id": did}},
-                                                             {"range": {"anomaly_grade": {"gt": 0}}}]}},
-                               "sort": [{"anomaly_grade": {"order": "desc"}}]}, timeout=20)
-        hits: dict = {}
-        if _resp_ok(r):
-            try:
-                hits = (r.json() or {}).get("hits") or {}
-            except ValueError:
-                hits = {}
-        total = hits.get("total") or {}
+        total, top, error = _top_anomalias(base, user, password, did, 5)
         casos.append({
             "slug": slug,
             "estado": _estado_historico(base, user, password, did, intentos=1),
-            "total": int(total.get("value", 0) if isinstance(total, dict) else total or 0),
-            "top": [_anomalia(h.get("_source") or {}) for h in (hits.get("hits") or [])[:5]],
-            "error": "" if _resp_ok(r) else _resp_motivo(r),
+            "total": total, "top": top, "error": error,
         })
     return ResumenAnomaliasResponse(casos=casos)
+
+
+def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int) -> tuple[int, list[dict], str]:
+    """(total, las `n` de mayor grado, error) de los resultados de un detector."""
+    r = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/results/_search", user, password,
+                json_body={"size": n, "track_total_hits": True,
+                           "query": {"bool": {"filter": [{"term": {"detector_id": detector_id}},
+                                                         {"range": {"anomaly_grade": {"gt": 0}}}]}},
+                           "sort": [{"anomaly_grade": {"order": "desc"}}]}, timeout=20)
+    hits: dict = {}
+    if _resp_ok(r):
+        try:
+            hits = (r.json() or {}).get("hits") or {}
+        except ValueError:
+            hits = {}
+    total = hits.get("total") or {}
+    return (int(total.get("value", 0) if isinstance(total, dict) else total or 0),
+            [_anomalia(h.get("_source") or {}) for h in (hits.get("hits") or [])[:n]],
+            "" if _resp_ok(r) else _resp_motivo(r))
 
 
 class ResumenSeguridadResponse(BaseModel):
@@ -7060,6 +7066,11 @@ class PplChatRequest(BaseModel):
     # Lo que ya se sabe de lo que se pregunta (p. ej. "Explicar" un hallazgo:
     # la ventana de tiempo y la IP).
     contexto: str = Field(default="", max_length=500)
+    # "Explicar" una anomalía (desde/hasta) o un hallazgo (solo desde: el
+    # instante del evento), en UTC 'YYYY-MM-DD HH:MM:SS'. Con esto la respuesta
+    # sale de las herramientas que comparan el intervalo contra el anterior.
+    explicar_desde: str = Field(default="", max_length=30)
+    explicar_hasta: str = Field(default="", max_length=30)
 
 
 class PplChatResponse(BaseModel):
@@ -7564,9 +7575,98 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
         body = r.json()
         return True, {"schema": body.get("schema", []), "datarows": body.get("datarows", [])}
 
+    indice = (_spec or {}).get("index_pattern", f"{request.slug}*")
+    if request.explicar_desde:
+        r = _explicar_con_herramientas(base, user, password, indice, (_spec or {}).get("pattern_field", ""),
+                                       request.question, request.contexto,
+                                       request.explicar_desde, request.explicar_hasta, _predecir_llm)
+        if r is not None:
+            return r
+    else:
+        import herramientas_chat as hc
+        tipo = hc.pide_listado(request.question)
+        if tipo:
+            r = _listar_alertas_o_anomalias(base, user, password, tipo, ids, request.question, _predecir_llm)
+            if r is not None:
+                return r
+
     return _conversar(request.question, request.history, (_spec or {}).get("fields", {}),
                       _predecir_ppl, _predecir_llm, _ejecutar,
                       investigar=request.investigar, contexto=request.contexto)
+
+
+def _ml_tool(base: str, user: str, password: str, nombre: str, params: dict, timeout: int = 60):
+    """Ejecuta una herramienta de ml-commons/skills (`_plugins/_ml/tools/_execute`)
+    y devuelve su resultado (JSON si lo es, si no el texto), o None si falló."""
+    import herramientas_chat as hc
+
+    r = _os_req("POST", f"{base}/_plugins/_ml/tools/_execute/{nombre}", user, password,
+                json_body={"parameters": {k: str(v) for k, v in params.items()}}, timeout=timeout)
+    if not _resp_ok(r):
+        print(f"[ppl-chat] herramienta {nombre}: {_resp_motivo(r)}")
+        return None
+    try:
+        return hc.resultado_de_herramienta(r.json())
+    except ValueError:
+        return None
+
+
+def _explicar_con_herramientas(base: str, user: str, password: str, indice: str, campo_de_patrones: str,
+                               pregunta: str, contexto: str, desde: str, hasta: str,
+                               predecir_llm) -> "PplChatResponse | None":
+    """"Explicar" una anomalía o un hallazgo: qué cambió en ese intervalo respecto
+    del anterior, medido por DataDistributionTool (todos los campos) y, si el caso
+    declara su campo de patrones, LogPatternAnalysisTool. None si no hay nada que
+    mostrar: entonces se responde como siempre, con consultas PPL."""
+    import herramientas_chat as hc
+
+    try:
+        v = hc.ventanas(desde, hasta)
+    except ValueError:
+        return None
+    comunes = {"index": indice, "timeField": "@timestamp"}
+    distribucion = hc.cambios_de_distribucion(
+        _ml_tool(base, user, password, "DataDistributionTool", {**comunes, **v, "size": 1000}))
+    patrones: list[dict] = []
+    if campo_de_patrones:
+        patrones = hc.cambios_de_patrones(_ml_tool(base, user, password, "LogPatternAnalysisTool", {
+            **comunes, "logFieldName": campo_de_patrones,
+            "selectionTimeRangeStart": v["selectionTimeRangeStart"], "selectionTimeRangeEnd": v["selectionTimeRangeEnd"],
+            "baseTimeRangeStart": v["baselineTimeRangeStart"], "baseTimeRangeEnd": v["baselineTimeRangeEnd"]}))
+    if not distribucion and not patrones:
+        return None
+    answer = predecir_llm(hc.prompt_de_explicacion(pregunta, contexto, v, distribucion, patrones, campo_de_patrones))
+    return PplChatResponse(answer=answer or "Lo que más cambió en ese intervalo está en el detalle.",
+                           result=hc.tabla_de_cambios(distribucion, patrones, campo_de_patrones))
+
+
+def _listar_alertas_o_anomalias(base: str, user: str, password: str, tipo: str, ids: dict,
+                                pregunta: str, predecir_llm) -> "PplChatResponse | None":
+    """"¿Qué alertas / anomalías hubo?": no están en el índice del caso, así que
+    no salen de PPL. Las alertas del monitor del caso (SearchAlertsTool) o los
+    resultados de su detector. None si el caso no tiene ese plugin."""
+    import herramientas_chat as hc
+
+    if tipo == "alertas" and ids.get("monitor_id"):
+        texto = _ml_tool(base, user, password, "SearchAlertsTool", {
+            "monitorId": ids["monitor_id"], "size": 10, "sortOrder": "desc", "sortString": "start_time"})
+        if not isinstance(texto, str):
+            return None
+        alertas = hc.alertas_del_texto(texto)
+        m = re.search(r"TotalAlerts=(\d+)", texto)
+        total, tabla = (int(m.group(1)) if m else len(alertas)), hc.tabla_de_alertas(alertas)
+    elif tipo == "anomalias" and ids.get("detector_id"):
+        total, top, error = _top_anomalias(base, user, password, ids["detector_id"], 10)
+        if error:
+            return None
+        tabla = hc.tabla_de_anomalias(top)
+    else:
+        return None
+    if not total:
+        nada = "No hay alertas de este caso." if tipo == "alertas" else "El detector de este caso no encontró anomalías."
+        return PplChatResponse(answer=nada, result=tabla)
+    answer = predecir_llm(hc.prompt_de_listado(pregunta, tipo, total, tabla))
+    return PplChatResponse(answer=answer or f"Hay {total:,}.".replace(",", "."), result=tabla)
 
 
 class DatasetPreviewResponse(BaseModel):

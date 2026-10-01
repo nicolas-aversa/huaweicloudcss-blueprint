@@ -6063,7 +6063,9 @@
         `¿Por qué se disparó "${regla}"? ¿Qué más pasó alrededor?`,
         `Hallazgo de Security Analytics: regla "${regla}"${hora ? `, evento del ${hora} (UTC, como @timestamp)` : ''}`
         + `${ip ? `, IP de origen ${ip}` : ''}. Mirá qué más hizo esa IP en todo el período y en las horas `
-        + `cercanas (no solo ese minuto).`));
+        + `cercanas (no solo ese minuto).`,
+        // La hora del evento: el backend compara esa hora contra el día anterior.
+        hora ? { desde: hora } : null));
       if (!tomada) toast('Para explicarlo hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
       return tomada;
     }
@@ -6119,7 +6121,9 @@
       const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
         '¿Qué pasó en ese intervalo? ¿Por qué es una anomalía?',
         `Anomalía detectada entre ${inicio} y ${fin} (UTC), grado ${grado} %${valores ? `; valores: ${valores}` : ''}. `
-        + `Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.`));
+        + `Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.`,
+        // El intervalo: el backend mide qué cambió contra el período anterior.
+        { desde: inicio, hasta: fin }));
       if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
       return tomada;
     }
@@ -6583,7 +6587,7 @@
       }
       // `investigar` lo fuerza "Explicar"; si no, lo decide el backend por la
       // pregunta (un "¿por qué…?", "¿qué pasó…?", "explicame…").
-      async function sendCapChat(question, { contexto = '', investigar = false } = {}) {
+      async function sendCapChat(question, { contexto = '', investigar = false, explicar = null } = {}) {
         question = (question || '').trim();
         if (!question || capChatBusy) return;
         // El caso de la PREGUNTA: la respuesta va a su conversación aunque
@@ -6608,6 +6612,7 @@
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               question, slug, history, investigar, contexto,
+              explicar_desde: explicar?.desde || '', explicar_hasta: explicar?.hasta || '',
               opensearch_password: state.osPassword || '',
               opensearch_user: state.osUser || 'admin',
               https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del state
@@ -6666,7 +6671,7 @@
       if (caso) desplegableDeCaso(caso, (slug) => { _mostrarCaso(slug); if (chatInput) chatInput.focus(); });
       // Otras partes de la vista le preguntan al asistente ("Explicar" un
       // hallazgo): abre el panel en ese caso y la manda en modo Investigar.
-      capChatPreguntar = (slug, pregunta, contexto) => {
+      capChatPreguntar = (slug, pregunta, contexto, explicar = null) => {
         if (!activeSlugs.includes(slug) || capChatBusy) return false;
         if (caso) {
           caso.dataset.value = slug;
@@ -6677,7 +6682,7 @@
         }
         _mostrarCaso(slug);
         _abrir(true);
-        sendCapChat(pregunta, { contexto, investigar: true });
+        sendCapChat(pregunta, { contexto, investigar: true, explicar });
         return true;
       };
       // Los gráficos de las respuestas guardadas se vuelven a embeber: el HTML

@@ -250,6 +250,9 @@ Audit trail: acciones, ratings, servicios, usuarios y recursos.""",
     'capability': {
         'label': 'Cloud Trace Service',
         'index_pattern': 'cts*',
+        # "Explicar" compara los valores de este campo entre el intervalo y el anterior
+        # (LogPatternAnalysisTool): en el SIEM se ve, p. ej., el salto de ssh_login.
+        'pattern_field': 'trace_name',
         'operations': ['ConsoleAction', 'ApiCall', 'SystemAction'],
         'success_code': '200',
         'volume_field': 'trace_name',

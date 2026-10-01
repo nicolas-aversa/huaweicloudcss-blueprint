@@ -392,6 +392,9 @@ VERTICAL = {
     'capability': {
         'label': 'SIEM',
         'index_pattern': 'siem*',
+        # "Explicar" compara los valores de este campo entre el intervalo y el anterior
+        # (LogPatternAnalysisTool): en el SIEM se ve, p. ej., el salto de ssh_login.
+        'pattern_field': 'event.action',
         'operations': ['network', 'intrusion_detection', 'authentication', 'iam', 'web', 'host'],
         'success_code': '',
         'fields': {

@@ -341,9 +341,10 @@ check('nada', anomaliasDetalleHTML([]).includes('No hay detectores de anomalías
 const b = { dataset: { slug: 's', inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00', grado: '93', valores: 'eventos: 1.840' } };
 check('sin asistente, avisa', explicarAnomalia(b) === false && toasts.length === 1 && toasts[0].includes('Provisionar plugins'));
 let pedido = null;
-capChatPreguntar = (slug, pregunta, contexto) => { pedido = { slug, pregunta, contexto }; return true; };
+capChatPreguntar = (slug, pregunta, contexto, explicar) => { pedido = { slug, pregunta, contexto, explicar }; return true; };
 check('con asistente', explicarAnomalia(b) === true && toasts.length === 1);
 check('la pregunta', pedido.pregunta === '¿Qué pasó en ese intervalo? ¿Por qué es una anomalía?');
+check('la ventana: el intervalo', JSON.stringify(pedido.explicar) === JSON.stringify({ desde: '2025-03-14 02:10:00', hasta: '2025-03-14 02:20:00' }), JSON.stringify(pedido.explicar));
 check('el contexto', pedido.contexto === 'Anomalía detectada entre 2025-03-14 02:10:00 y 2025-03-14 02:20:00 (UTC), grado 93 %; valores: eventos: 1.840. Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.', pedido.contexto);
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);

@@ -150,7 +150,7 @@ def test_el_asistente_se_arma_desde_lo_guardado():
 
 def test_la_respuesta_va_al_caso_de_la_pregunta_y_al_asistente_actual():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false, explicar = null } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     assert "const pend = _agregar(slug, 'bot'" in envio
     # Se guarda la respuesta entera y se busca su burbuja en lo que está en
@@ -174,7 +174,7 @@ def test_solo_en_memoria_y_se_borra_con_el_entorno():
 
 def test_la_pregunta_manda_la_memoria_de_su_caso():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false, explicar = null } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     # El historial se toma ANTES de agregar la pregunta nueva.
     assert envio.index("const history = capChatHistorial(slug);") < envio.index("_agregar(slug, 'user'")
@@ -312,7 +312,7 @@ console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
 
 def test_despues_de_cada_respuesta_vuelven_las_sugeridas():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false, explicar = null } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     # La pregunta queda anotada (para no volver a sugerirla) y la respuesta,
     # pendiente hasta que llega.
@@ -473,10 +473,12 @@ def test_investigar_lo_decide_la_pregunta_sin_boton():
     assert "investigar" not in form.lower()
     for rastro in ("cap-chat__modo", "_modoInvestigar", "capChatInvestigar", "cap-chat-investigar"):
         assert rastro not in html, rastro
-    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false } = {})"):]
+    envio = fn[fn.index("async function sendCapChat(question, { contexto = '', investigar = false, explicar = null } = {})"):]
     envio = envio[:envio.index("\n      }\n")]
     assert "question, slug, history, investigar, contexto," in envio
-    assert "sendCapChat(pregunta, { contexto, investigar: true });" in fn
+    assert "sendCapChat(pregunta, { contexto, investigar: true, explicar });" in fn
+    # "Explicar" manda la ventana: el backend la compara contra el período anterior.
+    assert "explicar_desde: explicar?.desde || '', explicar_hasta: explicar?.hasta || ''," in envio
     assert "chatForm?.addEventListener('submit', (e) => { e.preventDefault(); sendCapChat(chatInput?.value); });" in fn
     # La respuesta: cabecera arriba y detalles por consulta.
     assert "pend.html = `${cabecera}<div class=\"cap-chart-host\">" in envio

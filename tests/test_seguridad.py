@@ -547,10 +547,11 @@ check('nada', hallazgosHTML([]).includes('No hay detectores'));
 const b = { dataset: { slug: 'siem', regla: 'SSH', hora: '2026-02-28 12:26:30', ip: '1.2.3.4' } };
 check('sin asistente, avisa', explicarHallazgo(b) === false && toasts.length === 1 && toasts[0].includes('Provisionar plugins'));
 let pedido = null;
-capChatPreguntar = (slug, pregunta, contexto) => { pedido = { slug, pregunta, contexto }; return true; };
+capChatPreguntar = (slug, pregunta, contexto, explicar) => { pedido = { slug, pregunta, contexto, explicar }; return true; };
 check('con asistente', explicarHallazgo(b) === true && toasts.length === 1);
 check('la pregunta', pedido.slug === 'siem' && pedido.pregunta === '¿Por qué se disparó "SSH"? ¿Qué más pasó alrededor?', pedido.pregunta);
 check('el contexto', pedido.contexto === 'Hallazgo de Security Analytics: regla "SSH", evento del 2026-02-28 12:26:30 (UTC, como @timestamp), IP de origen 1.2.3.4. Mirá qué más hizo esa IP en todo el período y en las horas cercanas (no solo ese minuto).', pedido.contexto);
+check('la ventana: la hora del evento', JSON.stringify(pedido.explicar) === JSON.stringify({ desde: '2026-02-28 12:26:30' }), JSON.stringify(pedido.explicar));
 check('explicar lleva la hora UTC', h.includes('data-hora="2026-02-28 12:26:30"'), h);
 const conFalla = hallazgosHTML([{ slug: 'siem', detectores: [{ descripcion: 'Auth', total: 0, alertas: {}, fallas: ['no such index <x>'], error: '', recientes: [] }] }]);
 check('la falla del detector, aparte', conFalla.includes('el detector falló 1 vez') && conFalla.includes('title="no such index &lt;x&gt;"'), conFalla);
@@ -575,11 +576,11 @@ def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
     assert "${seguridadHTML(data.security_analytics)}" in html
     assert "body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));" in html
     assert "const b = e.target.closest('.hallazgo__explicar');\n        if (b) explicarHallazgo(b);" in html
-    i = html.index("      capChatPreguntar = (slug, pregunta, contexto) => {")
+    i = html.index("      capChatPreguntar = (slug, pregunta, contexto, explicar = null) => {")
     fn = html[i:html.index("\n      };\n", i)]
     assert "if (!activeSlugs.includes(slug) || capChatBusy) return false;" in fn
     assert fn.index("_mostrarCaso(slug);") < fn.index("_abrir(true);") \
-        < fn.index("sendCapChat(pregunta, { contexto, investigar: true });")
+        < fn.index("sendCapChat(pregunta, { contexto, investigar: true, explicar });")
     j = html.index("function _quitarAsistente() {")
     assert "capChatPreguntar = null;" in html[j:html.index("\n    }\n", j)]
     k = html.index("async function verHallazgos(btn) {")
