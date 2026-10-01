@@ -3151,6 +3151,20 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> None:
+    """Los casos con Security Analytics escriben `<caso>-%{+YYYY_MM}` (ver
+    `seguridad.FORMATO_DEL_MES`). Se fuerza acá, y no solo en el front, porque
+    el body de un entorno ya desplegado se rearma del registro del deploy, que
+    puede traer el `%{+YYYY.MM}` de antes."""
+    import seguridad
+
+    specs = verticals.security_specs()
+    for caso in request.cases or []:
+        v = verticals.get_vertical(caso.slug) if caso.slug in specs else None
+        if v and v.get("index_base"):
+            caso.index_name = seguridad.indice_de_salida(v["index_base"])
+
+
 def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                        logstash_flavor: str | None, opensearch_flavor: str | None):
     """Generador que corre el deploy y emite eventos SSE con progreso real.
@@ -3164,6 +3178,7 @@ def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
     borrar desde siempre sin que nadie lo hiciera. Lo que el destroy necesita
     (creds + IDs de infra) vive en `destroy.auto.tfvars.json`.
     """
+    _casos_de_seguridad_al_indice_mensual(request)
     secrets = _deploy_secret_literals(request)
     # El porcentaje global nunca baja, lo emita quien lo emita. Los tramos de
     # cada paso ya están en orden (`_PCT_*`), pero esto es lo que garantiza que
@@ -6703,6 +6718,7 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
     Lee el cluster + la EIP del NAT desde el tfstate. Best-effort: si el index
     template falla, `index_template_applied=False` y el operador puede reintentar.
     """
+    _casos_de_seguridad_al_indice_mensual(request)
     terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):

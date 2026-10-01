@@ -4804,7 +4804,8 @@
         : (meta.obsPrefix || `${meta.indexBase}-logs/`);
       const index = isCustom
         ? (document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}')
-        : `${meta.indexBase}-%{+YYYY.MM}`;
+        // Un caso con Security Analytics nombra el mes con guion bajo (outputIndex).
+        : (meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`);
       const fieldsCount = isCustom ? (state.fields || []).length : (data?.fields || []).length;
       return { bucket, prefix, index, fieldsCount, ownBucket,
                label: meta?.label || 'Tu log', isCustom };

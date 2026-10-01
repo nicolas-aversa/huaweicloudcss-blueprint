@@ -145,10 +145,23 @@ def alias_del_caso(index_pattern: str) -> str:
     return index_pattern.rstrip("*").rstrip("-._") + "-seguridad"
 
 
+# Los casos con Security Analytics nombran el mes con guion bajo: `siem-2025_07`.
+# Con punto (`siem-2025.07`, el formato del resto de los casos) Security Analytics
+# rechaza el detector aunque sea UN índice concreto: "Index patterns are not
+# supported for doc level monitors" (medido en CSS 3.4: con punto 500 con 1, 2 y
+# 13 índices; con guion bajo o guion, 201). El pattern sigue siendo `siem-*`.
+FORMATO_DEL_MES = "YYYY_MM"
+
+
+def indice_de_salida(index_base: str) -> str:
+    """El `index` del output de Logstash de un caso con Security Analytics."""
+    return f"{index_base}-%{{+{FORMATO_DEL_MES}}}"
+
+
 def indices_mensuales(index_pattern: str, meses: "tuple[str, str] | list[str]") -> list[str]:
     """Los índices por mes del dataset del caso, como los nombra Logstash
-    (`<caso>-%{+YYYY.MM}`): `siem-*`, ("2025-07", "2025-09") →
-    [siem-2025.07, siem-2025.08, siem-2025.09].
+    (`indice_de_salida`): `siem-*`, ("2025-07", "2025-09") →
+    [siem-2025_07, siem-2025_08, siem-2025_09].
 
     Se crean vacíos ANTES que los detectores. El monitor de un detector
     (doc-level, CSS 3.4) procesa todo lo que entra a un índice que ya existía
@@ -168,6 +181,6 @@ def indices_mensuales(index_pattern: str, meses: "tuple[str, str] | list[str]") 
     fin = tuple(int(x) for x in hasta.split("-"))
     salida = []
     while (anio, mes) <= fin:
-        salida.append(f"{base}-{anio:04d}.{mes:02d}")
+        salida.append(f"{base}-{anio:04d}_{mes:02d}")
         anio, mes = (anio + 1, 1) if mes == 12 else (anio, mes + 1)
     return salida

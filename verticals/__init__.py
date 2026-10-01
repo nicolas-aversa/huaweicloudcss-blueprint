@@ -105,6 +105,11 @@ def _members(group_id: str) -> list[str]:
     return [v["slug"] for v in _VERTICALS if v.get("group") == group_id]
 
 
+def _salida_de_seguridad(v: dict) -> str:
+    import seguridad
+    return seguridad.indice_de_salida(v["index_base"])
+
+
 def front_payload() -> dict:
     """Payload JSON-serializable inyectado en el front (`window.__VERTICALS__`).
 
@@ -125,6 +130,8 @@ def front_payload() -> dict:
             "group": v.get("group", ""),
             "icon": v.get("icon", ""),
             "indexBase": v.get("index_base", ""),
+            # Con Security Analytics el mes va con guion bajo (ver seguridad.py).
+            "outputIndex": _salida_de_seguridad(v) if v.get("security") else "",
             # Origen propio del vertical. Vacíos = el default de siempre: el
             # bucket de demos del SA y el prefijo `<indexBase>-logs/`. Solo los
             # declara un caso cuyo dato NO es un dataset que la plataforma sube.

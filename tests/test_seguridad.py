@@ -129,15 +129,21 @@ def test_el_template_de_un_caso_de_seguridad_lleva_el_alias(monkeypatch):
     assert "aliases" not in enviados["p-transacciones-billetera"]["template"]
 
 
-MESES_SIEM = [f"siem-{a}.{m:02d}" for a, m in [(2025, x) for x in range(7, 13)] + [(2026, x) for x in range(1, 8)]]
+MESES_SIEM = [f"siem-{a}_{m:02d}" for a, m in [(2025, x) for x in range(7, 13)] + [(2026, x) for x in range(1, 8)]]
 
 
 def test_los_indices_mensuales_del_caso():
     assert seguridad.indices_mensuales("siem-*", ("2025-11", "2026-02")) == [
-        "siem-2025.11", "siem-2025.12", "siem-2026.01", "siem-2026.02"]
-    assert seguridad.indices_mensuales("fortianalyzer*", ("2026-07", "2026-07")) == ["fortianalyzer-2026.07"]
+        "siem-2025_11", "siem-2025_12", "siem-2026_01", "siem-2026_02"]
+    assert seguridad.indices_mensuales("fortianalyzer*", ("2026-07", "2026-07")) == ["fortianalyzer-2026_07"]
+    # Sin punto: con punto Security Analytics rechaza el detector ("Index patterns
+    # are not supported for doc level monitors"), aunque sea un solo índice.
+    assert not [i for i in MESES_SIEM if "." in i]
     # Con el mismo nombre que les pone Logstash (`<caso>-%{+YYYY.MM}`).
-    assert seguridad.indices_mensuales(main.index_pattern_from_name("siem-%{+YYYY.MM}"), ("2025-07", "2026-07")) == MESES_SIEM
+    salida = seguridad.indice_de_salida("siem")
+    assert salida == "siem-%{+YYYY_MM}"
+    assert main._slug_from_index(salida) == "siem" and main.index_pattern_from_name(salida) == "siem-*"
+    assert seguridad.indices_mensuales(main.index_pattern_from_name(salida), ("2025-07", "2026-07")) == MESES_SIEM
 
 
 _MES_DEL_EVENTO = (
@@ -340,11 +346,11 @@ def test_si_el_indice_es_nuevo_los_detectores_se_recrean(monkeypatch, tmp_path):
     c = _Cluster()
     _provisionar(monkeypatch, tmp_path, c)
     viejos = dict(c.detectores)
-    c.indices.remove("siem-2026.01")
+    c.indices.remove("siem-2026_01")
     c.creados.clear()
     _, pasos = _provisionar(monkeypatch, tmp_path, c)
     tipos = [x[0] for x in c.creados]
-    assert c.creados[0] == ("indice", "siem-2026.01")
+    assert c.creados[0] == ("indice", "siem-2026_01")
     assert sorted(x[1] for x in c.creados if x[0] == "borrado_detector") == sorted(viejos.values())
     assert tipos.index("indice") < tipos.index("borrado_detector") < tipos.index("detector")
     assert set(c.detectores) == set(viejos) and not set(c.detectores.values()) & set(viejos.values())
@@ -390,7 +396,7 @@ def test_fortianalyzer_sin_correlaciones(monkeypatch, tmp_path):
     assert [x[1]["name"] for x in c.creados if x[0] == "detector"] == ["fortianalyzer-fortianalyzer"]
     assert not [x for x in c.creados if x[0] == "correlacion"]
     assert not [p for p in pasos if "correlaciones" in p[0]]
-    assert c.creados[0] == ("indice", "fortianalyzer-2025.07")
+    assert c.creados[0] == ("indice", "fortianalyzer-2025_07")
 
 
 def test_se_provisiona_al_aplicar_para_cada_caso_de_seguridad():
@@ -627,9 +633,9 @@ def test_con_los_indices_la_ingesta_no_toca_nada(monkeypatch, tmp_path):
 
 
 def test_si_falta_un_mes_la_ingesta_lo_crea(monkeypatch, tmp_path):
-    c = _Cluster(indices=[i for i in MESES_SIEM if i != "siem-2025.09"])
+    c = _Cluster(indices=[i for i in MESES_SIEM if i != "siem-2025_09"])
     eventos = _preparar(monkeypatch, tmp_path, c, [("siem", "siem-%{+YYYY.MM}")])
-    assert [x[1] for x in c.creados if x[0] == "indice"] == ["siem-2025.09"]
+    assert [x[1] for x in c.creados if x[0] == "indice"] == ["siem-2025_09"]
     assert eventos[0]["ok"] is True
 
 
@@ -651,13 +657,32 @@ def test_en_la_ingesta_va_despues_de_limpiar_y_antes_de_terraform():
     assert fase2 < preparar < cuerpo.index("    else:\n        yield _sse({\"type\": \"progress\", \"percent\": 2")
 
 
-def test_los_casos_de_seguridad_siguen_con_indice_mensual():
+def test_los_casos_de_seguridad_nombran_el_mes_con_guion_bajo():
     payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
     for slug in SPECS:
-        assert "outputIndex" not in payload[slug] and "indice_sa" not in payload[slug]["filterCode"]
+        assert payload[slug]["outputIndex"] == f"{slug}-%{{+YYYY_MM}}"
+    assert payload["transacciones-billetera"]["outputIndex"] == ""
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("function caseMeta(id)")
-    assert ": `${meta.indexBase}-%{+YYYY.MM}`;" in html[i:html.index("\n    }\n", i)]
+    assert "(meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`)" in html[i:html.index("\n    }\n", i)]
+
+
+def test_el_backend_fuerza_el_mes_con_guion_bajo():
+    """El body de "Reiniciar ingesta" se rearma del registro del deploy, que
+    puede traer `siem-%{+YYYY.MM}` de antes."""
+    req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x", cases=[
+        main.PipelineCase(slug="siem", index_name="siem-%{+YYYY.MM}"),
+        main.PipelineCase(slug="transacciones-billetera", index_name="tb-%{+YYYY.MM}")])
+    main._casos_de_seguridad_al_indice_mensual(req)
+    assert [c.index_name for c in req.cases] == ["siem-%{+YYYY_MM}", "tb-%{+YYYY.MM}"]
+
+
+def test_el_deploy_y_el_schema_normalizan_al_entrar():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    for funcion, siguiente in (("def _deploy_stream_gen(", "for raw in _deploy_stream_gen_raw("),
+                               ("def apply_schema(", "terraform_dir = _active_terraform_dir()")):
+        i = src.index(funcion)
+        assert "_casos_de_seguridad_al_indice_mensual(request)" in src[i:src.index(siguiente, i)], funcion
 
 
 # ── Después de la ingesta: ¿algún mes quedó sin detección? ──────────────────
@@ -681,10 +706,10 @@ def test_si_todos_los_meses_estaban_se_dice_en_verde(monkeypatch, tmp_path):
 def test_un_mes_que_creo_logstash_se_avisa(monkeypatch, tmp_path):
     """Un evento fuera de `security.meses`: Logstash creó el índice durante la
     ingesta, después de los detectores, y sus eventos no se evaluaron."""
-    c = _Cluster(indices=MESES_SIEM + ["siem-2026.08", ".kibana_1"])
+    c = _Cluster(indices=MESES_SIEM + ["siem-2026_08", ".kibana_1"])
     pasos = _revisar(monkeypatch, tmp_path, c)
     assert len(pasos) == 1 and pasos[0][:2] == ("Security Analytics · siem · meses", False)
-    assert pasos[0][2].startswith("siem-2026.08: lo creó Logstash durante la ingesta")
+    assert pasos[0][2].startswith("siem-2026_08: lo creó Logstash durante la ingesta")
     assert "security.meses" in pasos[0][2] and ".kibana" not in pasos[0][2]
 
 
@@ -698,7 +723,7 @@ def test_si_no_se_puede_listar_se_dice(monkeypatch, tmp_path):
 
 
 def test_sin_security_analytics_provisionado_no_se_revisa(monkeypatch, tmp_path):
-    c = _Cluster(indices=MESES_SIEM + ["siem-2026.08"])
+    c = _Cluster(indices=MESES_SIEM + ["siem-2026_08"])
     assert _revisar(monkeypatch, tmp_path, c, registrar=False) == []
     assert c.pedidos == []
 
