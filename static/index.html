@@ -1837,6 +1837,11 @@
       opacity: 0.7;
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
+    /* Forecasting: los casos como botones; el elegido, marcado. */
+    .pron__casos { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+    .pron__caso.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
+    .pron__lista { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+    .pron__grafico { min-height: 200px; width: 100%; }
     .case-tab__icon .icon { width: 18px; height: 18px; }
     .example-card__soon {
       font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
@@ -2481,6 +2486,7 @@
     .sev--critical { background: var(--accent-tint); color: var(--accent); }
     .sev--high { background: var(--accent-yellow-tint); color: var(--text-primary); }
     .sev--low { background: var(--bg-subtle); color: var(--text-muted); }
+    .sev--ok { background: var(--accent-green-tint); color: var(--accent-green); }
     @media (prefers-reduced-motion: reduce) {
       .cap-chart, .cap-chat__typing::after { animation: none; }
     }
@@ -2591,6 +2597,7 @@
     <symbol id="ic-cloud" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 0 0 .5-9 6 6 0 0 0-11.5-1.5A4 4 0 0 0 6.5 19h11z"/></symbol>
     <symbol id="ic-queue" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 7.5l7 3M8.5 16.5l7-3"/></symbol>
     <symbol id="ic-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></symbol>
+    <symbol id="ic-trending" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M14 7h7v7"/></symbol>
     <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
     <symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.7 4.3"/><path d="M20 5v6h-6"/></symbol>
@@ -5843,6 +5850,9 @@
     // (slug, pregunta, contexto) → true si el asistente la tomó. Lo arma
     // renderCapabilitiesResult; sin asistente, null. Lo usa "Explicar".
     let capChatPreguntar = null;
+    // El motor de gráficos del asistente (Vega-Lite vendorizado + el tema de la
+    // app), para que otras vistas dibujen igual. Lo publica el asistente al armarse.
+    let capVega = null;
     // Cómo estaba la barra izquierda antes de abrir el asistente (null: el
     // asistente no la tocó). Al cerrarlo vuelve a eso.
     let navAntesDelAsistente = null;
@@ -6068,6 +6078,96 @@
         hora ? { desde: hora } : null));
       if (!tomada) toast('Para explicarlo hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
       return tomada;
+    }
+    // Forecasting: los casos con forecasters (del registro). Los pronósticos se
+    // piden por caso, a demanda: la serie real, el pronóstico con su banda y,
+    // encima, lo que de verdad pasó (el backtest se ancla donde hay datos).
+    function _forecastersDe(ids) {
+      return (ids && (ids.forecaster_ids || (ids.forecaster_id ? [ids.forecaster_id] : []))) || [];
+    }
+    function pronosticosHTML(capabilities) {
+      const casos = Object.entries(capabilities || {}).filter(([, ids]) => _forecastersDe(ids).length);
+      if (!casos.length) return '';
+      const total = casos.reduce((n, [, ids]) => n + _forecastersDe(ids).length, 0);
+      return `<div class="section-card" id="infra-pronosticos">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('trending')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Forecasting</span>
+              <span class="section-card__hint">${total} pronóstico${total === 1 ? '' : 's'} en ${casos.length} caso${casos.length === 1 ? '' : 's'} · cada uno contra lo que pasó de verdad · en Dashboards: Forecasting</span>
+            </span>
+          </div>
+          <div class="pron__casos" role="group" aria-label="Caso">${casos.map(([slug]) =>
+            `<button type="button" class="btn btn-secondary btn-sm pron__caso" data-slug="${escapeHtml(slug)}">${escapeHtml(SLUG_LABELS[slug] || slug)}</button>`).join('')}</div>
+          <div id="infra-pronosticos-detalle"><div class="hallazgos__vacio">Elegí un caso para ver sus pronósticos.</div></div>
+        </div>`;
+    }
+    const _fmtPron = (v) => Number(v).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+    function pronosticosDetalleHTML(data) {
+      const lista = (data && data.pronosticos) || [];
+      if (!lista.length) return '<div class="hallazgos__vacio">Este caso no tiene pronósticos.</div>';
+      return `<div class="pron__lista">${lista.map((p, i) => {
+        const cada = p.intervalo_min >= 60 ? `${_fmtPron(p.intervalo_min / 60)} h` : `${p.intervalo_min} min`;
+        const acierto = p.error_pct == null ? ''
+          : `<span class="sev ${p.error_pct <= 20 ? 'sev--ok' : p.error_pct <= 40 ? 'sev--high' : 'sev--critical'}">error medio ${_fmtPron(p.error_pct)} %</span>`;
+        const cuerpo = p.error
+          ? `<div class="hallazgos__vacio">${escapeHtml(p.error)}</div>`
+          : `<div class="pron__grafico" data-i="${i}"></div>`;
+        return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(p.medida || p.nombre)}</strong>`
+          + `<span class="hallazgos__total">cada ${escapeHtml(cada)} · ${p.horizonte || 0} pasos hacia adelante</span>${acierto}</div>${cuerpo}</div>`;
+      }).join('')}</div>`;
+    }
+    // Vega-Lite: la serie real (línea), el pronóstico (punteado) con su banda y
+    // una regla donde arranca el pronóstico.
+    function specPronostico(p, config) {
+      const filas = [
+        ...(p.real || []).map(r => ({ t: r.t, v: r.v, serie: 'Real' })),
+        ...(p.pronostico || []).map(r => ({ t: r.t, v: r.v, lo: r.lo, hi: r.hi, serie: 'Pronóstico' })),
+      ];
+      const x = { field: 't', type: 'temporal', title: null };
+      return {
+        $schema: 'https://vega.github.io/schema/vega-lite/v5.json', width: 'container', height: 190,
+        autosize: { type: 'fit-x', contains: 'padding' }, config,
+        data: { values: filas },
+        layer: [
+          { transform: [{ filter: "datum.serie === 'Pronóstico'" }], mark: { type: 'area', opacity: 0.18 },
+            encoding: { x, y: { field: 'lo', type: 'quantitative', title: null }, y2: { field: 'hi' } } },
+          { mark: { type: 'line', strokeWidth: 2 },
+            encoding: { x, y: { field: 'v', type: 'quantitative', title: p.medida || null },
+                        color: { field: 'serie', type: 'nominal', title: null, legend: { orient: 'top' } },
+                        strokeDash: { field: 'serie', type: 'nominal', legend: null,
+                                      scale: { domain: ['Real', 'Pronóstico'], range: [[1, 0], [5, 4]] } },
+                        tooltip: [{ field: 't', type: 'temporal', title: 'Fin del paso (UTC)', format: '%Y-%m-%d %H:%M' },
+                                  { field: 'serie', title: 'Serie' }, { field: 'v', title: 'Valor', format: ',.1f' }] } },
+          { data: { values: [{ t: p.ancla }] }, mark: { type: 'rule', strokeDash: [2, 3], opacity: 0.6 },
+            encoding: { x: { field: 't', type: 'temporal' } } },
+        ],
+      };
+    }
+    async function verPronosticos(btn) {
+      const destino = document.getElementById('infra-pronosticos-detalle');
+      if (!destino) return;
+      document.querySelectorAll('.pron__caso').forEach(b => b.classList.toggle('is-active', b === btn));
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo los pronósticos…', 'loading');
+      try {
+        const res = await fetch('/api/v1/forecast/' + encodeURIComponent(btn.dataset.slug));
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = pronosticosDetalleHTML(data);
+        if (!capVega) return;
+        const embed = await capVega.ensure();
+        const config = capVega.config(capVega.theme());
+        (data.pronosticos || []).forEach((p, i) => {
+          const lugar = destino.querySelector(`.pron__grafico[data-i="${i}"]`);
+          if (lugar) embed(lugar, specPronostico(p, config), { actions: false, renderer: 'svg' }).catch(() => {});
+        });
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     }
     // Anomaly Detection: qué casos tienen detector (del registro, sin tocar el
     // cluster). Las anomalías se piden a demanda.
@@ -6557,6 +6657,7 @@
         return null;
       }
       // Renderiza el gráfico dentro de `container` (async para Vega).
+      capVega = { ensure: _ensureVega, theme: _vegaTheme, config: _vegaConfig };
       function _renderCapChartInto(container, result) {
         const plan = _capChatVizPlan(result);
         if (!plan) return;
@@ -7653,6 +7754,7 @@
             <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>` },
           { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
+          { id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) },
         ], infraSeccionGuardada())}
         `;
       body.querySelector('.infra-tabs')?.addEventListener('click', (e) => {
@@ -7665,6 +7767,11 @@
       body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
         const b = e.target.closest('.hallazgo__explicar');
         if (b) explicarHallazgo(b);
+      });
+      // Forecasting: por caso, a demanda.
+      body.querySelector('#infra-pronosticos')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.pron__caso');
+        if (b) verPronosticos(b);
       });
       // Anomaly Detection: igual, a demanda y con "Explicar".
       body.querySelector('#infra-anomalias-ver')?.addEventListener('click', (e) => verAnomalias(e.currentTarget));

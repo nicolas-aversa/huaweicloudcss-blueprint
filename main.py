@@ -6457,6 +6457,76 @@ class ResumenAnomaliasResponse(BaseModel):
     casos: list[dict] = Field(default_factory=list)
 
 
+class PronosticosResponse(BaseModel):
+    slug: str
+    pronosticos: list[dict] = Field(default_factory=list)
+
+
+def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> dict:
+    """Lo que calculó un forecaster, listo para dibujar (ver `pronosticos`)."""
+    import pronosticos as pr
+
+    r = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{forecaster_id}?task=true", user, password, timeout=20)
+    if not _resp_ok(r):
+        return {"id": forecaster_id, "error": _resp_motivo(r)}
+    cuerpo = r.json() or {}
+    fc = cuerpo.get("forecaster") or {}
+    medida = ((fc.get("feature_attributes") or [{}])[0]).get("feature_name", "")
+    tarea = (cuerpo.get("run_once_task") or {}).get("task_id", "")
+    fuera = {"id": forecaster_id, "nombre": fc.get("name", ""), "medida": medida,
+             "intervalo_min": pr.intervalo_ms(fc) // 60_000, "horizonte": fc.get("horizon"), "error": ""}
+    if not tarea:
+        return {**fuera, "error": "el forecaster no tiene backtest"}
+    limites = _index_time_bounds(base, user, password, (fc.get("indices") or [""])[0])
+    if not limites:
+        return {**fuera, "error": "no se pudo leer el rango de fechas del índice"}
+    filtro = [{"term": {"forecaster_id": forecaster_id}}, {"term": {"task_id": tarea}}]
+
+    def buscar(extra: list, orden: str, n: int) -> list[dict]:
+        rr = _os_req("POST", f"{base}/opensearch-forecast-results*/_search", user, password, timeout=20,
+                     json_body={"size": n, "query": {"bool": {"filter": filtro + extra}},
+                                "sort": [{"data_end_time": {"order": orden}}]})
+        try:
+            return [h.get("_source") or {} for h in ((rr.json() or {}).get("hits") or {}).get("hits", [])] \
+                if _resp_ok(rr) else []
+        except ValueError:
+            return []
+
+    # El valor real de cada paso es el resultado SIN horizon_index (feature_data no
+    # está indexado: un exists sobre él no encuentra nada).
+    real = [{"bool": {"must_not": [{"exists": {"field": "horizon_index"}}]}}]
+    paso, n = pr.intervalo_ms(fc), int(fc.get("horizon") or 0)
+    fin = int(limites[1])
+    recientes = buscar(real + [{"range": {"data_end_time": {"gte": fin - paso * pr.PASOS_DE_BUSQUEDA, "lte": fin}}}],
+                       "asc", pr.PASOS_DE_BUSQUEDA + n + 5)
+    ancla = pr.elegir_ancla(recientes, n)
+    if ancla is None:
+        return {**fuera, "error": "el backtest todavía no tiene pasos con datos"}
+    reales = [r for r in recientes
+              if ancla - paso * pr.PASOS_DE_CONTEXTO <= int(r.get("data_end_time") or 0) <= ancla + paso * n]
+    horizonte = buscar([{"term": {"data_end_time": ancla}}, {"exists": {"field": "horizon_index"}}], "asc", 50)
+    return {**fuera, **pr.serie(reales, horizonte, ancla, paso)}
+
+
+@app.get("/api/v1/forecast/{slug}", response_model=PronosticosResponse, tags=["capabilities"])
+def pronosticos_del_caso(slug: str) -> PronosticosResponse:
+    """Los pronósticos de un caso, en vivo y a demanda (pestaña Forecasting):
+    por forecaster, la serie real, el pronóstico con su banda y el error contra
+    lo que pasó. No se guarda nada."""
+    terraform_dir = _active_terraform_dir()
+    ids = _read_capabilities(terraform_dir).get(slug) or {}
+    fids = ids.get("forecaster_ids") or ([ids["forecaster_id"]] if ids.get("forecaster_id") else [])
+    if not fids:
+        return PronosticosResponse(slug=slug)
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "forecast", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    return PronosticosResponse(slug=slug, pronosticos=[_pronostico_de(base, user, password, f) for f in fids if f])
+
+
 @app.get("/api/v1/anomalias/resumen", response_model=ResumenAnomaliasResponse, tags=["capabilities"])
 def resumen_anomalias() -> ResumenAnomaliasResponse:
     """Las anomalías más fuertes de cada detector, en vivo: el estado del
