@@ -7372,6 +7372,37 @@
     // del payload de /terraform/status. Reusa formatAge/ticker para el
     // contador en vivo y destroyEnvironment para las
     // acciones (mismas funciones que usaba el wizard del step 5).
+    // "Entorno desplegado" en secciones: Resumen (puesta en marcha, pipelines,
+    // plugins), Security Analytics y Anomaly Detection, cada una en su pestaña,
+    // en vez de todo apilado (había que bajar mucho para llegar a las anomalías).
+    // Una sección vacía (el entorno no tiene ese plugin) no tiene pestaña; con
+    // una sola sección no hay pestañas. La elegida se recuerda en este navegador.
+    const _CLAVE_SECCION = 'infra-seccion';
+    function infraSeccionGuardada() {
+      try { return localStorage.getItem(_CLAVE_SECCION) || ''; } catch (_) { return ''; }
+    }
+    function infraSeccionesHTML(secciones, guardada) {
+      const llenas = secciones.filter(sec => sec.html);
+      const activa = (llenas.find(sec => sec.id === guardada) || llenas[0] || {}).id;
+      const tabs = llenas.length > 1
+        ? `<div class="case-tabs infra-tabs" role="tablist" aria-label="Secciones del entorno">${llenas.map(sec =>
+            `<button type="button" class="case-tab${sec.id === activa ? ' is-active' : ''}" role="tab" id="infra-tab-${sec.id}" `
+            + `data-infra-tab="${sec.id}" aria-controls="infra-panel-${sec.id}" aria-selected="${sec.id === activa}">`
+            + `<span class="case-tab__icon">${icon(sec.icon)}</span><span class="case-tab__label">${escapeHtml(sec.label)}</span></button>`).join('')}</div>`
+        : '';
+      return tabs + llenas.map(sec =>
+        `<div class="infra-panel" id="infra-panel-${sec.id}" data-infra-panel="${sec.id}" role="tabpanel" `
+        + `aria-labelledby="infra-tab-${sec.id}"${sec.id === activa ? '' : ' hidden'}>${sec.html}</div>`).join('');
+    }
+    function elegirSeccionInfra(raiz, id) {
+      raiz.querySelectorAll('[data-infra-tab]').forEach(t => {
+        const si = t.dataset.infraTab === id;
+        t.classList.toggle('is-active', si);
+        t.setAttribute('aria-selected', String(si));
+      });
+      raiz.querySelectorAll('[data-infra-panel]').forEach(pn => { pn.hidden = pn.dataset.infraPanel !== id; });
+      try { localStorage.setItem(_CLAVE_SECCION, id); } catch (_) { /* sin storage: solo no se recuerda */ }
+    }
     function renderInfraView(data) {
       const body = document.getElementById('infra-body');
       if (!body) return;
@@ -7606,21 +7637,28 @@
              las pipelines, lo que se veía primero era el estado ("En pausa",
              "Verificar ingesta") y no el paso siguiente. Terminada, queda
              plegada ("3 de 3"): sin cartel de cierre, que sobraba. */ ''}
-        ${setupPanel}
-        <div class="section-card">
-          <div class="section-card__head" style="margin-bottom:12px;">
-            <span class="section-card__tile">${icon('database')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Pipelines</span>
-              <span class="section-card__hint">${pipelines.length} en paralelo · cada una con su índice y prefijo OBS.</span>
-            </span>
-          </div>
-          <div class="pipe-list">${pipeRows}</div>
-        </div>
-        ${seguridadHTML(data.security_analytics)}
-        ${anomaliasHTML(data.capabilities)}
-        <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
+        ${infraSeccionesHTML([
+          { id: 'resumen', label: 'Resumen', icon: 'database', html: `
+            ${setupPanel}
+            <div class="section-card">
+              <div class="section-card__head" style="margin-bottom:12px;">
+                <span class="section-card__tile">${icon('database')}</span>
+                <span class="section-card__titlewrap">
+                  <span class="section-card__title">Pipelines</span>
+                  <span class="section-card__hint">${pipelines.length} en paralelo · cada una con su índice y prefijo OBS.</span>
+                </span>
+              </div>
+              <div class="pipe-list">${pipeRows}</div>
+            </div>
+            <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>` },
+          { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) },
+          { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
+        ], infraSeccionGuardada())}
         `;
+      body.querySelector('.infra-tabs')?.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-infra-tab]');
+        if (t) elegirSeccionInfra(body, t.dataset.infraTab);
+      });
 
       // Security Analytics: los hallazgos a demanda, y "Explicar" cada uno.
       body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));

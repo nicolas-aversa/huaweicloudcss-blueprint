@@ -573,7 +573,7 @@ def test_la_tarjeta_y_los_hallazgos_en_node(tmp_path):
 
 def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "${seguridadHTML(data.security_analytics)}" in html
+    assert "{ id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) }," in html
     assert "body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));" in html
     assert "const b = e.target.closest('.hallazgo__explicar');\n        if (b) explicarHallazgo(b);" in html
     i = html.index("      capChatPreguntar = (slug, pregunta, contexto, explicar = null) => {")
