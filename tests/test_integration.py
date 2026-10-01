@@ -4494,6 +4494,12 @@ def test_provision_capabilities_endpoint(monkeypatch):
                         lambda td: {"public_endpoint": "1.2.3.4:9200"})
     monkeypatch.setattr(main, "_provision_capabilities",
                         lambda cluster, slug, user, pw, https, force=False: {slug: {"anomaly": {"ok": True}}})
+    # El analista de demo: sin esto, PUTs reales contra la IP de prueba (timeouts).
+    analistas = []
+    monkeypatch.setattr(main, "_provisionar_analista",
+                        lambda base, u, p, slug, pattern, enm, td: analistas.append((slug, pattern, enm)) or
+                        {"ok": True, "reason": "ok"})
+    monkeypatch.setattr(main, "_revisar_meses_de_seguridad", lambda *a, **k: None)
 
     resp = client.post("/api/v1/onboarding/provision-capabilities",
                        json={"opensearch_password": "pw", "https_enabled": False})
@@ -4501,6 +4507,9 @@ def test_provision_capabilities_endpoint(monkeypatch):
     data = resp.json()
     assert data["status"] == "success"
     assert "transacciones-billetera" in data["capabilities"]
+    # Solo los casos que declaran un analista (salud y fintech), con sus campos.
+    assert {s for s, _, _ in analistas} == {"encuentros-clinicos", "transacciones-billetera", "transacciones-alyc"}
+    assert ("encuentros-clinicos", "encuentros-clinicos-*", ["patient"]) in analistas
 
 
 def test_provision_capabilities_endpoint_no_cluster_503(monkeypatch):

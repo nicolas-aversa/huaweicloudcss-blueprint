@@ -101,6 +101,9 @@ VERTICAL = {
         '¿Cuántos encuentros hay por día?',
     ],
     'dataset_files': ['encuentros-clinicos.log'],
+    # Analista de demo de solo lectura con estos campos enmascarados (ver accesos.py):
+    # se sigue pudiendo contar y agrupar, sin ver el dato.
+    'analista': {'enmascarados': ['patient']},
     'capability': {
         'label': 'Encuentros clínicos',
         'index_pattern': 'encuentros-clinicos*',

@@ -6312,6 +6312,44 @@ def _teardown_capabilities(cluster: dict[str, str], user: str, password: str,
 
 _SA_BASE = "/_plugins/_security_analytics"
 _SECURITY_REGISTRY_NAME = ".security_analytics.json"
+# El analista de demo de cada caso, con su contraseña: queda en el disco de la
+# plataforma (gitignoreado) para mostrarla en "Accesos de demo".
+_ANALISTAS_NAME = ".analistas.json"
+
+
+def _read_analistas(terraform_dir: Path) -> dict:
+    f = terraform_dir / _ANALISTAS_NAME
+    try:
+        data = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_analistas(terraform_dir: Path, registro: dict) -> None:
+    (terraform_dir / _ANALISTAS_NAME).write_text(json.dumps(registro, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _provisionar_analista(base: str, user: str, password: str, slug: str, index_pattern: str,
+                          enmascarados: list[str], terraform_dir: Path) -> dict:
+    """El analista de demo del caso: rol de solo lectura con `masked_fields` y
+    un usuario interno. Idempotente (PUT); conserva la contraseña de antes."""
+    import accesos
+
+    rr = _os_req("PUT", f"{base}/_plugins/_security/api/roles/{accesos.nombre_del_rol(slug)}", user, password,
+                 json_body=accesos.rol_analista(index_pattern, enmascarados), timeout=20)
+    if not _resp_ok(rr):
+        return {"ok": False, "reason": f"rol: {_resp_motivo(rr)}"}
+    registro = _read_analistas(terraform_dir)
+    clave = (registro.get(slug) or {}).get("password") or accesos.contrasena()
+    usuario = accesos.nombre_del_usuario(slug)
+    ru = _os_req("PUT", f"{base}/_plugins/_security/api/internalusers/{usuario}", user, password,
+                 json_body=accesos.usuario_analista(slug, clave), timeout=20)
+    if not _resp_ok(ru):
+        return {"ok": False, "reason": f"usuario: {_resp_motivo(ru)}"}
+    registro[slug] = {"usuario": usuario, "password": clave, "enmascarados": list(enmascarados)}
+    _write_analistas(terraform_dir, registro)
+    return {"ok": True, "reason": f"{usuario}: ve {index_pattern} con {', '.join(enmascarados)} enmascarado"}
 
 
 def _read_security(terraform_dir: Path) -> dict:
@@ -6571,6 +6609,18 @@ def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int
     return (int(total.get("value", 0) if isinstance(total, dict) else total or 0),
             [_anomalia(h.get("_source") or {}) for h in (hits.get("hits") or [])[:n]],
             "" if _resp_ok(r) else _resp_motivo(r))
+
+
+class AnalistasResponse(BaseModel):
+    analistas: list[dict] = Field(default_factory=list)
+
+
+@app.get("/api/v1/analistas", response_model=AnalistasResponse, tags=["capabilities"])
+def analistas() -> AnalistasResponse:
+    """Los usuarios de demo con datos enmascarados, con su contraseña: para que
+    el SA entre a Dashboards como ese analista. Solo lo que creó la plataforma."""
+    registro = _read_analistas(_active_terraform_dir())
+    return AnalistasResponse(analistas=[{"slug": s, **v} for s, v in sorted(registro.items())])
 
 
 class CampanasResponse(BaseModel):
@@ -7131,6 +7181,18 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
+    _base_analistas = _os_base(cluster, request.https_enabled)
+    for slug in slugs:
+        enmascarados = ((verticals.get_vertical(slug) or {}).get("analista") or {}).get("enmascarados")
+        if not enmascarados:
+            continue
+        indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
+        try:
+            res = _provisionar_analista(_base_analistas, user, password, slug, index_pattern_from_name(indice),
+                                        enmascarados, terraform_dir)
+        except Exception as exc:  # noqa: BLE001 — es una pieza de demo, no frena el paso
+            res = {"ok": False, "reason": repr(exc)}
+        runs.step(run, f"Analista con datos enmascarados · {slug}", res["ok"], res["reason"][:300])
     try:
         _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
                                     list(slugs), terraform_dir, run)

@@ -1837,6 +1837,10 @@
       opacity: 0.7;
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
+    /* Accesos de demo: usuario y contraseña, copiables. */
+    .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
+    .acceso__lbl { color: var(--text-muted); }
+    .acceso code { user-select: all; }
     /* Campañas: los pasos en orden, como una línea de tiempo. */
     .campana__pasos { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--accent-tint); display: grid; gap: 6px; }
     .campana__paso { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); position: relative; }
@@ -6037,6 +6041,49 @@
           <div id="infra-seguridad-detalle"></div>
         </div>`;
     }
+    // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
+    // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
+    function accesosHTML(slugs) {
+      const casos = (slugs || []).filter(s => (LOG_EXAMPLES.find(e => e.id === s)?.enmascarados || []).length);
+      if (!casos.length) return '';
+      return `<div class="section-card" id="infra-accesos">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('key')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Accesos de demo</span>
+              <span class="section-card__hint">Un analista de solo lectura por caso que ve los datos sensibles enmascarados · entrá a Dashboards con su usuario · los crea "Provisionar plugins"</span>
+            </span>
+            <button type="button" class="btn btn-primary btn-sm" id="infra-accesos-ver">Ver accesos</button>
+          </div>
+          <div class="seguridad__caso"><span>${casos.map(s => `${escapeHtml(SLUG_LABELS[s] || s)}: ${escapeHtml((LOG_EXAMPLES.find(e => e.id === s)?.enmascarados || []).join(', '))}`).join(' · ')}</span></div>
+          <div id="infra-accesos-detalle"></div>
+        </div>`;
+    }
+    function accesosDetalleHTML(lista) {
+      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay analistas: corré "Provisionar plugins".</div>';
+      return lista.map(a => `<div class="hallazgos__det"><div class="hallazgos__head">`
+        + `<strong>${escapeHtml(SLUG_LABELS[a.slug] || a.slug)}</strong>`
+        + `<span class="hallazgos__total">enmascarado: ${escapeHtml((a.enmascarados || []).join(', '))}</span></div>`
+        + `<div class="acceso"><span class="acceso__lbl">Usuario</span><code>${escapeHtml(a.usuario)}</code>`
+        + `<span class="acceso__lbl">Contraseña</span><code>${escapeHtml(a.password)}</code></div></div>`).join('');
+    }
+    async function verAccesos(btn) {
+      const destino = document.getElementById('infra-accesos-detalle');
+      if (!destino) return;
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo los accesos…', 'loading');
+      try {
+        const res = await fetch('/api/v1/analistas');
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = accesosDetalleHTML(data.analistas || []);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
     // Campañas: la línea de tiempo de cada una, desde los datos (event.campaign).
     // Solo los casos que declaran correlaciones (hoy el SIEM).
     function campanasHTML(sa) {
@@ -7823,7 +7870,8 @@
               </div>
               <div class="pipe-list">${pipeRows}</div>
             </div>
-            <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>` },
+            <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
+            ${accesosHTML(pipelines.map(p => p.slug))}` },
           { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) },
@@ -7840,6 +7888,8 @@
         const b = e.target.closest('.hallazgo__explicar');
         if (b) explicarHallazgo(b);
       });
+      // Accesos de demo: a demanda (la contraseña no viaja con el estado).
+      body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
       // Campañas: a demanda, y "Explicar" cada una.
       body.querySelector('#infra-campanas-ver')?.addEventListener('click', (e) => verCampanas(e.currentTarget));
       body.querySelector('#infra-campanas-detalle')?.addEventListener('click', (e) => {
