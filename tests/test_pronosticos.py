@@ -142,8 +142,8 @@ const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -
 check('sin forecasters, nada', pronosticosHTML({ s: { detector_id: 'D' } }) === '' && pronosticosHTML(null) === '');
 const card = pronosticosHTML({ 'produccion-pozos': { forecaster_ids: ['a', 'b', 'c'] }, cts: { forecaster_id: 'z' } });
 check('cuántos', card.includes('4 pronósticos en 2 casos'), card);
-check('un botón por caso', card.includes('class="btn btn-secondary btn-sm pron__caso" data-slug="produccion-pozos">Producción de pozos<')
-  && card.includes('data-slug="cts">cts<'), card);
+check('los casos, en la lista de la izquierda', card.includes('class="maestro__item pron__caso" data-slug="produccion-pozos"><span>Producción de pozos</span><span class="maestro__n">3</span>')
+  && card.includes('data-slug="cts"><span>cts</span><span class="maestro__n">1</span>'), card);
 const d = pronosticosDetalleHTML({ pronosticos: [
   { medida: 'oil_volume', intervalo_min: 262, horizonte: 8, error_pct: 4.3, error: '' },
   { medida: 'revenue', intervalo_min: 30, horizonte: 8, error_pct: 32.3, error: '' },
@@ -163,6 +163,12 @@ const spec = specPronostico({ medida: 'oil_volume', ancla: '2026-06-29 12:15:44'
 check('real y pronóstico', spec.data.values.length === 2 && spec.data.values[1].serie === 'Pronóstico' && spec.data.values[1].hi === 3);
 check('banda, líneas y regla', spec.layer.length === 3 && spec.layer[0].mark.type === 'area' && spec.layer[2].mark.type === 'rule'
   && spec.layer[2].data.values[0].t === '2026-06-29 12:15:44');
+check('la banda sin línea y en el color del pronóstico', spec.layer[0].mark.line === false && spec.layer[0].mark.color === '#e50000');
+check('real gris y pronóstico rojo', JSON.stringify(spec.layer[1].encoding.color.scale) === JSON.stringify({ domain: ['Real', 'Pronóstico'], range: ['#334155', '#e50000'] }));
+const otra = specPronostico({ medida: 'm', ancla: 'x', real: [], pronostico: [] }, {}, { real: '#111', pron: '#222' });
+check('colores del tema', otra.layer[1].encoding.color.scale.range.join() === '#111,#222' && otra.layer[0].mark.color === '#222');
+check('la leyenda al lado, en HTML', d.includes('<span class="pron__leyenda"><i class="pron__l pron__l--real"></i>Real<i class="pron__l pron__l--pron"></i>Pronóstico</span>'), d);
+check('sin gráfico, sin leyenda', d.split('pron__leyenda').length === 4, d);
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -184,5 +190,7 @@ def test_la_pestana_y_el_motor_de_graficos():
     i = html.index("    async function verPronosticos(btn) {")
     fn = html[i:html.index("\n    }\n", i)]
     assert "fetch('/api/v1/forecast/' + encodeURIComponent(btn.dataset.slug))" in fn
-    assert "embed(lugar, specPronostico(p, config), { actions: false, renderer: 'svg' })" in fn
+    assert "embed(lugar, specPronostico(p, config, colores), { actions: false, renderer: 'svg' })" in fn
+    # Los colores, los del tema (real en el gris del texto, pronóstico en el acento).
+    assert "css.getPropertyValue('--accent').trim() || _COLORES_PRON.pron" in fn
     assert "const b = e.target.closest('.pron__caso');\n        if (b) verPronosticos(b);" in html

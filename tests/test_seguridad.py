@@ -553,7 +553,8 @@ check('si coincide, sin aclaración', !h.includes('Security Analytics registró'
 check('alertas por severidad', h.includes('sev--critical">1 alerta crítica<') && h.includes('sev--high">30 alertas altas<'), h);
 check('sin alertas en cero', !h.includes('sev--low'));
 check('el hallazgo', h.includes('IPS &quot;raro&quot;') && h.includes('1.2.3.4') && h.includes('>Crítica<'), h);
-check('explicar con sus datos', h.includes('class="btn btn-secondary btn-sm hallazgo__explicar" data-slug="siem" data-regla="IPS &quot;raro&quot;"'), h);
+check('explicar con sus datos', h.includes('<button type="button" class="hallazgo hallazgo__explicar" data-slug="siem" data-regla="IPS &quot;raro&quot;"'), h);
+check('la fila entera explica, sin un botón por renglón', !h.includes('btn btn-secondary btn-sm hallazgo__explicar') && h.includes('<span class="hallazgo__accion"><i:spark> Explicar</span></button>'), h);
 check('sin hallazgos todavía', h.includes('Sin hallazgos todavía') && h.includes('Reiniciar ingesta'));
 check('error del detector', h.includes('No se pudieron leer: status 500: boom'));
 check('correlaciones', h.includes('SIEM · 3 correlaciones entre fuentes'));

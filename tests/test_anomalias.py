@@ -331,7 +331,8 @@ check('grado en %', d.includes('sev--critical">93 %<') && d.includes('sev--high"
 check('desde 70 % es alto', d.includes('sev--critical">75 %<'), d);
 check('el intervalo', d.includes('2025-03-14 02:10:00 → 02:20:00'), d);
 check('valores', d.includes('eventos: 1.840,5'), d);
-check('explicar con sus datos', d.includes('class="btn btn-secondary btn-sm anomalia__explicar" data-slug="s" data-inicio="2025-03-14 02:10:00" data-fin="2025-03-14 02:20:00" data-grado="93" data-valores="eventos: 1.840,5"'), d);
+check('explicar con sus datos', d.includes('<button type="button" class="hallazgo anomalia__explicar" data-slug="s" data-inicio="2025-03-14 02:10:00" data-fin="2025-03-14 02:20:00" data-grado="93" data-valores="eventos: 1.840,5" title="Explicar con el asistente">'), d);
+check('la fila entera explica, sin un botón por renglón', !d.includes('btn btn-secondary btn-sm anomalia__explicar') && d.includes('<span class="hallazgo__accion"><i:spark> Explicar</span></button>'), d);
 check('estado', d.includes('Análisis terminado') && d.includes('Analizando…'));
 check('total', d.includes('37 anomalías'));
 check('corriendo, sin anomalías', d.includes('el análisis histórico sigue corriendo'));

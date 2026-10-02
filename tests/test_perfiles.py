@@ -114,7 +114,7 @@ const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -
 check('sin perfiles, nada', perfilesHTML([{ slug: 'cts', perfil: '' }]) === '');
 const card = perfilesHTML([{ slug: 'siem', perfil: 'IP de origen' }, { slug: 'cts', perfil: '' }, { slug: 'mi-dataset', perfil: 'Cliente' }]);
 check('un dataset nuevo también', card.includes('data-slug="mi-dataset"') && card.includes('ip de origen, cliente'), card);
-check('la tarjeta', card.includes('una fila por ip de origen') && card.includes('data-slug="siem">SIEM<') && !card.includes('data-slug="cts"'), card);
+check('la tarjeta', card.includes('una fila por ip de origen') && card.includes('class="maestro__item perfil__caso" data-slug="siem"><span>SIEM</span><span class="maestro__n">IP de origen</span>') && !card.includes('data-slug="cts"'), card);
 const d = perfilDetalleHTML({ estado: 'finished', columnas: ['IP de origen', 'Eventos', 'Riesgo máx.', 'Primer evento'], fechas: [3],
   filas: [['5.188.206.18', 12571, '-Infinity', 1751372608000]], error: '' });
 check('encabezado', d.includes('Las 1 de mayor eventos') && d.includes('Transform: Terminado'), d);

@@ -2318,7 +2318,14 @@
 
     /* Las pestañas del entorno, de su tamaño y a la izquierda: estiradas,
        con tres pestañas cada una ocupaba un tercio de la pantalla. */
-    .infra-tabs .case-tab { flex: 0 0 auto; }
+    .infra-tabs .case-tab { flex: 0 0 auto; padding: 10px 14px; gap: 7px; font-size: var(--fs-base); }
+    /* Si igual no entran, la barra es finita y gris; roja recién al pasar. */
+    .infra-tabs::-webkit-scrollbar { height: 3px; }
+    .infra-tabs::-webkit-scrollbar-thumb { background: var(--border-default); }
+    .infra-tabs:hover::-webkit-scrollbar-thumb { background: var(--accent); }
+    /* El clic no deja el recuadro de foco; con teclado, sí se ve. */
+    .infra-tabs .case-tab:focus { outline: none; }
+    .infra-tabs .case-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     /* El contador de cada pestaña. */
     .infra-tab__cuenta {
       font-size: var(--fs-xs); font-weight: 700; padding: 1px 7px; border-radius: var(--radius-pill);
@@ -2337,19 +2344,77 @@
     #infra-campanas-detalle > .hallazgos__det + .hallazgos__det,
     #infra-accesos-detalle > .hallazgos__det + .hallazgos__det { margin-top: 0; }
     #infra-campanas-detalle:not(:empty), #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
-    /* Los 3 pronósticos de un caso entran en una fila. */
-    .infra-panel .pron__lista { grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
+    /* Un pronóstico por fila: la ficha a la izquierda y el gráfico a lo ancho. */
+    .infra-panel .pron__lista { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .pron__fila {
+      display: grid; grid-template-columns: minmax(150px, 190px) minmax(0, 1fr); gap: 16px; align-items: center;
+      padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-primary);
+    }
+    .pron__info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+    .pron__medida { font-size: var(--fs-base); color: var(--text-primary); overflow-wrap: anywhere; }
+    .pron__cada { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4; }
+    .pron__leyenda { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 2px; }
+    .pron__l { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--text-secondary); }
+    .pron__l + .pron__l, .pron__leyenda .pron__l:not(:first-child) { margin-left: 6px; }
+    .pron__l--pron { border-top: 2px dashed var(--accent); }
+    .pron__fila .pron__grafico { min-height: 170px; }
+    @media (max-width: 760px) { .pron__fila { grid-template-columns: minmax(0, 1fr); } }
     /* Una fila de hallazgo o de anomalía: severidad · regla con su dato debajo ·
        Explicar a la derecha. Con todo en una línea, en una tarjeta de la
        grilla el botón se caía a otra fila. */
     .infra-panel .hallazgo {
-      display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 1px;
+      display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 1px;
       grid-template-areas: "sev regla accion" "sev meta accion"; align-items: center;
     }
-    .infra-panel .hallazgo > .sev { grid-area: sev; align-self: start; margin-top: 1px; }
+    .infra-panel .hallazgo > .sev { grid-area: sev; align-self: start; justify-self: start; margin-top: 1px; }
     .infra-panel .hallazgo__regla { grid-area: regla; min-width: 0; }
     .infra-panel .hallazgo__meta { grid-area: meta; }
-    .infra-panel .hallazgo > .btn { grid-area: accion; }
+    .infra-panel .hallazgo > .hallazgo__accion { grid-area: accion; }
+    /* La fila es el botón: se marca al pasar y "Explicar" se enciende. */
+    button.hallazgo {
+      width: 100%; margin: 0; padding: 7px 10px; font: inherit; font-size: var(--fs-sm); text-align: left; color: inherit;
+      background: transparent; border: 1px solid transparent; border-radius: var(--radius-md); cursor: pointer;
+      transition: background var(--t-base), border-color var(--t-base);
+    }
+    .hallazgos__lista { gap: 2px; }
+    .hallazgos__lista > li { margin: 0 -10px; }
+    button.hallazgo:hover, button.hallazgo:focus-visible { background: var(--bg-secondary); border-color: var(--border-subtle); outline: none; }
+    .hallazgo__accion {
+      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+      font: inherit; font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted);
+      background: none; border: none; padding: 2px 4px; border-radius: var(--radius-sm); cursor: pointer;
+      transition: color var(--t-base);
+    }
+    .hallazgo__accion .icon { width: 13px; height: 13px; }
+    button.hallazgo:hover .hallazgo__accion, button.hallazgo:focus-visible .hallazgo__accion,
+    button.hallazgo__accion:hover, button.hallazgo__accion:focus-visible { color: var(--accent-hover); outline: none; }
+
+    /* Forecasting y Perfiles: los casos en una lista a la izquierda, el
+       detalle a la derecha. Con 9 casos, los botones en dos filas se veían
+       desordenados. En pantallas angostas la lista pasa arriba, en una fila. */
+    .maestro { display: grid; grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 14px; }
+    .maestro__lista {
+      display: flex; flex-direction: column; gap: 2px; padding-right: 14px;
+      border-right: 1px solid var(--border-subtle);
+    }
+    .maestro__item {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+      padding: 8px 12px; font: inherit; font-size: var(--fs-sm); font-weight: 600; text-align: left;
+      color: var(--text-secondary); background: transparent; border: none; border-radius: var(--radius-md); cursor: pointer;
+      transition: background var(--t-base), color var(--t-base);
+    }
+    .maestro__item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .maestro__item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .maestro__item.is-active { background: var(--accent-tint); color: var(--accent-hover); box-shadow: inset 3px 0 0 var(--accent); }
+    .maestro__n { font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+    .maestro__item.is-active .maestro__n { color: var(--accent-hover); }
+    .maestro__detalle { min-width: 0; }
+    .maestro__detalle > .hallazgos__vacio { margin-top: 6px; }
+    @media (max-width: 760px) {
+      .maestro { grid-template-columns: minmax(0, 1fr); }
+      .maestro__lista { flex-direction: row; overflow-x: auto; padding: 0 0 6px; border-right: none; border-bottom: 1px solid var(--border-subtle); }
+      .maestro__item { width: auto; white-space: nowrap; }
+    }
     .cap-assistant__adv { margin-top: 12px; font-size: var(--fs-sm); }
     .cap-assistant__adv > summary { cursor: pointer; color: var(--text-muted); }
     .cap-assistant__adv-body { margin-top: 6px; color: var(--text-secondary); line-height: 1.6; }
@@ -6263,9 +6328,12 @@
               <span class="section-card__hint">Un índice resumen que arma OpenSearch (Transform): una fila por ${casos.map(s => escapeHtml(etiqueta[s].toLowerCase())).join(', ')} · en Dashboards: Index Management → Transforms</span>
             </span>
           </div>
-          <div class="pron__casos" role="group" aria-label="Caso">${casos.map(s =>
-            `<button type="button" class="btn btn-secondary btn-sm perfil__caso" data-slug="${escapeHtml(s)}">${escapeHtml(SLUG_LABELS[s] || s)}</button>`).join('')}</div>
-          <div id="infra-perfiles-detalle"><div class="hallazgos__vacio">Elegí un caso para ver su perfil.</div></div>
+          <div class="maestro">
+            <div class="maestro__lista" role="group" aria-label="Caso">${casos.map(s =>
+              `<button type="button" class="maestro__item perfil__caso" data-slug="${escapeHtml(s)}">`
+              + `<span>${escapeHtml(SLUG_LABELS[s] || s)}</span><span class="maestro__n">${escapeHtml(etiqueta[s])}</span></button>`).join('')}</div>
+            <div class="maestro__detalle" id="infra-perfiles-detalle"><div class="hallazgos__vacio">Elegí un caso para ver su perfil.</div></div>
+          </div>
         </div>`;
     }
     const _ESTADO_TRANSFORM = { finished: 'Terminado', started: 'Corriendo…', init: 'Arrancando…', failed: 'Falló', stopped: 'Detenido' };
@@ -6375,9 +6443,9 @@
             + `<span class="hallazgo__meta">${p.eventos} evento${p.eventos === 1 ? '' : 's'}</span></li>`).join('');
           return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(k.id)}${k.nombre ? ` · ${escapeHtml(k.nombre)}` : ''}</strong>`
             + `<span class="hallazgos__total">${k.eventos} evento${k.eventos === 1 ? '' : 's'} en ${(k.fuentes || []).length} fuente${(k.fuentes || []).length === 1 ? '' : 's'}${(k.ips || []).length ? ` · desde ${escapeHtml(k.ips.join(', '))}` : ''}</span>`
-            + `<button type="button" class="btn btn-secondary btn-sm campana__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `<button type="button" class="hallazgo__accion campana__explicar" data-slug="${escapeHtml(c.slug)}" `
             + `data-campana="${escapeHtml(k.id)}" data-nombre="${escapeHtml(k.nombre || '')}" data-desde="${escapeHtml(_horaPpl(k.desde))}" `
-            + `data-hasta="${escapeHtml(_horaPpl(k.hasta))}" data-ips="${escapeHtml((k.ips || []).join(', '))}">Explicar</button></div>`
+            + `data-hasta="${escapeHtml(_horaPpl(k.hasta))}" data-ips="${escapeHtml((k.ips || []).join(', '))}" title="Explicar con el asistente">${icon('spark')} Explicar</button></div>`
             + `<ol class="campana__pasos">${pasos}</ol></div>`;
         }).join('') || `<div class="hallazgos__det"><div class="hallazgos__vacio">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}: sin eventos de campaña en los datos.</div></div>`;
       }).join('');
@@ -6424,13 +6492,16 @@
         const dets = (c.detectores || []).map(d => {
           const alertas = Object.entries(d.alertas || {}).filter(([, n]) => n)
             .map(([sev, n]) => `<span class="sev sev--${escapeHtml(sev)}">${n} alerta${n === 1 ? '' : 's'} ${escapeHtml((_NIVEL[sev] || sev).toLowerCase())}${n === 1 ? '' : 's'}</span>`).join('');
-          const recientes = (d.recientes || []).map(h => `<li class="hallazgo">`
+          // La fila entera explica ese hallazgo: un botón "Explicar" por
+          // renglón, todos iguales, era ruido.
+          const recientes = (d.recientes || []).map(h => `<li>`
+            + `<button type="button" class="hallazgo hallazgo__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `data-regla="${escapeHtml(h.regla || '')}" data-hora="${escapeHtml(h.hora_ppl || '')}" data-ip="${escapeHtml(h.ip || '')}" title="Explicar con el asistente">`
             + `<span class="sev sev--${escapeHtml(h.nivel || '')}">${escapeHtml(_NIVEL[h.nivel] || h.nivel || '—')}</span>`
             + `<span class="hallazgo__regla">${escapeHtml(h.regla || '')}</span>`
             + `<span class="hallazgo__meta">${escapeHtml(_fechaCorta(h.hora))}${h.ip ? ' · ' + escapeHtml(h.ip) : ''}</span>`
-            + `<button type="button" class="btn btn-secondary btn-sm hallazgo__explicar" data-slug="${escapeHtml(c.slug)}" `
-            + `data-regla="${escapeHtml(h.regla || '')}" data-hora="${escapeHtml(h.hora_ppl || '')}" data-ip="${escapeHtml(h.ip || '')}">Explicar</button>`
-            + `</li>`).join('');
+            + `<span class="hallazgo__accion">${icon('spark')} Explicar</span>`
+            + `</button></li>`).join('');
           const cuerpo = d.error
             ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(d.error)}</div>`
             : recientes
@@ -6478,15 +6549,20 @@
               <span class="section-card__hint">${total} pronóstico${total === 1 ? '' : 's'} en ${casos.length} caso${casos.length === 1 ? '' : 's'} · cada uno contra lo que pasó de verdad · en Dashboards: Forecasting</span>
             </span>
           </div>
-          <div class="pron__casos" role="group" aria-label="Caso">${casos.map(([slug]) =>
-            `<button type="button" class="btn btn-secondary btn-sm pron__caso" data-slug="${escapeHtml(slug)}">${escapeHtml(SLUG_LABELS[slug] || slug)}</button>`).join('')}</div>
-          <div id="infra-pronosticos-detalle"><div class="hallazgos__vacio">Elegí un caso para ver sus pronósticos.</div></div>
+          <div class="maestro">
+            <div class="maestro__lista" role="group" aria-label="Caso">${casos.map(([slug, ids]) =>
+              `<button type="button" class="maestro__item pron__caso" data-slug="${escapeHtml(slug)}">`
+              + `<span>${escapeHtml(SLUG_LABELS[slug] || slug)}</span><span class="maestro__n">${_forecastersDe(ids).length}</span></button>`).join('')}</div>
+            <div class="maestro__detalle" id="infra-pronosticos-detalle"><div class="hallazgos__vacio">Elegí un caso para ver sus pronósticos.</div></div>
+          </div>
         </div>`;
     }
     const _fmtPron = (v) => Number(v).toLocaleString('es-AR', { maximumFractionDigits: 1 });
     function pronosticosDetalleHTML(data) {
       const lista = (data && data.pronosticos) || [];
       if (!lista.length) return '<div class="hallazgos__vacio">Este caso no tiene pronósticos.</div>';
+      // Un pronóstico por fila: a la izquierda qué es y cuánto acierta, a la
+      // derecha el gráfico a lo ancho.
       return `<div class="pron__lista">${lista.map((p, i) => {
         const cada = p.intervalo_min >= 60 ? `${_fmtPron(p.intervalo_min / 60)} h` : `${p.intervalo_min} min`;
         const acierto = p.error_pct == null ? ''
@@ -6494,28 +6570,35 @@
         const cuerpo = p.error
           ? `<div class="hallazgos__vacio">${escapeHtml(p.error)}</div>`
           : `<div class="pron__grafico" data-i="${i}"></div>`;
-        return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(p.medida || p.nombre)}</strong>`
-          + `<span class="hallazgos__total">cada ${escapeHtml(cada)} · ${p.horizonte || 0} pasos hacia adelante</span>${acierto}</div>${cuerpo}</div>`;
+        return `<div class="pron__fila"><div class="pron__info"><strong class="pron__medida">${escapeHtml(p.medida || p.nombre)}</strong>`
+          + `<span class="pron__cada">cada ${escapeHtml(cada)} · ${p.horizonte || 0} pasos hacia adelante</span>${acierto}`
+          + `${p.error ? '' : '<span class="pron__leyenda"><i class="pron__l pron__l--real"></i>Real<i class="pron__l pron__l--pron"></i>Pronóstico</span>'}`
+          + `</div>${cuerpo}</div>`;
       }).join('')}</div>`;
     }
     // Vega-Lite: la serie real (línea), el pronóstico (punteado) con su banda y
     // una regla donde arranca el pronóstico.
-    function specPronostico(p, config) {
+    // Real en gris oscuro, pronóstico en rojo punteado y su banda en rojo
+    // suave (la leyenda va al lado, en HTML). Antes los colores eran los de la
+    // paleta por defecto y la banda dibujaba una línea azul de más.
+    const _COLORES_PRON = { real: '#334155', pron: '#e50000' };
+    function specPronostico(p, config, colores = _COLORES_PRON) {
       const filas = [
         ...(p.real || []).map(r => ({ t: r.t, v: r.v, serie: 'Real' })),
         ...(p.pronostico || []).map(r => ({ t: r.t, v: r.v, lo: r.lo, hi: r.hi, serie: 'Pronóstico' })),
       ];
       const x = { field: 't', type: 'temporal', title: null };
       return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json', width: 'container', height: 190,
+        $schema: 'https://vega.github.io/schema/vega-lite/v5.json', width: 'container', height: 170,
         autosize: { type: 'fit-x', contains: 'padding' }, config,
         data: { values: filas },
         layer: [
-          { transform: [{ filter: "datum.serie === 'Pronóstico'" }], mark: { type: 'area', opacity: 0.18 },
+          { transform: [{ filter: "datum.serie === 'Pronóstico'" }], mark: { type: 'area', opacity: 0.12, line: false, color: colores.pron },
             encoding: { x, y: { field: 'lo', type: 'quantitative', title: null }, y2: { field: 'hi' } } },
           { mark: { type: 'line', strokeWidth: 2 },
             encoding: { x, y: { field: 'v', type: 'quantitative', title: p.medida || null },
-                        color: { field: 'serie', type: 'nominal', title: null, legend: { orient: 'top' } },
+                        color: { field: 'serie', type: 'nominal', title: null, legend: null,
+                                 scale: { domain: ['Real', 'Pronóstico'], range: [colores.real, colores.pron] } },
                         strokeDash: { field: 'serie', type: 'nominal', legend: null,
                                       scale: { domain: ['Real', 'Pronóstico'], range: [[1, 0], [5, 4]] } },
                         tooltip: [{ field: 't', type: 'temporal', title: 'Fin del paso (UTC)', format: '%Y-%m-%d %H:%M' },
@@ -6540,9 +6623,12 @@
         if (!capVega) return;
         const embed = await capVega.ensure();
         const config = capVega.config(capVega.theme());
+        const css = getComputedStyle(document.documentElement);
+        const colores = { real: css.getPropertyValue('--text-secondary').trim() || _COLORES_PRON.real,
+                          pron: css.getPropertyValue('--accent').trim() || _COLORES_PRON.pron };
         (data.pronosticos || []).forEach((p, i) => {
           const lugar = destino.querySelector(`.pron__grafico[data-i="${i}"]`);
-          if (lugar) embed(lugar, specPronostico(p, config), { actions: false, renderer: 'svg' }).catch(() => {});
+          if (lugar) embed(lugar, specPronostico(p, config, colores), { actions: false, renderer: 'svg' }).catch(() => {});
         });
       } catch (err) {
         showStatus(destino, `Error: ${err.message}`, 'error');
@@ -6577,13 +6663,14 @@
       const bloques = (casos || []).map(c => {
         const top = (c.top || []).map(a => {
           const valores = (a.valores || []).map(v => `${v.nombre}: ${typeof v.valor === 'number' ? v.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : v.valor}`).join(' · ');
-          return `<li class="hallazgo">`
+          return `<li>`
+            + `<button type="button" class="hallazgo anomalia__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `data-inicio="${escapeHtml(a.inicio)}" data-fin="${escapeHtml(a.fin)}" data-grado="${Math.round((a.grado || 0) * 100)}" `
+            + `data-valores="${escapeHtml(valores)}" title="Explicar con el asistente">`
             + `<span class="sev ${a.grado >= 0.7 ? 'sev--critical' : 'sev--high'}">${Math.round((a.grado || 0) * 100)} %</span>`
             + `<span class="hallazgo__regla">${escapeHtml(a.inicio)} → ${escapeHtml((a.fin || '').slice(11))}</span>`
             + `<span class="hallazgo__meta">${escapeHtml(valores)}</span>`
-            + `<button type="button" class="btn btn-secondary btn-sm anomalia__explicar" data-slug="${escapeHtml(c.slug)}" `
-            + `data-inicio="${escapeHtml(a.inicio)}" data-fin="${escapeHtml(a.fin)}" data-grado="${Math.round((a.grado || 0) * 100)}" `
-            + `data-valores="${escapeHtml(valores)}">Explicar</button></li>`;
+            + `<span class="hallazgo__accion">${icon('spark')} Explicar</span></button></li>`;
         }).join('');
         const cuerpo = c.error
           ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(c.error)}</div>`
