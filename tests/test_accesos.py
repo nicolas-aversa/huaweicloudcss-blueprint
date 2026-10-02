@@ -111,7 +111,7 @@ def test_el_registro_esta_gitignoreado():
 
 
 def _funciones(html: str) -> str:
-    i = html.index("    function accesosHTML(slugs) {")
+    i = html.index("    function accesosHTML(pipelines) {")
     return html[i:html.index("    async function verAccesos(btn) {", i)]
 
 
@@ -119,12 +119,14 @@ _ARNES = r"""
 const icon = (n) => `<svg data-i="${n}"></svg>`;
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const SLUG_LABELS = { 'encuentros-clinicos': 'Encuentros clínicos' };
-const LOG_EXAMPLES = [{ id: 'encuentros-clinicos', enmascarados: ['patient'] }, { id: 'siem', enmascarados: [] }];
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-check('sin casos con analista, nada', accesosHTML(['siem']) === '' && accesosHTML(null) === '');
-const card = accesosHTML(['siem', 'encuentros-clinicos']);
+// Lo que informa el entorno por pipeline: sirve igual para un dataset nuevo.
+check('sin casos con analista, nada', accesosHTML([{ slug: 'siem', enmascarados: [] }]) === '' && accesosHTML(null) === '');
+const card = accesosHTML([{ slug: 'siem', enmascarados: [] }, { slug: 'encuentros-clinicos', enmascarados: ['patient'] },
+                          { slug: 'mi-dataset', enmascarados: ['data.dni'] }]);
+check('un dataset nuevo también', card.includes('mi-dataset: data.dni'), card);
 check('la tarjeta', card.includes('id="infra-accesos-ver"') && card.includes('Encuentros clínicos: patient') && !card.includes('siem'), card);
 check('sin contraseña en la tarjeta', !card.includes('Contraseña</span><code>'), card);
 const d = accesosDetalleHTML([{ slug: 'encuentros-clinicos', usuario: 'analista-encuentros-clinicos', password: 'Ab#1<x>', enmascarados: ['patient'] }]);
@@ -145,5 +147,5 @@ def test_la_tarjeta_en_node(tmp_path):
 
 def test_la_vista_la_pone_en_el_resumen():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "${accesosHTML(pipelines.map(p => p.slug))}` }," in html
+    assert "${accesosHTML(pipelines)}` }," in html
     assert "body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));" in html

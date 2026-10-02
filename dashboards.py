@@ -34,6 +34,7 @@ sin `.keyword`.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any
 
@@ -298,6 +299,10 @@ _CAPA_DE_PAISES: dict[str, Any] = {
     ],
     "format": {"type": "geojson"}, "layerId": "elastic_maps_service.World Countries", "isEMS": True,
 }
+
+
+_PISTA_DE_PAIS = re.compile(r"(country|pa[ií]s|naci[oó]n)", re.I)
+_CODIGO_DE_PAIS = re.compile(r"(code|c[oó]digo|iso)", re.I)
 
 
 def _vs_region_map(title: str, field: str, size: int = 100) -> dict[str, Any]:
@@ -781,6 +786,17 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
     # El mapa: un log con coordenadas se entiende acá y en ningún otro lado.
     for (p, ap, lbl) in geo_campos[:1]:
         panels.append({"type": "map", "title": _uniq(f"Mapa · {lbl}", p),
+                       "field": p, "grid": [0, y, 48, 18]})
+        graficados.add(p)
+        y += 18
+
+    # Sin coordenadas pero con el NOMBRE del país (country, país…): mapa por
+    # país, unido por nombre con la capa de países. Un código (ISO) no une.
+    paises = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed
+              if es == "keyword" and p not in graficados
+              and _PISTA_DE_PAIS.search(f"{p} {lbl}") and not _CODIGO_DE_PAIS.search(f"{p} {lbl}")]
+    for (p, ap, lbl) in paises[:1]:
+        panels.append({"type": "region_map", "title": _uniq(f"Por país · {lbl}", p),
                        "field": p, "grid": [0, y, 48, 18]})
         graficados.add(p)
         y += 18

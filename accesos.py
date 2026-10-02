@@ -61,3 +61,9 @@ def contrasena(largo: int = 16) -> str:
         if (any(c.islower() for c in p) and any(c.isupper() for c in p)
                 and any(c.isdigit() for c in p) and any(c in _ESPECIALES for c in p)):
             return p
+
+
+def enmascarados_desde_campos(fields: list[dict]) -> list[str]:
+    """Los campos que el usuario marcó como sensibles en el paso 2."""
+    return [f.get("field_path") or f.get("ecs_path") or f.get("raw_name") or ""
+            for f in fields or [] if f.get("sensitive") and (f.get("field_path") or f.get("raw_name"))]

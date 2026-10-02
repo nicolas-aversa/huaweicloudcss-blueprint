@@ -1840,6 +1840,8 @@
     /* Perfil por entidad: tabla que se desplaza en pantallas chicas. */
     .perfil__caso.is-active, .insights__tipo.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
     .perfil__tabla { overflow-x: auto; }
+    .mapping-marca { text-align: center; }
+    .mapping-marca input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
     .perfil__tabla table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
     .perfil__tabla th, .perfil__tabla td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
     .perfil__tabla th:first-child, .perfil__tabla td:first-child { text-align: left; }
@@ -3719,6 +3721,21 @@
       </details>`;
     }
 
+    // Paso 2: qué campo identifica a la entidad (el perfil del caso: una fila
+    // por cliente, usuario, IP…) y cuáles son sensibles (el analista de demo los
+    // ve enmascarados). La entidad viene propuesta y se puede cambiar.
+    const _PISTA_DE_ENTIDAD = /(^|[._])(id|ids|user|usuario|cliente|customer|client|account|cuenta|ip|host|device|dispositivo|patient|paciente|comitente|sesion|session|merchant|comercio|well|pozo)($|[._])/i;
+    function entidadPropuesta(fields) {
+      const ruta = (f) => f.field_path || f.ecs_path || f.raw_name || '';
+      const marcado = (fields || []).find(f => f.entity);
+      if (marcado) return ruta(marcado);
+      const f = (fields || []).find(f => ['string', 'keyword', 'ip'].includes(f.type) && f.dimension !== false
+        && (_PISTA_DE_ENTIDAD.test(ruta(f)) || _PISTA_DE_ENTIDAD.test(f.raw_name || '')));
+      return f ? ruta(f) : '';
+    }
+    function marcarEntidad(fields, idx) {
+      (fields || []).forEach((f, i) => { f.entity = i === idx; });
+    }
     function renderMappingTable(fields) {
       const container = document.getElementById('mapping-table');
       if (!container) return;
@@ -3740,6 +3757,11 @@
       if (!fields || !fields.length) {
         container.innerHTML = '<p class="form-hint">No se detectaron campos estructurados en el log.</p>';
         return;
+      }
+      // La entidad propuesta queda marcada (así viaja con el deploy).
+      if (!fields.some(f => f.entity)) {
+        const propuesta = entidadPropuesta(fields);
+        fields.forEach(f => { if ((f.field_path || f.ecs_path || f.raw_name) === propuesta) f.entity = true; });
       }
       const rowArr = fields.map((f, idx) => {
         const unitDisplay = f.unit ? `<span class="mapping-unit">(${escapeHtml(f.unit)})</span>` : '';
@@ -3790,6 +3812,10 @@
                 <option value="geo_point" ${f.type === 'geo_point' ? 'selected' : ''}>geo_point</option>
               </select>
             </td>
+            <td class="mapping-marca"><input type="radio" name="mapping-entidad" class="mapping-entidad" data-index="${idx}"
+                       ${f.entity ? 'checked' : ''} aria-label="Entidad: ${escapeHtml(f.business_label || f.raw_name || '')}"></td>
+            <td class="mapping-marca"><input type="checkbox" class="mapping-sensible" data-index="${idx}"
+                       ${f.sensitive ? 'checked' : ''} aria-label="Sensible: ${escapeHtml(f.business_label || f.raw_name || '')}"></td>
             <td>
               <button class="mapping-edit-btn" id="edit-btn-${idx}" data-index="${idx}" title="Editar campo">${icon('edit')}</button>
             </td>
@@ -3806,7 +3832,7 @@
           if (f.group && !seen.includes(f.group)) {
             seen.push(f.group);
             const count = fields.filter(ff => ff.group === f.group).length;
-            parts.push(`<tr class="mapping-group-header" data-group="${escapeHtml(f.group)}"><td colspan="5"><span class="mapping-group-toggle"><svg class="icon"><use href="#ic-chevron"/></svg></span><span class="mapping-group-title">${escapeHtml(f.group)}</span><span class="mapping-group-count">${count} campos</span></td></tr>`);
+            parts.push(`<tr class="mapping-group-header" data-group="${escapeHtml(f.group)}"><td colspan="7"><span class="mapping-group-toggle"><svg class="icon"><use href="#ic-chevron"/></svg></span><span class="mapping-group-title">${escapeHtml(f.group)}</span><span class="mapping-group-count">${count} campos</span></td></tr>`);
           }
           parts.push(rowArr[idx]);
         });
@@ -3836,6 +3862,8 @@
                 <th>Campo original</th>
                 <th>Etiqueta · Path</th>
                 <th style="width:100px;">Tipo</th>
+                <th style="width:70px;" title="El campo que identifica a cada entidad (cliente, usuario, IP…): arma el perfil por entidad">Entidad</th>
+                <th style="width:70px;" title="Datos sensibles: el analista de demo los ve enmascarados">Sensible</th>
                 <th style="width:60px;"></th>
               </tr>
             </thead>
@@ -3851,6 +3879,12 @@
           toggleFieldEdit(idx);
         });
       });
+      // Entidad (una sola) y Sensible: van en el campo y viajan con el deploy.
+      container.querySelectorAll('.mapping-entidad').forEach(r => r.addEventListener('change', (e) =>
+        marcarEntidad(fields, parseInt(e.currentTarget.dataset.index))));
+      container.querySelectorAll('.mapping-sensible').forEach(c => c.addEventListener('change', (e) => {
+        fields[parseInt(e.currentTarget.dataset.index)].sensitive = e.currentTarget.checked;
+      }));
 
       // Toggle de grupos colapsables (click en el header → mostrar/ocultar rows).
       container.querySelectorAll('.mapping-group-header').forEach(header => {
@@ -6096,15 +6130,17 @@
     }
     // Perfiles por entidad (Transforms): una fila por IP, cliente o pozo, con sus
     // medidas. Por caso, a demanda.
-    function perfilesHTML(slugs) {
-      const casos = (slugs || []).filter(s => LOG_EXAMPLES.find(e => e.id === s)?.perfil);
+    function perfilesHTML(pipelines) {
+      const conPerfil = (pipelines || []).filter(p => p.perfil);
+      const casos = conPerfil.map(p => p.slug);
+      const etiqueta = Object.fromEntries(conPerfil.map(p => [p.slug, p.perfil]));
       if (!casos.length) return '';
       return `<div class="section-card" id="infra-perfiles">
           <div class="section-card__head seguridad__head">
             <span class="section-card__tile">${icon('layers')}</span>
             <span class="section-card__titlewrap">
               <span class="section-card__title">Perfil por entidad</span>
-              <span class="section-card__hint">Un índice resumen que arma OpenSearch (Transform): una fila por ${casos.map(s => escapeHtml(LOG_EXAMPLES.find(e => e.id === s).perfil.toLowerCase())).join(', ')} · en Dashboards: Index Management → Transforms</span>
+              <span class="section-card__hint">Un índice resumen que arma OpenSearch (Transform): una fila por ${casos.map(s => escapeHtml(etiqueta[s].toLowerCase())).join(', ')} · en Dashboards: Index Management → Transforms</span>
             </span>
           </div>
           <div class="pron__casos" role="group" aria-label="Caso">${casos.map(s =>
@@ -6147,8 +6183,10 @@
     }
     // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
     // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
-    function accesosHTML(slugs) {
-      const casos = (slugs || []).filter(s => (LOG_EXAMPLES.find(e => e.id === s)?.enmascarados || []).length);
+    function accesosHTML(pipelines) {
+      const conAnalista = (pipelines || []).filter(p => (p.enmascarados || []).length);
+      const casos = conAnalista.map(p => p.slug);
+      const campos = Object.fromEntries(conAnalista.map(p => [p.slug, p.enmascarados]));
       if (!casos.length) return '';
       return `<div class="section-card" id="infra-accesos">
           <div class="section-card__head seguridad__head">
@@ -6159,7 +6197,7 @@
             </span>
             <button type="button" class="btn btn-primary btn-sm" id="infra-accesos-ver">Ver accesos</button>
           </div>
-          <div class="seguridad__caso"><span>${casos.map(s => `${escapeHtml(SLUG_LABELS[s] || s)}: ${escapeHtml((LOG_EXAMPLES.find(e => e.id === s)?.enmascarados || []).join(', '))}`).join(' · ')}</span></div>
+          <div class="seguridad__caso"><span>${casos.map(s => `${escapeHtml(SLUG_LABELS[s] || s)}: ${escapeHtml(campos[s].join(', '))}`).join(' · ')}</span></div>
           <div id="infra-accesos-detalle"></div>
         </div>`;
     }
@@ -7975,11 +8013,11 @@
               <div class="pipe-list">${pipeRows}</div>
             </div>
             <div id="infra-capabilities-result" style="margin:6px 0 16px;"></div>
-            ${accesosHTML(pipelines.map(p => p.slug))}` },
+            ${accesosHTML(pipelines)}` },
           { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) },
-          { id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines.map(p => p.slug)) },
+          { id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines) },
           { id: 'rendimiento', label: 'Rendimiento', icon: 'clock', html: rendimientoHTML() },
         ], infraSeccionGuardada())}
         `;

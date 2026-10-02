@@ -60,3 +60,51 @@ def tabla_del_perfil(hits: list[dict], perfil: dict) -> dict:
     return {"columnas": [perfil.get("etiqueta") or perfil["campo"]] + [perfil.get("nombres", {}).get(m, m) for m in medidas],
             "fechas": [i + 1 for i, m in enumerate(medidas) if m in set(perfil.get("fechas", []))],
             "filas": filas}
+
+
+# ── Datasets nuevos: el perfil sale de los campos del paso 2 ────────────────
+import re as _re
+
+# Lo que suele identificar a "alguien" en un log: cliente, usuario, IP, cuenta…
+_PISTA_DE_ENTIDAD = _re.compile(
+    r"(^|[._])(id|ids|user|usuario|cliente|customer|client|account|cuenta|ip|host|device|dispositivo|"
+    r"patient|paciente|comitente|sesion|session|merchant|comercio|well|pozo)($|[._])", _re.I)
+_NUMERICOS = ("integer", "long", "float", "double")
+
+
+def _ruta(f: dict) -> str:
+    return f.get("field_path") or f.get("ecs_path") or f.get("raw_name") or ""
+
+
+def entidad_propuesta(fields: list[dict]) -> str:
+    """El campo que identifica a la entidad: el que marcó el usuario en el
+    paso 2 o, si no marcó ninguno, la primera dimensión de texto o IP cuyo
+    nombre lo sugiere (cliente, usuario, IP, cuenta…). '' si no hay."""
+    marcado = next((_ruta(f) for f in fields or [] if f.get("entity")), "")
+    if marcado:
+        return marcado
+    for f in fields or []:
+        if f.get("type") in ("string", "keyword", "ip") and f.get("dimension", True) and \
+                (_PISTA_DE_ENTIDAD.search(_ruta(f)) or _PISTA_DE_ENTIDAD.search(f.get("raw_name") or "")):
+            return _ruta(f)
+    return ""
+
+
+def perfil_desde_campos(fields: list[dict]) -> "dict | None":
+    """El perfil de un dataset nuevo: agrupado por su entidad, con los eventos,
+    hasta tres medidas numéricas sumadas y el último evento. None si no hay
+    entidad."""
+    entidad = entidad_propuesta(fields)
+    if not entidad:
+        return None
+    etiqueta = next((f.get("business_label") or f.get("raw_name") or entidad
+                     for f in fields if _ruta(f) == entidad), entidad)
+    medidas: dict = {"eventos": {"value_count": {"field": "@timestamp"}}}
+    nombres = {"eventos": "Eventos"}
+    for f in [f for f in fields if f.get("type") in _NUMERICOS and _ruta(f) != entidad][:3]:
+        clave = _re.sub(r"[^a-z0-9_]", "_", _ruta(f).lower())
+        medidas[clave] = {"sum": {"field": _ruta(f)}}
+        nombres[clave] = f.get("business_label") or f.get("raw_name") or _ruta(f)
+    medidas["ultimo"] = {"max": {"field": "@timestamp"}}
+    nombres["ultimo"] = "Último evento"
+    return {"campo": entidad, "etiqueta": etiqueta, "medidas": medidas, "nombres": nombres, "fechas": ["ultimo"]}

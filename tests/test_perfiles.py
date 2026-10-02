@@ -97,7 +97,7 @@ def test_un_error_se_dice(monkeypatch, falla, motivo):
 
 
 def _funciones(html: str) -> str:
-    i = html.index("    function perfilesHTML(slugs) {")
+    i = html.index("    function perfilesHTML(pipelines) {")
     return html[i:html.index("    async function verPerfil(btn) {", i)]
 
 
@@ -105,12 +105,12 @@ _ARNES = r"""
 const icon = (n) => `<svg data-i="${n}"></svg>`;
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const SLUG_LABELS = { siem: 'SIEM' };
-const LOG_EXAMPLES = [{ id: 'siem', perfil: 'IP de origen' }, { id: 'cts', perfil: '' }];
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-check('sin perfiles, nada', perfilesHTML(['cts']) === '');
-const card = perfilesHTML(['siem', 'cts']);
+check('sin perfiles, nada', perfilesHTML([{ slug: 'cts', perfil: '' }]) === '');
+const card = perfilesHTML([{ slug: 'siem', perfil: 'IP de origen' }, { slug: 'cts', perfil: '' }, { slug: 'mi-dataset', perfil: 'Cliente' }]);
+check('un dataset nuevo también', card.includes('data-slug="mi-dataset"') && card.includes('ip de origen, cliente'), card);
 check('la tarjeta', card.includes('una fila por ip de origen') && card.includes('data-slug="siem">SIEM<') && !card.includes('data-slug="cts"'), card);
 const d = perfilDetalleHTML({ estado: 'finished', columnas: ['IP de origen', 'Eventos', 'Riesgo máx.', 'Primer evento'], fechas: [3],
   filas: [['5.188.206.18', 12571, '-Infinity', 1751372608000]], error: '' });
@@ -133,5 +133,5 @@ def test_la_pestana_en_node(tmp_path):
 
 def test_la_vista_la_registra():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines.map(p => p.slug)) }," in html
+    assert "{ id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines) }," in html
     assert "const b = e.target.closest('.perfil__caso');\n        if (b) verPerfil(b);" in html

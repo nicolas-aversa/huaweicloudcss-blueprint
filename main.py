@@ -6330,6 +6330,29 @@ def _write_analistas(terraform_dir: Path, registro: dict) -> None:
     (terraform_dir / _ANALISTAS_NAME).write_text(json.dumps(registro, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _perfil_de(slug: str, entry: dict) -> "dict | None":
+    """El perfil por entidad del caso: el que declara su vertical o, en un
+    dataset nuevo, el que sale de sus campos (la entidad marcada en el paso 2 o
+    la que se propone)."""
+    import perfiles
+
+    v = verticals.get_vertical(slug)
+    if v is not None:
+        return v.get("perfil")
+    return perfiles.perfil_desde_campos((entry or {}).get("fields") or [])
+
+
+def _enmascarados_de(slug: str, entry: dict) -> list[str]:
+    """Los campos sensibles del caso: los del vertical o, en un dataset nuevo,
+    los que se marcaron como sensibles en el paso 2."""
+    import accesos
+
+    v = verticals.get_vertical(slug)
+    if v is not None:
+        return list((v.get("analista") or {}).get("enmascarados") or [])
+    return accesos.enmascarados_desde_campos((entry or {}).get("fields") or [])
+
+
 def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pattern: str,
                         perfil: dict, force: bool) -> dict:
     """El Transform del perfil por entidad: lo crea y lo arranca. Si ya estaba,
@@ -6651,10 +6674,10 @@ def perfil_del_caso(slug: str) -> PerfilResponse:
     vivo y a demanda: el estado del Transform y las entidades de mayor peso."""
     import perfiles
 
-    perfil = (verticals.get_vertical(slug) or {}).get("perfil")
+    terraform_dir = _active_terraform_dir()
+    perfil = _perfil_de(slug, _read_pipelines_registry(terraform_dir).get(slug) or {})
     if not perfil:
         return PerfilResponse(slug=slug, error="este caso no tiene perfil por entidad")
-    terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
     if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -7285,7 +7308,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             runs.step(run, slug, False, repr(exc)[:300])
     _base_analistas = _os_base(cluster, request.https_enabled)
     for slug in slugs:
-        perfil = (verticals.get_vertical(slug) or {}).get("perfil")
+        perfil = _perfil_de(slug, pipe_reg.get(slug) or {})
         if not perfil:
             continue
         indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
@@ -7296,7 +7319,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             res = {"ok": False, "reason": repr(exc)}
         runs.step(run, f"Perfil por entidad · {slug}", res["ok"], res["reason"][:300])
     for slug in slugs:
-        enmascarados = ((verticals.get_vertical(slug) or {}).get("analista") or {}).get("enmascarados")
+        enmascarados = _enmascarados_de(slug, pipe_reg.get(slug) or {})
         if not enmascarados:
             continue
         indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
@@ -8186,6 +8209,10 @@ def terraform_status() -> TerraformStatusResponse:
             # (productivo) → el backend es la única fuente de verdad para el gate del
             # frontend (no más CAPABILITY_SLUGS hardcodeado).
             "has_capabilities": slug in _curated_slugs or bool(entry.get("fields")),
+            # Para las tarjetas "Perfil por entidad" y "Accesos de demo": también
+            # en un dataset nuevo (sale de sus campos), no solo en los de demo.
+            "perfil": (_perfil_de(slug, entry) or {}).get("etiqueta", ""),
+            "enmascarados": _enmascarados_de(slug, entry),
         }
         for slug, entry in registry.items()
     ]
