@@ -3165,6 +3165,90 @@ def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> 
             caso.index_name = seguridad.indice_de_salida(v["index_base"])
 
 
+def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
+    """Lo que hay en Huawei para comparar con el state (solo lectura): los
+    clusters CSS de la cuenta, las reglas DNAT del NAT gateway del state y las
+    configuraciones del cluster Logstash del entorno (el del state o, si no
+    está, el que tenga su nombre)."""
+    import requests
+    import recuperacion
+    from huaweicloudsdkcore.auth.credentials import BasicCredentials
+    from huaweicloudsdkcore.region.region import Region
+    from huaweicloudsdkcore.sdk_request import SdkRequest
+    from huaweicloudsdkcore.signer.signer import Signer
+    from huaweicloudsdkcss.v1 import CssClient, ListClustersDetailsRequest, ListConfsRequest
+
+    pid, region = get_huawei_project_id(), get_region()
+    cred = BasicCredentials(ak, sk, pid)
+    css = CssClient.new_builder().with_credentials(cred).with_region(
+        Region(region, f"https://css.{region}.myhuaweicloud.com")).build()
+    clusters = [{"id": c.id, "name": c.name, "status": str(c.status), "subnet_id": getattr(c, "subnet_id", "") or ""}
+                for c in (css.list_clusters_details(ListClustersDetailsRequest(limit=100)).clusters or [])]
+    actual = {d: a for d, _k, a, _s in recuperacion.instancias(state)}
+    reglas: list[dict] = []
+    gw = (actual.get("huaweicloud_nat_gateway.nat") or {}).get("id", "")
+    if gw:
+        host, ruta = f"nat.{region}.myhuaweicloud.com", f"/v2/{pid}/dnat_rules"
+        firmado = Signer(cred).sign(SdkRequest(
+            method="GET", schema="https", host=host, resource_path=ruta,
+            query_params=[("nat_gateway_id", gw), ("limit", "100")],
+            header_params={"Content-Type": "application/json", "X-Project-Id": pid}, body=""))
+        r = requests.get(f"https://{host}{ruta}?nat_gateway_id={gw}&limit=100", headers=firmado.header_params, timeout=30)
+        if r.status_code == 200:
+            reglas = [{"id": d.get("id"), "external_service_port": d.get("external_service_port")}
+                      for d in (r.json() or {}).get("dnat_rules", [])]
+    confs: list[str] = []
+    ls_id = (actual.get("huaweicloud_css_logstash_cluster.logstash_cluster") or {}).get("id") or next(
+        (c["id"] for c in clusters if c["name"].endswith("-logstash")), "")
+    if ls_id:
+        try:
+            confs = [c.name for c in (css.list_confs(ListConfsRequest(cluster_id=ls_id)).confs or [])]
+        except Exception as exc:  # noqa: BLE001 — sin la lista, no se importan configuraciones
+            print(f"[recuperar] no se pudieron listar las configuraciones de Logstash: {exc!r}")
+    return {"clusters": clusters, "reglas_dnat": reglas, "confs_logstash": confs}
+
+
+def _recuperar_deploy_cortado(request, terraform_dir: Path):
+    """Antes de un apply: si un deploy anterior se cortó a la mitad, adopta lo
+    que Huawei llegó a crear y el state no tiene (`terraform import`) y desmarca
+    los clusters sanos que quedaron como mal creados (`terraform untaint`). Así
+    el usuario solo vuelve a tocar el mismo botón. Emite un `step` por pieza."""
+    import recuperacion
+
+    ak, sk = getattr(request, "obs_access_key", ""), getattr(request, "obs_secret_key", "")
+    if not (ak and sk):
+        return
+    try:
+        state = tfstate.read_state(terraform_dir)
+        if not recuperacion.instancias(state):
+            return
+        inv = _inventario_huawei(ak, sk, state)
+    except Exception as exc:  # noqa: BLE001 — es una ayuda: si no se puede mirar, se sigue como siempre
+        print(f"[recuperar] no se pudo comparar con Huawei: {exc!r}")
+        return
+    registro = _read_pipelines_registry(terraform_dir)
+    importar = recuperacion.a_importar(
+        state, proyecto=getattr(request, "project_name", "") or "log-analytics",
+        subnet_id=_huawei_infra_tfvars().get("subnet_id", ""), reglas_dnat=inv["reglas_dnat"],
+        clusters=inv["clusters"], confs_logstash=inv["confs_logstash"], pipelines=list(registry_slugs(registro, request)),
+        reusa_opensearch=bool(getattr(request, "existing_opensearch_endpoint", "")))
+    desmarcar = recuperacion.a_desmarcar(state, {c["id"]: c["status"] for c in inv["clusters"]})
+    for paso in importar + desmarcar:
+        args = ["import", "-input=false", "-no-color", paso["direccion"], paso["id"]] if "id" in paso \
+            else ["untaint", "-no-color", paso["direccion"]]
+        r = subprocess.run(["terraform", *args], cwd=terraform_dir, env=tfstate.tf_env(),
+                           capture_output=True, text=True, timeout=300)
+        accion = "adoptado" if "id" in paso else "desmarcado (estaba sano)"
+        yield _sse({"type": "step", "name": f"Recuperar deploy cortado · {paso['que']}", "ok": r.returncode == 0,
+                    "reason": accion if r.returncode == 0 else ((r.stderr or r.stdout or "")[-300:])})
+
+
+def registry_slugs(registro: dict, request) -> list[str]:
+    """Los slugs de las pipelines del entorno: los del pedido y los del registro."""
+    slugs = [c.slug for c in (getattr(request, "cases", None) or [])]
+    return list(dict.fromkeys(slugs + list(registro)))
+
+
 def _deploy_stream_gen(request: TerraformDeployRequest, terraform_dir: Path,
                        logstash_flavor: str | None, opensearch_flavor: str | None):
     """Generador que corre el deploy y emite eventos SSE con progreso real.
@@ -3325,6 +3409,11 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         return
     if detalle_push:
         yield _sse({"type": "step", "name": "Recuperar el state anterior", "ok": True})
+
+    # ── un deploy anterior cortado a la mitad ────────────────────────────
+    # Lo que Huawei llegó a crear sin quedar en el state se adopta, y lo sano
+    # que quedó marcado como mal creado se desmarca: reintentar alcanza.
+    yield from _recuperar_deploy_cortado(request, terraform_dir)
 
     # ── terraform apply (streaming línea por línea) ──────────────────────
     yield _sse({"type": "progress", "percent": 5, "phase": "Terraform apply",
@@ -8368,6 +8457,10 @@ def _terraform_destroy_impl(request: TerraformDestroyRequest) -> TerraformDestro
             detail={"stage": "terraform_destroy",
                     "message": "Hay un state sin subir (errored.tfstate) y no se pudo "
                                "recuperar; el destroy no vería esos recursos. " + detalle_push})
+    # Lo que un deploy cortado dejó en Huawei sin pasar al state: se adopta para
+    # que el destroy también lo borre (si no, queda facturando).
+    for ev in _recuperar_deploy_cortado(request, terraform_dir):
+        print(f"[terraform_destroy] {ev.strip()}")
     print("[terraform_destroy] ejecutando terraform destroy -auto-approve -input=false...")
     result = subprocess.run(
         ["terraform", "destroy", "-auto-approve", "-input=false", "-no-color"],
