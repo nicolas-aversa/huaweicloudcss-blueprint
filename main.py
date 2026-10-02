@@ -5878,6 +5878,35 @@ def _forecast_test_state(base: str, user: str, password: str, fc_id: str, task_i
     return False, f"{FORECAST_EN_CURSO} ({ultimo or 'sin tarea todavía'})"
 
 
+def _lanzar_backtest(base: str, user: str, password: str, fc_id: str) -> str:
+    """`_run_once` del forecaster: el `taskId` de su backtest ("" si no se pudo)."""
+    r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once", user, password, timeout=30)
+    try:
+        return str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""
+    except (ValueError, AttributeError):
+        return ""
+
+
+def _esperar_backtests(base: str, user: str, password: str, lanzados: list[dict],
+                       rondas: int = 8) -> "dict[str, tuple[bool, str]]":
+    """Espera JUNTOS los backtests ya lanzados: `{fc_id: (ok, estado)}`. En cada
+    ronda mira una vez cada uno que sigue corriendo; entre rondas espera
+    `_FORECAST_ESPERA_S`. Lo que sigue corriendo al final queda EN_CURSO (no es
+    un error: el backtest termina solo)."""
+    estados: dict[str, tuple[bool, str]] = {}
+    pendientes = {x["fc_id"]: x.get("task_id", "") for x in lanzados}
+    for ronda in range(rondas):
+        for fc_id, task_id in list(pendientes.items()):
+            ok, estado = _forecast_test_state(base, user, password, fc_id, task_id, tries=1)
+            if ok or not estado.startswith(FORECAST_EN_CURSO) or ronda == rondas - 1:
+                estados[fc_id] = (ok, estado)
+                del pendientes[fc_id]
+        if not pendientes:
+            break
+        time.sleep(_FORECAST_ESPERA_S)
+    return estados
+
+
 def _epoch_ms_to_iso(ms: float) -> str:
     """Epoch millis → ISO8601 UTC con milisegundos (formato del time picker de OS Dashboards)."""
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -6416,6 +6445,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                       f"window_delay={window_delay_m}min history={hist} (span={int((max_ms-min_ms)//86400000)}d, docs={doc_count})")
                 forecaster_ids = []
                 states: list[str] = []
+                lanzados: list[dict] = []
                 for fc_spec in forecast_specs:
                     # history: el derivado de los datos, respetando el tope del spec
                     # (cardinality usa 2000 por el circuit breaker).
@@ -6431,27 +6461,20 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                                                             history=fc_history,
                                                             window_delay_minutes=window_delay_m), "_id")
                     if fc_id:
-                        r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once",
-                                     user, password, timeout=30)
-                        task_id = ""
-                        if _resp_ok(r1):
-                            try:
-                                task_id = str((r1.json() or {}).get("taskId") or "")
-                            except (ValueError, AttributeError):
-                                task_id = ""
-                        _ok_fc, state = _forecast_test_state(base, user, password, fc_id, task_id)
-                        if not _ok_fc and _es_saturacion(state):
-                            # Rechazado por el cluster saturado: se espera y se relanza una vez.
-                            _esperar_cluster_libre(base, user, password)
-                            r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once",
-                                         user, password, timeout=30)
-                            try:
-                                task_id = str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""
-                            except (ValueError, AttributeError):
-                                task_id = ""
-                            _ok_fc, state = _forecast_test_state(base, user, password, fc_id, task_id)
-                        states.append(f"{fc_spec['name']}={state}")
+                        lanzados.append({"nombre": fc_spec["name"], "fc_id": fc_id,
+                                         "task_id": _lanzar_backtest(base, user, password, fc_id)})
                         forecaster_ids.append(fc_id)
+                # Los backtests corren juntos y se esperan juntos: antes se esperaba
+                # cada uno antes de lanzar el siguiente (3 en fila, ~45 s por caso).
+                estados = _esperar_backtests(base, user, password, lanzados)
+                saturados = [x for x in lanzados if not estados[x["fc_id"]][0] and _es_saturacion(estados[x["fc_id"]][1])]
+                if saturados:
+                    # Rechazados por el cluster saturado: se espera y se relanzan una vez.
+                    _esperar_cluster_libre(base, user, password)
+                    for x in saturados:
+                        x["task_id"] = _lanzar_backtest(base, user, password, x["fc_id"])
+                    estados.update(_esperar_backtests(base, user, password, saturados))
+                states = [f"{x['nombre']}={estados[x['fc_id']][1]}" for x in lanzados]
                 ids["forecaster_ids"] = forecaster_ids
                 ids["forecaster_id"] = forecaster_ids[0] if forecaster_ids else None
                 n_ok = sum(1 for s in states if s.endswith("=TEST_COMPLETE"))

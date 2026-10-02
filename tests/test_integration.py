@@ -4170,8 +4170,10 @@ def test_forecast_siempre_en_curso_no_es_error(monkeypatch):
 
 def test_forecast_usa_el_task_id_del_run_once_y_arma_el_mensaje():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
-    i = src.index('task_id = str((r1.json() or {}).get("taskId") or "")')
-    assert "_forecast_test_state(base, user, password, fc_id, task_id)" in src[i:i + 400]
+    i = src.index("def _lanzar_backtest(")
+    assert 'return str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""' in src[i:i + 600]
+    j = src.index("def _esperar_backtests(")
+    assert "_forecast_test_state(base, user, password, fc_id, task_id, tries=1)" in src[j:j + 1200]
     assert "los forecasters quedaron en INIT / sin datos" not in src
     assert 'fc_ok = n_ok > 0 or (bool(en_curso) and not fallidos)' in src
 

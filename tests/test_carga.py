@@ -107,8 +107,10 @@ def test_el_paso_3_espera_y_reintenta():
     j = src.index("def _provisionar_anomalias(")
     ad = src[j:src.index("\ndef ", j + 10)]
     assert ad.index("if not _resp_ok(rd) and _es_saturacion(_resp_motivo(rd)):") < ad.index("detector_id = _resp_id(rd)")
-    k = src.index("_ok_fc, state = _forecast_test_state(base, user, password, fc_id, task_id)")
-    assert "if not _ok_fc and _es_saturacion(state):" in src[k:k + 400]
+    k = src.index("estados = _esperar_backtests(base, user, password, lanzados)")
+    bloque = src[k:k + 900]
+    assert "_es_saturacion(estados[x[\"fc_id\"]][1])" in bloque
+    assert bloque.index("_esperar_cluster_libre(base, user, password)") < bloque.index("_lanzar_backtest(base, user, password, x[\"fc_id\"])")
 
 
 # ── Reglas del SIEM afinadas ────────────────────────────────────────────────

@@ -7916,7 +7916,7 @@
       // Un paso de la secuencia de puesta en marcha (número/check + label + botón).
       // Hecho → la pastilla y, al lado, el botón para rehacerlo (cada paso es
       // reintentable). Los botones llevan solo texto y miden lo que su texto.
-      const setupStep = (n, done, enabled, label, hint, btnId, btnLabel, redoLabel) => `
+      const setupStep = (n, done, enabled, label, hint, btnId, btnLabel, redoLabel, extra = '') => `
         <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 0; ${n > 1 ? 'border-top:1px solid var(--border-subtle);' : ''}">
           <span style="flex:none; width:24px; height:24px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:var(--fs-sm); font-weight:700;
             background:${done ? 'var(--accent-green)' : (enabled ? 'var(--accent)' : 'var(--bg-tertiary)')};
@@ -7927,7 +7927,7 @@
             ${done
               ? `<div class="setup-step__hecho">
                    <span class="status-pill" style="background:var(--accent-green-tint); color:var(--accent-green);"><span class="status-pill__dot"></span>Hecho</span>
-                   <button class="btn btn-secondary btn-sm" id="${btnId}">${redoLabel}</button>
+                   <button class="btn btn-secondary btn-sm" id="${btnId}">${redoLabel}</button>${extra}
                  </div>`
               : `<button class="btn ${enabled ? 'btn-primary' : 'btn-secondary'} btn-sm" id="${btnId}" ${enabled ? '' : 'disabled'}>${btnLabel}</button>`}
             ${/* El progreso y el resultado de cada paso, debajo de SU botón:
@@ -7958,7 +7958,10 @@
           ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
             ingestDone ? 'Agente conversacional (NL→PPL) y forecast. Esperá ~1-2 min a que carguen datos.'
                        : 'Iniciá la ingesta y esperá que entren documentos.',
-            'infra-capabilities-btn', 'Provisionar plugins', 'Volver a provisionar plugins') : ''}
+            'infra-capabilities-btn', 'Provisionar plugins', 'Volver a provisionar plugins',
+            // "Volver a provisionar" completa lo que falta o falló (segundos si
+            // está todo); "Rehacer todo" borra y recrea todo (minutos).
+            `<button class="btn btn-ghost btn-sm" id="infra-capabilities-rehacer" title="Borra y vuelve a crear el agente, los pronósticos, las anomalías y las alertas de todos los casos">Rehacer todo</button>`) : ''}
           </div>
         </details>` : '';
 
@@ -8074,8 +8077,20 @@
         infraApplySchema(e.currentTarget));
       body.querySelector('#infra-ingest-btn')?.addEventListener('click', (e) =>
         infraStartIngestion(e.currentTarget, { conservarIndices: ingestDone }));
+      // Sin `force`: completa lo que falta o quedó fallado. Antes, con los
+      // plugins ya provisionados, el botón mandaba force y rehacía todo
+      // (~7 minutos para 9 casos) aunque estuviera bien.
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
-        provisionCapabilitiesFromInfra(e.currentTarget, pipelines, capsDone));
+        provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false));
+      body.querySelector('#infra-capabilities-rehacer')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const ok = await confirmModal({
+          title: '¿Rehacer todos los plugins?',
+          message: 'Se borran y se vuelven a crear el agente, los pronósticos, las anomalías y las alertas de todos los casos. Tarda varios minutos.',
+          confirmLabel: 'Rehacer todo',
+        });
+        if (ok) provisionCapabilitiesFromInfra(btn, pipelines, true);
+      });
       body.querySelector('#infra-verify-btn')?.addEventListener('click', (e) =>
         verificarIngesta(e.currentTarget));
 
