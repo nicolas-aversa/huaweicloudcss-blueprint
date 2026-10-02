@@ -187,3 +187,11 @@ def test_las_pestanas_de_casos_no_se_salen_con_muchos_casos():
     assert "scrollbar-width" not in tabs.split("*/", 1)[-1]
     assert "white-space: nowrap" in tab and "flex: 1 0 auto" in tab and "margin-bottom: -2px" not in tab
     assert html.count("tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });") == 2
+
+
+def test_las_pestanas_del_entorno_van_centradas_sin_recortarse():
+    """Centradas con márgenes automáticos: con justify-content: center, cuando
+    no entran, las del principio quedan fuera del scroll."""
+    assert "margin-left: auto" in _regla(".infra-tabs .case-tab:first-child")
+    assert "margin-right: auto" in _regla(".infra-tabs .case-tab:last-child")
+    assert "justify-content: center" not in _regla(".case-tabs")

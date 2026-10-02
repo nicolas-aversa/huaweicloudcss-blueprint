@@ -2319,6 +2319,10 @@
     /* Las pestañas del entorno, de su tamaño y a la izquierda: estiradas,
        con tres pestañas cada una ocupaba un tercio de la pantalla. */
     .infra-tabs .case-tab { flex: 0 0 auto; padding: 10px 14px; gap: 7px; font-size: var(--fs-base); }
+    /* Centradas. Con márgenes automáticos y no con justify-content: center,
+       que con scroll recorta las del principio y no se pueden alcanzar. */
+    .infra-tabs .case-tab:first-child { margin-left: auto; }
+    .infra-tabs .case-tab:last-child { margin-right: auto; }
     /* Si igual no entran, la barra es finita y gris; roja recién al pasar. */
     .infra-tabs::-webkit-scrollbar { height: 3px; }
     .infra-tabs::-webkit-scrollbar-thumb { background: var(--border-default); }
