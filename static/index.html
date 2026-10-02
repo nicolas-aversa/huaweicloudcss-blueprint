@@ -1838,7 +1838,7 @@
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
     /* Perfil por entidad: tabla que se desplaza en pantallas chicas. */
-    .perfil__caso.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
+    .perfil__caso.is-active, .insights__tipo.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
     .perfil__tabla { overflow-x: auto; }
     .perfil__tabla table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
     .perfil__tabla th, .perfil__tabla td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
@@ -6049,6 +6049,51 @@
           <div id="infra-seguridad-detalle"></div>
         </div>`;
     }
+    // Rendimiento (Query Insights): las consultas sobre datos más pesadas de las
+    // últimas 24 h, por latencia, CPU o memoria. Incluye las del asistente.
+    const _TIPOS_INSIGHTS = [['latency', 'Latencia'], ['cpu', 'CPU'], ['memory', 'Memoria']];
+    function rendimientoHTML() {
+      return `<div class="section-card" id="infra-rendimiento">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('clock')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Consultas más pesadas</span>
+              <span class="section-card__hint">Query Insights · últimas 24 h, sin las consultas internas del cluster · incluye las del asistente y los dashboards · en Dashboards: Query Insights</span>
+            </span>
+          </div>
+          <div class="pron__casos" role="group" aria-label="Ordenar por">${_TIPOS_INSIGHTS.map(([t, l]) =>
+            `<button type="button" class="btn btn-secondary btn-sm insights__tipo" data-tipo="${t}">${l}</button>`).join('')}</div>
+          <div id="infra-rendimiento-detalle"><div class="hallazgos__vacio">Elegí por qué ordenar.</div></div>
+        </div>`;
+    }
+    const _fmtIns = (v) => Number(v || 0).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+    function rendimientoDetalleHTML(d) {
+      if (d.error) return `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(d.error)}</div>`;
+      if (!(d.consultas || []).length) return '<div class="hallazgos__vacio">Sin consultas sobre datos en las últimas 24 h.</div>';
+      return `<div class="perfil__tabla"><table><thead><tr><th>Hora (UTC)</th><th>Índices</th><th>Qué hace</th>`
+        + `<th>Latencia</th><th>CPU</th><th>Memoria</th></tr></thead><tbody>${d.consultas.map(c =>
+          `<tr><td>${escapeHtml(c.hora)}</td><td>${escapeHtml(c.indices)}</td><td>${escapeHtml(c.forma)}</td>`
+          + `<td>${_fmtIns(c.latencia_ms)} ms</td><td>${_fmtIns(c.cpu_ms)} ms</td><td>${_fmtIns(c.memoria_kb)} KB</td></tr>`).join('')}`
+        + `</tbody></table></div>`;
+    }
+    async function verRendimiento(btn) {
+      const destino = document.getElementById('infra-rendimiento-detalle');
+      if (!destino) return;
+      document.querySelectorAll('.insights__tipo').forEach(b => b.classList.toggle('is-active', b === btn));
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo Query Insights…', 'loading');
+      try {
+        const res = await fetch('/api/v1/insights/consultas?tipo=' + encodeURIComponent(btn.dataset.tipo));
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = rendimientoDetalleHTML(data);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
     // Perfiles por entidad (Transforms): una fila por IP, cliente o pozo, con sus
     // medidas. Por caso, a demanda.
     function perfilesHTML(slugs) {
@@ -7935,6 +7980,7 @@
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) },
           { id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines.map(p => p.slug)) },
+          { id: 'rendimiento', label: 'Rendimiento', icon: 'clock', html: rendimientoHTML() },
         ], infraSeccionGuardada())}
         `;
       body.querySelector('.infra-tabs')?.addEventListener('click', (e) => {
@@ -7947,6 +7993,11 @@
       body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
         const b = e.target.closest('.hallazgo__explicar');
         if (b) explicarHallazgo(b);
+      });
+      // Rendimiento: por latencia, CPU o memoria, a demanda.
+      body.querySelector('#infra-rendimiento')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.insights__tipo');
+        if (b) verRendimiento(b);
       });
       // Perfiles por entidad: por caso, a demanda.
       body.querySelector('#infra-perfiles')?.addEventListener('click', (e) => {

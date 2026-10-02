@@ -6680,6 +6680,39 @@ def perfil_del_caso(slug: str) -> PerfilResponse:
     return PerfilResponse(slug=slug, etiqueta=perfil.get("etiqueta", ""), estado=estado, **tabla)
 
 
+class ConsultasPesadasResponse(BaseModel):
+    tipo: str
+    consultas: list[dict] = Field(default_factory=list)
+    error: str = ""
+
+
+@app.get("/api/v1/insights/consultas", response_model=ConsultasPesadasResponse, tags=["capabilities"])
+def consultas_pesadas(tipo: str = "latency") -> ConsultasPesadasResponse:
+    """Las consultas sobre datos más pesadas de las últimas 24 h, según Query
+    Insights (ya activo en CSS 3.4): latencia, CPU o memoria. A demanda."""
+    import insights
+
+    if tipo not in insights.TIPOS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "insights", "message": f"tipo: {', '.join(insights.TIPOS)}"})
+    terraform_dir = _active_terraform_dir()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "insights", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    desde, hasta = insights.ventana(datetime.now(timezone.utc))
+    r = _os_req("GET", f"{base}/_insights/top_queries?type={tipo}&from={desde}&to={hasta}", "admin",
+                _cluster_admin_password(terraform_dir), timeout=60)
+    if not _resp_ok(r):
+        return ConsultasPesadasResponse(tipo=tipo, error=_resp_motivo(r))
+    try:
+        top = (r.json() or {}).get("top_queries") or []
+    except ValueError:
+        top = []
+    return ConsultasPesadasResponse(tipo=tipo, consultas=insights.consultas(top, tipo))
+
+
 class AnalistasResponse(BaseModel):
     analistas: list[dict] = Field(default_factory=list)
 
