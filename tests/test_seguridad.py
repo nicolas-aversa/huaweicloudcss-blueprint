@@ -305,7 +305,7 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     assert all(x[1]["source"] == "Custom" for x in c.creados if x[0] == "log_type")
     # Cada regla, en la categoría de su tipo de log.
     reglas = [x for x in c.creados if x[0] == "regla"]
-    assert len(reglas) == 8 and ("regla", "siem_auth", "SSH: login fallido") in reglas
+    assert len(reglas) == 7 and ("regla", "siem_auth", "SSH: fuerza bruta sobre root") in reglas
     # Un detector por tipo, sobre el pattern real, con las reglas de ese tipo.
     dets = {x[1]["name"]: x[1] for x in c.creados if x[0] == "detector"}
     assert set(dets) == {"siem-siem-fortigate", "siem-siem-auth", "siem-siem-cloudaudit", "siem-siem-waf"}
@@ -317,13 +317,13 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     alias = next(x[1] for x in c.creados if x[0] == "alias")
     assert alias == {"actions": [{"add": {"index": "siem-*", "alias": "siem-seguridad"}}]}
     assert tipos.index("alias") < tipos.index("detector")
-    assert {r["id"] for r in auth["custom_rules"]} == {c.reglas["SSH: login fallido"], c.reglas["Acceso a /etc/shadow con sudo"]}
+    assert {r["id"] for r in auth["custom_rules"]} == {c.reglas["SSH: fuerza bruta sobre root"], c.reglas["Acceso a /etc/shadow con sudo"]}
     corr = [x[1] for x in c.creados if x[0] == "correlacion"]
     assert len(corr) == 2 and all(p["index"] == "siem-seguridad" for x in corr for p in x["correlate"])
     # En Actividad, cada pieza con su resultado.
     nombres = [p[0] for p in pasos]
     assert "Security Analytics · siem · tipos de log" in nombres
-    assert ("Security Analytics · siem · 8 de 8 reglas", True, "") in pasos
+    assert ("Security Analytics · siem · 7 de 7 reglas", True, "") in pasos
     assert ("Security Analytics · siem · detector siem_waf", True, "") in pasos
     assert ("Security Analytics · siem · alias siem-seguridad", True, "") in pasos
     assert ("Security Analytics · siem · 2 de 2 correlaciones", True, "") in pasos
@@ -332,7 +332,7 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
     # Y queda registrado (lo lee la vista).
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
     assert set(reg["detectores"]) == set(dets) and reg["detectores"]["siem-siem-auth"]["log_type"] == "siem_auth"
-    assert len(reg["reglas"]) == 8 and len(reg["correlaciones"]) == 2
+    assert len(reg["reglas"]) == 7 and len(reg["correlaciones"]) == 2
     assert res["available"] is True
 
 
@@ -363,7 +363,7 @@ def test_si_el_indice_es_nuevo_los_detectores_se_recrean(monkeypatch, tmp_path):
     assert sorted(x[1] for x in c.creados if x[0] == "borrado_detector") == sorted(viejos.values())
     assert tipos.index("indice") < tipos.index("borrado_detector") < tipos.index("detector")
     assert set(c.detectores) == set(viejos) and not set(c.detectores.values()) & set(viejos.values())
-    assert ("Security Analytics · siem · detector siem_auth", True, "recreado sobre los índices del caso") in pasos
+    assert ("Security Analytics · siem · detector siem_auth", True, "recreado con sus índices y reglas actuales") in pasos
     assert ("Security Analytics · siem · 1 índices mensuales", True, "creados antes que los detectores") in pasos
     reg = json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]
     assert reg["detectores"]["siem-siem-auth"]["id"] == c.detectores["siem-siem-auth"]
@@ -381,11 +381,11 @@ def test_sin_meses_declarados_se_dice(monkeypatch, tmp_path):
 
 
 def test_una_regla_que_falla_se_dice_con_el_motivo(monkeypatch, tmp_path):
-    c = _Cluster(fallar_regla="WAF: webshell")
+    c = _Cluster(fallar_regla="WAF: webshell desde una IP maliciosa")
     _, pasos = _provisionar(monkeypatch, tmp_path, c)
     paso = next(p for p in pasos if "reglas" in p[0])
-    assert paso[0] == "Security Analytics · siem · 7 de 8 reglas" and paso[1] is False
-    assert "WAF: webshell: status 400: field [x] is not mapped" in paso[2]
+    assert paso[0] == "Security Analytics · siem · 6 de 7 reglas" and paso[1] is False
+    assert "WAF: webshell desde una IP maliciosa: status 400: field [x] is not mapped" in paso[2]
     # El detector del WAF sale igual, con la regla que sí se creó.
     waf = next(x[1] for x in c.creados if x[0] == "detector" and x[1]["name"] == "siem-siem-waf")
     assert len(waf["inputs"][0]["detector_input"]["custom_rules"]) == 1
@@ -439,11 +439,11 @@ def test_el_registro_se_expone_y_se_va_con_el_entorno(tmp_path):
 
 # ── Los hallazgos ───────────────────────────────────────────────────────────
 def test_un_hallazgo_para_la_vista():
-    regla_por_id = {"R1": {"titulo": "SSH: login fallido", "nivel": "high"}}
+    regla_por_id = {"R1": {"titulo": "SSH: fuerza bruta sobre root", "nivel": "high"}}
     f = {"index": "siem-2025.10", "timestamp": 111, "queries": [{"id": "R1", "name": "x"}],
          "document_list": [{"document": json.dumps({"@timestamp": "2025-10-21T03:14:07Z",
                                                     "source": {"ip": "1.2.3.4"}})}]}
-    assert main._hallazgo(f, regla_por_id) == {"regla": "SSH: login fallido", "nivel": "high",
+    assert main._hallazgo(f, regla_por_id) == {"regla": "SSH: fuerza bruta sobre root", "nivel": "high",
                                                "hora": "2025-10-21T03:14:07Z",
                                                "hora_ppl": "2025-10-21 03:14:07", "ip": "1.2.3.4",
                                                "indice": "siem-2025.10"}
@@ -471,7 +471,7 @@ def test_la_hora_para_el_asistente_es_utc_y_con_anio(valor, esperado):
 
 def test_el_resumen_en_vivo(monkeypatch, tmp_path):
     main._write_security(tmp_path, {"siem": {"detectores": {"siem-siem-auth": {"id": "D1", "log_type": "siem_auth"}},
-                                             "reglas": {"SSH: login fallido": "R1"}, "correlaciones": {"c": "C"}}})
+                                             "reglas": {"SSH: fuerza bruta sobre root": "R1"}, "correlaciones": {"c": "C"}}})
     monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
     monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
     monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
@@ -493,7 +493,7 @@ def test_el_resumen_en_vivo(monkeypatch, tmp_path):
     assert r.status_code == 200
     det = r.json()["casos"][0]["detectores"][0]
     assert det["total"] == 1234 and len(det["recientes"]) == 5 and det["recientes"][0]["ip"] == "9.9.9.9"
-    assert det["recientes"][0]["regla"] == "SSH: login fallido" and det["recientes"][0]["nivel"] == "high"
+    assert det["recientes"][0]["regla"] == "SSH: fuerza bruta sobre root" and det["recientes"][0]["nivel"] == "high"
     assert det["alertas"] == {"critical": 1, "high": 2} and det["error"] == ""
     # Una alerta en ERROR es el detector que no pudo correr: va aparte.
     assert det["fallas"] == ["IndexNotFoundException[no such index [siem-seguridad]]"]
@@ -763,7 +763,7 @@ def test_un_detector_sobre_el_alias_se_recrea_sobre_los_indices(monkeypatch, tmp
     assert ("borrado_detector", "VIEJO") in c.creados
     auth = next(x[1] for x in c.creados if x[0] == "detector" and x[1]["name"] == "siem-siem-auth")
     assert auth["inputs"][0]["detector_input"]["indices"] == MESES_SIEM
-    assert ("Security Analytics · siem · detector siem_auth", True, "recreado sobre los índices del caso") in pasos
+    assert ("Security Analytics · siem · detector siem_auth", True, "recreado con sus índices y reglas actuales") in pasos
 
 
 def test_sin_meses_el_detector_queda_sobre_el_alias(monkeypatch, tmp_path):

@@ -2617,7 +2617,11 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
         "https_enabled": request.https_enabled,
     }
     # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
-    _cap = _capacity_for(len(pipelines_var))
+    _cap = _capacity_for(len(pipelines_var), pesado=_entorno_pesado(pipelines_var))
+    # Un cluster que ya existe conserva su tamaño (cambiarlo lo podría reemplazar).
+    _existente = _opensearch_del_state(terraform_dir)
+    if _existente:
+        _cap["opensearch_flavor"], _cap["opensearch_volume_size"] = _existente
     tfvars["pipeline_secrets"] = _pipeline_secrets(request)
     tfvars["beats_port"] = _beats_port(request)
     tfvars["logstash_flavor"] = _cap["logstash_flavor"]
@@ -3638,7 +3642,8 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
             detail={"stage": "pipeline_cap",
                     "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."},
         )
-    logstash_flavor, opensearch_flavor = _determine_flavor(num_cases)
+    logstash_flavor, opensearch_flavor = _determine_flavor(
+        num_cases, pesado=_entorno_pesado([c.slug for c in (request.cases or [])]))
     slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
     registry = _read_pipelines_registry(terraform_dir)
     if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
@@ -3737,7 +3742,8 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
     if _MAX_PIPELINES and num_cases > _MAX_PIPELINES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
-    logstash_flavor, opensearch_flavor = _determine_flavor(num_cases)
+    logstash_flavor, opensearch_flavor = _determine_flavor(
+        num_cases, pesado=_entorno_pesado([c.slug for c in (request.cases or [])]))
     slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
     registry = _read_pipelines_registry(terraform_dir)
     if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
@@ -4369,7 +4375,36 @@ except ValueError:
     _MAX_PIPELINES = 0
 
 
-def _capacity_for(num_pipelines: int) -> dict:
+# Un entorno pesado (muchos casos, o el SIEM con Security Analytics procesando
+# toda la ingesta) satura un nodo de 4 vCPU: OpenSearch va a 8u16g con 80 GB.
+# Logstash no cambia. Solo al CREAR el cluster: después se conserva el que
+# tiene (cambiarle el flavor a uno existente lo podría reemplazar).
+_FLAVOR_PESADO, _DISCO_PESADO = "ess.spec-8u16g", 80
+_CASOS_PESADO = 5
+
+
+def _entorno_pesado(slugs) -> bool:
+    slugs = list(slugs or [])
+    return len(slugs) >= _CASOS_PESADO or "siem" in slugs
+
+
+def _opensearch_del_state(terraform_dir: Path) -> "tuple[str, int] | None":
+    """(flavor, disco) del cluster OpenSearch que ya existe, o None."""
+    try:
+        state = tfstate.read_state(terraform_dir)
+    except Exception:  # noqa: BLE001
+        return None
+    for res in (state or {}).get("resources") or []:
+        if res.get("type") == "huaweicloud_css_cluster":
+            for i in res.get("instances") or []:
+                nodo = ((i.get("attributes") or {}).get("node_config") or [{}])[0]
+                flavor, vol = nodo.get("flavor"), ((nodo.get("volume") or [{}])[0]).get("size")
+                if flavor and vol:
+                    return flavor, int(vol)
+    return None
+
+
+def _capacity_for(num_pipelines: int, pesado: bool = False) -> dict:
     """Capacidad del cluster: flavor FIJO en 4u8g (4 vCPU, 8 GB) para OpenSearch
     y Logstash y discos de 40 GB — no escala con la cantidad de pipelines. Los
     4 vCPU del nodo Logstash se reparten entre las pipelines (workers por
@@ -4381,15 +4416,16 @@ def _capacity_for(num_pipelines: int) -> dict:
     n = max(1, int(num_pipelines))
     workers = max(1, min(2, 4 // n))
     return {
-        "logstash_flavor": "ess.spec-4u8g", "opensearch_flavor": "ess.spec-4u8g",
+        "logstash_flavor": "ess.spec-4u8g",
+        "opensearch_flavor": _FLAVOR_PESADO if pesado else "ess.spec-4u8g",
         "pipeline_workers": workers,
-        "opensearch_volume_size": 40, "logstash_volume_size": 40,
+        "opensearch_volume_size": _DISCO_PESADO if pesado else 40, "logstash_volume_size": 40,
     }
 
 
-def _determine_flavor(num_pipelines: int) -> tuple[str, str]:
+def _determine_flavor(num_pipelines: int, pesado: bool = False) -> tuple[str, str]:
     """Compat: solo los flavors (para los callers viejos)."""
-    c = _capacity_for(num_pipelines)
+    c = _capacity_for(num_pipelines, pesado)
     return (c["logstash_flavor"], c["opensearch_flavor"])
 
 
@@ -5631,6 +5667,47 @@ def _estado_historico(base: str, user: str, password: str, detector_id: str,
     return estado
 
 
+# El cluster saturado: apenas termina la ingesta, Security Analytics procesa
+# todo de golpe y la cola de búsquedas se llena (visto en un deploy de 10 casos:
+# cola en 1.000, 260.000 búsquedas rechazadas). Lo que busca en ese momento
+# (backtests de forecast, el alta de un detector de anomalías) se rechaza. El
+# paso 3 espera a que haya lugar y reintenta lo rechazado una vez.
+_COLA_LIBRE = 200            # búsquedas en cola por debajo de las que se sigue
+_ESPERA_CLUSTER_S = 15.0     # entre una mirada y otra
+_ESPERA_CLUSTER_MAX_S = 300.0
+
+
+def _cola_de_busquedas(base: str, user: str, password: str) -> "int | None":
+    r = _os_req("GET", f"{base}/_cat/thread_pool/search?format=json&h=queue", user, password, timeout=15)
+    try:
+        return sum(int(x.get("queue") or 0) for x in (r.json() or [])) if _resp_ok(r) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _esperar_cluster_libre(base: str, user: str, password: str) -> bool:
+    """Espera (hasta `_ESPERA_CLUSTER_MAX_S`) a que la cola de búsquedas baje de
+    `_COLA_LIBRE`. True si hay lugar (o no se pudo medir: no se frena por eso)."""
+    esperado = 0.0
+    while True:
+        cola = _cola_de_busquedas(base, user, password)
+        if cola is None or cola < _COLA_LIBRE:
+            return True
+        if esperado >= _ESPERA_CLUSTER_MAX_S:
+            print(f"[capabilities] el cluster sigue saturado (cola de búsquedas: {cola}); se sigue igual")
+            return False
+        print(f"[capabilities] cluster saturado (cola de búsquedas: {cola}): espero {_ESPERA_CLUSTER_S:.0f}s")
+        time.sleep(_ESPERA_CLUSTER_S)
+        esperado += _ESPERA_CLUSTER_S or 1
+
+
+def _es_saturacion(texto: str) -> bool:
+    """Un rechazo por cluster saturado (se reintenta), no un error del pedido."""
+    t = (texto or "").lower()
+    return any(x in t for x in ("rejected execution", "rejected_execution", "all shards failed",
+                                "status 429", "fail to create detector"))
+
+
 def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index_pattern: str,
                            spec: dict, ids: dict) -> dict:
     """El detector del caso, dimensionado con el rango real del índice, y el
@@ -5653,6 +5730,10 @@ def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index
     intervalo = _intervalo_de_anomalias(min_ms, max_ms)
     rd = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors", user, password, timeout=30,
                  json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo))
+    if not _resp_ok(rd) and _es_saturacion(_resp_motivo(rd)):
+        _esperar_cluster_libre(base, user, password)
+        rd = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors", user, password, timeout=30,
+                     json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo))
     detector_id = _resp_id(rd) if _resp_ok(rd) else ""
     if not detector_id:
         return {"ok": False, "reason": f"no se pudo crear el detector: {_resp_motivo(rd)}"}
@@ -6289,6 +6370,16 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             except (ValueError, AttributeError):
                                 task_id = ""
                         _ok_fc, state = _forecast_test_state(base, user, password, fc_id, task_id)
+                        if not _ok_fc and _es_saturacion(state):
+                            # Rechazado por el cluster saturado: se espera y se relanza una vez.
+                            _esperar_cluster_libre(base, user, password)
+                            r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once",
+                                         user, password, timeout=30)
+                            try:
+                                task_id = str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""
+                            except (ValueError, AttributeError):
+                                task_id = ""
+                            _ok_fc, state = _forecast_test_state(base, user, password, fc_id, task_id)
                         states.append(f"{fc_spec['name']}={state}")
                         forecaster_ids.append(fc_id)
                 ids["forecaster_ids"] = forecaster_ids
@@ -7030,14 +7121,16 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
         fuente = h.get("_source") or {}
         det = fuente.get("detector") or fuente
         existentes[det.get("name")] = h.get("_id")
-        entrada_de[det.get("name")] = sorted(
-            ((det.get("inputs") or [{}])[0].get("detector_input") or {}).get("indices") or [])
+        inp = (det.get("inputs") or [{}])[0].get("detector_input") or {}
+        entrada_de[det.get("name")] = (sorted(inp.get("indices") or []),
+                                       sorted(r.get("id") for r in inp.get("custom_rules") or []))
     for lt in spec.get("log_types", []):
         nombre_d = seguridad.nombre_de_detector(slug, lt["nombre"])
         recreado = False
         # Se recrea si hay índices nuevos (no los sigue) o si apunta a otra
         # cosa (p. ej. el alias de antes).
-        if existentes.get(nombre_d) and (indice_nuevo or entrada_de.get(nombre_d) != sorted(entrada)):
+        esperado = (sorted(entrada), sorted(rid for rid, _ in por_tipo.get(lt["nombre"], [])))
+        if existentes.get(nombre_d) and (indice_nuevo or entrada_de.get(nombre_d) != esperado):
             _os_req("DELETE", f"{base}{_SA_BASE}/detectors/{existentes[nombre_d]}", user, password, timeout=30)
             reg["detectores"].pop(nombre_d, None)
             recreado = True
@@ -7054,7 +7147,7 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
         if _resp_ok(rd):
             reg["detectores"][nombre_d] = {"id": _resp_id(rd), "log_type": lt["nombre"]}
         paso(f"detector {lt['nombre']}", _resp_ok(rd),
-             _resp_motivo(rd) if not _resp_ok(rd) else ("recreado sobre los índices del caso" if recreado else ""))
+             _resp_motivo(rd) if not _resp_ok(rd) else ("recreado con sus índices y reglas actuales" if recreado else ""))
 
     # Correlaciones entre tipos de log.
     correlaciones = spec.get("correlaciones", [])
@@ -7380,6 +7473,9 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
         if not has_spec and not has_fields:
             continue
+        # Con el cluster saturado (Security Analytics procesando la ingesta) lo
+        # que se lanza ahora se rechaza: primero, que haya lugar.
+        _esperar_cluster_libre(_os_base(cluster, request.https_enabled), user, password)
         try:
             caps_result[slug] = _provision_capabilities(
                 cluster, slug, user, password, request.https_enabled,

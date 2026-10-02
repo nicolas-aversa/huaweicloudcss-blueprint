@@ -33,3 +33,7 @@ def _settings_aislados(tmp_path, monkeypatch):
     monkeypatch.setattr(_main, "_FORECAST_ESPERA_S", 0.0)
     monkeypatch.setattr(_main, "_AD_ESPERA_S", 0.0)
     monkeypatch.setattr(_main, "_RANGO_ESPERA_S", 0.0)
+    monkeypatch.setattr(_main, "_ESPERA_CLUSTER_S", 0.0)
+    monkeypatch.setattr(_main, "_ESPERA_CLUSTER_MAX_S", 0.0)
+    # Sin cluster de verdad: la cola de búsquedas no se mide (se sigue de largo).
+    monkeypatch.setattr(_main, "_cola_de_busquedas", lambda *a, **k: None)

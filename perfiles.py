@@ -34,7 +34,10 @@ def build_transform(slug: str, index_pattern: str, perfil: dict) -> dict[str, An
         "enabled": True, "continuous": False,
         "description": f"Perfil por {perfil.get('etiqueta') or perfil['campo']} de {slug} (plataforma)",
         "source_index": index_pattern, "target_index": indice_destino(slug), "page_size": 1000,
-        "schedule": {"interval": {"period": 1, "unit": "Hours", "start_time": 1}},
+        # Cada minuto: con 1 hora el Transform recién arrancaba en el próximo
+        # turno (visto: creado y habilitado, sin correr). No es continuo: corre
+        # una vez sobre todo y queda terminado.
+        "schedule": {"interval": {"period": 1, "unit": "Minutes", "start_time": 1}},
         "groups": [{"terms": {"source_field": perfil["campo"], "target_field": "entidad"}}],
         "aggregations": perfil["medidas"],
     }
