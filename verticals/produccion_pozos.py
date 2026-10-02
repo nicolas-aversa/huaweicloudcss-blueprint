@@ -142,6 +142,16 @@ VERTICAL = {
         '¿Cuál es la presión de fondo promedio por pozo?',
     ],
     'dataset_files': ['produccion-pozos.log'],
+    # Perfil por entidad (Transform, ver perfiles.py): medidas probadas con _preview.
+    'perfil': {
+        'campo': 'well', 'etiqueta': 'Pozo',
+        'medidas': {'petroleo': {'sum': {'field': 'oil_vol'}}, 'gas': {'sum': {'field': 'gas_vol'}},
+                    'horas': {'sum': {'field': 'on_stream_hrs'}}, 'lecturas': {'value_count': {'field': '@timestamp'}},
+                    'ultimo': {'max': {'field': '@timestamp'}}},
+        'nombres': {'petroleo': 'Petróleo', 'gas': 'Gas', 'horas': 'Horas en producción', 'lecturas': 'Lecturas',
+                    'ultimo': 'Última lectura'},
+        'fechas': ['ultimo'],
+    },
     'capability': {
         'label': 'Producción de pozos',
         'index_pattern': 'produccion-pozos*',

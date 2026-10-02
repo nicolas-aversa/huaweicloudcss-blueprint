@@ -143,6 +143,7 @@ def front_payload() -> dict:
             "hasCapability": "capability" in v,
             "hasSecurity": bool(v.get("security")),
             "enmascarados": list((v.get("analista") or {}).get("enmascarados") or []),
+            "perfil": (v.get("perfil") or {}).get("etiqueta", ""),
             "sample": v.get("sample", ""),
             "filterCode": v.get("filter_code", ""),
             "fields": v.get("fields", []),

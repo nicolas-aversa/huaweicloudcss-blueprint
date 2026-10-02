@@ -393,6 +393,16 @@ VERTICAL = {
         '¿Cuántos eventos hay por día?',
     ],
     'dataset_files': ['siem-fortigate.log', 'siem-cloudaudit.log', 'siem-auth.log', 'siem-waf.log'],
+    # Perfil por entidad (Transform, ver perfiles.py): medidas probadas con _preview.
+    'perfil': {
+        'campo': 'source.ip', 'etiqueta': 'IP de origen',
+        'filtro': {'exists': {'field': 'source.ip'}},
+        'medidas': {'eventos': {'value_count': {'field': '@timestamp'}},
+                    'riesgo_max': {'max': {'field': 'event.risk_score'}},
+                    'primero': {'min': {'field': '@timestamp'}}, 'ultimo': {'max': {'field': '@timestamp'}}},
+        'nombres': {'eventos': 'Eventos', 'riesgo_max': 'Riesgo máx.', 'primero': 'Primer evento', 'ultimo': 'Último evento'},
+        'fechas': ['primero', 'ultimo'],
+    },
     'capability': {
         'label': 'SIEM',
         'index_pattern': 'siem*',

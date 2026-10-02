@@ -6330,6 +6330,30 @@ def _write_analistas(terraform_dir: Path, registro: dict) -> None:
     (terraform_dir / _ANALISTAS_NAME).write_text(json.dumps(registro, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pattern: str,
+                        perfil: dict, force: bool) -> dict:
+    """El Transform del perfil por entidad: lo crea y lo arranca. Si ya estaba,
+    lo deja (o, con `force`, lo borra con su índice y lo vuelve a crear)."""
+    import perfiles
+
+    tid = perfiles.nombre_del_transform(slug)
+    ruta = f"{base}/_plugins/_transform/{tid}"
+    ya = _os_req("GET", ruta, user, password, timeout=20)
+    if _resp_ok(ya):
+        if not force:
+            return {"ok": True, "reason": "ya estaba"}
+        _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
+        _os_req("DELETE", ruta, user, password, timeout=20)
+        _os_req("DELETE", f"{base}/{perfiles.indice_destino(slug)}", user, password, timeout=20)
+    rc = _os_req("PUT", ruta, user, password, json_body=perfiles.build_transform(slug, index_pattern, perfil), timeout=30)
+    if not _resp_ok(rc):
+        return {"ok": False, "reason": _resp_motivo(rc)}
+    rs = _os_req("POST", f"{ruta}/_start", user, password, timeout=20)
+    if not _resp_ok(rs):
+        return {"ok": False, "reason": f"creado pero no arrancó: {_resp_motivo(rs)}"}
+    return {"ok": True, "reason": f"{tid} → {perfiles.indice_destino(slug)}, una fila por {perfil.get('etiqueta') or perfil['campo']}"}
+
+
 def _provisionar_analista(base: str, user: str, password: str, slug: str, index_pattern: str,
                           enmascarados: list[str], terraform_dir: Path) -> dict:
     """El analista de demo del caso: rol de solo lectura con `masked_fields` y
@@ -6609,6 +6633,51 @@ def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int
     return (int(total.get("value", 0) if isinstance(total, dict) else total or 0),
             [_anomalia(h.get("_source") or {}) for h in (hits.get("hits") or [])[:n]],
             "" if _resp_ok(r) else _resp_motivo(r))
+
+
+class PerfilResponse(BaseModel):
+    slug: str
+    etiqueta: str = ""
+    estado: str = ""
+    columnas: list[str] = Field(default_factory=list)
+    fechas: list[int] = Field(default_factory=list)
+    filas: list[list] = Field(default_factory=list)
+    error: str = ""
+
+
+@app.get("/api/v1/perfiles/{slug}", response_model=PerfilResponse, tags=["capabilities"])
+def perfil_del_caso(slug: str) -> PerfilResponse:
+    """El perfil por entidad de un caso (el índice que arma su Transform), en
+    vivo y a demanda: el estado del Transform y las entidades de mayor peso."""
+    import perfiles
+
+    perfil = (verticals.get_vertical(slug) or {}).get("perfil")
+    if not perfil:
+        return PerfilResponse(slug=slug, error="este caso no tiene perfil por entidad")
+    terraform_dir = _active_terraform_dir()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "perfil", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    tid = perfiles.nombre_del_transform(slug)
+    ex = _os_req("GET", f"{base}/_plugins/_transform/{tid}/_explain", user, password, timeout=20)
+    try:
+        # Si el Transform no existe, `_explain` trae un texto en vez del objeto.
+        info = (ex.json() or {}).get(tid) if _resp_ok(ex) else None
+    except ValueError:
+        info = None
+    meta = (info.get("transform_metadata") or {}) if isinstance(info, dict) else {}
+    estado = str(meta.get("status") or "").lower()
+    r = _os_req("POST", f"{base}/{perfiles.indice_destino(slug)}/_search", user, password, timeout=20,
+                json_body={"size": 15, "sort": [{perfiles.orden_del_perfil(perfil): {"order": "desc"}}]})
+    if not _resp_ok(r):
+        return PerfilResponse(slug=slug, etiqueta=perfil.get("etiqueta", ""), estado=estado,
+                              error="el perfil todavía no existe: corré \"Provisionar plugins\""
+                              if getattr(r, "status_code", 0) == 404 else _resp_motivo(r))
+    tabla = perfiles.tabla_del_perfil(((r.json() or {}).get("hits") or {}).get("hits") or [], perfil)
+    return PerfilResponse(slug=slug, etiqueta=perfil.get("etiqueta", ""), estado=estado, **tabla)
 
 
 class AnalistasResponse(BaseModel):
@@ -7182,6 +7251,17 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
     _base_analistas = _os_base(cluster, request.https_enabled)
+    for slug in slugs:
+        perfil = (verticals.get_vertical(slug) or {}).get("perfil")
+        if not perfil:
+            continue
+        indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
+        try:
+            res = _provisionar_perfil(_base_analistas, user, password, slug, index_pattern_from_name(indice),
+                                      perfil, request.force)
+        except Exception as exc:  # noqa: BLE001 — pieza de demo, no frena el paso
+            res = {"ok": False, "reason": repr(exc)}
+        runs.step(run, f"Perfil por entidad · {slug}", res["ok"], res["reason"][:300])
     for slug in slugs:
         enmascarados = ((verticals.get_vertical(slug) or {}).get("analista") or {}).get("enmascarados")
         if not enmascarados:

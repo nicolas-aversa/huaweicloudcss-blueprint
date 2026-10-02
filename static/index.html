@@ -1837,6 +1837,14 @@
       opacity: 0.7;
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
+    /* Perfil por entidad: tabla que se desplaza en pantallas chicas. */
+    .perfil__caso.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
+    .perfil__tabla { overflow-x: auto; }
+    .perfil__tabla table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+    .perfil__tabla th, .perfil__tabla td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
+    .perfil__tabla th:first-child, .perfil__tabla td:first-child { text-align: left; }
+    .perfil__tabla th { color: var(--text-muted); font-weight: 600; }
+    .perfil__tabla td { font-variant-numeric: tabular-nums; }
     /* Accesos de demo: usuario y contraseña, copiables. */
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
     .acceso__lbl { color: var(--text-muted); }
@@ -6041,6 +6049,57 @@
           <div id="infra-seguridad-detalle"></div>
         </div>`;
     }
+    // Perfiles por entidad (Transforms): una fila por IP, cliente o pozo, con sus
+    // medidas. Por caso, a demanda.
+    function perfilesHTML(slugs) {
+      const casos = (slugs || []).filter(s => LOG_EXAMPLES.find(e => e.id === s)?.perfil);
+      if (!casos.length) return '';
+      return `<div class="section-card" id="infra-perfiles">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('layers')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Perfil por entidad</span>
+              <span class="section-card__hint">Un índice resumen que arma OpenSearch (Transform): una fila por ${casos.map(s => escapeHtml(LOG_EXAMPLES.find(e => e.id === s).perfil.toLowerCase())).join(', ')} · en Dashboards: Index Management → Transforms</span>
+            </span>
+          </div>
+          <div class="pron__casos" role="group" aria-label="Caso">${casos.map(s =>
+            `<button type="button" class="btn btn-secondary btn-sm perfil__caso" data-slug="${escapeHtml(s)}">${escapeHtml(SLUG_LABELS[s] || s)}</button>`).join('')}</div>
+          <div id="infra-perfiles-detalle"><div class="hallazgos__vacio">Elegí un caso para ver su perfil.</div></div>
+        </div>`;
+    }
+    const _ESTADO_TRANSFORM = { finished: 'Terminado', started: 'Corriendo…', init: 'Arrancando…', failed: 'Falló', stopped: 'Detenido' };
+    function _celdaPerfil(v, esFecha) {
+      if (v === null || v === undefined || v === '-Infinity' || v === 'Infinity') return '—';
+      if (esFecha) return new Date(Number(v)).toISOString().replace('T', ' ').slice(0, 16);
+      return typeof v === 'number' ? v.toLocaleString('es-AR', { maximumFractionDigits: 1 }) : escapeHtml(String(v));
+    }
+    function perfilDetalleHTML(d) {
+      if (d.error) return `<div class="hallazgos__vacio">${escapeHtml(d.error)}</div>`;
+      if (!(d.filas || []).length) return `<div class="hallazgos__vacio">El perfil todavía está vacío${d.estado ? ` (${escapeHtml(_ESTADO_TRANSFORM[d.estado] || d.estado)})` : ''}.</div>`;
+      const fechas = new Set(d.fechas || []);
+      return `<div class="hallazgos__head" style="margin-bottom:6px;"><span class="hallazgos__total">Las ${d.filas.length} de mayor ${escapeHtml((d.columnas[1] || '').toLowerCase())}`
+        + `${d.estado ? ` · Transform: ${escapeHtml(_ESTADO_TRANSFORM[d.estado] || d.estado)}` : ''}</span></div>`
+        + `<div class="perfil__tabla"><table><thead><tr>${d.columnas.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`
+        + `<tbody>${d.filas.map(f => `<tr>${f.map((v, i) => `<td>${_celdaPerfil(v, fechas.has(i))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    }
+    async function verPerfil(btn) {
+      const destino = document.getElementById('infra-perfiles-detalle');
+      if (!destino) return;
+      document.querySelectorAll('.perfil__caso').forEach(b => b.classList.toggle('is-active', b === btn));
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo el perfil…', 'loading');
+      try {
+        const res = await fetch('/api/v1/perfiles/' + encodeURIComponent(btn.dataset.slug));
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = perfilDetalleHTML(data);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
     // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
     // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
     function accesosHTML(slugs) {
@@ -7875,6 +7934,7 @@
           { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) },
+          { id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines.map(p => p.slug)) },
         ], infraSeccionGuardada())}
         `;
       body.querySelector('.infra-tabs')?.addEventListener('click', (e) => {
@@ -7887,6 +7947,11 @@
       body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
         const b = e.target.closest('.hallazgo__explicar');
         if (b) explicarHallazgo(b);
+      });
+      // Perfiles por entidad: por caso, a demanda.
+      body.querySelector('#infra-perfiles')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.perfil__caso');
+        if (b) verPerfil(b);
       });
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
       body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));

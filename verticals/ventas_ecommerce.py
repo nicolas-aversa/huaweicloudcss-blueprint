@@ -163,6 +163,17 @@ VERTICAL = {
         '¿Cuántas cancelaciones hay por motivo?',
     ],
     'dataset_files': ['ventas-ecommerce.log'],
+    # Perfil por entidad (Transform, ver perfiles.py): medidas probadas con _preview.
+    'perfil': {
+        'campo': 'customer_id', 'etiqueta': 'Cliente',
+        'medidas': {'facturacion': {'sum': {'field': 'taxful_total_price'}},
+                    'pedidos': {'value_count': {'field': '@timestamp'}},
+                    'ticket_promedio': {'avg': {'field': 'taxful_total_price'}},
+                    'ultimo': {'max': {'field': '@timestamp'}}},
+        'nombres': {'facturacion': 'Facturación', 'pedidos': 'Pedidos', 'ticket_promedio': 'Ticket promedio',
+                    'ultimo': 'Último pedido'},
+        'fechas': ['ultimo'],
+    },
     'capability': {
         'label': 'Ventas e-commerce',
         'index_pattern': 'ventas-ecommerce*',
