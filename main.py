@@ -7059,6 +7059,52 @@ class ResumenSeguridadResponse(BaseModel):
     casos: list[dict] = Field(default_factory=list)
 
 
+_TOPES_DE_LOS_DETECTORES = {
+    "plugins.alerting.monitor.doc_level_monitor_execution_max_duration": "15m",   # default 4m
+    "plugins.alerting.monitor.doc_level_monitor_fanout_max_duration": "12m",     # default 3m
+}
+
+
+def _caps_spec_de(slug: str) -> dict:
+    import capabilities as _caps
+    return _caps.get_capability_spec(slug) or {}
+
+
+def _eventos_detectados(base: str, user: str, password: str, patron: str, spec: dict,
+                        log_type: str) -> "int | None":
+    """Cuántos eventos del caso matchean las reglas del tipo de log: el total
+    honesto del detector. `total_findings` de Security Analytics cuenta el mismo
+    evento varias veces cuando el cluster se satura (2 a 13 veces en un deploy
+    de 9 casos; con el cluster tranquilo, 1). None si no se pudo contar."""
+    import seguridad
+
+    reglas = next((lt.get("reglas") or [] for lt in spec.get("log_types", []) if lt["nombre"] == log_type), [])
+    if not reglas:
+        return None
+    r = _os_req("POST", f"{base}/{patron}/_count", user, password, timeout=20,
+                json_body={"query": seguridad.consulta_de_reglas(reglas)})
+    try:
+        return int(r.json()["count"]) if _resp_ok(r) else None
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _sin_repetidos(findings: list[dict], n: int) -> list[dict]:
+    """Los primeros `n` hallazgos de eventos distintos (el mismo evento puede
+    venir repetido, ver `_eventos_detectados`)."""
+    vistos, fuera = set(), []
+    for i, f in enumerate(findings):
+        ids = [x for x in (f.get("related_doc_ids") or [d.get("id") for d in f.get("document_list") or []]) if x]
+        clave = tuple(ids) if ids else i   # sin id no se puede saber: se muestra
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        fuera.append(f)
+        if len(fuera) == n:
+            break
+    return fuera
+
+
 @app.get("/api/v1/security/resumen", response_model=ResumenSeguridadResponse, tags=["capabilities"])
 def resumen_seguridad() -> ResumenSeguridadResponse:
     """Hallazgos y alertas de los detectores de Security Analytics, en vivo.
@@ -7081,10 +7127,14 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
                                    for r in lt.get("reglas", []) if r["titulo"] == titulo), {"titulo": titulo})
                         for titulo, rid in (reg.get("reglas") or {}).items()}
         detectores = []
+        patron = ((_caps_spec_de(slug) or {}).get("index_pattern")) or f"{slug}-*"
         for nombre, d in (reg.get("detectores") or {}).items():
+            # De más: con el cluster saturado el mismo evento viene repetido.
             rf = _os_req("GET", f"{base}{_SA_BASE}/findings/_search?detector_id={d['id']}"
-                                "&size=5&sortOrder=desc", user, password, timeout=20)
+                                "&size=25&sortOrder=desc", user, password, timeout=20)
             hallazgos = rf.json() if _resp_ok(rf) else {}
+            eventos = _eventos_detectados(base, user, password, patron, specs.get(slug) or {},
+                                          d.get("log_type", ""))
             ra = _os_req("GET", f"{base}{_SA_BASE}/alerts?detector_id={d['id']}&size=500",
                          user, password, timeout=20)
             alertas: dict[str, int] = {}
@@ -7100,8 +7150,12 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
             detectores.append({
                 "nombre": nombre, "log_type": d.get("log_type", ""),
                 "descripcion": _descripcion_log_type(specs, slug, d.get("log_type", "")),
-                "total": int((hallazgos or {}).get("total_findings") or 0),
-                "recientes": [_hallazgo(f, regla_por_id) for f in ((hallazgos or {}).get("findings") or [])[:5]],
+                # Eventos detectados (cada uno una vez); si no se pudieron
+                # contar, lo que dice Security Analytics.
+                "total": eventos if eventos is not None else int((hallazgos or {}).get("total_findings") or 0),
+                "hallazgos_sa": int((hallazgos or {}).get("total_findings") or 0),
+                "recientes": [_hallazgo(f, regla_por_id)
+                              for f in _sin_repetidos((hallazgos or {}).get("findings") or [], 5)],
                 "alertas": alertas,
                 "fallas": fallas,
                 "error": "" if _resp_ok(rf) else _resp_motivo(rf),
@@ -7202,6 +7256,15 @@ def _provision_security_analytics(cluster: dict, user: str, password: str, https
                 por_tipo[lt["nombre"]].append((rid, regla["nivel"]))
     creadas = sum(len(v) for v in por_tipo.values())
     paso(f"{creadas} de {total} reglas", not fallos, "; ".join(fallos))
+
+    # Más tiempo para cada corrida del detector antes de crearlo. Con el cluster
+    # saturado (9 casos ingestando a la vez) el mismo evento salía 2 veces en una
+    # corrida y la corrida siguiente lo repetía: compatible con corridas que se
+    # pasan del tope (4 min, 3 para repartir entre shards) y se reintentan. Con
+    # el cluster tranquilo, 1 hallazgo por evento (medido: 2.000 de 2.000).
+    rt = _os_req("PUT", f"{base}/_cluster/settings", user, password, timeout=20,
+                 json_body={"persistent": _TOPES_DE_LOS_DETECTORES})
+    paso("tiempo por corrida de los detectores", _resp_ok(rt), "" if _resp_ok(rt) else _resp_motivo(rt))
 
     # Un detector por tipo de log, sobre los índices mensuales POR NOMBRE: con
     # el alias el monitor no guarda hasta dónde leyó (ver indices_mensuales).

@@ -6317,7 +6317,7 @@
               ? `<ul class="hallazgos__lista">${recientes}</ul>`
               : `<div class="hallazgos__vacio">Sin hallazgos todavía: aparecen a medida que entran los datos. Si la ingesta corrió antes de crear el detector, tocá "Reiniciar ingesta".</div>`;
           return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(d.descripcion || d.log_type)}</strong>`
-            + `<span>${Number(d.total || 0).toLocaleString('es-AR')} hallazgos</span>${alertas}`
+            + `<span${(d.hallazgos_sa || 0) > (d.total || 0) ? ` title="Security Analytics registró ${Number(d.hallazgos_sa).toLocaleString('es-AR')}: con el cluster saturado cuenta el mismo evento varias veces"` : ''}>${Number(d.total || 0).toLocaleString('es-AR')} eventos detectados</span>${alertas}`
             + ((d.fallas || []).length ? `<span class="sev" title="${escapeHtml(d.fallas[0])}">el detector falló ${d.fallas.length} ${d.fallas.length === 1 ? 'vez' : 'veces'}</span>` : '')
             + `</div>${cuerpo}</div>`;
         }).join('');

@@ -240,6 +240,9 @@ class _Cluster:
         if ruta == "/_aliases":
             self.creados.append(("alias", json_body))
             return _Resp(200, {"acknowledged": True})
+        if ruta == "/_cluster/settings":
+            self.creados.append(("settings", json_body))
+            return _Resp(200, {"acknowledged": True})
         if method == "PUT":
             if ruta.strip("/") in self.indices:
                 return _Resp(400, text="resource_already_exists_exception")
@@ -339,12 +342,12 @@ def test_crea_todo_para_el_siem(monkeypatch, tmp_path):
 def test_la_segunda_vez_no_duplica_nada(monkeypatch, tmp_path):
     c = _Cluster()
     _provisionar(monkeypatch, tmp_path, c)
-    antes = len([x for x in c.creados if x[0] != "alias"])
+    antes = len([x for x in c.creados if x[0] not in ("alias", "settings")])
     (tmp_path / main._SECURITY_REGISTRY_NAME).unlink()   # aunque se pierda el registro
     _, pasos = _provisionar(monkeypatch, tmp_path, c)
     # El alias se vuelve a sumar (en OpenSearch agregarlo de nuevo no cambia nada);
     # lo demás no se duplica.
-    assert len([x for x in c.creados if x[0] != "alias"]) == antes, "todo se encuentra por nombre o título"
+    assert len([x for x in c.creados if x[0] not in ("alias", "settings")]) == antes, "todo se encuentra por nombre o título"
     assert ("Security Analytics · siem · detector siem_auth", True, "ya estaba") in pasos
     assert len(json.loads((tmp_path / main._SECURITY_REGISTRY_NAME).read_text(encoding="utf-8"))["siem"]["correlaciones"]) == 2
 
@@ -499,7 +502,8 @@ def test_el_resumen_en_vivo(monkeypatch, tmp_path):
     assert det["fallas"] == ["IndexNotFoundException[no such index [siem-seguridad]]"]
     assert det["descripcion"] == "Hosts Linux: SSH y sudo (SIEM)"
     assert r.json()["casos"][0]["correlaciones"] == 1
-    assert all(m == "GET" for m, _ in pedidos) and "detector_id=D1" in pedidos[0][1]
+    # Solo lectura: GETs y el conteo de eventos (POST a _count).
+    assert all(m == "GET" or u.endswith("/_count") for m, u in pedidos) and "detector_id=D1" in pedidos[0][1]
 
 
 def test_sin_registro_no_se_toca_el_cluster(monkeypatch, tmp_path):
@@ -542,7 +546,10 @@ const h = hallazgosHTML([{ slug: 'siem', correlaciones: 3, detectores: [
   { descripcion: 'Auth', total: 0, alertas: {}, error: '', recientes: [] },
   { descripcion: 'WAF', total: 0, alertas: {}, error: 'status 500: boom', recientes: [] },
 ] }]);
-check('total con miles', h.includes('1.842 hallazgos'), h);
+check('total con miles', h.includes('>1.842 eventos detectados<'), h);
+const inflado = hallazgosHTML([{ slug: 'siem', detectores: [{ descripcion: 'F', total: 26707, hallazgos_sa: 251463, alertas: {}, error: '', recientes: [] }] }]);
+check('lo que registró SA, aparte', inflado.includes('title="Security Analytics registró 251.463: con el cluster saturado cuenta el mismo evento varias veces">26.707 eventos detectados<'), inflado);
+check('si coincide, sin aclaración', !h.includes('Security Analytics registró'), h);
 check('alertas por severidad', h.includes('sev--critical">1 alerta crítica<') && h.includes('sev--high">30 alertas altas<'), h);
 check('sin alertas en cero', !h.includes('sev--low'));
 check('el hallazgo', h.includes('IPS &quot;raro&quot;') && h.includes('1.2.3.4') && h.includes('>Crítica<'), h);
@@ -773,3 +780,64 @@ def test_sin_meses_el_detector_queda_sobre_el_alias(monkeypatch, tmp_path):
     _provisionar(monkeypatch, tmp_path, c)
     auth = next(x[1] for x in c.creados if x[0] == "detector" and x[1]["name"] == "siem-siem-auth")
     assert auth["inputs"][0]["detector_input"]["indices"] == ["siem-seguridad"]
+
+
+# ── Hallazgos repetidos con el cluster saturado ─────────────────────────────
+def test_los_eventos_detectados_se_cuentan_con_las_reglas():
+    """Security Analytics registró 251.463 hallazgos para 26.707 eventos en
+    FortiAnalyzer (cluster saturado). El total que muestra la plataforma son los
+    eventos que matchean las reglas, cada uno una vez."""
+    import seguridad
+    q = seguridad.consulta_de_reglas([
+        {"seleccion": {"subtype": "ips", "severity": "critical"}},
+        {"seleccion": {"action": ["blocked", "dropped"], "dstport": [22, 3389]}}])
+    assert q == {"bool": {"minimum_should_match": 1, "should": [
+        {"bool": {"filter": [{"terms": {"subtype": ["ips"]}}, {"terms": {"severity": ["critical"]}}]}},
+        {"bool": {"filter": [{"terms": {"action": ["blocked", "dropped"]}}, {"terms": {"dstport": [22, 3389]}}]}}]}}
+
+
+def test_el_total_son_los_eventos_y_lo_de_sa_va_aparte(monkeypatch, tmp_path):
+    main._write_security(tmp_path, {"siem": {"detectores": {"siem-siem-auth": {"id": "D1", "log_type": "siem_auth"}},
+                                             "reglas": {}, "correlaciones": {}}})
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
+    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
+    contados = []
+
+    def fake(method, url, user, password, json_body=None, timeout=30):
+        if url.endswith("/_count"):
+            contados.append((url, json_body))
+            return _Resp(200, {"count": 1279})
+        if "/findings/_search" in url:
+            f = lambda d: {"related_doc_ids": [d], "queries": [], "document_list": []}
+            return _Resp(200, {"total_findings": 4616, "findings": [f("a"), f("a"), f("b"), f("a"), f("c")]})
+        return _Resp(200, {"alerts": []})
+
+    monkeypatch.setattr(main, "_os_req", fake)
+    from fastapi.testclient import TestClient
+    det = TestClient(main.app).get("/api/v1/security/resumen").json()["casos"][0]["detectores"][0]
+    assert det["total"] == 1279 and det["hallazgos_sa"] == 4616
+    assert len(det["recientes"]) == 3, "el mismo evento repetido se muestra una vez"
+    (url, cuerpo), = contados
+    assert url == "http://x:9200/siem*/_count"
+    reglas_auth = next(lt["reglas"] for lt in verticals.security_specs()["siem"]["log_types"] if lt["nombre"] == "siem_auth")
+    import seguridad
+    assert cuerpo == {"query": seguridad.consulta_de_reglas(reglas_auth)}
+
+
+def test_si_no_se_puede_contar_queda_lo_de_sa(monkeypatch):
+    monkeypatch.setattr(main, "_os_req", lambda *a, **k: _Resp(500, text="boom"))
+    assert main._eventos_detectados("http://x:9200", "a", "p", "siem*", verticals.security_specs()["siem"], "siem_auth") is None
+    assert main._eventos_detectados("http://x:9200", "a", "p", "siem*", {}, "siem_auth") is None
+
+
+def test_los_detectores_tienen_mas_tiempo_por_corrida(monkeypatch, tmp_path):
+    c = _Cluster()
+    _, pasos = _provisionar(monkeypatch, tmp_path, c)
+    (i_set,) = [i for i, x in enumerate(c.creados) if x[0] == "settings"]
+    assert c.creados[i_set][1] == {"persistent": {
+        "plugins.alerting.monitor.doc_level_monitor_execution_max_duration": "15m",
+        "plugins.alerting.monitor.doc_level_monitor_fanout_max_duration": "12m"}}
+    assert i_set < min(i for i, x in enumerate(c.creados) if x[0] == "detector"), "antes de crear los detectores"
+    assert ("Security Analytics · siem · tiempo por corrida de los detectores", True, "") in pasos

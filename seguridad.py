@@ -127,6 +127,18 @@ def build_correlacion(correlacion: dict, index_pattern: str) -> dict[str, Any]:
     }
 
 
+def consulta_de_reglas(reglas: list[dict]) -> dict[str, Any]:
+    """Los eventos que matchean alguna de las reglas, con la misma selección que
+    el Sigma (los campos se combinan con Y, los valores de una lista con O). Es
+    lo que el detector TENDRÍA que haber encontrado, cada evento una vez: con el
+    cluster saturado Security Analytics registra el mismo evento 2 a 13 veces
+    (medido: 251.463 hallazgos para 26.707 eventos en FortiAnalyzer)."""
+    return {"bool": {"minimum_should_match": 1, "should": [
+        {"bool": {"filter": [{"terms": {campo: valor if isinstance(valor, list) else [valor]}}
+                             for campo, valor in r["seleccion"].items()]}}
+        for r in reglas]}}
+
+
 def campos_de_reglas(spec: dict) -> set[str]:
     """Todos los campos que usan las reglas del spec (para validarlos contra
     los del caso)."""
