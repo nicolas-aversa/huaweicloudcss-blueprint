@@ -118,7 +118,7 @@ def test_capabilities_se_llama_plugins_en_lo_que_se_ve():
 # ── Verificar ingesta ───────────────────────────────────────────────────────
 def test_verificar_ingesta_es_rojo_y_dice_todos_los_pipelines():
     vista = _vista()
-    assert '<button class="btn btn-primary btn-sm" id="infra-verify-btn">Verificar ingesta</button>' in vista
+    assert '<button class="btn btn-primary btn-sm env-kpi__accion" id="infra-verify-btn">Verificar ingesta</button>' in vista
     i = HTML.index("async function verificarIngesta(btn)")
     assert "'Todos los pipelines tienen documentos.'" in HTML[i:i + 4000]
     assert "Todas las pipelines" not in HTML

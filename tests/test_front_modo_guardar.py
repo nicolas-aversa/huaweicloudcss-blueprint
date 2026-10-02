@@ -173,16 +173,16 @@ def test_verificar_ingesta_aparece_recien_con_algo_ingestando():
     """Con todo en pausa, el botón estaba arriba de la puesta en marcha y se
     tocaba antes de iniciar la ingesta, como si fuera el primer paso."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("const pipeRows = pipelines.length")
-    filas = html[i:html.index("Sin pipelines registradas.", i)]
-    boton = filas.index('id="infra-verify-btn"')
-    assert "pipelines.some(p => p.active)" in filas[:boton]
+    i = html.index("const verificar = ")
+    bloque = html[i:html.index("const kpis = ", i)]
+    assert bloque.index("pipelines.some(p => p.active)") < bloque.index('id="infra-verify-btn"')
+    assert "${kpi('', 'Documentos'" in html and "'se cuentan al verificar la ingesta', verificar)" in html
 
 
 def test_la_puesta_en_marcha_va_antes_que_las_pipelines():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("${setupPanel}")
-    j = html.index('<span class="section-card__title">Pipelines</span>')
+    j = html.index('<span class="section-card__title">Casos</span>')
     assert i < j, "el paso que falta tiene que verse antes que el estado"
     # Sin cartel de cierre ("Entorno operativo"): terminada, queda plegada.
     assert "donePanel" not in html and "Entorno operativo" not in html

@@ -57,6 +57,23 @@ elegirSeccionInfra(raiz, 'anomalias');
 check('pestaña marcada', tabs[1].classList.on && tabs[1].attrs['aria-selected'] === 'true' && !tabs[0].classList.on && tabs[0].attrs['aria-selected'] === 'false');
 check('panel visible', panels[1].hidden === false && panels[0].hidden === true);
 check('recordada', guardado['infra-seccion'] === 'anomalias' && infraSeccionGuardada() === 'anomalias');
+// El contador de cada pestaña (sin contador, nada).
+h = infraSeccionesHTML([{ ...secs[0] }, { id: 'anomalias', label: 'AD', icon: 'activity', cuenta: 9, html: '<p>AD</p>' }], '');
+check('contador', h.includes('<span class="infra-tab__cuenta">9</span>') && h.split('infra-tab__cuenta').length === 2, h);
+
+// Cada pestaña carga lo suyo al abrirla, una sola vez por render.
+const clicks = [];
+const boton = (n) => ({ click: () => clicks.push(n) });
+const panelSeg = { dataset: {}, querySelector: (sel) => ({ '#infra-seguridad-ver': boton('hallazgos'), '#infra-campanas-ver': boton('campañas') })[sel] || null };
+const panelPron = { dataset: {}, querySelector: (sel) => sel === '.pron__caso' ? boton('primer caso') : null };
+const raizC = { querySelector: (sel) => ({ '[data-infra-panel="seguridad"]': panelSeg, '[data-infra-panel="pronosticos"]': panelPron })[sel] || null };
+cargarSeccionInfra(raizC, 'seguridad');
+cargarSeccionInfra(raizC, 'seguridad');
+cargarSeccionInfra(raizC, 'pronosticos');
+cargarSeccionInfra(raizC, 'resumen');
+cargarSeccionInfra(raizC, undefined);
+check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['hallazgos', 'campañas', 'primer caso']), JSON.stringify(clicks));
+
 romper = true;
 check('sin storage no rompe', infraSeccionGuardada() === '');
 elegirSeccionInfra(raiz, 'resumen');
@@ -78,14 +95,19 @@ def test_la_vista_arma_sus_secciones_debajo_del_banner():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    function renderInfraView(data) {")
     vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    # Banner y acciones arriba, siempre visibles; después las secciones.
-    assert vista.index('<div class="infra-dash__banner">') < vista.index('id="infra-destroy-btn"') \
-        < vista.index("${infraSeccionesHTML([")
+    # La franja del entorno con sus acciones y la puesta en marcha arriba,
+    # siempre visibles; después las secciones.
+    assert vista.index('<section class="env-bar">') < vista.index('id="infra-destroy-btn"') \
+        < vista.index("${setupPanel}") < vista.index("${infraSeccionesHTML([")
     secciones = vista[vista.index("${infraSeccionesHTML(["):vista.index("], infraSeccionGuardada())}")]
     assert secciones.index("{ id: 'resumen'") < secciones.index("{ id: 'seguridad'") < secciones.index("{ id: 'anomalias'")
     resumen = secciones[:secciones.index("{ id: 'seguridad'")]
-    for pieza in ("${setupPanel}", '<div class="pipe-list">${pipeRows}</div>', 'id="infra-capabilities-result"'):
+    for pieza in ("${kpis}", '<div class="pipe-list">${pipeRows}</div>', "${accesosHTML(pipelines)}"):
         assert pieza in resumen, pieza
+    # El resultado de "Provisionar plugins", dentro de la puesta en marcha.
+    k = vista.index("const setupPanel = ")
+    setup = vista[k:vista.index("body.innerHTML = `", k)]
+    assert 'id="infra-capabilities-result"' in setup
     assert "body.querySelector('.infra-tabs')?.addEventListener('click'" in vista
     assert "elegirSeccionInfra(body, t.dataset.infraTab);" in vista
 
@@ -96,3 +118,20 @@ def test_lo_que_se_recuerda_no_es_el_chat():
     f = _funciones(_INDEX.read_text(encoding="utf-8"))
     assert f.count("localStorage.getItem(") == 1 and f.count("localStorage.setItem(") == 1
     assert "_CLAVE_SECCION = 'infra-seccion'" in f
+
+
+def test_los_numeros_y_los_chips_llevan_a_su_pestana():
+    """Los indicadores del Resumen y los chips de cada caso abren la pestaña que
+    corresponde, y esa pestaña carga sola."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("    function renderInfraView(data) {")
+    vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
+    for ir in ("kpi('seguridad'", "kpi('anomalias'", "kpi('pronosticos'",
+               "['Anomalías', 'anomalias']", "'pronosticos']", "'seguridad']", "'perfiles']"):
+        assert ir in vista, ir
+    irA = vista[vista.index("const irASeccion = (id) => {"):vista.index("body.querySelector('.infra-tabs')?.addEventListener")]
+    assert "elegirSeccionInfra(body, id);" in irA and "cargarSeccionInfra(body, id);" in irA
+    assert "if (k && !e.target.closest('#infra-verify-btn')) irASeccion(k.dataset.ir);" in vista
+    assert "if (k && (e.key === 'Enter' || e.key === ' '))" in vista, "con teclado también"
+    # La pestaña que quedó elegida carga al entrar.
+    assert "cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);" in vista

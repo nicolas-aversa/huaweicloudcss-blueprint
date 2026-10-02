@@ -367,7 +367,7 @@ def test_la_tarjeta_y_las_anomalias_en_node(tmp_path):
 
 def test_la_vista_la_pinta_con_sus_fichas():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: anomaliasHTML(data.capabilities) }," in html
+    assert "{ id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', cuenta: nAnomalias, html: anomaliasHTML(data.capabilities) }," in html
     assert "body.querySelector('#infra-anomalias-ver')?.addEventListener('click', (e) => verAnomalias(e.currentTarget));" in html
     assert "const b = e.target.closest('.anomalia__explicar');\n        if (b) explicarAnomalia(b);" in html
     assert "anomalias: 'Detección de anomalías'," in html and "alertas: 'Alertas'," in html

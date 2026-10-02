@@ -33,8 +33,11 @@ def test_el_ensanchado_mide_el_contenido_y_nunca_achica():
     assert "var(--container-w) -" not in regla
 
 
-def test_las_filas_de_pipelines_bajan_de_renglon_sin_partir_nombres():
-    assert "flex-wrap: wrap" in _regla(".pipe-row")
+def test_los_casos_van_en_grilla_sin_partir_nombres():
+    # Una tarjeta por caso: tantas columnas como entren, y en un teléfono una.
+    assert "grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr))" in _regla(".pipe-list")
+    assert "text-overflow: ellipsis" in _regla(".caso-card__nombre")
+    assert "flex-wrap: wrap" in _regla(".caso-card__chips")
     idx = _regla(".pipe-row__idx")
     assert "white-space: nowrap" in idx and "text-overflow: ellipsis" in idx
     assert "white-space: nowrap" in _regla(".pipe-row__prefix")
@@ -137,14 +140,16 @@ console.log(fallos.join('\n')); process.exit(fallos.length ? 1 : 0);
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_el_entorno_tiene_el_ancho_de_las_demas_paginas():
-    """Ni el banner ni la vista se ensanchan: al contraer la barra, "Entorno
-    desplegado" quedaba más ancho que el resto de las páginas."""
+def test_el_entorno_usa_todo_el_ancho():
+    """Es un tablero: con 880 px y 9 casos todo iba en una columna angosta y la
+    mitad de la pantalla quedaba vacía. Usa el área de contenido (hasta 1.640
+    px), con márgenes que ensanchan y nunca achican, como el Home."""
+    i = CSS.index("    #view-infra {\n      --ancho-entorno")
+    regla = CSS[i:CSS.index("}", i)]
+    assert "--ancho-entorno: min(1640px, calc(100cqi - 56px))" in regla
+    assert regla.count("min(0px, calc((100% - var(--ancho-entorno)) / 2))") == 2
+    # El Home sigue con su propio ancho.
     assert CSS.count("--ancho-amplio:") == 1
-    i = CSS.index("--ancho-amplio:")
-    selector = CSS[CSS.rindex("*/", 0, i) + 2:i]
-    assert selector.strip() == "#view-home {", selector
-    assert "#view-infra" not in selector and "infra-dash__banner" not in selector
 
 
 def test_el_boton_de_contraer_no_se_mueve_y_cambia_la_linea():

@@ -178,7 +178,7 @@ def test_la_tarjeta_y_el_detalle_en_node(tmp_path):
 
 def test_la_pestana_y_el_motor_de_graficos():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'pronosticos', label: 'Forecasting', icon: 'trending', html: pronosticosHTML(data.capabilities) }," in html
+    assert "{ id: 'pronosticos', label: 'Forecasting', icon: 'trending', cuenta: nPronosticos, html: pronosticosHTML(data.capabilities) }," in html
     assert '<symbol id="ic-trending"' in html
     assert "capVega = { ensure: _ensureVega, theme: _vegaTheme, config: _vegaConfig };" in html
     i = html.index("    async function verPronosticos(btn) {")

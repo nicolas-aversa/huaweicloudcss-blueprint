@@ -135,7 +135,7 @@ def test_el_status_la_muestra_rechazada_y_no_en_pausa(monkeypatch, tmp_path):
 def test_el_front_dice_rechazada_por_css():
     import pathlib
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    i = html.index("const pipeRows = pipelines.length")
+    i = html.index("const estadoCaso = (p) =>")
     filas = html[i:html.index("Sin pipelines registradas.", i)]
     assert "p.config_status === 'rechazada'" in filas and "Rechazada por CSS" in filas
     assert "escapeHtml(p.config_error" in filas

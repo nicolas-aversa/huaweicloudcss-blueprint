@@ -136,7 +136,7 @@ def test_la_pestana_en_node(tmp_path):
 
 def test_la_vista_la_registra():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines) }," in html
+    assert "{ id: 'perfiles', label: 'Perfiles', icon: 'layers', cuenta: nPerfiles, html: perfilesHTML(pipelines) }," in html
     assert "const b = e.target.closest('.perfil__caso');\n        if (b) verPerfil(b);" in html
 
 
