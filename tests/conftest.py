@@ -26,6 +26,11 @@ def _settings_aislados(tmp_path, monkeypatch):
     # pasaba a fallar. Los tests que necesitan un store lo vuelven a mover.
     (tmp_path / "data").mkdir(exist_ok=True)
     monkeypatch.setattr(_auth, "DATA_ROOT", tmp_path / "data")
+    # Y la Actividad: sin usuario, los runs iban a `runs/` del repo, la misma
+    # carpeta que lee la app local; la suite le llenaba el historial de corridas
+    # falsas (y el recorte a 50 le borraba las de verdad).
+    import runs as _runs
+    monkeypatch.setattr(_runs, "_BASE_SIN_USUARIO", tmp_path)
     # Las esperas entre sondeos al cluster (backtest de forecast, análisis
     # histórico de AD) son de segundos: con un fake que nunca termina, un test
     # dormía minutos de verdad. Los que las miden, las miden igual.

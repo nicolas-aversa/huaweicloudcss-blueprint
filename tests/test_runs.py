@@ -147,3 +147,11 @@ def test_get_unknown_run_is_none(isolated):
     assert runs.get("no-existe") is None
     runs.append("no-existe", {"type": "log", "message": "x"})  # no explota
     runs.finish("no-existe")
+
+
+def test_la_suite_no_escribe_en_la_actividad_de_la_app_local(tmp_path):
+    """El conftest mueve los runs sin usuario a un directorio temporal: antes la
+    suite escribía en `runs/` del repo, que es lo que muestra la app local."""
+    import pathlib
+    assert runs._BASE_SIN_USUARIO != pathlib.Path(runs.__file__).parent
+    assert pathlib.Path(runs.__file__).parent / "runs" != runs.runs_dir()

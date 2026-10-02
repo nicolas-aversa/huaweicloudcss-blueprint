@@ -46,10 +46,17 @@ _RUNS: dict[str, dict] = {}
 _GUARD = threading.Lock()
 
 
+# Single-user (sin login): junto al código. Los tests lo mueven a un directorio
+# temporal: corriendo la suite al lado de la app local, sus runs falsos ("el
+# cluster no respondió a _cat/plugins", destroys de prueba) aparecían en la
+# Actividad de verdad.
+_BASE_SIN_USUARIO = Path(__file__).parent
+
+
 def runs_dir() -> Path:
     """Directorio de runs del usuario actual (o global en single-user)."""
     ctx = auth.current_user_var.get()
-    base = ctx.data_dir if ctx is not None else Path(__file__).parent
+    base = ctx.data_dir if ctx is not None else _BASE_SIN_USUARIO
     d = base / "runs"
     d.mkdir(parents=True, exist_ok=True)
     return d
