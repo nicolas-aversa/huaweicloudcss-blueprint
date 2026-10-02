@@ -12,7 +12,10 @@ existe). Y un cluster cuya creación Terraform no vio terminar queda marcado
 
 Antes de cada apply, la plataforma compara el state con lo que hay en Huawei:
 - lo que existe en Huawei y el state no tiene, se IMPORTA (se adopta tal cual);
-- lo marcado como mal creado que en Huawei está sano, se DESMARCA.
+- lo marcado como mal creado que en Huawei está sano, se DESMARCA. También la
+  activación de las pipelines: si Terraform se cansó de esperar (timeout) pero
+  después arrancaron (un reintento, o la consola), está bien aunque quedó
+  marcada; reemplazarla las pararía y las volvería a arrancar.
 
 Para no adoptar recursos de OTRO entorno de la misma cuenta, solo se miran:
 - reglas DNAT del NAT gateway de este mismo state;
@@ -26,6 +29,7 @@ from __future__ import annotations
 from typing import Any
 
 _ESTADO_SANO = "200"
+_PIPELINE_CORRIENDO = "working"
 
 
 def instancias(state: dict) -> list[tuple[str, Any, dict, str]]:
@@ -89,12 +93,22 @@ def a_importar(state: dict, *, proyecto: str, subnet_id: str, reglas_dnat: list[
     return fuera
 
 
-def a_desmarcar(state: dict, estados: dict[str, str]) -> list[dict]:
+def a_desmarcar(state: dict, estados: dict[str, str],
+                pipelines: dict[str, str] | None = None) -> list[dict]:
     """Los clusters marcados como mal creados (`tainted`) que en Huawei están
-    sanos (status 200): `[{direccion, que}]`. `estados`: id → status en Huawei."""
+    sanos (status 200), y la activación marcada cuyas pipelines ya corren:
+    `[{direccion, que}]`. `estados`: id → status en Huawei; `pipelines`:
+    nombre → status de las pipelines del Logstash del entorno."""
     fuera = []
     for direccion, _k, attrs, status in instancias(state):
-        if status != "tainted" or not direccion.startswith(("huaweicloud_css_cluster.", "huaweicloud_css_logstash_cluster.")):
+        if status != "tainted":
+            continue
+        if direccion.startswith("huaweicloud_css_logstash_pipeline."):
+            nombres = list(attrs.get("names") or [])
+            if nombres and all((pipelines or {}).get(n) == _PIPELINE_CORRIENDO for n in nombres):
+                fuera.append({"direccion": direccion, "que": f"activación de {len(nombres)} pipelines (ya corren)"})
+            continue
+        if not direccion.startswith(("huaweicloud_css_cluster.", "huaweicloud_css_logstash_cluster.")):
             continue
         if estados.get(attrs.get("id", "")) == _ESTADO_SANO:
             fuera.append({"direccion": direccion, "que": f"cluster {attrs.get('name') or attrs.get('id')}"})

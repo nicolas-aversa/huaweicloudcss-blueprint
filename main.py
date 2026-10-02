@@ -2958,19 +2958,28 @@ def _items_de_rutas(request: "TerraformDeployRequest") -> list[dict]:
 
 
 def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
-                   extras: list[dict] | None = None):
+                   extras: list[dict] | None = None, vigia=None):
     """Corre los applies de `_pasos_del_apply` en orden; devuelve el código del
     último que corrió (None si se cortó la lectura). Si uno falla no sigue: no
     se activa una pipeline cuya configuración no quedó bien. `extras`: filas
-    que no son de Terraform y van en la lista desde el plan."""
+    que no son de Terraform y van en la lista desde el plan. `vigia`: arma el
+    vigía del arranque de las pipelines (`_vigia_de_activacion`); corre solo
+    durante la activación."""
     returncode = 0
     for paso in pasos:
         original = (_tfvars_sin_activar(terraform_dir, paso["sin_activar"])
                     if paso["sin_activar"] else None)
+        v = vigia() if (vigia and paso["args"] == [_TARGET_ACTIVACION]) else None
         try:
-            returncode = yield from _correr_apply(terraform_dir, paso["args"],
-                                                  paso["desde"], paso["hasta"], tf_lines,
-                                                  extras=extras)
+            if v:
+                with v:
+                    returncode = yield from _correr_apply(terraform_dir, paso["args"],
+                                                          paso["desde"], paso["hasta"], tf_lines,
+                                                          extras=extras, vigia=v)
+            else:
+                returncode = yield from _correr_apply(terraform_dir, paso["args"],
+                                                      paso["desde"], paso["hasta"], tf_lines,
+                                                      extras=extras)
         finally:
             # Pase lo que pase, el tfvars vuelve a decir lo que pidió el deploy.
             if original is not None:
@@ -3007,11 +3016,14 @@ _PARALELISMO_APPLY = 4
 
 
 def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
-                  tf_lines: list[str], plan: bool = True, extras: list[dict] | None = None):
+                  tf_lines: list[str], plan: bool = True, extras: list[dict] | None = None,
+                  vigia=None):
     """Un `terraform apply`, streameado: eventos SSE mientras corre y, al
     final, el código de salida (None si se cortó la lectura). Con `plan=False`
     no reemplaza la lista de componentes de la pantalla (un apply dirigido que
-    completa otro: sus recursos se actualizan en la lista que ya está)."""
+    completa otro: sus recursos se actualizan en la lista que ya está).
+    `vigia`: un `VigiaEnSegundoPlano` cuyos pasos salen entre línea y línea
+    (Terraform imprime "Still creating…" cada 10 s mientras espera)."""
     progreso = progreso_tf.ProgresoApply(adicionales=len(extras or []))
     process = subprocess.Popen(
         ["terraform", "apply", "-auto-approve", "-input=false", "-no-color",
@@ -3033,12 +3045,16 @@ def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: flo
             if stripped:
                 yield _sse({"type": "log", "source": "terraform apply", "message": stripped})
             yield from _eventos_de_linea(progreso, line, desde, hasta, plan, extras)
+            for paso in (vigia.pendientes() if vigia else []):
+                yield _sse({"type": "step", **paso})
     except Exception as exc:  # noqa: BLE001
         yield _sse({"type": "error", "message": f"Error leyendo terraform: {exc}"})
         return None
     finally:
         process.stdout.close()
         process.wait()
+    for paso in (vigia.pendientes() if vigia else []):
+        yield _sse({"type": "step", **paso})
     return process.returncode
 
 
@@ -3177,15 +3193,13 @@ def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
     import requests
     import recuperacion
     from huaweicloudsdkcore.auth.credentials import BasicCredentials
-    from huaweicloudsdkcore.region.region import Region
     from huaweicloudsdkcore.sdk_request import SdkRequest
     from huaweicloudsdkcore.signer.signer import Signer
-    from huaweicloudsdkcss.v1 import CssClient, ListClustersDetailsRequest, ListConfsRequest
+    from huaweicloudsdkcss.v1 import ListClustersDetailsRequest, ListConfsRequest
 
     pid, region = get_huawei_project_id(), get_region()
     cred = BasicCredentials(ak, sk, pid)
-    css = CssClient.new_builder().with_credentials(cred).with_region(
-        Region(region, f"https://css.{region}.myhuaweicloud.com")).build()
+    css = _cliente_css(ak, sk)
     clusters = [{"id": c.id, "name": c.name, "status": str(c.status), "subnet_id": getattr(c, "subnet_id", "") or ""}
                 for c in (css.list_clusters_details(ListClustersDetailsRequest(limit=100)).clusters or [])]
     actual = {d: a for d, _k, a, _s in recuperacion.instancias(state)}
@@ -3202,6 +3216,7 @@ def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
             reglas = [{"id": d.get("id"), "external_service_port": d.get("external_service_port")}
                       for d in (r.json() or {}).get("dnat_rules", [])]
     confs: list[str] = []
+    pipelines: dict[str, str] = {}
     ls_id = (actual.get("huaweicloud_css_logstash_cluster.logstash_cluster") or {}).get("id") or next(
         (c["id"] for c in clusters if c["name"].endswith("-logstash")), "")
     if ls_id:
@@ -3209,7 +3224,60 @@ def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
             confs = [c.name for c in (css.list_confs(ListConfsRequest(cluster_id=ls_id)).confs or [])]
         except Exception as exc:  # noqa: BLE001 — sin la lista, no se importan configuraciones
             print(f"[recuperar] no se pudieron listar las configuraciones de Logstash: {exc!r}")
-    return {"clusters": clusters, "reglas_dnat": reglas, "confs_logstash": confs}
+        try:
+            pipelines = _estados_de_pipelines(css, ls_id)
+        except Exception as exc:  # noqa: BLE001 — sin estados, la activación marcada no se desmarca
+            print(f"[recuperar] no se pudo leer el estado de las pipelines: {exc!r}")
+    return {"clusters": clusters, "reglas_dnat": reglas, "confs_logstash": confs, "pipelines": pipelines}
+
+
+def _cliente_css(ak: str, sk: str):
+    from huaweicloudsdkcore.auth.credentials import BasicCredentials
+    from huaweicloudsdkcore.region.region import Region
+    from huaweicloudsdkcss.v1 import CssClient
+
+    pid, region = get_huawei_project_id(), get_region()
+    return CssClient.new_builder().with_credentials(BasicCredentials(ak, sk, pid)).with_region(
+        Region(region, f"https://css.{region}.myhuaweicloud.com")).build()
+
+
+def _estados_de_pipelines(css, ls_id: str) -> dict[str, str]:
+    """nombre → status de las pipelines del cluster Logstash (`working`, `failed`…)."""
+    from huaweicloudsdkcss.v1 import ListPipelinesRequest
+
+    return {p.name: str(p.status or "") for p in
+            (css.list_pipelines(ListPipelinesRequest(cluster_id=ls_id)).pipelines or [])}
+
+
+def _vigia_de_activacion(request, terraform_dir: Path):
+    """El vigía del arranque de las pipelines (ver `vigia_logstash`) para la
+    activación que está por correr, o None si no hay con qué mirar (sin
+    credenciales, sin cluster Logstash en el state o nada a activar)."""
+    import recuperacion
+    import vigia_logstash
+
+    ak, sk = getattr(request, "obs_access_key", ""), getattr(request, "obs_secret_key", "")
+    if not (ak and sk):
+        return None
+    try:
+        state = tfstate.read_state(terraform_dir)
+        actual = {d: a for d, _k, a, _s in recuperacion.instancias(state)}
+        ls_id = (actual.get("huaweicloud_css_logstash_cluster.logstash_cluster") or {}).get("id", "")
+        tfvars = json.loads((terraform_dir / "deploy.auto.tfvars.json").read_text(encoding="utf-8"))
+        nombres = vigia_logstash.nombres_activos(tfvars)
+        if not (ls_id and nombres):
+            return None
+        css = _cliente_css(ak, sk)
+    except Exception as exc:  # noqa: BLE001 — es una ayuda: sin vigía, el apply corre como siempre
+        print(f"[vigia] no se pudo preparar: {exc!r}")
+        return None
+
+    def arrancar(nombres_):
+        from huaweicloudsdkcss.v1 import StartPipelineReq, StartPipelineRequest
+        css.start_pipeline(StartPipelineRequest(cluster_id=ls_id, body=StartPipelineReq(names=list(nombres_))))
+
+    return vigia_logstash.VigiaEnSegundoPlano(vigia_logstash.Vigia(
+        lambda: _estados_de_pipelines(css, ls_id), arrancar, nombres))
 
 
 def _recuperar_deploy_cortado(request, terraform_dir: Path):
@@ -3236,7 +3304,8 @@ def _recuperar_deploy_cortado(request, terraform_dir: Path):
         subnet_id=_huawei_infra_tfvars().get("subnet_id", ""), reglas_dnat=inv["reglas_dnat"],
         clusters=inv["clusters"], confs_logstash=inv["confs_logstash"], pipelines=list(registry_slugs(registro, request)),
         reusa_opensearch=bool(getattr(request, "existing_opensearch_endpoint", "")))
-    desmarcar = recuperacion.a_desmarcar(state, {c["id"]: c["status"] for c in inv["clusters"]})
+    desmarcar = recuperacion.a_desmarcar(state, {c["id"]: c["status"] for c in inv["clusters"]},
+                                         inv.get("pipelines"))
     for paso in importar + desmarcar:
         args = ["import", "-input=false", "-no-color", paso["direccion"], paso["id"]] if "id" in paso \
             else ["untaint", "-no-color", paso["direccion"]]
@@ -3437,7 +3506,8 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
 
     tf_lines: list[str] = []
     returncode = yield from _aplicar_pasos(terraform_dir, pasos, tf_lines,
-                                           extras=_items_de_rutas(request))
+                                           extras=_items_de_rutas(request),
+                                           vigia=lambda: _vigia_de_activacion(request, terraform_dir))
     if returncode is None:
         return                # la lectura se cortó: el error ya salió
 

@@ -504,6 +504,13 @@ resource "huaweicloud_css_logstash_pipeline" "pipeline" {
   count      = length(local.active_pipeline_names) > 0 ? 1 : 0
   cluster_id = huaweicloud_css_logstash_cluster.logstash_cluster.id
   names      = local.active_pipeline_names
+
+  # 10 minutos (el default) no alcanzan si Logstash se cae al arrancar y la
+  # plataforma lo reintenta (ver vigia_logstash.py): cada intento tarda varios.
+  timeouts {
+    create = "30m"
+    update = "30m"
+  }
 }
 
 # ── Outputs ──────────────────────────────────────────────────────────────────
