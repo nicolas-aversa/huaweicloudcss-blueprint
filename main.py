@@ -6612,8 +6612,14 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
     tid = perfiles.nombre_del_transform(slug)
     ruta = f"{base}/_plugins/_transform/{tid}"
     ya = _os_req("GET", ruta, user, password, timeout=20)
+    fallo = None
     if _resp_ok(ya):
-        if not force:
+        # Uno que falló se rehace igual que con `force`: visto con el cluster
+        # saturado por Security Analytics, el de SIEM indexó 581 de 34.259 IPs
+        # y quedó en `failed` ("Failed to index the documents"); "Volver a
+        # provisionar" lo salteaba como "ya estaba".
+        fallo = _motivo_si_fallo(ruta, user, password)
+        if not force and fallo is None:
             return {"ok": True, "reason": "ya estaba"}
         _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
         _os_req("DELETE", ruta, user, password, timeout=20)
@@ -6624,7 +6630,22 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
     rs = _os_req("POST", f"{ruta}/_start", user, password, timeout=20)
     if not _resp_ok(rs):
         return {"ok": False, "reason": f"creado pero no arrancó: {_resp_motivo(rs)}"}
-    return {"ok": True, "reason": f"{tid} → {perfiles.indice_destino(slug)}, una fila por {perfil.get('etiqueta') or perfil['campo']}"}
+    rehecho = f" (había fallado: {fallo}; se rehízo)" if fallo is not None else ""
+    return {"ok": True, "reason": f"{tid} → {perfiles.indice_destino(slug)}, una fila por "
+                                  f"{perfil.get('etiqueta') or perfil['campo']}{rehecho}"}
+
+
+def _motivo_si_fallo(ruta: str, user: str, password: str) -> "str | None":
+    """El motivo si el Transform quedó en `failed`, o None (corriendo, terminado
+    o sin poder saberlo: ante la duda no se rehace)."""
+    r = _os_req("GET", f"{ruta}/_explain", user, password, timeout=20)
+    try:
+        md = next(iter((r.json() or {}).values()), {}).get("transform_metadata") or {} if _resp_ok(r) else {}
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if md.get("status") != "failed":
+        return None
+    return str(md.get("failure_reason") or "sin motivo")[:150]
 
 
 def _provisionar_analista(base: str, user: str, password: str, slug: str, index_pattern: str,

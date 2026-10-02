@@ -54,7 +54,7 @@ class _R:
         return self._d
 
 
-def _cluster(monkeypatch, existe=False, falla=""):
+def _cluster(monkeypatch, existe=False, falla="", estado="finished"):
     pedidos = []
 
     def req(method, url, user, password, json_body=None, timeout=30):
@@ -64,6 +64,9 @@ def _cluster(monkeypatch, existe=False, falla=""):
             return _R(400, {"error": "malo"})
         if method == "GET" and ruta == "/_plugins/_transform/siem-perfil":
             return _R(200 if existe else 404)
+        if method == "GET" and ruta == "/_plugins/_transform/siem-perfil/_explain":
+            return _R(200, {"siem-perfil": {"transform_metadata": {
+                "status": estado, "failure_reason": "Failed to index the documents" if estado == "failed" else None}}})
         return _R(200, {"acknowledged": True})
 
     monkeypatch.setattr(main, "_os_req", req)
@@ -82,7 +85,7 @@ def test_si_ya_estaba_se_deja_y_con_force_se_rehace(monkeypatch):
     pedidos = _cluster(monkeypatch, existe=True)
     assert main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False) == \
         {"ok": True, "reason": "ya estaba"}
-    assert len(pedidos) == 1
+    assert [m for m, _ in pedidos] == ["GET", "GET"], "solo mira; no toca nada"
     pedidos = _cluster(monkeypatch, existe=True)
     main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=True)
     assert ("DELETE", "/_plugins/_transform/siem-perfil") in pedidos and ("DELETE", "/perfil-siem") in pedidos
@@ -135,3 +138,19 @@ def test_la_vista_la_registra():
     html = _INDEX.read_text(encoding="utf-8")
     assert "{ id: 'perfiles', label: 'Perfiles', icon: 'layers', html: perfilesHTML(pipelines) }," in html
     assert "const b = e.target.closest('.perfil__caso');\n        if (b) verPerfil(b);" in html
+
+
+def test_si_habia_fallado_se_rehace(monkeypatch):
+    """Visto: con el cluster saturado, el de SIEM indexó 581 de 34.259 IPs y
+    quedó `failed`. "Volver a provisionar" lo tiene que rehacer, no saltear."""
+    pedidos = _cluster(monkeypatch, existe=True, estado="failed")
+    r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
+    assert r["ok"] and "había fallado: Failed to index the documents; se rehízo" in r["reason"]
+    assert pedidos.index(("DELETE", "/perfil-siem")) < pedidos.index(("PUT", "/_plugins/_transform/siem-perfil"))         < pedidos.index(("POST", "/_plugins/_transform/siem-perfil/_start"))
+
+
+@pytest.mark.parametrize("estado", ["started", "finished", None])
+def test_corriendo_o_terminado_no_se_toca(monkeypatch, estado):
+    pedidos = _cluster(monkeypatch, existe=True, estado=estado)
+    assert main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)["reason"] == "ya estaba"
+    assert all(m == "GET" for m, _ in pedidos)
