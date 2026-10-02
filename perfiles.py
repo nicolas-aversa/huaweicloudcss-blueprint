@@ -27,6 +27,27 @@ def indice_destino(slug: str) -> str:
     return f"perfil-{slug}"
 
 
+# max/min/avg de una entidad sin ese campo en ningún evento quedan vacíos y el
+# Transform no puede indexar ese documento: falla entero ("Failed to index the
+# documents"). Visto en SIEM: de las primeras 1.000 IPs, 419 no tenían
+# `event.risk_score` y el perfil quedó en 581 filas de 34.259. `sum` y
+# `value_count` dan 0 solos.
+_PUEDEN_QUEDAR_VACIAS = ("max", "min", "avg")
+
+
+def medidas_sin_vacios(perfil: dict) -> dict[str, Any]:
+    """Las medidas del perfil con `missing: 0` en las que pueden quedar vacías.
+    Las fechas no: un 0 ahí sería 1970 (todos los eventos tienen fecha)."""
+    fechas = set(perfil.get("fechas", []))
+    fuera: dict[str, Any] = {}
+    for nombre, agg in perfil["medidas"].items():
+        tipo, cuerpo = next(iter(agg.items()))
+        if tipo in _PUEDEN_QUEDAR_VACIAS and nombre not in fechas and "missing" not in cuerpo:
+            agg = {tipo: {**cuerpo, "missing": 0}}
+        fuera[nombre] = agg
+    return fuera
+
+
 def build_transform(slug: str, index_pattern: str, perfil: dict) -> dict[str, Any]:
     """`PUT _plugins/_transform/<slug>-perfil`. No continuo: recorre todos los
     datos una vez y queda terminado (los datos de demo no cambian)."""
@@ -39,7 +60,7 @@ def build_transform(slug: str, index_pattern: str, perfil: dict) -> dict[str, An
         # una vez sobre todo y queda terminado.
         "schedule": {"interval": {"period": 1, "unit": "Minutes", "start_time": 1}},
         "groups": [{"terms": {"source_field": perfil["campo"], "target_field": "entidad"}}],
-        "aggregations": perfil["medidas"],
+        "aggregations": medidas_sin_vacios(perfil),
     }
     if perfil.get("filtro"):
         cuerpo["data_selection_query"] = perfil["filtro"]

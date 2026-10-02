@@ -154,3 +154,25 @@ def test_corriendo_o_terminado_no_se_toca(monkeypatch, estado):
     pedidos = _cluster(monkeypatch, existe=True, estado=estado)
     assert main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)["reason"] == "ya estaba"
     assert all(m == "GET" for m, _ in pedidos)
+
+
+# ── Una entidad sin el campo de una medida ──────────────────────────────────
+def test_una_medida_que_puede_quedar_vacia_toma_cero():
+    """Visto en SIEM: 419 de las primeras 1.000 IPs no tenían `event.risk_score`;
+    su máximo quedó vacío, el Transform no pudo indexarlas y el perfil quedó
+    en 581 filas de 34.259 (dos veces seguidas, con el cluster tranquilo)."""
+    aggs = perfiles.build_transform("siem", "siem-*", verticals.get_vertical("siem")["perfil"])["transform"]["aggregations"]
+    assert aggs["riesgo_max"] == {"max": {"field": "event.risk_score", "missing": 0}}
+    # Las fechas no: un 0 sería 1970.
+    assert aggs["primero"] == {"min": {"field": "@timestamp"}} and aggs["ultimo"] == {"max": {"field": "@timestamp"}}
+    assert aggs["eventos"] == {"value_count": {"field": "@timestamp"}}
+
+
+def test_sum_y_lo_ya_declarado_no_se_tocan():
+    perfil = {"campo": "x", "fechas": [], "medidas": {
+        "total": {"sum": {"field": "v"}}, "prom": {"avg": {"field": "v"}},
+        "propio": {"min": {"field": "v", "missing": 5}}}}
+    assert perfiles.medidas_sin_vacios(perfil) == {
+        "total": {"sum": {"field": "v"}}, "prom": {"avg": {"field": "v", "missing": 0}},
+        "propio": {"min": {"field": "v", "missing": 5}}}
+    assert perfil["medidas"]["prom"] == {"avg": {"field": "v"}}, "no modifica el spec del vertical"
