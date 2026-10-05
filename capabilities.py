@@ -43,8 +43,15 @@ def _sanitize_desc(s: str) -> str:
 # Endpoint que el CLUSTER usa para llamar a MaaS (distinto del que usa el backend
 # de la plataforma). El operador probó `api-ap-southeast-1`. Configurable por env.
 DEFAULT_MAAS_CONNECTOR_ENDPOINT = "api-ap-southeast-1.modelarts-maas.com"
-DEFAULT_MAAS_LLM_MODEL = "deepseek-v4-flash"
-DEFAULT_MAAS_PPL_MODEL = "deepseek-v4-flash"
+# deepseek-v4-flash se depreca el 2026-10-08. Su sucesor: medido en un cluster
+# CSS 3.4 con las preguntas de cada caso, genera PPL igual de bien (incluido el
+# join con campos con punto, que glm-5.x y deepseek-v4-pro fallan), es el más
+# rápido (~2,3 s contra 5-7 s de glm) y acepta `chat_template_kwargs` y tools.
+DEFAULT_MAAS_LLM_MODEL = "deepseek-v4.1-flash"
+DEFAULT_MAAS_PPL_MODEL = "deepseek-v4.1-flash"
+# Los que ya no existen en MaaS: un entorno desplegado con ellos se migra al
+# volver a provisionar (ver main._migrar_modelos_retirados).
+MODELOS_RETIRADOS = frozenset({"deepseek-v4-flash"})
 
 
 def maas_connector_endpoint() -> str:
@@ -429,6 +436,80 @@ def build_conversational_agent(llm_model_id: str, ppl_model_id: str,
         },
         "memory": {"type": "conversation_index"},
         "tools": tools,
+    }
+
+
+# ── Agente que investiga (plan-execute-reflect, ml-commons 3.x) ──────────────
+# Ante una pregunta compleja arma un plan, ejecuta cada paso con las herramientas
+# (las mismas PPLTools del agente conversacional) y se corrige antes de responder.
+# Su LLM llama a las herramientas por function calling (formato OpenAI): el
+# connector necesita las variables del historial, las interacciones con las
+# herramientas y la definición de las tools, que el de chat no tiene. Medido en
+# MaaS: deepseek-v4 (flash y pro), deepseek-v4.1-flash y glm-5.1/5.2 llaman bien
+# a las tools; glm-5.3 rechaza `chat_template_kwargs`.
+NOMBRE_DEL_INVESTIGADOR = "Platform Investigador"
+_LLM_INTERFACE = "openai/v1/chat/completions"
+
+
+def build_agent_connector(api_key: str, endpoint: str | None = None, model: str | None = None) -> dict[str, Any]:
+    """Connector del LLM del investigador, con function calling."""
+    endpoint = endpoint or maas_connector_endpoint()
+    model = model or maas_llm_model()
+    request_body = (
+        '{ "model": "${parameters.model}", "messages": ['
+        '{"role": "system", "content": "${parameters.system_prompt}"}, '
+        '${parameters._chat_history:-}'
+        '{"role": "user", "content": "${parameters.prompt}"}'
+        '${parameters._interactions:-}]'
+        '${parameters.tool_configs:-}, '
+        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
+    )
+    return {
+        "name": "MaaS LLM con herramientas (platform)",
+        "description": _sanitize_desc("LLM MaaS con function calling para el agente que investiga"),
+        "version": "1.0",
+        "protocol": "http",
+        "parameters": {"endpoint": endpoint, "model": model},
+        "credential": {"maas_key": api_key},
+        "actions": [_connector_action(request_body, endpoint)],
+        "client_config": _CLIENT_CONFIG,
+    }
+
+
+# Con function calling cada tool declara qué recibe: las PPLTools reciben la
+# pregunta en lenguaje natural.
+_ESQUEMA_DE_PREGUNTA = {
+    "type": "object",
+    "properties": {"question": {"type": "string", "description": "La pregunta, en lenguaje natural"}},
+    "required": ["question"],
+}
+
+
+def herramientas_del_investigador(tools_del_conversacional: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Las PPLTools del agente conversacional (con su esquema de entrada para
+    function calling) más las de exploración del cluster."""
+    fuera = []
+    for t in tools_del_conversacional or []:
+        if t.get("type") != "PPLTool":
+            continue
+        fuera.append({**t, "attributes": {**(t.get("attributes") or {}), "input_schema": _ESQUEMA_DE_PREGUNTA,
+                                          "strict": False}})
+    fuera += [{"type": "ListIndexTool"}, {"type": "IndexMappingTool"}]
+    return fuera
+
+
+def build_investigador(llm_model_id: str, tools: list[dict[str, Any]],
+                       name: str = NOMBRE_DEL_INVESTIGADOR) -> dict[str, Any]:
+    """`POST _plugins/_ml/agents/_register` del agente plan-execute-reflect."""
+    return {
+        "name": name,
+        "type": "plan_execute_and_reflect",
+        "description": _sanitize_desc("Agente que investiga: arma un plan, consulta los datos paso a paso y se corrige"),
+        "llm": {"model_id": llm_model_id, "parameters": {"prompt": "${parameters.question}"}},
+        "memory": {"type": "conversation_index"},
+        "parameters": {"_llm_interface": _LLM_INTERFACE},
+        "tools": tools,
+        "app_type": "os_chat",
     }
 
 

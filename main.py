@@ -6095,6 +6095,55 @@ def _teardown_slug_caps(base: str, user: str, password: str, ids: dict) -> None:
             _os_req("DELETE", f"{base}/_plugins/_ml/connectors/{cid}", user, password, timeout=20)
 
 
+def _migrar_modelos_retirados(base: str, user: str, password: str, api_key: str) -> list[dict]:
+    """Los connectors del cluster que usan un modelo que MaaS retiró
+    (`MODELOS_RETIRADOS`) pasan al que corresponde hoy. Sin esto, un entorno
+    desplegado antes del retiro deja de responder en el chat y el agente.
+
+    ml-commons no deja cambiar un connector con su modelo desplegado ("models
+    are still using this connector"), y al actualizarlo se pierde la credencial
+    si no se la vuelve a mandar ("Failed to get the authorization header" de
+    MaaS). Medido en CSS 3.4: replegar → actualizar con la credencial → volver
+    a desplegar. Devuelve un paso `{nombre, ok, motivo}` por connector."""
+    import capabilities as caps
+
+    r = _os_req("POST", f"{base}/_plugins/_ml/connectors/_search", user, password, timeout=20,
+                json_body={"size": 100, "query": {"match_all": {}}})
+    try:
+        hits = (r.json() or {}).get("hits", {}).get("hits", []) if _resp_ok(r) else []
+    except (ValueError, AttributeError):
+        hits = []
+    pasos = []
+    for h in hits:
+        fuente = h.get("_source") or {}
+        params = dict(fuente.get("parameters") or {})
+        viejo = params.get("model")
+        if viejo not in caps.MODELOS_RETIRADOS:
+            continue
+        # El de PPL tiene su system_prompt como parámetro; el resto, el del LLM.
+        nuevo = caps.maas_ppl_model() if "system_prompt" in params else caps.maas_llm_model()
+        nombre = f"Modelo de MaaS · {fuente.get('name') or h['_id']}"
+        rm = _os_req("POST", f"{base}/_plugins/_ml/models/_search", user, password, timeout=20,
+                     json_body={"size": 20, "query": {"term": {"connector_id": h["_id"]}}, "_source": False})
+        try:
+            modelos = [x["_id"] for x in (rm.json() or {}).get("hits", {}).get("hits", [])] if _resp_ok(rm) else []
+        except (ValueError, AttributeError):
+            modelos = []
+        for mid in modelos:
+            _os_req("POST", f"{base}/_plugins/_ml/models/{mid}/_undeploy", user, password, timeout=30)
+        ru = _os_req("PUT", f"{base}/_plugins/_ml/connectors/{h['_id']}", user, password, timeout=30,
+                     json_body={"parameters": {**params, "model": nuevo}, "credential": {"maas_key": api_key}})
+        fallos = [] if _resp_ok(ru) else [f"connector: {_resp_motivo(ru)}"]
+        for mid in modelos:
+            _os_req("POST", f"{base}/_plugins/_ml/models/{mid}/_deploy", user, password, timeout=30)
+            ok, estado = _ml_wait_deployed(base, user, password, mid)
+            if not ok:
+                fallos.append(f"el modelo {mid} quedó {estado}")
+        pasos.append({"nombre": nombre, "ok": not fallos,
+                      "motivo": "; ".join(fallos) if fallos else f"{viejo} → {nuevo} ({viejo} fue retirado de MaaS)"})
+    return pasos
+
+
 def _search_ids(base: str, user: str, password: str, search_path: str,
                 name: str, name_field: str = "name.keyword") -> "list[str]":
     """Devuelve los `_id` de los docs cuyo `name_field` == `name` (para limpiar
@@ -7642,6 +7691,15 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
     # cuanto el browser cerraba la pestaña.
     run = runs.start("capabilities", detail=", ".join(slugs))
+    # Antes que nada: un modelo que MaaS retiró deja al chat y al agente sin
+    # responder. Se migra lo que ya está desplegado (ver _migrar_modelos_retirados).
+    from maas_integrator import get_maas_api_key as _clave_maas
+    if _clave_maas():
+        try:
+            for p in _migrar_modelos_retirados(_os_base(cluster, request.https_enabled), user, password, _clave_maas()):
+                runs.step(run, p["nombre"], p["ok"], p["motivo"][:300])
+        except Exception as exc:  # noqa: BLE001 — la migración no frena el resto del paso
+            print(f"[capabilities] migración de modelos falló: {exc!r}")
     _asegurar_ppl_v3(cluster, user, password, request.https_enabled, terraform_dir, run,
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
