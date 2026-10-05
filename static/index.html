@@ -8234,10 +8234,8 @@
               ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
                 ingestDone ? 'Asistente, anomalías, pronósticos y alertas. Esperá ~1-2 min a que carguen datos.'
                            : 'Iniciá la ingesta y esperá que entren documentos.',
-                'infra-capabilities-btn', 'Provisionar plugins', 'Volver a provisionar plugins',
-                // "Volver a provisionar" completa lo que falta o falló (segundos si
-                // está todo); "Rehacer todo" borra y recrea todo (minutos).
-                `<button class="btn btn-ghost btn-sm" id="infra-capabilities-rehacer" title="Borra y vuelve a crear el agente, los pronósticos, las anomalías y las alertas de todos los casos">Rehacer todo</button>`) : ''}
+                // "Volver a provisionar" completa lo que falta o quedó fallado.
+                'infra-capabilities-btn', 'Provisionar plugins', 'Volver a provisionar plugins') : ''}
             </div>
             <div id="infra-capabilities-result" class="setup-card__plugins"></div>
           </div>
@@ -8367,13 +8365,6 @@
       // (~7 minutos para 9 casos) aunque estuviera bien.
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false));
-      body.querySelector('#infra-capabilities-rehacer')?.addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        const ok = await confirmModal({
-          title: '¿Rehacer todos los plugins?',
-          message: 'Se borran y se vuelven a crear el agente, los pronósticos, las anomalías y las alertas de todos los casos. Tarda varios minutos.',
-          confirmLabel: 'Rehacer todo',
-        });
         if (ok) provisionCapabilitiesFromInfra(btn, pipelines, true);
       });
       body.querySelector('#infra-verify-btn')?.addEventListener('click', (e) =>

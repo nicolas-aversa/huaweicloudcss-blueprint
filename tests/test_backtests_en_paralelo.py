@@ -75,11 +75,7 @@ def test_volver_a_provisionar_no_rehace_todo():
     assert "provisionCapabilitiesFromInfra(e.currentTarget, pipelines, capsDone)" not in html
 
 
-def test_rehacer_todo_es_aparte_y_pide_confirmacion():
+def test_no_hay_boton_de_rehacer_todo():
+    """Era redundante con "Volver a provisionar plugins"."""
     html = _html()
-    assert 'id="infra-capabilities-rehacer"' in html
-    i = html.index("body.querySelector('#infra-capabilities-rehacer')")
-    bloque = html[i:html.index("\n      });", i)]
-    assert bloque.index("await confirmModal(") < bloque.index("if (ok) provisionCapabilitiesFromInfra(btn, pipelines, true);")
-    j = html.index("const setupStep = (n, done, enabled, label, hint, btnId, btnLabel, redoLabel, extra = '') =>")
-    assert "${redoLabel}</button>${extra}" in html[j:j + 2000], "solo cuando el paso ya está hecho"
+    assert "infra-capabilities-rehacer" not in html and ">Rehacer todo<" not in html
