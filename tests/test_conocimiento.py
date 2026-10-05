@@ -1,6 +1,7 @@
-"""Base de conocimiento: el usuario sube sus documentos, se parten e indexan en el
-cluster del entorno, y un pipeline RAG de OpenSearch responde con ellos.
-Lo medido en CSS 3.4 está en el docstring de conocimiento.py."""
+"""Base de conocimiento 100 % OpenSearch: el archivo entra por un pipeline de
+ingesta (attachment → text_chunking) y un pipeline de búsqueda RAG responde con
+él. La plataforma solo manda el archivo, como cualquier aplicación. Lo medido en
+CSS 3.4 está en el docstring de conocimiento.py."""
 import base64
 import json
 import pathlib
@@ -13,108 +14,72 @@ import conocimiento as kb
 import main
 
 
-# ── Extraer el texto ────────────────────────────────────────────────────────
-def _pdf(texto: str) -> bytes:
-    """Un PDF mínimo de una página con `texto` (sin dependencias)."""
-    contenido = f"BT /F1 12 Tf 72 720 Td ({texto}) Tj ET".encode("latin-1")
-    objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
-            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-            b"<< /Length %d >>\nstream\n" % len(contenido) + contenido + b"\nendstream",
-            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
-    out, offs = b"%PDF-1.4\n", []
-    for i, o in enumerate(objs, 1):
-        offs.append(len(out))
-        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
-    xref = len(out)
-    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offs)
-    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
-    return out
+# ── Lo que hace OpenSearch ──────────────────────────────────────────────────
+def test_el_pipeline_de_ingesta_extrae_parte_y_no_guarda_el_archivo():
+    procs = kb.build_pipeline_de_ingesta()["processors"]
+    assert [next(iter(p)) for p in procs] == ["attachment", "rename", "text_chunking", "remove"]
+    assert procs[0]["attachment"]["field"] == "archivo" and procs[0]["attachment"]["indexed_chars"] == -1
+    assert procs[2]["text_chunking"]["field_map"] == {"texto": "fragmentos"}
+    assert procs[3]["remove"]["field"] == ["archivo", "texto"], "ni el binario ni el texto entero"
 
 
-def test_extrae_texto_de_pdf():
-    assert "Ventana de mantenimiento los domingos" in kb.extraer_texto("politica.PDF", _pdf("Ventana de mantenimiento los domingos"))
+def test_el_indice_usa_el_pipeline_y_analiza_en_tres_idiomas():
+    m = kb.mapping()
+    assert m["settings"]["index.default_pipeline"] == kb.PIPELINE_DE_INGESTA
+    f = m["mappings"]["properties"]["fragmentos"]
+    assert f["fields"]["es"]["analyzer"] == "spanish" and f["fields"]["en"]["analyzer"] == "english"
 
 
-def test_extrae_texto_plano_y_html():
-    assert kb.extraer_texto("a.md", "# Título\n\n\n\nTexto   con  espacios".encode()) == "# Título\n\nTexto con espacios"
-    assert kb.extraer_texto("a.txt", "año".encode("latin-1")) == "año", "no todo viene en UTF-8"
-    h = kb.extraer_texto("a.html", b"<html><style>x{}</style><script>alert(1)</script><p>Hola &amp; chau</p></html>")
-    assert h == "Hola & chau"
-
-
-@pytest.mark.parametrize("nombre, contenido, motivo", [
-    ("a.docx", b"x", "formato no soportado (.docx)"),
-    ("sin_extension", b"x", "sin extensión"),
-    ("a.txt", b"   \n  ", "no tiene texto"),
-    ("a.pdf", b"no es un pdf", "no se pudo leer el PDF"),
-    ("a.txt", b"x" * (kb.MAX_BYTES + 1), "pesa más de 10 MB"),
-], ids=["docx", "sin-extension", "vacio", "pdf-roto", "muy-grande"])
-def test_lo_que_no_se_puede_usar_se_dice(nombre, contenido, motivo):
-    with pytest.raises(kb.DocumentoInvalido, match=motivo.replace("(", r"\(").replace(")", r"\)")):
-        kb.extraer_texto(nombre, contenido)
-
-
-# ── Partir en fragmentos ────────────────────────────────────────────────────
-def test_fragmenta_por_parrafos_con_solape():
-    parrafos = [f"Párrafo {i}. " + "palabra " * 60 for i in range(10)]
-    partes = kb.fragmentar("\n\n".join(parrafos), tam=1200, solape=150)
-    assert len(partes) > 1 and all(len(p) <= 1200 for p in partes)
-    assert partes[1].startswith(partes[0][-150:]), "el siguiente arranca con el final del anterior"
-    assert "Párrafo 9." in partes[-1]
-
-
-def test_un_parrafo_enorme_se_corta_igual():
-    partes = kb.fragmentar("x" * 5000, tam=1200, solape=0)
-    assert [len(p) for p in partes] == [1200, 1200, 1200, 1200, 200]
-
-
-def test_los_documentos_a_indexar():
-    docs = kb.documentos_para_indexar("Runbook.md", "uno\n\ndos")
-    assert docs == [{"titulo": "Runbook.md", "fragmento": 1, "fragmentos": 1, "texto": "uno\n\ndos"}]
-
-
-def test_el_texto_se_analiza_en_tres_idiomas():
-    """Con el análisis estándar "reiniciar" no encontraba "reinician"."""
-    t = kb.mapping()["mappings"]["properties"]["texto"]
-    assert t["fields"]["es"]["analyzer"] == "spanish" and t["fields"]["en"]["analyzer"] == "english"
+def test_la_busqueda_trae_el_contexto_y_resalta_el_pasaje():
     q = kb.busqueda("¿reinicio?", "m")
-    assert {"texto", "texto.es", "texto.en"} <= set(q["query"]["multi_match"]["fields"])
-    # El procesador lee el contexto del _source: tiene que venir.
-    assert {"titulo", "texto"} <= set(q["_source"])
+    assert {"fragmentos.es", "fragmentos.en"} <= set(q["query"]["multi_match"]["fields"])
+    assert "fragmentos" in q["_source"], "el procesador RAG lee el contexto del _source"
+    assert set(q["highlight"]["fields"]) == {"fragmentos", "fragmentos.es", "fragmentos.en"}
     assert q["ext"]["generative_qa_parameters"]["llm_question"] == "¿reinicio?"
 
 
-def test_el_pipeline_le_pasa_el_titulo_y_prohibe_inventar():
+def test_el_pipeline_rag():
     proc = kb.build_pipeline("M")["response_processors"][0]["retrieval_augmented_generation"]
-    assert proc["model_id"] == "M" and proc["context_field_list"] == ["titulo", "texto"]
+    assert proc["model_id"] == "M" and proc["context_field_list"] == ["titulo", "fragmentos"]
     assert "nunca inventes" in proc["system_prompt"]
-
-
-def test_el_connector_recibe_los_mensajes_armados():
     c = kb.build_connector("K", "e", "deepseek-v4.1-flash")
     assert '"messages": ${parameters.messages}' in c["actions"][0]["request_body"]
-    assert '"thinking": true' in c["actions"][0]["request_body"]
 
 
-# ── La respuesta y sus fuentes ──────────────────────────────────────────────
-def _hit(titulo, frag, score):
-    return {"_score": score, "_source": {"titulo": titulo, "fragmento": frag, "fragmentos": 3, "texto": "t" * 400}}
+@pytest.mark.parametrize("nombre, tamano, motivo", [
+    ("a.docx", 10, ""), ("a.PDF", 10, ""), ("a.exe", 10, "formato no soportado (.exe)"),
+    ("sin_extension", 10, "sin extensión"), ("a.txt", kb.MAX_BYTES + 1, "pesa más de 10 MB"), ("a.txt", 0, "está vacío"),
+])
+def test_validar(nombre, tamano, motivo):
+    assert motivo in kb.validar(nombre, tamano) and (kb.validar(nombre, tamano) == "") == (motivo == "")
 
 
-def test_las_fuentes_son_las_relevantes_y_sin_repetir():
+def test_el_error_de_un_pdf_sin_texto_se_entiende():
+    err = '{"error":{"root_cause":[{"type":"illegal_argument_exception","reason":"field [adjunto.content] not present as part of path [adjunto.content]"}]}}'
+    assert kb.motivo_de_ingesta(err) == "no tiene texto (¿es un PDF escaneado o una imagen?)"
+    assert kb.motivo_de_ingesta('{"error":{"reason":"otra cosa"}}') == "otra cosa"
+
+
+# ── La respuesta ────────────────────────────────────────────────────────────
+def _hit(titulo, score, resaltado=None):
+    h = {"_score": score, "_source": {"titulo": titulo, "fragmentos": ["primer fragmento " * 30]}}
+    if resaltado:
+        h["highlight"] = {"fragmentos.es": [resaltado]}
+    return h
+
+
+def test_las_fuentes_son_las_relevantes_con_su_pasaje():
     resp = {"ext": {"retrieval_augmented_generation": {"answer": " Al CISO. "}},
-            "hits": {"hits": [_hit("Runbook", 2, 4.0), _hit("Runbook", 2, 3.9), _hit("Runbook", 1, 2.5), _hit("Política", 1, 1.0)]}}
+            "hits": {"hits": [_hit("Runbook", 4.0, "avisar al CISO dentro de la hora"), _hit("Política", 1.0)]}}
     r = kb.respuesta(resp)
-    assert r["respuesta"] == "Al CISO."
-    assert [(f["titulo"], f["fragmento"]) for f in r["fuentes"]] == [("Runbook", 2), ("Runbook", 1)], \
-        "la de menos de la mitad del mejor puntaje no se muestra"
-    assert len(r["fuentes"][0]["extracto"]) == 280
+    assert r == {"respuesta": "Al CISO.", "fuentes": [{"titulo": "Runbook", "extracto": "avisar al CISO dentro de la hora"}]}
+    sin = kb.respuesta({"hits": {"hits": [_hit("X", 1.0)]}})
+    assert len(sin["fuentes"][0]["extracto"]) == 280, "sin resaltado, el comienzo del primer fragmento"
 
 
 def test_el_listado():
-    assert kb.listado({"aggregations": {"docs": {"buckets": [{"key": "a.md", "doc_count": 3}]}}}) == \
-        [{"titulo": "a.md", "fragmentos": 3}]
+    resp = {"hits": {"hits": [{"_source": {"titulo": "a.pdf", "adjunto": {"content_type": "application/pdf; x", "content_length": 9}}}]}}
+    assert kb.listado(resp) == [{"titulo": "a.pdf", "tipo": "application/pdf", "caracteres": 9}]
 
 
 # ── Los endpoints ───────────────────────────────────────────────────────────
@@ -129,7 +94,7 @@ class _R:
 
 @pytest.fixture
 def cluster(monkeypatch):
-    estado = {"pedidos": [], "bulk": None, "indice": False, "modelo": None, "pipeline": False}
+    estado = {"pedidos": [], "indice": False, "modelo": None, "pipeline": False, "ingesta_falla": ""}
 
     def req(method, url, user, password, json_body=None, timeout=30):
         ruta = url.split(":9200", 1)[1]
@@ -137,8 +102,10 @@ def cluster(monkeypatch):
         if ruta == "/conocimiento-plataforma" and method == "PUT":
             ya = estado["indice"]; estado["indice"] = True
             return _R(400, text="resource_already_exists_exception") if ya else _R(200)
+        if ruta.startswith("/conocimiento-plataforma/_doc"):
+            return _R(400, text=estado["ingesta_falla"]) if estado["ingesta_falla"] else _R(201, {"result": "created"})
         if ruta.startswith("/conocimiento-plataforma/_delete_by_query"):
-            return _R(200, {"deleted": 2})
+            return _R(200, {"deleted": 1})
         if ruta == "/_plugins/_ml/models/_search":
             return _R(200, {"hits": {"hits": [{"_id": estado["modelo"]}] if estado["modelo"] else []}})
         if ruta == "/_plugins/_ml/connectors/_create":
@@ -157,52 +124,57 @@ def cluster(monkeypatch):
                 return _R(404)
             if "search_pipeline" in ruta:
                 return _R(200, {"ext": {"retrieval_augmented_generation": {"answer": "Los domingos."}},
-                                "hits": {"hits": [_hit("Mantenimiento.md", 1, 3.0)]}})
-            return _R(200, {"aggregations": {"docs": {"buckets": [{"key": "Mantenimiento.md", "doc_count": 1}]}}})
+                                "hits": {"hits": [_hit("Mantenimiento.pdf", 3.0, "los domingos de 02 a 05")]}})
+            return _R(200, {"hits": {"hits": [{"_source": {"titulo": "Mantenimiento.pdf", "adjunto": {"content_type": "application/pdf"}}}]}})
         return _R(200, {"acknowledged": True})
 
-    def bulk(base, user, password, ndjson):
-        estado["bulk"] = ndjson
-        return _R(200, {"errors": False})
-
     monkeypatch.setattr(main, "_os_req", req)
-    monkeypatch.setattr(main, "_os_bulk", bulk)
     monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x:9200", "admin", "pw"))
     monkeypatch.setattr("maas_integrator.get_maas_api_key", lambda: "CLAVE")
     from fastapi.testclient import TestClient
     return estado, TestClient(main.app)
 
 
-def test_subir_indexa_los_fragmentos_y_reemplaza_el_anterior(cluster):
+_B64 = base64.b64encode(b"%PDF-1.4 algo").decode()
+
+
+def test_subir_manda_el_archivo_al_pipeline_de_ingesta(cluster):
     estado, client = cluster
-    b64 = base64.b64encode("Los domingos de 02 a 05.".encode()).decode()
-    r = client.post("/api/v1/conocimiento/documentos", json={"nombre": "Mantenimiento.md", "contenido_b64": b64})
-    assert r.status_code == 200 and r.json() == {"titulo": "Mantenimiento.md", "fragmentos": 1, "caracteres": 24}
-    lineas = estado["bulk"].strip().split("\n")
-    assert json.loads(lineas[0]) == {"index": {"_index": "conocimiento-plataforma"}}
-    assert json.loads(lineas[1])["texto"] == "Los domingos de 02 a 05."
-    borrar = [p for p in estado["pedidos"] if "_delete_by_query" in p[1]]
-    assert borrar[0][2] == {"query": {"term": {"titulo.k": "Mantenimiento.md"}}}, "el mismo nombre reemplaza"
+    r = client.post("/api/v1/conocimiento/documentos", json={"nombre": "Mantenimiento.pdf", "contenido_b64": _B64})
+    assert r.status_code == 200 and r.json() == {"titulo": "Mantenimiento.pdf"}
+    hechos = {(m, p.split("?")[0]): (p, b) for m, p, b in estado["pedidos"]}
+    assert hechos[("PUT", "/_ingest/pipeline/conocimiento-ingesta")][1] == kb.build_pipeline_de_ingesta()
+    ruta, cuerpo = hechos[("POST", "/conocimiento-plataforma/_doc")]
+    assert "pipeline=conocimiento-ingesta" in ruta
+    assert cuerpo == {"titulo": "Mantenimiento.pdf", "archivo": _B64}, "la plataforma no procesa nada"
+    borrar = [b for m, p, b in estado["pedidos"] if "_delete_by_query" in p]
+    assert borrar == [{"query": {"term": {"titulo.k": "Mantenimiento.pdf"}}}], "el mismo nombre reemplaza"
     # La segunda vez el índice ya existe: no es un error.
-    assert client.post("/api/v1/conocimiento/documentos", json={"nombre": "Mantenimiento.md", "contenido_b64": b64}).status_code == 200
+    assert client.post("/api/v1/conocimiento/documentos", json={"nombre": "Mantenimiento.pdf", "contenido_b64": _B64}).status_code == 200
 
 
-def test_un_archivo_invalido_es_400_con_el_motivo(cluster):
-    _, client = cluster
-    r = client.post("/api/v1/conocimiento/documentos",
-                    json={"nombre": "a.docx", "contenido_b64": base64.b64encode(b"x").decode()})
-    assert r.status_code == 400 and "a.docx: formato no soportado" in r.json()["detail"]["message"]
+def test_lo_que_falla_en_la_ingesta_se_dice(cluster):
+    estado, client = cluster
+    estado["ingesta_falla"] = '{"error":{"reason":"field [adjunto.content] not present as part of path [adjunto.content]"}}'
+    r = client.post("/api/v1/conocimiento/documentos", json={"nombre": "escaneado.pdf", "contenido_b64": _B64})
+    assert r.status_code == 400 and r.json()["detail"]["message"] == "escaneado.pdf: no tiene texto (¿es un PDF escaneado o una imagen?)"
+
+
+def test_un_formato_no_soportado_no_llega_al_cluster(cluster):
+    estado, client = cluster
+    r = client.post("/api/v1/conocimiento/documentos", json={"nombre": "a.exe", "contenido_b64": _B64})
+    assert r.status_code == 400 and "a.exe: formato no soportado" in r.json()["detail"]["message"]
+    assert estado["pedidos"] == []
 
 
 def test_preguntar_crea_el_rag_la_primera_vez(cluster):
     estado, client = cluster
     estado["indice"] = True
     r = client.post("/api/v1/conocimiento/preguntar", json={"pregunta": "¿Cuándo reinicio?"})
-    assert r.status_code == 200 and r.json()["respuesta"] == "Los domingos."
-    assert r.json()["fuentes"][0]["titulo"] == "Mantenimiento.md"
+    assert r.status_code == 200 and r.json() == {"respuesta": "Los domingos.",
+                                                 "fuentes": [{"titulo": "Mantenimiento.pdf", "extracto": "los domingos de 02 a 05"}]}
     hechos = [(m, p) for m, p, _ in estado["pedidos"]]
     assert ("POST", "/_plugins/_ml/connectors/_create") in hechos and ("PUT", "/_search/pipeline/plataforma-rag") in hechos
-    # La segunda vez ya está todo: no se crea nada.
     estado["pedidos"].clear()
     client.post("/api/v1/conocimiento/preguntar", json={"pregunta": "¿Y en feriados?"})
     assert not [p for m, p, _ in estado["pedidos"] if "_create" in p or "_register" in p or m == "PUT"]
@@ -215,10 +187,12 @@ def test_sin_documentos_avisa(cluster):
     assert client.get("/api/v1/conocimiento/documentos").json() == {"documentos": []}
 
 
-def test_borrar(cluster):
-    _, client = cluster
-    r = client.delete("/api/v1/conocimiento/documentos/Mantenimiento.md")
-    assert r.status_code == 200 and r.json() == {"borrados": 2}
+def test_listar_y_borrar(cluster):
+    estado, client = cluster
+    estado["indice"] = True
+    assert client.get("/api/v1/conocimiento/documentos").json() == {
+        "documentos": [{"titulo": "Mantenimiento.pdf", "tipo": "application/pdf", "caracteres": None}]}
+    assert client.delete("/api/v1/conocimiento/documentos/Mantenimiento.pdf").json() == {"borrados": 1}
 
 
 # ── La vista ────────────────────────────────────────────────────────────────
@@ -230,12 +204,15 @@ def test_la_pestana_esta_y_carga_sola():
     assert "{ id: 'documentos', label: 'Documentos', icon: 'file', html: documentosHTML() }," in html
     assert "documentos: ['#infra-documentos-actualizar']," in html
     assert '<symbol id="ic-file"' in html
+    # Acepta lo mismo que valida el backend.
+    i = html.index("const _EXT_DOCUMENTOS = '") + len("const _EXT_DOCUMENTOS = '")
+    assert tuple(html[i:html.index("'", i)].split(",")) == kb.EXTENSIONES
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_respuesta_en_node(tmp_path):
+def test_la_vista_en_node(tmp_path):
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("    function documentosListaHTML(docs) {")
+    i = html.index("    const _TIPO_DOC = {")
     fns = html[i:html.index("    async function cargarDocumentos() {", i)]
     js = tmp_path / "docs.mjs"
     js.write_text(r"""
@@ -244,15 +221,13 @@ const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
 """ + fns + r"""
 const f = [];
 const check = (n, c, x) => { if (!c) f.push(n + ' -> ' + x); };
-let h = documentosRespuestaHTML({ respuesta: 'Al <CISO>', fuentes: [{ titulo: 'R.pdf', fragmento: 3, fragmentos: 12, extracto: 'ante un acceso' }] });
+let h = documentosRespuestaHTML({ respuesta: 'Al <CISO>', fuentes: [{ titulo: 'R.pdf', extracto: 'ante un acceso' }] });
 check('respuesta escapada', h.includes('<div class="docs__respuesta">Al &lt;CISO&gt;</div>'), h);
-check('documentos consultados', h.includes('Documentos consultados') && h.includes('<strong>R.pdf</strong>') && h.includes('fragmento 3 de 12'), h);
-h = documentosRespuestaHTML({ respuesta: 'x', fuentes: [{ titulo: 'a', fragmento: 1, fragmentos: 1, extracto: 'e' }] });
-check('un solo fragmento no se numera', !h.includes('fragmento 1 de 1'), h);
+check('consultados con su pasaje', h.includes('Documentos consultados') && h.includes('<strong>R.pdf</strong>') && h.includes('…ante un acceso…'), h);
 check('sin fuentes, sin título', !documentosRespuestaHTML({ respuesta: 'x', fuentes: [] }).includes('Documentos consultados'));
 check('aviso', documentosRespuestaHTML({ respuesta: '', fuentes: [], aviso: 'Ningún documento' }).includes('Ningún documento'));
-const l = documentosListaHTML([{ titulo: 'a "b".md', fragmentos: 1 }]);
-check('lista', l.includes('1 fragmento<') && l.includes('data-titulo="a &quot;b&quot;.md"'), l);
+const l = documentosListaHTML([{ titulo: 'a "b".pdf', tipo: 'application/pdf' }, { titulo: 'c', tipo: '' }]);
+check('lista con el tipo', l.includes('>PDF<') && l.includes('data-titulo="a &quot;b&quot;.pdf"'), l);
 check('vacía', documentosListaHTML([]).includes('Todavía no hay documentos'));
 console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
 """, encoding="utf-8")

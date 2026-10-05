@@ -6306,14 +6306,14 @@
     // Base de conocimiento (RAG): los documentos que sube el usuario, partidos e
     // indexados en el cluster del entorno; se les pregunta y responde OpenSearch
     // (pipeline de búsqueda con retrieval_augmented_generation) con MaaS.
-    const _EXT_DOCUMENTOS = '.txt,.md,.markdown,.csv,.json,.log,.html,.htm,.pdf';
+    const _EXT_DOCUMENTOS = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.rtf,.txt,.md,.markdown,.csv,.json,.log,.html,.htm';
     function documentosHTML() {
       return `<div class="section-card" id="infra-documentos">
           <div class="section-card__head seguridad__head">
             <span class="section-card__tile">${icon('file')}</span>
             <span class="section-card__titlewrap">
               <span class="section-card__title">Base de conocimiento</span>
-              <span class="section-card__hint">Subí manuales, políticas o runbooks y preguntales: OpenSearch busca en ellos y el modelo responde con lo que encuentra (RAG). Los documentos van al cluster del entorno; la plataforma no guarda copia.</span>
+              <span class="section-card__hint">Subí manuales, políticas o runbooks y preguntales. Todo lo hace OpenSearch: un pipeline de ingesta saca el texto (attachment) y lo parte en fragmentos (text_chunking), y un pipeline de búsqueda responde con ellos (RAG). La plataforma no guarda copia.</span>
             </span>
             <button type="button" class="btn btn-secondary btn-sm" id="infra-documentos-actualizar" title="Volver a leer">${icon('refresh')} Actualizar</button>
           </div>
@@ -6322,7 +6322,7 @@
               <label class="docs__subir" id="infra-documentos-subir" tabindex="0">
                 <input type="file" id="infra-documentos-archivo" accept="${_EXT_DOCUMENTOS}" multiple hidden>
                 <span class="docs__subir-tile">${icon('upload')}</span>
-                <span><strong>Subir documentos</strong><span class="docs__subir-hint">Texto, Markdown, CSV, HTML o PDF · hasta 10 MB cada uno</span></span>
+                <span><strong>Subir documentos</strong><span class="docs__subir-hint">PDF, Word, PowerPoint, Excel, texto, Markdown o HTML · hasta 10 MB cada uno</span></span>
               </label>
               <div id="infra-documentos-estado" class="hidden"></div>
               <ul class="docs__lista" id="infra-documentos-lista"></ul>
@@ -6337,17 +6337,20 @@
           </div>
         </div>`;
     }
+    const _TIPO_DOC = { 'application/pdf': 'PDF', 'text/plain': 'texto', 'text/html': 'HTML', 'text/csv': 'CSV',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word', 'application/msword': 'Word',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel', 'application/rtf': 'RTF' };
     function documentosListaHTML(docs) {
       if (!(docs || []).length) return '<li class="hallazgos__vacio">Todavía no hay documentos.</li>';
       return docs.map(d => `<li class="docs__doc">${icon('file')}<span class="docs__titulo" title="${escapeHtml(d.titulo)}">${escapeHtml(d.titulo)}</span>`
-        + `<span class="hallazgo__meta">${d.fragmentos} fragmento${d.fragmentos === 1 ? '' : 's'}</span>`
+        + `${d.tipo ? `<span class="hallazgo__meta">${escapeHtml(_TIPO_DOC[d.tipo] || d.tipo)}</span>` : ''}`
         + `<button type="button" class="docs__borrar" data-titulo="${escapeHtml(d.titulo)}" title="Borrar" aria-label="Borrar ${escapeHtml(d.titulo)}">${icon('trash')}</button></li>`).join('');
     }
     function documentosRespuestaHTML(d) {
       if (d.aviso && !d.respuesta) return `<div class="hallazgos__vacio">${escapeHtml(d.aviso)}</div>`;
       const fuentes = (d.fuentes || []).map(f => `<li><strong>${escapeHtml(f.titulo)}</strong>`
-        + `${f.fragmentos > 1 ? ` <span class="hallazgo__meta">· fragmento ${f.fragmento} de ${f.fragmentos}</span>` : ''}`
-        + `<div class="docs__extracto">${escapeHtml(f.extracto || '')}…</div></li>`).join('');
+        + `<div class="docs__extracto">…${escapeHtml(f.extracto || '')}…</div></li>`).join('');
       return `<div class="docs__respuesta">${escapeHtml(d.respuesta || '')}</div>`
         + (fuentes ? `<div class="docs__fuentes-lbl">Documentos consultados</div><ul class="docs__fuentes">${fuentes}</ul>` : '');
     }
@@ -8732,15 +8735,15 @@
         if (u.includes('/api/v1/conocimiento/preguntar')) {
           await espera(900);
           return json({ respuesta: 'Vista previa, con documentos de ejemplo: ante un acceso sospechoso hay que aislar el equipo, revocar las credenciales y las access keys, preservar los logs de los últimos 7 días y abrir un ticket de severidad alta. Si vino de una IP extranjera, avisar al CISO dentro de la hora.',
-                        fuentes: [{ titulo: 'Runbook de incidentes.pdf', fragmento: 3, fragmentos: 12, extracto: 'Ante un acceso sospechoso a una cuenta administrativa: aislar el equipo de la red, revocar las credenciales y las access keys del usuario, preservar los logs' }] });
+                        fuentes: [{ titulo: 'Runbook de incidentes.pdf', extracto: 'Ante un acceso sospechoso a una cuenta administrativa: aislar el equipo de la red, revocar las credenciales y las access keys del usuario, preservar los logs' }] });
         }
         if (u.includes('/api/v1/conocimiento/documentos')) {
           await espera(400);
-          window.__docsPrevia = window.__docsPrevia || [{ titulo: 'Runbook de incidentes.pdf', fragmentos: 12 }, { titulo: 'Política de mantenimiento.md', fragmentos: 2 }];
+          window.__docsPrevia = window.__docsPrevia || [{ titulo: 'Runbook de incidentes.pdf', tipo: 'application/pdf' }, { titulo: 'Política de mantenimiento.docx', tipo: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }];
           if (metodo === 'POST') {
             const { nombre } = JSON.parse(opts.body || '{}');
-            window.__docsPrevia = [...window.__docsPrevia.filter(d => d.titulo !== nombre), { titulo: nombre, fragmentos: 1 }];
-            return json({ titulo: nombre, fragmentos: 1 });
+            window.__docsPrevia = [...window.__docsPrevia.filter(d => d.titulo !== nombre), { titulo: nombre, tipo: '' }];
+            return json({ titulo: nombre });
           }
           if (metodo === 'DELETE') {
             const t = decodeURIComponent(u.split('/documentos/')[1] || '');

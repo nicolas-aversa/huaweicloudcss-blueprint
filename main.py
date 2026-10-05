@@ -6992,16 +6992,6 @@ def _cluster_del_entorno(stage: str) -> "tuple[str, str, str]":
             "admin", _cluster_admin_password(terraform_dir))
 
 
-def _os_bulk(base: str, user: str, password: str, ndjson: str) -> "Any":
-    import requests
-    try:
-        return requests.post(f"{base}/_bulk?refresh=wait_for", data=ndjson.encode("utf-8"), auth=(user, password),
-                             headers={"Content-Type": "application/x-ndjson"}, timeout=120, verify=False)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[conocimiento] _bulk error: {exc!r}")
-        return None
-
-
 def _asegurar_rag(base: str, user: str, password: str) -> "tuple[str | None, str]":
     """El modelo y el pipeline del RAG, creados la primera vez que se pregunta
     (cualquier entorno, sin paso extra). Devuelve (model_id, motivo si falló)."""
@@ -7056,8 +7046,7 @@ def listar_documentos() -> dict:
     """Los documentos cargados en la base de conocimiento del entorno."""
     import conocimiento
     base, user, password = _cluster_del_entorno("conocimiento")
-    r = _os_req("POST", f"{base}/{conocimiento.INDICE}/_search", user, password, timeout=20, json_body={
-        "size": 0, "aggs": {"docs": {"terms": {"field": "titulo.k", "size": 500, "order": {"_key": "asc"}}}}})
+    r = _os_req("POST", f"{base}/{conocimiento.INDICE}/_search", user, password, timeout=20, json_body=conocimiento.LISTAR)
     if getattr(r, "status_code", 0) == 404:
         return {"documentos": []}
     if not _resp_ok(r):
@@ -7067,37 +7056,39 @@ def listar_documentos() -> dict:
 
 @app.post("/api/v1/conocimiento/documentos", tags=["conocimiento"])
 def subir_documento(request: DocumentoRequest) -> dict:
-    """Extrae el texto, lo parte en fragmentos y los indexa en el cluster del
-    entorno. Si ya había un documento con ese nombre, lo reemplaza. La
-    plataforma no guarda copia."""
+    """Manda el archivo al cluster del entorno, que lo procesa con su pipeline de
+    ingesta (attachment → text_chunking): la plataforma no extrae ni parte nada,
+    ni guarda copia. Si ya había un documento con ese nombre, lo reemplaza."""
     import base64
     import conocimiento
 
     try:
-        contenido = base64.b64decode(request.contenido_b64, validate=True)
-        texto = conocimiento.extraer_texto(request.nombre, contenido)
-    except (ValueError, conocimiento.DocumentoInvalido) as exc:
+        tamano = len(base64.b64decode(request.contenido_b64, validate=True))
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail={"stage": "conocimiento",
-                                                     "message": f"{request.nombre}: {exc}"}) from exc
-    audit.record("conocimiento_subir", f"{request.nombre} ({len(contenido)} bytes)")
+                                                     "message": f"{request.nombre}: no es base64"}) from exc
+    motivo = conocimiento.validar(request.nombre, tamano)
+    if motivo:
+        raise HTTPException(status_code=400, detail={"stage": "conocimiento", "message": f"{request.nombre}: {motivo}"})
+    audit.record("conocimiento_subir", f"{request.nombre} ({tamano} bytes)")
     base, user, password = _cluster_del_entorno("conocimiento")
+    rp = _os_req("PUT", f"{base}/_ingest/pipeline/{conocimiento.PIPELINE_DE_INGESTA}", user, password, timeout=30,
+                 json_body=conocimiento.build_pipeline_de_ingesta())
+    if not _resp_ok(rp):
+        raise HTTPException(status_code=502, detail={"stage": "conocimiento",
+                                                     "message": f"pipeline de ingesta: {_resp_motivo(rp)}"})
     ri = _os_req("PUT", f"{base}/{conocimiento.INDICE}", user, password, json_body=conocimiento.mapping(), timeout=30)
     if not _resp_ok(ri) and "already_exists" not in (getattr(ri, "text", "") or ""):
         raise HTTPException(status_code=502, detail={"stage": "conocimiento", "message": _resp_motivo(ri)})
     _os_req("POST", f"{base}/{conocimiento.INDICE}/_delete_by_query?refresh=true", user, password, timeout=60,
             json_body={"query": {"term": {"titulo.k": request.nombre}}})
-    docs = conocimiento.documentos_para_indexar(request.nombre, texto)
-    ndjson = "".join(json.dumps({"index": {"_index": conocimiento.INDICE}}) + "\n" + json.dumps(d, ensure_ascii=False) + "\n"
-                     for d in docs)
-    rb = _os_bulk(base, user, password, ndjson)
-    try:
-        errores = rb.json().get("errors") if _resp_ok(rb) else True
-    except ValueError:
-        errores = True
-    if errores:
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento",
-                                                     "message": f"no se pudo indexar: {_resp_motivo(rb)}"})
-    return {"titulo": request.nombre, "fragmentos": len(docs), "caracteres": len(texto)}
+    rd = _os_req("POST", f"{base}/{conocimiento.INDICE}/_doc?pipeline={conocimiento.PIPELINE_DE_INGESTA}&refresh=true",
+                 user, password, timeout=120, json_body=conocimiento.documento(request.nombre, request.contenido_b64))
+    if not _resp_ok(rd):
+        raise HTTPException(status_code=400 if getattr(rd, "status_code", 0) == 400 else 502, detail={
+            "stage": "conocimiento",
+            "message": f"{request.nombre}: {conocimiento.motivo_de_ingesta(getattr(rd, 'text', '') or '')}"})
+    return {"titulo": request.nombre}
 
 
 @app.delete("/api/v1/conocimiento/documentos/{titulo}", tags=["conocimiento"])
