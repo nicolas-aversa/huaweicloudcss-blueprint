@@ -2357,6 +2357,11 @@
     .docs__fuentes-lbl { margin: 12px 0 6px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
     .docs__fuentes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
     .docs__extracto { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
+    /* Los documentos que consultó el agente, debajo de la respuesta. */
+    .cap-chat__fuentes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: var(--fs-xs); }
+    .cap-chat__fuentes-lbl { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-weight: 600; }
+    .cap-chat__fuentes-lbl .icon { width: 12px; height: 12px; }
+    .cap-chat__fuente { padding: 2px 8px; border-radius: var(--radius-pill); background: var(--bg-secondary); border: 1px solid var(--border-subtle); color: var(--text-secondary); }
     /* El contador de cada pestaña. */
     .infra-tab__cuenta {
       font-size: var(--fs-xs); font-weight: 700; padding: 1px 7px; border-radius: var(--radius-pill);
@@ -6152,7 +6157,10 @@
       (capChats[slug] = capChats[slug] || []).push(entry);
       return entry;
     }
-    function capChatLimpiar(slug) { capChats[slug] = []; }
+    // La conversación con el agente de OpenSearch: su memory_id, por caso. La
+    // memoria la guarda ml-commons; acá solo el id para seguirla.
+    const capChatMemoria = {};
+    function capChatLimpiar(slug) { capChats[slug] = []; delete capChatMemoria[slug]; }
     // Los últimos turnos contestados de un caso, para mandarle al chat.
     function capChatHistorial(slug, max = 4) {
       return (capChats[slug] || []).filter(e => e.turno && !e.err).slice(-max).map(e => e.turno);
@@ -6177,6 +6185,32 @@
     }
     // "ver PPL / datos": la consulta y su tabla; en una investigación, cada
     // consulta con la suya (o con su error).
+    function capChatFuentesHTML(data) {
+      const fuentes = (data && data.fuentes) || [];
+      if (!fuentes.length) return '';
+      return `<div class="cap-chat__fuentes"><span class="cap-chat__fuentes-lbl">${icon('file')} Documentos consultados</span>`
+        + fuentes.map(f => `<span class="cap-chat__fuente" title="${escapeHtml(f.extracto || '')}">${escapeHtml(f.titulo)}</span>`).join('')
+        + `</div>`;
+    }
+    // El Vega-Lite que armó el agente de text to visualization, con los datos de
+    // la consulta. Vega-Lite lee "a.b" como un campo anidado: los nombres de las
+    // columnas con punto se escapan en la especificación.
+    function capChatVegaConDatos(vega, result, config) {
+      const cols = ((result && result.schema) || []).map(c => c.name);
+      const values = ((result && result.datarows) || []).map(r => Object.fromEntries(cols.map((c, i) => [c, r[i]])));
+      const escapar = (n) => String(n).replace(/\./g, '\\.');
+      const conPunto = new Set(cols.filter(c => String(c).includes('.')));
+      const recorrer = (o) => {
+        if (Array.isArray(o)) return o.map(recorrer);
+        if (!o || typeof o !== 'object') return o;
+        return Object.fromEntries(Object.entries(o).map(([k, v]) =>
+          [k, (k === 'field' && conPunto.has(v)) ? escapar(v) : recorrer(v)]));
+      };
+      const spec = recorrer(vega);
+      delete spec.data;
+      return { ...spec, $schema: 'https://vega.github.io/schema/vega-lite/v5.json', width: 'container',
+               autosize: { type: 'fit-x', contains: 'padding' }, config, data: { values } };
+    }
     function capChatDetallesHTML(data) {
       const consultas = (data && data.consultas) || [];
       if (consultas.length) {
@@ -7025,7 +7059,7 @@
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Preguntá sobre tus datos…" aria-label="Tu pregunta">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
-          <div class="cap-chat__pie">Responde con consultas PPL sobre tus índices. Puede equivocarse.</div>
+          <div class="cap-chat__pie">Responde el agente de OpenSearch con tus datos y tus documentos. Puede equivocarse.</div>
         </div>`;
       const lanzador = document.createElement('button');
       lanzador.id = 'cap-lanzador';
@@ -7277,7 +7311,17 @@
       }
       // Renderiza el gráfico dentro de `container` (async para Vega).
       capVega = { ensure: _ensureVega, theme: _vegaTheme, config: _vegaConfig };
-      function _renderCapChartInto(container, result) {
+      function _renderCapChartInto(container, result, vega = null) {
+        if (vega && Object.keys(vega).length && (result && (result.datarows || []).length)) {
+          const holder = document.createElement('div');
+          holder.className = 'cap-chart cap-chart--vega cap-chart--t2v';
+          holder.style.minHeight = '220px';
+          container.appendChild(holder);
+          container.closest('.cap-chat__msg')?.classList.add('cap-chat__msg--rich');
+          _ensureVega().then((embed) => embed(holder, capChatVegaConDatos(vega, result, _vegaConfig(_vegaTheme())),
+            { actions: false, renderer: 'svg' })).catch(() => { holder.remove(); _renderCapChartInto(container, result); });
+          return;
+        }
         const plan = _capChatVizPlan(result);
         if (!plan) return;
         if (plan.kind === 'kpi') { container.innerHTML = plan.html; return; }
@@ -7331,7 +7375,7 @@
           const res = await fetch('/api/v1/capabilities/ppl-chat', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              question, slug, history, investigar, contexto,
+              question, slug, history, investigar, contexto, memory_id: capChatMemoria[slug] || '',
               explicar_desde: explicar?.desde || '', explicar_hasta: explicar?.hasta || '',
               opensearch_password: state.osPassword || '',
               opensearch_user: state.osUser || 'admin',
@@ -7347,18 +7391,20 @@
             _error(`${escapeHtml(msg)}${ppl}`);
             return;
           }
-          const details = capChatDetallesHTML(data);
+          if (data.memory_id) capChatMemoria[slug] = data.memory_id;
+          const details = capChatFuentesHTML(data) + capChatDetallesHTML(data);
           const cabecera = capChatCabeceraHTML(data);
           // Lo que queda guardado es la respuesta entera: el typewriter es solo
           // la primera vez; un re-render la muestra completa, con su gráfico.
           pend.html = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
           pend.result = data.result || null;
+          pend.vega = data.vega || null;
           pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };
           const el = _msgDe(pend);
           if (!el) return;   // el caso no está en pantalla: se pinta al volver
           // Visualización Vega-Lite (motor de OpenSearch) + respuesta con typewriter + details.
           el.innerHTML = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer"></span>`;
-          _renderCapChartInto(el.querySelector('.cap-chart-host'), data.result);
+          _renderCapChartInto(el.querySelector('.cap-chart-host'), data.result, data.vega);
           const answerEl = el.querySelector('.cap-chat__answer');
           _typeInto(answerEl, data.answer || '', () => {
             if (details) el.insertAdjacentHTML('beforeend', details);
@@ -7411,7 +7457,7 @@
         for (const e of capChats[s] || []) {
           if (!e.result || e.err) continue;
           const lugar = host.querySelector(`[data-msg="${e.id}"] .cap-chart-host`);
-          if (lugar && !lugar.childElementCount) _renderCapChartInto(lugar, e.result);
+          if (lugar && !lugar.childElementCount) _renderCapChartInto(lugar, e.result, e.vega);
         }
       }
     }

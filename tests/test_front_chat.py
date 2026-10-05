@@ -145,7 +145,7 @@ def test_el_asistente_se_arma_desde_lo_guardado():
     assert "activeSlugs.indexOf(capChatSlug)" in fn
     assert "capChatSlug = slug;" in fn
     # Los gráficos de lo guardado se vuelven a embeber.
-    assert "_renderCapChartInto(lugar, e.result)" in fn
+    assert "_renderCapChartInto(lugar, e.result, e.vega)" in fn
 
 
 def test_la_respuesta_va_al_caso_de_la_pregunta_y_al_asistente_actual():

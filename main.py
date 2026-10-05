@@ -6403,6 +6403,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                     # todavía no está habilitado, el config queda igual y toma efecto
                     # cuando lo prendan + reinicien Dashboards.
                     _set_os_chat_root_agent(base, user, password, agent_id)
+                    result["text2viz"] = _provisionar_text2viz(base, user, password, llm_model)
                     # El agente es GLOBAL (multi-fuente): el re-register borró el
                     # anterior, así que actualizar el id guardado por los otros slugs
                     # para que sus chips/teardown no apunten a un agente inexistente.
@@ -7910,6 +7911,8 @@ class PplChatRequest(BaseModel):
     # sale de las herramientas que comparan el intervalo contra el anterior.
     explicar_desde: str = Field(default="", max_length=30)
     explicar_hasta: str = Field(default="", max_length=30)
+    # La conversación con el agente de OpenSearch (la guarda ml-commons).
+    memory_id: str = Field(default="", max_length=100)
 
 
 class PplChatResponse(BaseModel):
@@ -7918,6 +7921,11 @@ class PplChatResponse(BaseModel):
     result: dict = Field(default_factory=dict)
     # En una investigación, cada consulta con su resultado o su error.
     consultas: list[dict] = Field(default_factory=list)
+    # Con el agente de OpenSearch: los documentos que consultó, el gráfico que
+    # armó text to visualization y la memoria de la conversación.
+    fuentes: list[dict] = Field(default_factory=list)
+    vega: dict = Field(default_factory=dict)
+    memory_id: str = ""
 
 
 def _index_time_window(base: str, user: str, password: str, index_pattern: str):
@@ -8429,9 +8437,123 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
             if r is not None:
                 return r
 
+    # La pregunta va al agente de OpenSearch: decide si consulta datos,
+    # documentos o los dos, y guarda la conversación. Si el entorno no tiene
+    # agente o falla, el camino de antes (consultas armadas desde acá).
+    if ids.get("agent_id"):
+        r = _conversar_con_el_agente(base, user, password, ids["agent_id"], request,
+                                     (_spec or {}).get("label", request.slug), indice)
+        if r is not None:
+            return r
     return _conversar(request.question, request.history, (_spec or {}).get("fields", {}),
                       _predecir_ppl, _predecir_llm, _ejecutar,
                       investigar=request.investigar, contexto=request.contexto)
+
+
+def _conversar_con_el_agente(base: str, user: str, password: str, agente: str, request: "PplChatRequest",
+                             fuente: str, indice: str) -> "PplChatResponse | None":
+    """`_execute` del agente conversacional; de sus trazas salen las consultas
+    (tabla y gráfico) y los documentos. None si el agente no contestó."""
+    import agente_chat
+
+    params = {"question": agente_chat.pregunta_para_el_agente(request.question, fuente, indice, request.contexto)}
+    if request.memory_id:
+        params["memory_id"] = request.memory_id
+    r = _os_req("POST", f"{base}/_plugins/_ml/agents/{agente}/_execute", user, password,
+                json_body={"parameters": params}, timeout=240)
+    if not _resp_ok(r):
+        print(f"[ppl-chat] el agente no contestó ({_resp_motivo(r)}): sigo sin él")
+        return None
+    try:
+        salida = agente_chat.respuesta(r.json())
+    except ValueError:
+        return None
+    if not salida["respuesta"]:
+        return None
+    trazas: list = []
+    if salida["parent_interaction_id"]:
+        rt = _os_req("GET", f"{base}/_plugins/_ml/memory/message/{salida['parent_interaction_id']}/traces",
+                     user, password, timeout=30)
+        try:
+            trazas = (rt.json() or {}).get("traces") or [] if _resp_ok(rt) else []
+        except ValueError:
+            trazas = []
+    leido = agente_chat.de_las_trazas(trazas)
+    buena = agente_chat.ultima_buena(leido["consultas"])
+    resultado = (buena or {}).get("result") or {}
+    vega = _visualizar(base, user, password, request.question, (buena or {}).get("ppl", ""), resultado)
+    return PplChatResponse(answer=salida["respuesta"], ppl=(buena or {}).get("ppl", ""), result=resultado,
+                           consultas=leido["consultas"] if len(leido["consultas"]) > 1 else [],
+                           fuentes=leido["fuentes"], vega=vega or {}, memory_id=salida["memory_id"])
+
+
+_AGENTE_T2VEGA: dict[str, str] = {}
+
+
+def _visualizar(base: str, user: str, password: str, pregunta: str, ppl: str, resultado: dict) -> "dict | None":
+    """El gráfico de la respuesta, armado por el agente de text to visualization
+    de OpenSearch (Vega-Lite). None si no hay agente, si el resultado no da
+    para un gráfico (una fila) o si no devolvió una especificación válida."""
+    import text2viz
+
+    if not ppl or len(resultado.get("datarows") or []) < 2:
+        return None
+    if base not in _AGENTE_T2VEGA:
+        ids = _search_ids(base, user, password, "/_plugins/_ml/agents/_search", text2viz.AGENTE)
+        if not ids:
+            return None
+        _AGENTE_T2VEGA[base] = ids[0]
+    r = _os_req("POST", f"{base}/_plugins/_ml/agents/{_AGENTE_T2VEGA[base]}/_execute", user, password, timeout=120,
+                json_body={"parameters": text2viz.parametros(pregunta, ppl, resultado)})
+    if not _resp_ok(r):
+        print(f"[text2viz] {_resp_motivo(r)}")
+        return None
+    try:
+        return text2viz.especificacion(r.json())
+    except ValueError:
+        return None
+
+
+def _provisionar_text2viz(base: str, user: str, password: str, llm_model: str) -> dict:
+    """Los agentes de text to visualization con el flow framework (plantilla
+    oficial sobre el LLM del entorno) y su configuración para OpenSearch
+    Dashboards (`os_text2vega`, `os_text2vega_with_instructions`). Idempotente
+    por nombre."""
+    import text2viz
+
+    ya = {n: (_search_ids(base, user, password, "/_plugins/_ml/agents/_search", n) or [None])[0]
+          for n in (text2viz.AGENTE, text2viz.AGENTE_CON_INSTRUCCIONES)}
+    if not all(ya.values()):
+        rw = _os_req("POST", f"{base}/_plugins/_flow_framework/workflow?provision=true", user, password, timeout=60,
+                     json_body=text2viz.build_workflow(llm_model))
+        # Con `provision=true` el flow framework contesta 202 (lo provisiona en
+        # segundo plano), no 200/201.
+        try:
+            wid = (rw.json() or {}).get("workflow_id") if rw is not None and rw.status_code in (200, 201, 202) else None
+        except ValueError:
+            wid = None
+        if not wid:
+            return {"ok": False, "reason": f"flow framework: {_resp_motivo(rw)}"}
+        estado = {}
+        for _ in range(_ML_TASK_POLL_RETRIES):
+            rs = _os_req("GET", f"{base}/_plugins/_flow_framework/workflow/{wid}/_status", user, password, timeout=20)
+            try:
+                estado = rs.json() if _resp_ok(rs) else {}
+            except ValueError:
+                estado = {}
+            if estado.get("state") in ("COMPLETED", "FAILED"):
+                break
+            time.sleep(_ML_TASK_POLL_DELAY)
+        if estado.get("state") != "COMPLETED":
+            return {"ok": False, "reason": f"el workflow quedó {estado.get('state')}: {estado.get('error', '')}"[:300]}
+        pasos = {x.get("workflow_step_id"): x.get("resource_id") for x in estado.get("resources_created") or []
+                 if x.get("resource_type") == "agent_id"}
+        ya = {text2viz.AGENTE: pasos.get("t2vega_agent"),
+              text2viz.AGENTE_CON_INSTRUCCIONES: pasos.get("t2vega_instruction_based_agent")}
+    for nombre, doc in text2viz.CONFIG.items():
+        _os_req("PUT", f"{base}/.plugins-ml-config/_doc/{doc}", user, password, timeout=20,
+                json_body={"type": "os_chat_root_agent", "configuration": {"agent_id": ya[nombre]}})
+    return {"ok": True, "reason": "agentes t2vega listos (flow framework); en Dashboards: Visualize → Natural language"}
 
 
 def _ml_tool(base: str, user: str, password: str, nombre: str, params: dict, timeout: int = 60):
