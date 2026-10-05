@@ -35,7 +35,9 @@ class _Cluster:
             cid = json_body["query"]["term"]["connector_id"]
             return _R(200, {"hits": {"hits": [{"_id": m} for m, d in self.modelos.items() if d["connector"] == cid]}})
         if ruta.endswith("/_undeploy"):
-            self.modelos[ruta.split("/")[-2]]["estado"] = "UNDEPLOYED"
+            # Como en CSS: asíncrono, tarda un par de consultas en quedar replegado.
+            self.modelos[ruta.split("/")[-2]]["estado"] = "DEPLOYED"
+            self.modelos[ruta.split("/")[-2]]["repliegue"] = 2
             return _R(200)
         if ruta.endswith("/_deploy"):
             self.modelos[ruta.split("/")[-2]]["estado"] = "DEPLOYED"
@@ -49,7 +51,12 @@ class _Cluster:
             c["credencial"] = (json_body.get("credential") or {}).get("maas_key")
             return _R(200, {"result": "updated"})
         if method == "GET" and ruta.startswith("/_plugins/_ml/models/"):
-            return _R(200, {"model_state": self.modelos[ruta.rsplit("/", 1)[1]]["estado"]})
+            m = self.modelos[ruta.rsplit("/", 1)[1]]
+            if m.get("repliegue"):
+                m["repliegue"] -= 1
+                if not m["repliegue"]:
+                    m["estado"] = "UNDEPLOYED"
+            return _R(200, {"model_state": m["estado"]})
         return _R(404)
 
 
@@ -64,6 +71,7 @@ def _cluster(monkeypatch):
                  "M-OK": {"connector": "C-OK", "estado": "DEPLOYED"}}
     monkeypatch.setattr(main, "_os_req", c.req)
     monkeypatch.setattr(main, "_ML_TASK_POLL_DELAY", 0, raising=False)
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
     return c
 
 

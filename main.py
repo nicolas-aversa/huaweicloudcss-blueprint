@@ -6095,6 +6095,20 @@ def _teardown_slug_caps(base: str, user: str, password: str, ids: dict) -> None:
             _os_req("DELETE", f"{base}/_plugins/_ml/connectors/{cid}", user, password, timeout=20)
 
 
+def _esperar_replegado(base: str, user: str, password: str, model_id: str) -> bool:
+    """Espera a que el modelo deje de figurar DEPLOYED (o algo parecido)."""
+    for _ in range(_ML_TASK_POLL_RETRIES):
+        r = _os_req("GET", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=15)
+        try:
+            estado = (r.json() or {}).get("model_state") if _resp_ok(r) else None
+        except (ValueError, AttributeError):
+            estado = None
+        if estado not in ("DEPLOYED", "DEPLOYING", "PARTIALLY_DEPLOYED"):
+            return True
+        time.sleep(_ML_TASK_POLL_DELAY)
+    return False
+
+
 def _migrar_modelos_retirados(base: str, user: str, password: str, api_key: str) -> list[dict]:
     """Los connectors del cluster que usan un modelo que MaaS retiró
     (`MODELOS_RETIRADOS`) pasan al que corresponde hoy. Sin esto, un entorno
@@ -6131,6 +6145,10 @@ def _migrar_modelos_retirados(base: str, user: str, password: str, api_key: str)
             modelos = []
         for mid in modelos:
             _os_req("POST", f"{base}/_plugins/_ml/models/{mid}/_undeploy", user, password, timeout=30)
+        # El repliegue es asíncrono: actualizar enseguida daba el mismo "models
+        # are still using this connector" (visto en CSS 3.4).
+        for mid in modelos:
+            _esperar_replegado(base, user, password, mid)
         ru = _os_req("PUT", f"{base}/_plugins/_ml/connectors/{h['_id']}", user, password, timeout=30,
                      json_body={"parameters": {**params, "model": nuevo}, "credential": {"maas_key": api_key}})
         fallos = [] if _resp_ok(ru) else [f"connector: {_resp_motivo(ru)}"]
