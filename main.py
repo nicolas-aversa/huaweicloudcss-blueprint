@@ -6387,6 +6387,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             spec2.get("success_code", ""), spec2.get("label", slug2)),
                     })
                 instr = caps.build_agent_system_instruction(agent_verticals)
+                _asegurar_indice_de_documentos(base, user, password)
                 # ml-commons NO exige nombres únicos de agente: sin borrar el anterior
                 # quedarían duplicados. Se borra por nombre y se re-registra con la
                 # lista completa de fuentes.
@@ -6992,6 +6993,16 @@ def _cluster_del_entorno(stage: str) -> "tuple[str, str, str]":
             "admin", _cluster_admin_password(terraform_dir))
 
 
+def _asegurar_indice_de_documentos(base: str, user: str, password: str) -> bool:
+    """El pipeline de ingesta y el índice de la base de conocimiento (vacío si
+    no hay documentos): idempotente."""
+    import conocimiento
+    rp = _os_req("PUT", f"{base}/_ingest/pipeline/{conocimiento.PIPELINE_DE_INGESTA}", user, password, timeout=30,
+                 json_body=conocimiento.build_pipeline_de_ingesta())
+    ri = _os_req("PUT", f"{base}/{conocimiento.INDICE}", user, password, json_body=conocimiento.mapping(), timeout=30)
+    return _resp_ok(rp) and (_resp_ok(ri) or "already_exists" in (getattr(ri, "text", "") or ""))
+
+
 def _asegurar_rag(base: str, user: str, password: str) -> "tuple[str | None, str]":
     """El modelo y el pipeline del RAG, creados la primera vez que se pregunta
     (cualquier entorno, sin paso extra). Devuelve (model_id, motivo si falló)."""
@@ -7072,14 +7083,9 @@ def subir_documento(request: DocumentoRequest) -> dict:
         raise HTTPException(status_code=400, detail={"stage": "conocimiento", "message": f"{request.nombre}: {motivo}"})
     audit.record("conocimiento_subir", f"{request.nombre} ({tamano} bytes)")
     base, user, password = _cluster_del_entorno("conocimiento")
-    rp = _os_req("PUT", f"{base}/_ingest/pipeline/{conocimiento.PIPELINE_DE_INGESTA}", user, password, timeout=30,
-                 json_body=conocimiento.build_pipeline_de_ingesta())
-    if not _resp_ok(rp):
+    if not _asegurar_indice_de_documentos(base, user, password):
         raise HTTPException(status_code=502, detail={"stage": "conocimiento",
-                                                     "message": f"pipeline de ingesta: {_resp_motivo(rp)}"})
-    ri = _os_req("PUT", f"{base}/{conocimiento.INDICE}", user, password, json_body=conocimiento.mapping(), timeout=30)
-    if not _resp_ok(ri) and "already_exists" not in (getattr(ri, "text", "") or ""):
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento", "message": _resp_motivo(ri)})
+                                                     "message": "no se pudo crear el índice o el pipeline de ingesta"})
     _os_req("POST", f"{base}/{conocimiento.INDICE}/_delete_by_query?refresh=true", user, password, timeout=60,
             json_body={"query": {"term": {"titulo.k": request.nombre}}})
     rd = _os_req("POST", f"{base}/{conocimiento.INDICE}/_doc?pipeline={conocimiento.PIPELINE_DE_INGESTA}&refresh=true",

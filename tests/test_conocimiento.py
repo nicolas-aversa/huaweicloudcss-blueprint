@@ -240,3 +240,18 @@ console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_el_indice_existe_antes_de_registrar_el_agente():
+    """La herramienta Documentos del agente no tiene que fallar por "no such
+    index" antes de que se suba el primer documento."""
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    i = src.index("instr = caps.build_agent_system_instruction(agent_verticals)")
+    bloque = src[i:i + 900]
+    assert bloque.index("_asegurar_indice_de_documentos(base, user, password)") < bloque.index("caps.build_conversational_agent(")
+
+
+def test_asegurar_el_indice_es_idempotente(cluster):
+    estado, _ = cluster
+    assert main._asegurar_indice_de_documentos("http://x:9200", "a", "p") is True
+    assert main._asegurar_indice_de_documentos("http://x:9200", "a", "p") is True, "ya existe no es un error"

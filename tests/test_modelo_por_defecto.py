@@ -19,7 +19,35 @@ def test_los_rankings_descartan_los_vacios():
 
 def test_razona_solo_con_deepseek():
     """deepseek-v4.1-flash con razonamiento: 25/25 en el mismo tiempo. glm: de ~3 a ~8 s."""
-    for armar in (lambda m: caps.build_llm_connector("K", model=m), lambda m: caps.build_ppl_connector("K", "p", model=m),
-                  lambda m: caps.build_agent_connector("K", model=m)):
+    for armar in (lambda m: caps.build_llm_connector("K", model=m), lambda m: caps.build_agent_connector("K", model=m)):
         assert '"chat_template_kwargs": {"thinking": true}' in armar("deepseek-v4.1-flash")["actions"][0]["request_body"]
         assert '"chat_template_kwargs": {"thinking": false}' in armar("glm-5.2")["actions"][0]["request_body"]
+
+
+
+def test_el_ppl_nunca_razona():
+    """Dentro del PPLTool, razonando contestaba con explicaciones y bloques de
+    código alrededor de la consulta, y el PPLTool la ejecutaba tal cual."""
+    for m in ("deepseek-v4.1-flash", "glm-5.2"):
+        assert '"chat_template_kwargs": {"thinking": false}' in caps.build_ppl_connector("K", "p", model=m)["actions"][0]["request_body"]
+
+
+def _agente():
+    v = [{"tool_name": "PPLTool-x", "label": "X", "index_pattern": "x*", "ppl_system_prompt": "p"}]
+    return caps.build_conversational_agent("L", "P", caps.build_agent_system_instruction(v), v)
+
+
+def test_el_agente_le_pasa_al_ppltool_solo_su_parte():
+    """Sin el JSON el PPLTool toma la pregunta original entera: con una que
+    mezclaba datos y documentos, el modelo de PPL contestaba con texto."""
+    ppl = next(t for t in _agente()["tools"] if t["type"] == "PPLTool")
+    assert 'El input es un JSON con SOLO la parte de la pregunta que se responde con estos datos: {"question": "<esa pregunta>"}.' in ppl["description"]
+
+
+def test_el_agente_busca_en_los_documentos():
+    a = _agente()
+    doc = next(t for t in a["tools"] if t["name"] == "Documentos")
+    assert doc["type"] == "SearchIndexTool" and '"index": "conocimiento-plataforma"' in doc["description"]
+    assert '"fields": ["fragmentos", "fragmentos.es", "fragmentos.en", "titulo"]' in doc["description"]
+    assert "use both tools" in a["llm"]["parameters"]["system_instruction"]
+    assert a["llm"]["parameters"]["max_iteration"] == "10", "con 5 no llegaba a consultar datos, corregir y buscar en documentos"

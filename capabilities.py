@@ -222,7 +222,10 @@ def build_ppl_connector(api_key: str, ppl_system_prompt: str,
         '{ "model": "${parameters.model}", "messages": ['
         '{"role": "system", "content": "${parameters.system_prompt}"}, '
         '{"role": "user", "content": "${parameters.prompt}"}], '
-        '"temperature": 0, "chat_template_kwargs": {"thinking": ' + _razona(model) + '} }'
+        # Sin razonamiento aunque sea deepseek: dentro del PPLTool el modelo
+        # razonando contesta con explicaciones y bloques de código alrededor de
+        # la consulta, y el PPLTool la ejecuta tal cual (visto en CSS 3.4).
+        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
     )
     return {
         "name": "MaaS DeepSeek PPLTool (platform)",
@@ -394,6 +397,9 @@ def build_agent_system_instruction(verticals: list[dict[str, Any]]) -> str:
         f"{tools_desc}\n\n"
         "To get data, call the appropriate PPLTool. Pass it the user's question in natural language; "
         "PPLTool generates and runs the PPL query itself and returns the numbers.\n\n"
+        "For questions about procedures, policies or what to do, search the organization's documents with "
+        "the Documentos tool and answer with what they say, naming the document. If a question needs data AND "
+        "procedures, use both tools.\n\n"
         "Resolve references ('esas', 'those', 'esos') from the chat history. "
         "After PPLTool returns, answer in the user's language, with thousands separators. "
         "Never invent numbers: if PPLTool fails, say so instead of guessing."
@@ -416,9 +422,13 @@ def build_conversational_agent(llm_model_id: str, ppl_model_id: str,
         tools.append({
             "type": "PPLTool",
             "name": v["tool_name"],
+            # El JSON: sin él el PPLTool toma la pregunta ORIGINAL del usuario
+            # entera, y en una pregunta que mezcla datos y documentos el modelo
+            # de PPL contestaba con texto en vez de una consulta.
             "description": (
                 f"Genera y ejecuta una query PPL de OpenSearch sobre {v['label']} "
-                f"(index: {v['index_pattern']}). Pasale la pregunta del usuario en lenguaje natural."
+                f"(index: {v['index_pattern']}). El input es un JSON con SOLO la parte de la pregunta "
+                'que se responde con estos datos: {"question": "<esa pregunta>"}.'
             ),
             "parameters": {
                 "model_type": "FINETUNE",
@@ -437,14 +447,33 @@ def build_conversational_agent(llm_model_id: str, ppl_model_id: str,
         "llm": {
             "model_id": llm_model_id,
             "parameters": {
-                "max_iteration": "5",
+                # 5 no alcanzaba para consultar datos, corregir y después buscar
+                # en los documentos (visto en CSS 3.4).
+                "max_iteration": "10",
                 "response_filter": "$.choices[0].message.content",
                 "system_instruction": system_instruction.replace("\n", "\\n"),
                 "prompt": _AGENT_REACT_PROMPT,
             },
         },
         "memory": {"type": "conversation_index"},
-        "tools": tools,
+        "tools": tools + [herramienta_de_documentos()],
+    }
+
+
+def herramienta_de_documentos() -> dict[str, Any]:
+    """La base de conocimiento como herramienta del agente: SearchIndexTool sobre
+    el índice de los documentos (ver conocimiento.py). El agente decide si
+    consulta datos, documentos o los dos."""
+    import conocimiento
+    return {
+        "type": "SearchIndexTool", "name": "Documentos",
+        "description": _sanitize_desc(
+            "Busca en la base de conocimiento de la organización (manuales, políticas, runbooks, procedimientos) "
+            "y devuelve los fragmentos que coinciden. Usala para preguntas sobre qué hacer, cómo se hace, "
+            "políticas o procedimientos.") + " El input es un JSON: " + (
+            '{"index": "' + conocimiento.INDICE + '", "query": {"size": 3, "_source": ["titulo", "fragmentos"], '
+            '"query": {"multi_match": {"query": "<palabras clave de la pregunta>", '
+            '"fields": ["fragmentos", "fragmentos.es", "fragmentos.en", "titulo"]}}}}'),
     }
 
 

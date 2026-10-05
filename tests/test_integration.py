@@ -3944,8 +3944,8 @@ def test_capability_builders_wellformed():
     _json.dumps(agent)
     assert agent["type"] == "conversational"
     assert agent["llm"]["model_id"] == "LLM_ID"
-    assert {t["name"] for t in agent["tools"]} == {f"PPLTool-{s}" for s in C.get_capability_slugs()}
-    for t in agent["tools"]:
+    assert {t["name"] for t in agent["tools"]} == {f"PPLTool-{s}" for s in C.get_capability_slugs()} | {"Documentos"}
+    for t in [t for t in agent["tools"] if t["name"] != "Documentos"]:
         assert t["type"] == "PPLTool" and t["parameters"]["model_id"] == "PPL_ID"
         assert t["parameters"]["execute"] == "true" and t["parameters"]["system_prompt"]
     assert "Producción de pozos" in instr and "Encuentros clínicos" in instr
