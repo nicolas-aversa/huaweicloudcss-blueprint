@@ -49,9 +49,6 @@ DEFAULT_MAAS_CONNECTOR_ENDPOINT = "api-ap-southeast-1.modelarts-maas.com"
 # rápido (~2,3 s contra 5-7 s de glm) y acepta `chat_template_kwargs` y tools.
 DEFAULT_MAAS_LLM_MODEL = "deepseek-v4.1-flash"
 DEFAULT_MAAS_PPL_MODEL = "deepseek-v4.1-flash"
-# Los que ya no existen en MaaS: un entorno desplegado con ellos se migra al
-# volver a provisionar (ver main._migrar_modelos_retirados).
-MODELOS_RETIRADOS = frozenset({"deepseek-v4-flash"})
 
 
 def maas_connector_endpoint() -> str:
