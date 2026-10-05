@@ -7085,9 +7085,12 @@ def subir_documento(request: DocumentoRequest) -> dict:
     rd = _os_req("POST", f"{base}/{conocimiento.INDICE}/_doc?pipeline={conocimiento.PIPELINE_DE_INGESTA}&refresh=true",
                  user, password, timeout=120, json_body=conocimiento.documento(request.nombre, request.contenido_b64))
     if not _resp_ok(rd):
-        raise HTTPException(status_code=400 if getattr(rd, "status_code", 0) == 400 else 502, detail={
-            "stage": "conocimiento",
-            "message": f"{request.nombre}: {conocimiento.motivo_de_ingesta(getattr(rd, 'text', '') or '')}"})
+        # Lo que rechaza el pipeline de ingesta (sin texto, archivo corrupto) es
+        # un problema del archivo: 400, aunque OpenSearch conteste 500.
+        texto_err = getattr(rd, "text", "") or ""
+        del_archivo = getattr(rd, "status_code", 0) == 400 or conocimiento.SIN_TEXTO in texto_err             or "attachment" in texto_err or "TikaException" in texto_err
+        raise HTTPException(status_code=400 if del_archivo else 502, detail={
+            "stage": "conocimiento", "message": f"{request.nombre}: {conocimiento.motivo_de_ingesta(texto_err)}"})
     return {"titulo": request.nombre}
 
 

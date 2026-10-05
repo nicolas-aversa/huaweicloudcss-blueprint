@@ -147,7 +147,10 @@ def busqueda(pregunta: str, modelo: str, k: int = DOCUMENTOS_POR_RESPUESTA) -> d
         "size": k,
         "_source": ["titulo", "fragmentos", "adjunto.content_type"],
         "query": {"multi_match": {"query": pregunta, "type": "most_fields", "fields": _CAMPOS + ["titulo^2"]}},
+        # La oración que más pesa, no el comienzo del fragmento: sin esto la
+        # pregunta del CISO mostraba "Sección 78…" (el inicio del fragmento).
         "highlight": {"pre_tags": [""], "post_tags": [""], "number_of_fragments": 1, "fragment_size": 280,
+                      "type": "unified", "boundary_scanner": "sentence", "order": "score",
                       "fields": {c: {} for c in _CAMPOS}},
         "ext": {"generative_qa_parameters": {"llm_model": modelo, "llm_question": pregunta,
                                               "context_size": k, "timeout": 60}},

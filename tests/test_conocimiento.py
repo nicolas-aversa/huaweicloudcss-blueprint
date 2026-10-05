@@ -37,6 +37,7 @@ def test_la_busqueda_trae_el_contexto_y_resalta_el_pasaje():
     assert {"fragmentos.es", "fragmentos.en"} <= set(q["query"]["multi_match"]["fields"])
     assert "fragmentos" in q["_source"], "el procesador RAG lee el contexto del _source"
     assert set(q["highlight"]["fields"]) == {"fragmentos", "fragmentos.es", "fragmentos.en"}
+    assert (q["highlight"]["boundary_scanner"], q["highlight"]["order"]) == ("sentence", "score"),         "la oración que más pesa, no el comienzo del fragmento"
     assert q["ext"]["generative_qa_parameters"]["llm_question"] == "¿reinicio?"
 
 
@@ -106,7 +107,7 @@ def cluster(monkeypatch):
             ya = estado["indice"]; estado["indice"] = True
             return _R(400, text="resource_already_exists_exception") if ya else _R(200)
         if ruta.startswith("/conocimiento-plataforma/_doc"):
-            return _R(400, text=estado["ingesta_falla"]) if estado["ingesta_falla"] else _R(201, {"result": "created"})
+            return _R(500, text=estado["ingesta_falla"]) if estado["ingesta_falla"] else _R(201, {"result": "created"})
         if ruta.startswith("/conocimiento-plataforma/_delete_by_query"):
             return _R(200, {"deleted": 1})
         if ruta == "/_plugins/_ml/models/_search":
@@ -158,7 +159,8 @@ def test_subir_manda_el_archivo_al_pipeline_de_ingesta(cluster):
 
 def test_lo_que_falla_en_la_ingesta_se_dice(cluster):
     estado, client = cluster
-    estado["ingesta_falla"] = '{"error":{"reason":"field [adjunto.content] not present as part of path [adjunto.content]"}}'
+    # Como en CSS 3.4: el `fail` del pipeline vuelve como 500.
+    estado["ingesta_falla"] = '{"error":{"reason":"el documento no tiene texto"}}'
     r = client.post("/api/v1/conocimiento/documentos", json={"nombre": "escaneado.pdf", "contenido_b64": _B64})
     assert r.status_code == 400 and r.json()["detail"]["message"] == "escaneado.pdf: no tiene texto (¿es un PDF escaneado o una imagen?)"
 
