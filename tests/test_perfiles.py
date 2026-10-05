@@ -20,7 +20,7 @@ def test_el_transform_resume_el_caso_en_un_indice_aparte():
     # Fuera del pattern del caso: no se mezcla con los datos crudos.
     assert not t["target_index"].startswith("siem-")
     assert t["groups"] == [{"terms": {"source_field": "source.ip", "target_field": "entidad"}}]
-    assert t["continuous"] is False and t["enabled"] is True
+    assert t["continuous"] is True and t["enabled"] is True
     assert t["data_selection_query"] == {"exists": {"field": "source.ip"}}, "sin el grupo de eventos sin IP"
     assert "data_selection_query" not in perfiles.build_transform(
         "ventas-ecommerce", "v*", verticals.get_vertical("ventas-ecommerce")["perfil"])["transform"]
@@ -54,7 +54,7 @@ class _R:
         return self._d
 
 
-def _cluster(monkeypatch, existe=False, falla="", estado="finished"):
+def _cluster(monkeypatch, existe=False, falla="", estado="finished", continuo=True):
     pedidos = []
 
     def req(method, url, user, password, json_body=None, timeout=30):
@@ -63,7 +63,7 @@ def _cluster(monkeypatch, existe=False, falla="", estado="finished"):
         if falla and ruta.endswith(falla) and method != "GET":
             return _R(400, {"error": "malo"})
         if method == "GET" and ruta == "/_plugins/_transform/siem-perfil":
-            return _R(200 if existe else 404)
+            return _R(200, {"transform": {"continuous": continuo}}) if existe else _R(404)
         if method == "GET" and ruta == "/_plugins/_transform/siem-perfil/_explain":
             return _R(200, {"siem-perfil": {"transform_metadata": {
                 "status": estado, "failure_reason": "Failed to index the documents" if estado == "failed" else None}}})
@@ -176,3 +176,16 @@ def test_sum_y_lo_ya_declarado_no_se_tocan():
         "total": {"sum": {"field": "v"}}, "prom": {"avg": {"field": "v", "missing": 0}},
         "propio": {"min": {"field": "v", "missing": 5}}}
     assert perfil["medidas"]["prom"] == {"avg": {"field": "v"}}, "no modifica el spec del vertical"
+
+
+def test_el_transform_es_continuo():
+    """De una sola pasada se armaba con la ingesta corriendo y quedaba con lo que
+    había entrado (visto: 2.153 IPs de 34.259 en SIEM)."""
+    assert perfiles.build_transform("siem", "siem-*", PERFIL)["transform"]["continuous"] is True
+
+
+def test_uno_de_una_sola_pasada_se_rehace(monkeypatch):
+    pedidos = _cluster(monkeypatch, existe=True, continuo=False)
+    r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
+    assert r["ok"] and "era de una sola pasada" in r["reason"]
+    assert ("PUT", "/_plugins/_transform/siem-perfil") in pedidos and ("DELETE", "/perfil-siem") in pedidos

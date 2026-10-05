@@ -165,6 +165,14 @@ _CLIENT_CONFIG = {
 }
 
 
+def _razona(model: str) -> str:
+    """El valor JSON de `thinking` para el connector. Prendido en deepseek: en un
+    cluster CSS 3.4, deepseek-v4.1-flash con razonamiento acertó 25/25 consultas
+    (24/25 sin) en el mismo tiempo (~2,6 s). Apagado en el resto: a glm-5.2 lo
+    lleva de ~3 a ~8 s."""
+    return "true" if str(model).startswith("deepseek") else "false"
+
+
 def _connector_action(request_body: str, endpoint: str) -> dict[str, Any]:
     return {
         "action_type": "PREDICT",
@@ -187,7 +195,7 @@ def build_llm_connector(api_key: str, endpoint: str | None = None, model: str | 
         '{ "model": "${parameters.model}", "messages": ['
         '{"role": "system", "content": "${parameters.system_instruction:-You are a helpful assistant}"}, '
         '{"role": "user", "content": "${parameters.prompt}"}], '
-        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
+        '"temperature": 0, "chat_template_kwargs": {"thinking": ' + _razona(model) + '} }'
     )
     return {
         "name": "MaaS LLM (platform)",
@@ -214,7 +222,7 @@ def build_ppl_connector(api_key: str, ppl_system_prompt: str,
         '{ "model": "${parameters.model}", "messages": ['
         '{"role": "system", "content": "${parameters.system_prompt}"}, '
         '{"role": "user", "content": "${parameters.prompt}"}], '
-        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
+        '"temperature": 0, "chat_template_kwargs": {"thinking": ' + _razona(model) + '} }'
     )
     return {
         "name": "MaaS DeepSeek PPLTool (platform)",
@@ -355,7 +363,11 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         # comentario vacío no es '', es un campo AUSENTE. "¿Cuántas sin
         # comentario?" daba 0 comparando con ''.
         "10. Empty or missing values are stored as ABSENT fields: count them with isnull(field) "
-        "and non-empty ones with isnotnull(field). NEVER compare a field with ''.\n"
+        "and non-empty ones with isnotnull(field). NEVER compare a field with ''. "
+        # Sin esto el "top 5 IPs" del SIEM salía encabezado por un null (12.972
+        # eventos sin source.ip): la fila de los que no tienen el campo.
+        "When ranking or grouping BY a field (top N, most frequent, count by X), first filter "
+        "where isnotnull(<field>), unless the user asks about missing values.\n"
         + (_REGLAS_PPL_V3_ML.replace("<index>", index_pattern) if ppl_v3 else "") + "\n"
         "CORRECT PATTERNS:\n"
         f"{examples}"
@@ -459,7 +471,7 @@ def build_agent_connector(api_key: str, endpoint: str | None = None, model: str 
         '{"role": "user", "content": "${parameters.prompt}"}'
         '${parameters._interactions:-}]'
         '${parameters.tool_configs:-}, '
-        '"temperature": 0, "chat_template_kwargs": {"thinking": false} }'
+        '"temperature": 0, "chat_template_kwargs": {"thinking": ' + _razona(model) + '} }'
     )
     return {
         "name": "MaaS LLM con herramientas (platform)",

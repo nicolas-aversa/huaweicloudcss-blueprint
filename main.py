@@ -6642,6 +6642,14 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
         # y quedó en `failed` ("Failed to index the documents"); "Volver a
         # provisionar" lo salteaba como "ya estaba".
         fallo = _motivo_si_fallo(ruta, user, password)
+        # Uno de una sola pasada (los de antes) quedó con lo que había entrado al
+        # provisionar: se rehace continuo.
+        try:
+            continuo = bool(((ya.json() or {}).get("transform") or {}).get("continuous"))
+        except (ValueError, AttributeError):
+            continuo = True
+        if fallo is None and not continuo:
+            fallo = "era de una sola pasada y quedó con los datos de ese momento"
         if not force and fallo is None:
             return {"ok": True, "reason": "ya estaba"}
         _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)

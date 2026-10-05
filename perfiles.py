@@ -49,15 +49,16 @@ def medidas_sin_vacios(perfil: dict) -> dict[str, Any]:
 
 
 def build_transform(slug: str, index_pattern: str, perfil: dict) -> dict[str, Any]:
-    """`PUT _plugins/_transform/<slug>-perfil`. No continuo: recorre todos los
-    datos una vez y queda terminado (los datos de demo no cambian)."""
+    """`PUT _plugins/_transform/<slug>-perfil`. Continuo: cada minuto suma lo
+    que entró. Uno de una sola pasada se armaba al provisionar, con la ingesta
+    todavía corriendo, y quedaba con lo que había entrado hasta ahí (visto: 2.153
+    IPs de 34.259 en SIEM)."""
     cuerpo: dict[str, Any] = {
-        "enabled": True, "continuous": False,
+        "enabled": True, "continuous": True,
         "description": f"Perfil por {perfil.get('etiqueta') or perfil['campo']} de {slug} (plataforma)",
         "source_index": index_pattern, "target_index": indice_destino(slug), "page_size": 1000,
         # Cada minuto: con 1 hora el Transform recién arrancaba en el próximo
-        # turno (visto: creado y habilitado, sin correr). No es continuo: corre
-        # una vez sobre todo y queda terminado.
+        # turno (visto: creado y habilitado, sin correr).
         "schedule": {"interval": {"period": 1, "unit": "Minutes", "start_time": 1}},
         "groups": [{"terms": {"source_field": perfil["campo"], "target_field": "entidad"}}],
         "aggregations": medidas_sin_vacios(perfil),
