@@ -145,7 +145,7 @@ def test_si_habia_fallado_se_rehace(monkeypatch):
     quedó `failed`. "Volver a provisionar" lo tiene que rehacer, no saltear."""
     pedidos = _cluster(monkeypatch, existe=True, estado="failed")
     r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
-    assert r["ok"] and "había fallado: Failed to index the documents; se rehízo" in r["reason"]
+    assert r["ok"] and "(se rehízo: había fallado (Failed to index the documents))" in r["reason"]
     assert pedidos.index(("DELETE", "/perfil-siem")) < pedidos.index(("PUT", "/_plugins/_transform/siem-perfil"))         < pedidos.index(("POST", "/_plugins/_transform/siem-perfil/_start"))
 
 
@@ -187,5 +187,5 @@ def test_el_transform_es_continuo():
 def test_uno_de_una_sola_pasada_se_rehace(monkeypatch):
     pedidos = _cluster(monkeypatch, existe=True, continuo=False)
     r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
-    assert r["ok"] and "era de una sola pasada" in r["reason"]
+    assert r["ok"] and r["reason"].endswith("(se rehízo: el anterior era de una sola pasada y quedó con los datos de ese momento)")
     assert ("PUT", "/_plugins/_transform/siem-perfil") in pedidos and ("DELETE", "/perfil-siem") in pedidos

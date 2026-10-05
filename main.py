@@ -6642,6 +6642,7 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
         # y quedó en `failed` ("Failed to index the documents"); "Volver a
         # provisionar" lo salteaba como "ya estaba".
         fallo = _motivo_si_fallo(ruta, user, password)
+        fallo = f"había fallado ({fallo})" if fallo is not None else None
         # Uno de una sola pasada (los de antes) quedó con lo que había entrado al
         # provisionar: se rehace continuo.
         try:
@@ -6649,7 +6650,7 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
         except (ValueError, AttributeError):
             continuo = True
         if fallo is None and not continuo:
-            fallo = "era de una sola pasada y quedó con los datos de ese momento"
+            fallo = "el anterior era de una sola pasada y quedó con los datos de ese momento"
         if not force and fallo is None:
             return {"ok": True, "reason": "ya estaba"}
         _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
@@ -6661,7 +6662,7 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
     rs = _os_req("POST", f"{ruta}/_start", user, password, timeout=20)
     if not _resp_ok(rs):
         return {"ok": False, "reason": f"creado pero no arrancó: {_resp_motivo(rs)}"}
-    rehecho = f" (había fallado: {fallo}; se rehízo)" if fallo is not None else ""
+    rehecho = f" (se rehízo: {fallo})" if fallo is not None else ""
     return {"ok": True, "reason": f"{tid} → {perfiles.indice_destino(slug)}, una fila por "
                                   f"{perfil.get('etiqueta') or perfil['campo']}{rehecho}"}
 
