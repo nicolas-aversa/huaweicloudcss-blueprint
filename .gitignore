@@ -57,3 +57,6 @@ data/
 .env.hosted
 # Historial de ejecuciones en single-user (en hosted vive bajo data/).
 runs/
+
+# Logs del uvicorn local (pueden traer datos del entorno)
+uvicorn-local*.log
