@@ -35,6 +35,7 @@ TOKENS_POR_FRAGMENTO = 300
 SOLAPE = 0.15
 DOCUMENTOS_POR_RESPUESTA = 3
 RELEVANCIA_MINIMA = 0.5   # de la puntuación del mejor resultado, para mostrarlo
+SIN_TEXTO = "el documento no tiene texto"
 # Lo que entiende `attachment` (Tika) y tiene sentido como documento.
 EXTENSIONES = (".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".odt", ".rtf",
                ".txt", ".md", ".markdown", ".csv", ".json", ".log", ".html", ".htm")
@@ -50,6 +51,9 @@ def build_pipeline_de_ingesta() -> dict[str, Any]:
             # Un PDF escaneado no trae texto: sin `content` el rename falla y el
             # error dice por qué.
             {"rename": {"field": "adjunto.content", "target_field": "texto"}},
+            # Tika devuelve un par de blancos para un PDF sin texto (escaneado):
+            # se rechaza en vez de indexar un documento vacío.
+            {"fail": {"if": "ctx.texto == null || ctx.texto.trim().isEmpty()", "message": SIN_TEXTO}},
             {"text_chunking": {"field_map": {"texto": "fragmentos"}, "algorithm": {"fixed_token_length": {
                 "token_limit": TOKENS_POR_FRAGMENTO, "overlap_rate": SOLAPE, "tokenizer": "standard"}}}},
             # Ni el binario ni el texto entero: quedan los fragmentos.
@@ -93,7 +97,7 @@ def validar(nombre: str, tamano: int) -> str:
 def motivo_de_ingesta(texto_del_error: str) -> str:
     """El error de la ingesta, dicho para el usuario."""
     t = texto_del_error or ""
-    if "adjunto.content" in t and ("not present" in t or "doesn't exist" in t or "cannot be found" in t):
+    if SIN_TEXTO in t or ("adjunto.content" in t and ("not present" in t or "doesn't exist" in t or "cannot be found" in t)):
         return "no tiene texto (¿es un PDF escaneado o una imagen?)"
     m = re.search(r'"reason"\s*:\s*"([^"]{1,200})', t)
     return m.group(1) if m else t[:200]

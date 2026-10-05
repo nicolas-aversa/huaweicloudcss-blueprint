@@ -7032,12 +7032,12 @@ def _asegurar_rag(base: str, user: str, password: str) -> "tuple[str | None, str
         ok, st = _ml_wait_deployed(base, user, password, model_id)
         if not ok:
             return None, f"el modelo quedó {st}"
-    rp = _os_req("GET", f"{base}/_search/pipeline/{conocimiento.PIPELINE}", user, password, timeout=20)
+    # Siempre se pone (PUT es idempotente): uno que quedó de una versión
+    # anterior pedía otro campo de contexto y la búsqueda daba 500.
+    rp = _os_req("PUT", f"{base}/_search/pipeline/{conocimiento.PIPELINE}", user, password, timeout=20,
+                 json_body=conocimiento.build_pipeline(model_id))
     if not _resp_ok(rp):
-        rp = _os_req("PUT", f"{base}/_search/pipeline/{conocimiento.PIPELINE}", user, password, timeout=20,
-                     json_body=conocimiento.build_pipeline(model_id))
-        if not _resp_ok(rp):
-            return None, f"no se pudo crear el pipeline: {_resp_motivo(rp)}"
+        return None, f"no se pudo crear el pipeline: {_resp_motivo(rp)}"
     return model_id, ""
 
 

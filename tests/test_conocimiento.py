@@ -17,10 +17,12 @@ import main
 # ── Lo que hace OpenSearch ──────────────────────────────────────────────────
 def test_el_pipeline_de_ingesta_extrae_parte_y_no_guarda_el_archivo():
     procs = kb.build_pipeline_de_ingesta()["processors"]
-    assert [next(iter(p)) for p in procs] == ["attachment", "rename", "text_chunking", "remove"]
+    assert [next(iter(p)) for p in procs] == ["attachment", "rename", "fail", "text_chunking", "remove"]
     assert procs[0]["attachment"]["field"] == "archivo" and procs[0]["attachment"]["indexed_chars"] == -1
-    assert procs[2]["text_chunking"]["field_map"] == {"texto": "fragmentos"}
-    assert procs[3]["remove"]["field"] == ["archivo", "texto"], "ni el binario ni el texto entero"
+    # Un PDF escaneado: Tika devuelve blancos y se indexaba vacío.
+    assert procs[2]["fail"] == {"if": "ctx.texto == null || ctx.texto.trim().isEmpty()", "message": kb.SIN_TEXTO}
+    assert procs[3]["text_chunking"]["field_map"] == {"texto": "fragmentos"}
+    assert procs[4]["remove"]["field"] == ["archivo", "texto"], "ni el binario ni el texto entero"
 
 
 def test_el_indice_usa_el_pipeline_y_analiza_en_tres_idiomas():
@@ -58,6 +60,7 @@ def test_el_error_de_un_pdf_sin_texto_se_entiende():
     err = '{"error":{"root_cause":[{"type":"illegal_argument_exception","reason":"field [adjunto.content] not present as part of path [adjunto.content]"}]}}'
     assert kb.motivo_de_ingesta(err) == "no tiene texto (¿es un PDF escaneado o una imagen?)"
     assert kb.motivo_de_ingesta('{"error":{"reason":"otra cosa"}}') == "otra cosa"
+    assert kb.motivo_de_ingesta('{"error":{"reason":"el documento no tiene texto"}}') == "no tiene texto (¿es un PDF escaneado o una imagen?)"
 
 
 # ── La respuesta ────────────────────────────────────────────────────────────
@@ -177,7 +180,9 @@ def test_preguntar_crea_el_rag_la_primera_vez(cluster):
     assert ("POST", "/_plugins/_ml/connectors/_create") in hechos and ("PUT", "/_search/pipeline/plataforma-rag") in hechos
     estado["pedidos"].clear()
     client.post("/api/v1/conocimiento/preguntar", json={"pregunta": "¿Y en feriados?"})
-    assert not [p for m, p, _ in estado["pedidos"] if "_create" in p or "_register" in p or m == "PUT"]
+    assert not [p for m, p, _ in estado["pedidos"] if "_create" in p or "_register" in p]
+    # El pipeline se pone siempre: uno de una versión anterior pedía otro campo.
+    assert ("PUT", "/_search/pipeline/plataforma-rag", kb.build_pipeline("M1")) in estado["pedidos"]
 
 
 def test_sin_documentos_avisa(cluster):
