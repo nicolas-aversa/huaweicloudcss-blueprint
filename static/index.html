@@ -8365,8 +8365,6 @@
       // (~7 minutos para 9 casos) aunque estuviera bien.
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false));
-        if (ok) provisionCapabilitiesFromInfra(btn, pipelines, true);
-      });
       body.querySelector('#infra-verify-btn')?.addEventListener('click', (e) =>
         verificarIngesta(e.currentTarget));
 
