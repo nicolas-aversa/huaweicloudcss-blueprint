@@ -6137,8 +6137,12 @@ def _migrar_modelos_retirados(base: str, user: str, password: str, api_key: str)
         # El de PPL tiene su system_prompt como parámetro; el resto, el del LLM.
         nuevo = caps.maas_ppl_model() if "system_prompt" in params else caps.maas_llm_model()
         nombre = f"Modelo de MaaS · {fuente.get('name') or h['_id']}"
+        # En CSS 3.4 `connector_id` es texto: el término exacto va contra
+        # `.keyword` (con `connector_id` solo, no encontraba ningún modelo y el
+        # connector quedaba "en uso").
         rm = _os_req("POST", f"{base}/_plugins/_ml/models/_search", user, password, timeout=20,
-                     json_body={"size": 20, "query": {"term": {"connector_id": h["_id"]}}, "_source": False})
+                     json_body={"size": 20, "_source": False, "query": {"bool": {"minimum_should_match": 1, "should": [
+                         {"term": {"connector_id.keyword": h["_id"]}}, {"term": {"connector_id": h["_id"]}}]}}})
         try:
             modelos = [x["_id"] for x in (rm.json() or {}).get("hits", {}).get("hits", [])] if _resp_ok(rm) else []
         except (ValueError, AttributeError):

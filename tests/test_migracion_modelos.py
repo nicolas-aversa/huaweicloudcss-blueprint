@@ -32,7 +32,10 @@ class _Cluster:
             return _R(200, {"hits": {"hits": [{"_id": i, "_source": {"name": c["name"], "parameters": c["parameters"]}}
                                               for i, c in self.connectors.items()]}})
         if ruta == "/_plugins/_ml/models/_search":
-            cid = json_body["query"]["term"]["connector_id"]
+            # Como en CSS 3.4: `connector_id` es texto, el término exacto solo
+            # matchea contra `.keyword`.
+            terms = [x["term"] for x in json_body["query"].get("bool", {}).get("should", [])] or [json_body["query"].get("term", {})]
+            cid = next((t["connector_id.keyword"] for t in terms if "connector_id.keyword" in t), None)
             return _R(200, {"hits": {"hits": [{"_id": m} for m, d in self.modelos.items() if d["connector"] == cid]}})
         if ruta.endswith("/_undeploy"):
             # Como en CSS: asíncrono, tarda un par de consultas en quedar replegado.
