@@ -122,13 +122,13 @@ def test_conversar_con_el_agente(monkeypatch):
         return _R(404, {})
 
     monkeypatch.setattr(main, "_os_req", req)
-    monkeypatch.setattr(main, "_visualizar", lambda *a: {"mark": "bar"})
+    monkeypatch.setattr(main, "_visualizar", lambda *a: pytest.fail("la respuesta no espera al gráfico"))
     pedido = main.PplChatRequest(question="¿top IP?", slug="siem", memory_id="MEM0")
     r = main._conversar_con_el_agente("http://x:9200", "a", "p", "AG", pedido, "SIEM", "siem*")
     assert r.answer == "La IP es 5.188.206.18." and r.memory_id == "MEM"
     assert r.ppl == "source=siem* | where isnotnull(source.ip)" and r.result["datarows"] == [[571]]
     assert len(r.consultas) == 3 and r.fuentes == [{"titulo": "Runbook.md", "extracto": "bloquear la IP"}]
-    assert r.vega == {"mark": "bar"}
+    assert r.vega == {}, "el gráfico se pide aparte"
     ejecucion = next(b for m, ruta, b in pedidos if ruta.endswith("/_execute"))
     assert ejecucion["parameters"]["memory_id"] == "MEM0", "sigue la conversación"
     assert "datos de SIEM" in ejecucion["parameters"]["question"]
@@ -213,4 +213,22 @@ def test_la_vista_manda_y_guarda_la_memoria():
     assert "if (data.memory_id) capChatMemoria[slug] = data.memory_id;" in html
     assert "function capChatLimpiar(slug) { capChats[slug] = []; delete capChatMemoria[slug]; }" in html, \
         "conversación nueva, memoria nueva"
-    assert "_renderCapChartInto(el.querySelector('.cap-chart-host'), data.result, data.vega);" in html
+    # El gráfico del agente se pide DESPUÉS de mostrar la respuesta.
+    assert "if (conT2v) _graficoDelAgente(pend, lugar, question, data);" in html
+    assert "else _renderCapChartInto(lugar, data.result, data.vega);" in html
+    i = html.index("async function _graficoDelAgente(")
+    fn = html[i:html.index("      function _typeInto(", i)]
+    assert "fetch('/api/v1/capabilities/visualizar'" in fn and "Armando el gráfico" in fn
+    assert "_renderCapChartInto(actual, data.result, pend.vega);" in fn, "sin el del agente, el de las reglas"
+
+
+def test_el_grafico_se_pide_aparte(monkeypatch):
+    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x:9200", "a", "p"))
+    vistos = []
+    monkeypatch.setattr(main, "_visualizar", lambda base, u, pw, q, ppl, res: vistos.append((q, ppl, res)) or {"mark": "line"})
+    from fastapi.testclient import TestClient
+    res = {"schema": [{"name": "a"}], "datarows": [[1], [2]]}
+    r = TestClient(main.app).post("/api/v1/capabilities/visualizar", json={"question": "q", "ppl": "source=x", "result": res})
+    assert r.json() == {"vega": {"mark": "line"}} and vistos == [("q", "source=x", res)]
+    monkeypatch.setattr(main, "_visualizar", lambda *a: None)
+    assert TestClient(main.app).post("/api/v1/capabilities/visualizar", json={"question": "q", "ppl": "p"}).json() == {"vega": {}}

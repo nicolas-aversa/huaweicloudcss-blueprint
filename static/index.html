@@ -2357,6 +2357,8 @@
     .docs__fuentes-lbl { margin: 12px 0 6px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
     .docs__fuentes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
     .docs__extracto { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
+    .cap-chart__armando { display: flex; align-items: center; gap: 6px; padding: 8px 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    .cap-chart__armando .icon { width: 13px; height: 13px; animation: pulse 1.6s var(--ease) infinite; }
     /* Los documentos que consultó el agente, debajo de la respuesta. */
     .cap-chat__fuentes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: var(--fs-xs); }
     .cap-chat__fuentes-lbl { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-weight: 600; }
@@ -7336,6 +7338,25 @@
           actions: false, renderer: 'svg',
         })).catch(() => { holder.remove(); });
       }
+      // El gráfico de text to visualization, cuando llega. Mientras tanto una
+      // línea dice que se está armando; si no llega, el de las reglas de acá.
+      async function _graficoDelAgente(pend, lugar, pregunta, data) {
+        lugar.innerHTML = `<div class="cap-chart__armando">${icon('trending')} Armando el gráfico…</div>`;
+        let vega = null;
+        try {
+          const res = await fetch('/api/v1/capabilities/visualizar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: pregunta, ppl: data.ppl, result: data.result }),
+          });
+          if (res.ok) vega = (await res.json()).vega || null;
+        } catch (_err) { /* sin el del agente, el de siempre */ }
+        pend.vega = vega && Object.keys(vega).length ? vega : null;
+        // El mensaje puede haberse re-pintado mientras tanto: el lugar de ahora.
+        const actual = _msgDe(pend)?.querySelector('.cap-chart-host') || lugar;
+        actual.innerHTML = '';
+        _renderCapChartInto(actual, data.result, pend.vega);
+        _scrollLog(actual);
+      }
       function _typeInto(el, text, onDone) {
         text = text || '';
         if (_reduceMotion || text.length > 320) { el.textContent = text; onDone && onDone(); return; }
@@ -7399,12 +7420,17 @@
           pend.html = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
           pend.result = data.result || null;
           pend.vega = data.vega || null;
+          // Con el agente, el gráfico lo arma text to visualization: se pide
+          // aparte para no demorar la respuesta (~4 s más).
+          const conT2v = !!(data.memory_id && data.ppl && ((data.result || {}).datarows || []).length > 1 && !data.vega);
           pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };
           const el = _msgDe(pend);
           if (!el) return;   // el caso no está en pantalla: se pinta al volver
           // Visualización Vega-Lite (motor de OpenSearch) + respuesta con typewriter + details.
           el.innerHTML = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer"></span>`;
-          _renderCapChartInto(el.querySelector('.cap-chart-host'), data.result, data.vega);
+          const lugar = el.querySelector('.cap-chart-host');
+          if (conT2v) _graficoDelAgente(pend, lugar, question, data);
+          else _renderCapChartInto(lugar, data.result, data.vega);
           const answerEl = el.querySelector('.cap-chat__answer');
           _typeInto(answerEl, data.answer || '', () => {
             if (details) el.insertAdjacentHTML('beforeend', details);

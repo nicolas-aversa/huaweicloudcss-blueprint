@@ -8481,10 +8481,25 @@ def _conversar_con_el_agente(base: str, user: str, password: str, agente: str, r
     leido = agente_chat.de_las_trazas(trazas)
     buena = agente_chat.ultima_buena(leido["consultas"])
     resultado = (buena or {}).get("result") or {}
-    vega = _visualizar(base, user, password, request.question, (buena or {}).get("ppl", ""), resultado)
+    # Sin el gráfico: text to visualization es otro llamado al LLM (~4 s) y se
+    # pide aparte (/capabilities/visualizar), así la respuesta no lo espera.
     return PplChatResponse(answer=salida["respuesta"], ppl=(buena or {}).get("ppl", ""), result=resultado,
                            consultas=leido["consultas"] if len(leido["consultas"]) > 1 else [],
-                           fuentes=leido["fuentes"], vega=vega or {}, memory_id=salida["memory_id"])
+                           fuentes=leido["fuentes"], memory_id=salida["memory_id"])
+
+
+class VisualizarRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    ppl: str = Field(..., min_length=1, max_length=4000)
+    result: dict = Field(default_factory=dict)
+
+
+@app.post("/api/v1/capabilities/visualizar", tags=["capabilities"])
+def visualizar(request: VisualizarRequest) -> dict:
+    """El gráfico de una respuesta del asistente, armado por el agente de text
+    to visualization de OpenSearch. Se pide después de mostrar la respuesta."""
+    base, user, password = _cluster_del_entorno("visualizar")
+    return {"vega": _visualizar(base, user, password, request.question, request.ppl, request.result) or {}}
 
 
 _AGENTE_T2VEGA: dict[str, str] = {}
