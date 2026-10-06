@@ -23,17 +23,20 @@ import plan_de_cluster
 
 _RAIZ = pathlib.Path(__file__).resolve().parent.parent
 _SEMANTICA = json.loads((_RAIZ / "tests" / "fixtures" / "semantica_demos.json").read_text(encoding="utf-8"))
+# Las reglas de Security Analytics que propuso el LLM (`seguridad_derivada`).
+_SEGURIDAD = json.loads((_RAIZ / "tests" / "fixtures" / "seguridad_demos.json").read_text(encoding="utf-8"))
 
 # Lo que cada vertical curada provisiona hoy, en los nombres del Builder.
 ESPERADO = {
-    "ventas-ecommerce.log": {"fecha": True, "medida": "taxful_total_price", "entidad": "customer_id",
-                             "perfil": "customer_id"},
     "produccion-pozos.log": {"fecha": True, "medida": "oil_vol", "perfil": "well",
                              # El curado cuenta las lecturas con el pozo parado (`downtime`,
                              # un campo que arma su filter); el Builder, `status_falla`.
                              "critico": "status_falla"},
+    # Tiene campos con nombre de seguridad (event, user_id) pero no lo es.
     "streaming-ott.log": {"fecha": True, "medida": "watch_seconds", "entidad": "user_id",
-                          "critico": "error_code"},
+                          "critico": "error_code", "seguridad": False},
+    "ventas-ecommerce.log": {"fecha": True, "medida": "taxful_total_price", "entidad": "customer_id",
+                             "perfil": "customer_id", "seguridad": False},
     # Sin header: el nombre de la columna lo pone la semántica (triage o triaje).
     "encuentros-clinicos.log": {"fecha": True, "entidad": ("id_paciente", "paciente_id"),
                                 "critico": ("triage", "triaje"),
@@ -52,7 +55,6 @@ ESPERADO = {
 
 # Los huecos de hoy: (archivo, criterio) → por qué.
 HUECOS = {
-    ("fortianalyzer.log", "seguridad"): "Security Analytics sale solo de las verticales curadas",
 }
 
 
@@ -72,6 +74,7 @@ def _descubierto(archivo: str) -> tuple:
     """(campos, plan) del Builder para las primeras 200 filas, como las manda el front."""
     import maas_integrator
     import semantica
+    import seguridad_derivada
 
     ruta = _RAIZ / "datasets" / archivo
     lineas = muestra_repartida([l for l in ruta.read_text(encoding="utf-8").splitlines() if l.strip()])
@@ -84,13 +87,19 @@ def _descubierto(archivo: str) -> tuple:
             raise RuntimeError("sin respuesta grabada")
         return _SEMANTICA[archivo]
 
+    def _reglas_grabadas(_prompt):
+        if archivo not in _SEGURIDAD:
+            raise RuntimeError("sin respuesta grabada")
+        return _SEGURIDAD[archivo]
+
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(semantica, "_llamar_al_llm", _grabada)
+        mp.setattr(seguridad_derivada, "_llamar_al_llm", _reglas_grabadas)
         mp.setattr(maas_integrator, "_build_client", _sin_llm)
         r = main.generate_filter_endpoint(main.GenerateFilterRequest(raw_log="\n".join(lineas)))
     campos = [f.model_dump() if hasattr(f, "model_dump") else dict(f) for f in r.fields]
     slug = archivo.removesuffix(".log")
-    return campos, {i["plugin"]: i for i in plan_de_cluster.plan(slug, campos)}
+    return campos, {i["plugin"]: i for i in plan_de_cluster.plan(slug, campos, seguridad=r.seguridad)}
 
 
 def _nombre(campos: list[dict], ruta: str) -> str:
@@ -132,7 +141,7 @@ def _chequeo(archivo: str, criterio: str):
             alternativas = alternativas if isinstance(alternativas, tuple) else (alternativas,)
             assert marcados & set(alternativas), (alternativas, plan["analista"])
     elif criterio == "seguridad":
-        assert (plan.get("security_analytics") or {}).get("aplica"), "sin Security Analytics"
+        assert bool((plan.get("security_analytics") or {}).get("aplica")) == esperado, plan.get("security_analytics")
     else:
         raise AssertionError(criterio)
 

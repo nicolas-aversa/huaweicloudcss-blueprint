@@ -122,7 +122,9 @@ def build_correlacion(correlacion: dict, index_pattern: str) -> dict[str, Any]:
     return {
         "name": correlacion["nombre"],
         "time_window": int(correlacion.get("ventana_min", 60)) * 60_000,
-        "correlate": [{"index": index_pattern, "query": c["query"], "category": c["log_type"]}
+        # Cada lado en su índice si lo dice (las fuentes de un dataset nuevo
+        # van a índices distintos); si no, el del caso.
+        "correlate": [{"index": c.get("index") or index_pattern, "query": c["query"], "category": c["log_type"]}
                       for c in correlacion["correlate"]],
     }
 

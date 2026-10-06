@@ -217,7 +217,7 @@ def test_front_payload_merges_case_into_its_group(store):
     entry = after["verticals"][-1]
     assert entry["slug"] == "firewall-de-acme"
     assert entry["custom"] is True
-    assert entry["hasCapability"] is False, "el spec del chatbot se auto-deriva de fields"
+    assert entry["hasCapability"] is True, "el asistente sale de sus campos"
 
     seguridad = next(g for g in after["groups"] if g["id"] == "seguridad")
     assert seguridad["members"][-1] == "firewall-de-acme"
@@ -855,3 +855,23 @@ def test_un_caso_viejo_con_slug_log_plano_sigue_andando(store):
 ])
 def test_safe_filename(feo, esperado):
     assert custom_cases.safe_filename(feo, "firewall-de-acme") == esperado
+
+
+
+def test_el_caso_guarda_lo_decidido_en_el_paso_2(store, client):
+    """Las reglas de Security Analytics, los plugins apagados y la familia
+    (los archivos que se subieron juntos) viajan con el caso: el deploy los usa
+    aunque el body se rearme sin ellos."""
+    reglas = {"descripcion": "FortiGate", "reglas": [{"titulo": "IPS", "nivel": "high", "seleccion": {"a": "b"}}]}
+    r = client.post("/api/v1/cases", json={**_meta(), "log_content": LOG, "seguridad": reglas,
+                                           "excluir": ["perfil", 7], "familia": "SIEM de ACME",
+                                           "familia_label": "SIEM de ACME"})
+    assert r.status_code == 200, r.text
+    caso = custom_cases.get_case("firewall-de-acme")
+    assert caso["seguridad"] == reglas and caso["excluir"] == ["perfil"]
+    assert caso["familia"] == "siem-de-acme" and caso["familia_label"] == "SIEM de ACME"
+    entry = next(v for v in main._front_payload()["verticals"] if v["slug"] == "firewall-de-acme")
+    assert entry["hasSecurity"] is True and entry["familia"] == "siem-de-acme"
+    custom_cases.save_case(_meta("Otro", seguridad="no es un dict", excluir=["security_analytics"]), LOG)
+    otro = next(v for v in main._front_payload()["verticals"] if v["slug"] == "otro")
+    assert otro["hasSecurity"] is False and custom_cases.get_case("otro")["seguridad"] is None

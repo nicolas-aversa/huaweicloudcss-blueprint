@@ -1008,6 +1008,8 @@ class GenerateFilterResponse(BaseModel):
     # Para el `codec => multiline` del input: con qué empieza cada registro.
     # Vacío si cada línea es un registro (o si no se encontró un inicio fiable).
     inicio_registro: str = ""
+    # Reglas Sigma propuestas sobre los campos, si es un log de seguridad.
+    seguridad: dict | None = None
 
 
 class IndexTemplateRequest(BaseModel):
@@ -1357,6 +1359,12 @@ def create_custom_case(request: dict) -> dict:
                 "fields": request.get("fields") or [],
                 "suggested_questions": request.get("questions") or [],
                 "input_config": request.get("input_config") or {},
+                # Del plan del cluster (paso 2) y, si se subieron varios
+                # archivos juntos, de qué dataset es esta fuente.
+                "seguridad": request.get("seguridad"),
+                "excluir": request.get("excluir") or [],
+                "familia": request.get("familia", ""),
+                "familia_label": request.get("familia_label", ""),
             },
             str(request.get("log_content", "") or ""),
             created_by=email,
@@ -1598,12 +1606,18 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         except ValueError as exc:
             print(f"[raiz] los campos quedan bajo `{raiz.AREA}.`: {exc}")
 
+    # Si es un log de seguridad, sus reglas para Security Analytics (validadas
+    # contra los campos y la muestra). Va al final: con los paths definitivos.
+    import seguridad_derivada
+    propuesta = seguridad_derivada.proponer(enriched_fields, lineas) if not request.feedback else None
+
     return GenerateFilterResponse(
         filter_code=filter_code,
         fields=enriched_fields,
         verificacion=verificacion,
         questions=preguntas.armar(enriched_fields, candidatas, filas_de),
         inicio_registro=(perfil.inicio_registro if perfil is not None else ""),
+        seguridad=propuesta,
     )
 
 
@@ -1611,6 +1625,7 @@ class PlanDelClusterRequest(BaseModel):
     slug: str = Field(default="", max_length=120)
     label: str = Field(default="", max_length=200)
     fields: list[dict] = Field(default_factory=list)
+    seguridad: dict | None = None
 
 
 @app.post("/api/v1/onboarding/plan-del-cluster", tags=["onboarding"],
@@ -1622,7 +1637,7 @@ def plan_del_cluster_endpoint(request: PlanDelClusterRequest) -> dict:
     import plan_de_cluster
 
     slug = (request.slug or "").strip() or "dataset"
-    return {"items": plan_de_cluster.plan(slug, request.fields, request.label)}
+    return {"items": plan_de_cluster.plan(slug, request.fields, request.label, seguridad=request.seguridad)}
 
 
 @app.post(
@@ -2115,6 +2130,7 @@ class PipelineCase(BaseModel):
     document_id: str = Field(default="", description="document_id de dedup para read_existing (ej. CTS → %{trace_id}, fintech → %{[@metadata][generated_id]}). Vacío = ids auto de Logstash.")
     input_config: dict = Field(default_factory=dict, description="Fuente propia del caso (`{plugin_type, <plugin>: {...}}`) para casos que NO leen de OBS (Kafka/Beats/JDBC del cliente). Vacío = input s3 sobre el bucket de demos.")
     excluir: list[str] = Field(default_factory=list, description="Plugins del plan del cluster que se apagaron en el paso 2 (forecasting, anomalias, alertas, perfil, analista).")
+    seguridad: dict = Field(default_factory=dict, description="Reglas de Security Analytics que propuso el Builder (`seguridad_derivada`). Vacío = las del caso guardado, si tiene.")
 
 
 class TerraformDeployRequest(BaseModel):
@@ -2611,13 +2627,16 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
     registry = {} if _fresh_deploy_effective(request, terraform_dir) else _read_pipelines_registry(terraform_dir)
     if request.cases:
         for case in request.cases:
+            propuesta, excluir = _propuesta_de_seguridad(case)
             registry[case.slug] = {
                 "pipeline_conf": _build_pipeline_conf_for_case(case, request),
                 "start_ingestion": request.start_ingestion,
                 "index": case.index_name,
                 "obs_prefix": case.obs_prefix,
                 "fields": case.fields or [],
-                "excluir": list(case.excluir or []),
+                "excluir": excluir,
+                "seguridad": _spec_de_seguridad_del_caso(case, propuesta) if propuesta else None,
+                "familia": (custom_cases.get_case(case.slug) or {}).get("familia", ""),
                 # Cada caso creado desde la plataforma aporta su propio label →
                 # el chatbot nombra bien la fuente en vez de rotular todo igual.
                 "label": _registry_label(case.slug),
@@ -2633,6 +2652,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
             "excluir": list(request.excluir or []),
             "label": _registry_label(slug),
         }
+    _correlaciones_de_familias(registry)
     _write_pipelines_registry(terraform_dir, registry)
 
     # Normalizado también acá: las pipelines que ya corrían vuelven a Terraform
@@ -2690,6 +2710,24 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
     # las variables por stdin.
     _write_destroy_creds(terraform_dir, request)
     return registry
+
+
+def _correlaciones_de_familias(registry: dict) -> None:
+    """Las fuentes de un mismo dataset (los archivos que se subieron juntos:
+    firewall, WAF, auth…) con Security Analytics se correlacionan de a pares:
+    hallazgos de las dos dentro de una hora. Van en la spec de la última fuente
+    de la familia, que se provisiona cuando los tipos de log de las demás ya
+    existen."""
+    import seguridad_derivada
+
+    familias: dict[str, list[str]] = {}
+    for slug, entrada in registry.items():
+        if (entrada or {}).get("familia") and (entrada or {}).get("seguridad"):
+            familias.setdefault(entrada["familia"], []).append(slug)
+    for familia, slugs in familias.items():
+        fuentes = [(s, registry[s]["seguridad"], index_pattern_from_name(registry[s].get("index") or f"{s}-*"))
+                   for s in slugs]
+        registry[slugs[-1]]["seguridad"]["correlaciones"] = seguridad_derivada.correlaciones(familia, fuentes)
 
 
 def _backend_init_args(terraform_dir: Path) -> list[str] | None:
@@ -3203,6 +3241,41 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _propuesta_de_seguridad(caso: "PipelineCase") -> "tuple[dict | None, list[str]]":
+    """(las reglas que propuso el Builder, lo apagado en el paso 2) de un caso:
+    las del body o, si el body se rearmó sin ellas (un redeploy tras un F5),
+    las del caso guardado. Sin reglas o con Security Analytics apagado: None."""
+    guardado = custom_cases.get_case(caso.slug) or {}
+    excluir = list(caso.excluir or guardado.get("excluir") or [])
+    propuesta = caso.seguridad or guardado.get("seguridad") or None
+    if not propuesta or "security_analytics" in excluir:
+        return None, excluir
+    return propuesta, excluir
+
+
+def _spec_de_seguridad_del_caso(caso: "PipelineCase", propuesta: dict) -> dict:
+    """La spec `security` del caso, con los meses del dataset (sus índices se
+    crean antes que los detectores: ver `seguridad.indices_mensuales`)."""
+    import seguridad_derivada
+
+    texto = caso.log_file_content
+    if not texto:
+        ruta = custom_cases.dataset_path(caso.slug)
+        texto = ruta.read_text(encoding="utf-8", errors="replace") if ruta else ""
+    meses = seguridad_derivada.meses_del_dataset(texto, caso.fields or [])
+    return seguridad_derivada.spec_del_caso(caso.slug, propuesta, meses)
+
+
+def _specs_de_seguridad(terraform_dir: "Path | None" = None) -> dict:
+    """slug → spec de Security Analytics: la de las verticales curadas y la de
+    cada dataset nuevo desplegado (la que guardó el deploy en el registro)."""
+    specs = dict(verticals.security_specs())
+    for slug, entrada in _read_pipelines_registry(terraform_dir or _active_terraform_dir()).items():
+        if slug not in specs and (entrada or {}).get("seguridad") and "security_analytics" not in _excluidos(entrada):
+            specs[slug] = entrada["seguridad"]
+    return specs
+
+
 def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> None:
     """Los casos con Security Analytics escriben `<caso>-%{+YYYY_MM}` (ver
     `seguridad.FORMATO_DEL_MES`). Se fuerza acá, y no solo en el front, porque
@@ -3215,6 +3288,9 @@ def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> 
         v = verticals.get_vertical(caso.slug) if caso.slug in specs else None
         if v and v.get("index_base"):
             caso.index_name = seguridad.indice_de_salida(v["index_base"])
+        elif _propuesta_de_seguridad(caso)[0]:
+            base = (caso.index_name or "").split("%{")[0].rstrip("-._") or caso.slug
+            caso.index_name = seguridad.indice_de_salida(base)
 
 
 def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
@@ -4930,7 +5006,7 @@ def _apply_index_templates(
     # Los casos con Security Analytics llevan su alias en el template: así cada
     # índice mensual (siem-2025.08, …) entra al alias del detector apenas se crea.
     import seguridad
-    con_seguridad = verticals.security_specs()
+    con_seguridad = _specs_de_seguridad(_active_terraform_dir())
     casos = request.cases or []
     for i, (name, tpl) in enumerate(templates):
         caso = next((c for c in casos if f"{base_name}-{c.slug}" == name), None)
@@ -5132,7 +5208,7 @@ def _preparar_seguridad_para_ingesta(request: "TerraformDeployRequest", terrafor
     detectores se recrean. Emite un `step` por caso."""
     import seguridad
 
-    specs = verticals.security_specs()
+    specs = _specs_de_seguridad(terraform_dir)
     casos = [c for c in request.cases or [] if c.slug in specs]
     if not casos or not request.opensearch_password:
         return
@@ -6820,7 +6896,7 @@ def _descripcion_log_type(specs: dict, slug: str, log_type: str) -> str:
 def _resumen_de_seguridad(terraform_dir: Path) -> dict:
     """Lo provisionado por caso, para /terraform/status (solo el registro, sin
     tocar el cluster). Cada detector con la descripción de su tipo de log."""
-    specs = verticals.security_specs()
+    specs = _specs_de_seguridad(terraform_dir)
     return {slug: {"detectores": [{"nombre": n, "log_type": d.get("log_type", ""),
                                    "descripcion": _descripcion_log_type(specs, slug, d.get("log_type", ""))}
                                   for n, d in (reg.get("detectores") or {}).items()],
@@ -7366,7 +7442,7 @@ def resumen_seguridad() -> ResumenSeguridadResponse:
                             detail={"stage": "security", "message": "No hay un cluster alcanzable."})
     base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
     user, password = "admin", _cluster_admin_password(terraform_dir)
-    specs = verticals.security_specs()
+    specs = _specs_de_seguridad(terraform_dir)
     casos = []
     for slug, reg in registro.items():
         regla_por_id = {rid: next((r for lt in (specs.get(slug) or {}).get("log_types", [])
@@ -7720,7 +7796,7 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
 
     # Security Analytics para los casos que lo declaran (SIEM, FortiAnalyzer):
     # acá, antes de la ingesta, para que el detector vea todos los documentos.
-    specs_seguridad = verticals.security_specs()
+    specs_seguridad = _specs_de_seguridad(terraform_dir)
     detectores_sa = 0
     for slug_t, _campos_t, index_name_t in targets:
         spec_sa = specs_seguridad.get(slug_t)
@@ -7794,7 +7870,7 @@ def _revisar_meses_de_seguridad(cluster: dict, user: str, password: str, https_e
     """Después de la ingesta: ¿algún mes quedó sin detección? Un evento fuera de
     los meses declarados hace que Logstash cree ese índice sobre la marcha, y
     sin esto el hueco no se veía en ningún lado."""
-    specs = verticals.security_specs()
+    specs = _specs_de_seguridad(terraform_dir)
     registro = _read_security(terraform_dir)
     pipe_reg = _read_pipelines_registry(terraform_dir)
     base = _os_base(cluster, https_enabled)

@@ -415,7 +415,7 @@ def test_se_provisiona_al_aplicar_para_cada_caso_de_seguridad():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def apply_schema(")
     cuerpo = src[i:src.index("\n    msg = ", i)]
-    assert "specs_seguridad = verticals.security_specs()" in cuerpo
+    assert "specs_seguridad = _specs_de_seguridad(terraform_dir)" in cuerpo
     assert "index_pattern_from_name(index_name_t), spec_sa," in cuerpo
     # Una sola llamada: el deploy ya no lo corre (lo hacía antes de que existiera el template).
     # La definición, la de apply-schema y la de la ingesta (índice + detectores antes de Logstash).

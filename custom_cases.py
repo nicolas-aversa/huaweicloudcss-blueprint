@@ -263,7 +263,10 @@ def front_entries() -> list[dict]:
             "description": c.get("description", ""),
             "dedupId": "",
             "hidden": False,
-            "hasCapability": False,  # se auto-deriva de `fields` en runtime
+            "hasCapability": bool(c.get("fields")),  # el asistente sale de sus campos
+            "hasSecurity": bool(c.get("seguridad")) and "security_analytics" not in (c.get("excluir") or []),
+            "familia": c.get("familia", ""),
+            "familiaLabel": c.get("familia_label", ""),
             "sample": c.get("sample", ""),
             "filterCode": c.get("filter_code", ""),
             "fields": c.get("fields", []),
@@ -365,6 +368,13 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
         "filter_code": filter_code,
         "fields": fields,
         "suggested_questions": questions[:10],
+        # Lo que se decidió en el paso 2 y que el deploy usa aunque el body se
+        # rearme sin ello: las reglas de Security Analytics que se propusieron,
+        # los plugins apagados y la familia (las fuentes que se subieron juntas).
+        "seguridad": meta.get("seguridad") if isinstance(meta.get("seguridad"), dict) else None,
+        "excluir": [str(x) for x in (meta.get("excluir") or []) if isinstance(x, str)][:10],
+        "familia": slugify(str(meta.get("familia") or "")) if meta.get("familia") else "",
+        "familia_label": str(meta.get("familia_label") or "").strip()[:60],
         # Solo los casos con dataset se pre-cargan en OBS; los `live` leen de la
         # fuente del cliente y no tienen archivo que subir. El nombre es el del
         # archivo subido: `<slug>-logs/<ese nombre>` en el bucket.

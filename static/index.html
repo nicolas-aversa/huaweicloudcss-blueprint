@@ -3806,6 +3806,8 @@
         state.fields = Array.isArray(data.fields) ? data.fields : [];
         state.verificacion = data.verificacion || null;
         state.preguntas = Array.isArray(data.questions) ? data.questions : [];
+        // Reglas de Security Analytics sobre estos campos, si es un log de seguridad.
+        state.seguridad = data.seguridad || null;
         // Con qué empieza cada registro, si hay registros de varias líneas: va
         // al `codec => multiline` del input s3 (ver collectInputConfig).
         state.inicioRegistro = data.inicio_registro || '';
@@ -3910,6 +3912,7 @@
     function clearMapping() {
       state.fields = [];
       state.planExcluidos = [];
+      state.seguridad = null;
       state.filterCode = '';
       state.generatedFromLog = '';
       state.inicioRegistro = '';   // el patrón multilínea es de ESE dataset
@@ -4027,7 +4030,7 @@
       try {
         const res = await fetch('/api/v1/onboarding/plan-del-cluster', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields: state.fields || [] }),
+          body: JSON.stringify({ fields: state.fields || [], seguridad: state.seguridad || null }),
         });
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
@@ -4882,6 +4885,9 @@
             fields: state.fields || [],
             // Las diez del paso 2 (LLM validado + plantillas con valores reales).
             questions: state.preguntas || [],
+            // Lo decidido en el plan del cluster (paso 2).
+            seguridad: state.seguridad || null,
+            excluir: state.planExcluidos || [],
             log_content: state.logFileContent || '',
             // El nombre con que se subió: así se guarda y así llega al bucket.
             log_filename: state.logFileName || '',

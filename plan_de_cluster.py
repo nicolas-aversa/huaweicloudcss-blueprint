@@ -58,7 +58,7 @@ def campo_de_mapa(fields: list[dict]) -> "tuple[str, str] | None":
 
 # Los que se pueden apagar en el paso 2 (el provisioning los saltea, ver
 # `main._excluidos`). El resto es la base: el asistente y lo del cluster.
-OPCIONALES = ("forecasting", "anomalias", "alertas", "perfil", "analista")
+OPCIONALES = ("forecasting", "anomalias", "alertas", "perfil", "analista", "security_analytics")
 
 
 def _item(plugin: str, titulo: str, aplica: bool, motivo: str, config: Any = None) -> dict:
@@ -75,7 +75,7 @@ def _forecast_en_palabras(fc: dict, fields: list[dict]) -> str:
 
 
 def plan(slug: str, fields: list[dict], label: str = "",
-         enums: "dict[str, list[str]] | None" = None) -> list[dict]:
+         enums: "dict[str, list[str]] | None" = None, seguridad: "dict | None" = None) -> list[dict]:
     """Los plugins de OpenSearch para el dataset `slug`, cada uno con
     `{plugin, titulo, aplica, motivo, config}`."""
     from index_template import index_pattern_from_name
@@ -129,6 +129,14 @@ def plan(slug: str, fields: list[dict], label: str = "",
     items.append(_item("explicar", "Explicar un cambio", bool(fecha),
                        ("compara la distribución de los campos" + (f" y los patrones de {_nombre_de(patrones, fields)}" if patrones else ""))
                        if fecha else sin_fecha, {"pattern_field": patrones}))
+
+    reglas = (seguridad or {}).get("reglas") or []
+    items.append(_item(
+        "security_analytics", "Security Analytics (reglas Sigma)", bool(reglas),
+        (f"{len(reglas)} regla{'s' if len(reglas) != 1 else ''} sobre tus campos: "
+         + "; ".join(r["titulo"] for r in reglas[:4]) + ("…" if len(reglas) > 4 else ""))
+        if reglas else "no es un log de seguridad (o no hay eventos sospechosos para detectar)",
+        {"reglas": reglas} if reglas else None))
 
     # Para todo el cluster, no por dataset.
     for plugin, titulo, motivo in (

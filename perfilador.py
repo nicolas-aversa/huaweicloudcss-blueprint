@@ -602,9 +602,10 @@ def _fecha_de(valor: str, candidatos=_FECHAS) -> _Fecha | None:
     return None
 
 
-def _parsea(valor: str, f: _Fecha) -> bool:
+def leer_fecha(valor: str, f: _Fecha) -> datetime | None:
+    """La fecha de `valor` con el formato `f`, o None si no lo cumple."""
     if not re.fullmatch(f.forma, valor):
-        return False
+        return None
     try:
         if f.joda == "ISO8601":
             d = datetime.fromisoformat(valor.replace("Z", "+00:00"))
@@ -613,8 +614,12 @@ def _parsea(valor: str, f: _Fecha) -> bool:
         else:
             d = datetime.strptime(valor, f.strptime)
     except ValueError:
-        return False
-    return 1970 <= d.year <= 2100
+        return None
+    return d if 1970 <= d.year <= 2100 else None
+
+
+def _parsea(valor: str, f: _Fecha) -> bool:
+    return leer_fecha(valor, f) is not None
 
 
 def _tipar(col: Columna, n_filas: int) -> None:
