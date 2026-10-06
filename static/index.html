@@ -3036,8 +3036,8 @@
 
           <section class="hero">
             <span class="eyebrow eyebrow--muted">Tool de preventa · Huawei Cloud CSS</span>
-            <h1 class="hero__title">Del log crudo a OpenSearch,<br><span class="accent">con dashboards y chatbot</span>.</h1>
-            <p class="hero__sub" id="home-hero-sub">El pipeline lo escribe el LLM. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.</p>
+            <h1 class="hero__title">Del log crudo a OpenSearch,<br><span class="accent">con todo lo que tus datos justifican</span>.</h1>
+            <p class="hero__sub" id="home-hero-sub">El código lee la estructura y la IA entiende qué significa cada campo. Elegí un dataset ya armado, o subí el tuyo (uno o varias fuentes) y guardalo como un dataset nuevo.</p>
             <!-- La entrada al wizard son los dos caminos de abajo; acá solo
                  aparece el atajo a infraestructura cuando hay entorno activo. -->
             <div class="hero__actions">
@@ -3062,7 +3062,7 @@
                 <span class="path__icon"><svg class="icon"><use href="#ic-code"/></svg></span>
                 <h2 class="path__name">Dataset nuevo</h2>
               </div>
-              <p class="path__lead">Traés un log y con IA armamos el caso desde cero, con lo mismo que los de ejemplo.</p>
+              <p class="path__lead">Traés tus logs, descubrimos qué son y te mostramos qué va a tener tu cluster antes de desplegarlo.</p>
               <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un dataset <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
           </section>
@@ -8217,7 +8217,7 @@
     // infraestructura y el subtítulo refleja el estado real. Lo llama
     // renderInfraView (única fuente de verdad del estado del entorno).
     // Debe coincidir con el texto del markup de #home-hero-sub.
-    const HOME_SUB_DEFAULT = 'El pipeline lo escribe el LLM. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.';
+    const HOME_SUB_DEFAULT = 'El código lee la estructura y la IA entiende qué significa cada campo. Elegí un dataset ya armado, o subí el tuyo (uno o varias fuentes) y guardalo como un dataset nuevo.';
     function syncHomeHero(active, nPipelines) {
       document.getElementById('home-infra-btn')?.classList.toggle('hidden', !active);
       const sub = document.getElementById('home-hero-sub');
