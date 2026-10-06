@@ -388,6 +388,41 @@ def generate_syslog_3164(lines: list[str]) -> dict:
     return result
 
 
+# --- Syslog BSD con fecha ISO ----------------------------------------------
+# `<PRI>2025-07-01T10:21:33Z host proceso[pid]: mensaje`: el formato de rsyslog
+# y journald modernos (BSD con fecha ISO). No es RFC 5424 (sin versión ni
+# msgid) ni 3164 (fecha `MMM dd`), y sin esto iba al LLM: 8 minutos (medido).
+_SYSLOG_ISO_RX = re.compile(
+    r'^(?:<\d+>)?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})? '
+    r'\S+ [^\s:\[]+(?:\[\d+\])?: ')
+
+
+def detect_syslog_iso(line: str) -> bool:
+    """``<PRI>ISO8601 host proceso[pid]: mensaje``."""
+    return bool(_SYSLOG_ISO_RX.match(line.strip()))
+
+
+def generate_syslog_iso(lines: list[str]) -> dict:
+    result = _grok_then_rename(
+        raw_line=lines[0],
+        grok_pattern=(
+            "^(?:<%{POSINT:syslog_pri}>)?%{TIMESTAMP_ISO8601:event_timestamp} %{IPORHOST:syslog_host} "
+            "%{DATA:syslog_app}(?:\\[%{POSINT:syslog_pid}\\])?: %{GREEDYDATA:syslog_msg}"
+        ),
+        field_mappings=[
+            ("syslog_pri",  "log.syslog.priority", "integer"),
+            ("syslog_host", "host.hostname",       "keyword"),
+            ("syslog_app",  "process.name",        "keyword"),
+            ("syslog_pid",  "process.pid",         "keyword"),
+            ("syslog_msg",  "message",             "text"),
+        ],
+        date_source="event_timestamp",
+        date_patterns=["ISO8601"],
+    )
+    result["multiline_hint"] = detect_multiline(lines)
+    return result
+
+
 # --- CEF (Common Event Format) ---------------------------------------------
 _CEF_RX = re.compile(r'^CEF:\d+\|')
 
@@ -661,6 +696,7 @@ CATALOG: list[FormatEntry] = [
     FormatEntry("cef",             detect_cef,             generate_cef,             False),
     FormatEntry("syslog_5424",     detect_syslog_5424,     generate_syslog_5424,     False),
     FormatEntry("syslog_3164",     detect_syslog_3164,     generate_syslog_3164,     False),
+    FormatEntry("syslog_iso",      detect_syslog_iso,      generate_syslog_iso,      False),
     FormatEntry("apache_combined", detect_apache_combined, generate_apache_combined, False),
     FormatEntry("apache_common",   detect_apache_common,   generate_apache_common,   False),
     # log4j ANTES de csv: si el log empieza con `[YYYY-MM-DD ...` y tiene

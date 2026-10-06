@@ -201,3 +201,46 @@ def test_un_registro_con_security_analytics_apagado_no_lo_provisiona(tmp_path):
         "fw2": {"seguridad": spec, "excluir": []}}), encoding="utf-8")
     specs = main._specs_de_seguridad(tmp_path)
     assert "fw" not in specs and specs["fw2"]["log_types"][0]["nombre"] == "fw"
+
+
+# ── Syslog con fecha ISO y reglas sobre texto libre ─────────────────────────
+AUTH = ["<134>2025-07-01T10:21:33Z web-prod-02 sshd[36336]: Accepted password for postgres from 83.30.177.140 port 52077 ssh2",
+        "<38>2025-07-01T10:22:40Z web-prod-02 sshd[36340]: Failed password for root from 45.9.1.2 port 51000 ssh2",
+        "<85>2025-07-01T10:25:00Z web-prod-02 sudo[1201]: svc_ci : TTY=pts/0 ; PWD=/home ; USER=root ; COMMAND=/bin/bash"]
+
+
+def test_el_syslog_con_fecha_iso_lo_lee_el_catalogo():
+    """Antes iba al LLM del .conf: 8 minutos con 3000 líneas (medido)."""
+    import conf_lint
+    import log_format_catalog as cat
+
+    assert all(cat.detect_syslog_iso(l) for l in AUTH)
+    assert not cat.detect_syslog_iso("2025-07-01T10:21:33Z hola mundo sin proceso")
+    r = cat.try_match(AUTH)
+    assert "TIMESTAMP_ISO8601:event_timestamp" in r["filter_code"]
+    assert {f["ecs_path"] for f in r["fields"]} >= {"host.hostname", "process.name", "message"}
+    conf_lint.parse(r["filter_code"])
+
+
+TEXTO = [{"field_path": "process.name", "type": "string", "frecuentes": ["sshd", "sudo"]},
+         {"field_path": "message", "type": "text"}]
+
+
+def test_una_regla_contains_sobre_texto_libre():
+    def regla(sel):
+        relleno = [f"<134>2025-07-01T11:{i:02d}:00Z web-prod-02 sshd[{i}]: Accepted password for u{i} from 10.0.0.{i} port 5{i} ssh2"
+                   for i in range(20)]
+        return sd.validar({"es_seguridad": True, "reglas": [_regla(seleccion=sel)]}, TEXTO, AUTH + relleno)
+    ok = regla({"process.name": "sshd", "message|contains": "Failed password for root"})
+    assert ok["reglas"][0]["seleccion"] == {"process.name": "sshd", "message|contains": "Failed password for root"}
+    assert regla({"message|contains": "frase que no está"}) is None
+    assert regla({"process.name|contains": "ssh"}) is None, "contains solo sobre texto libre"
+    assert regla({"message|startswith": "Failed"}) is None, "solo el modificador contains"
+    assert regla({"message|contains": "password"}) is None, "una frase en todas las líneas es demasiado amplia"
+    yaml = seguridad.sigma_yaml(ok["reglas"][0], "auth")
+    assert '    message|contains: "Failed password for root"' in yaml
+    q = seguridad.consulta_de_reglas(ok["reglas"])
+    filtros = q["bool"]["should"][0]["bool"]["filter"]
+    assert {"terms": {"process.name": ["sshd"]}} in filtros
+    assert {"bool": {"minimum_should_match": 1, "should": [{"match_phrase": {"message": "Failed password for root"}}]}} in filtros
+    assert sd.consulta_de_reglas(ok["reglas"]) == '(process.name:"sshd" AND message:"Failed password for root")'

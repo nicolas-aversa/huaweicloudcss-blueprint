@@ -39,7 +39,7 @@ _TAG = re.compile(r"^attack\.[a-z0-9_.]+$")
 _PISTA = re.compile(
     r"(^|[._])(src|dst|source|destination|client|remote|attack|threat|severity|action|"
     r"virus|malware|ips|firewall|waf|login|logon|auth|sudo|ssh|blocked|denied|policy|rule|"
-    r"signature|alert|user|usuario|event|evento)([._]|$)", re.I)
+    r"signature|alert|user|usuario|event|evento|process|program|hostname|syslog)([._]|$)", re.I)
 
 _PROMPT = """Sos analista de seguridad. Te paso los campos de un log (con sus valores \
 frecuentes) y unas líneas. Si el log tiene eventos de seguridad (tráfico de red, \
@@ -55,7 +55,9 @@ bloqueado de severidad alta, un login fallido de admin, un virus): nunca "todo e
 tráfico" ni "todos los logins". Cada regla tiene que ser rara en los datos.
 - "seleccion": todos los campos se cumplen a la vez; una lista es cualquiera de sus \
 valores. Usá SOLO campos de la lista, por su nombre exacto, y SOLO valores que \
-aparecen en sus valores frecuentes o en las líneas.
+aparecen en sus valores frecuentes o en las líneas. Para un campo de texto libre \
+(tipo text, como un mensaje) usá "<campo>|contains" con una frase corta que \
+aparezca en las líneas ("message|contains": "Failed password").
 - "tags": técnicas de MITRE ATT&CK como attack.tNNNN (o attack.<táctica>).
 - Si no es un log de seguridad: {{"es_seguridad": false, "reglas": []}}.
 
@@ -126,10 +128,15 @@ def validar(datos: Any, fields: list[dict], lineas: list[str]) -> "dict | None":
             continue
         limpia = {}
         for campo, valor in sel.items():
+            # `campo|contains`: solo sobre texto libre (un mensaje); el resto, igualdad.
+            base, _, modificador = str(campo).partition("|")
+            if modificador and (modificador != "contains" or (por_ruta.get(base) or {}).get("type") != "text"):
+                limpia = {}
+                break
             valores = valor if isinstance(valor, list) else [valor]
             buenos = [v for v in valores if isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip()]
-            if (campo not in por_ruta or not buenos or len(buenos) != len(valores)
-                    or not all(_visto(campo, v, por_ruta, texto) for v in buenos)):
+            if (base not in por_ruta or not buenos or len(buenos) != len(valores)
+                    or not all(_visto(base, v, por_ruta, texto) for v in buenos)):
                 limpia = {}
                 break
             limpia[campo] = buenos if isinstance(valor, list) else buenos[0]
@@ -246,6 +253,7 @@ def consulta_de_reglas(reglas: list[dict]) -> str:
         condiciones = []
         for campo, valor in r["seleccion"].items():
             valores = valor if isinstance(valor, list) else [valor]
+            campo = campo.partition("|")[0]   # una frase entre comillas ya es "contiene"
             condiciones.append(f"{campo}:{_valor_lucene(valores[0])}" if len(valores) == 1
                                else f"{campo}:(" + " OR ".join(_valor_lucene(v) for v in valores) + ")")
         partes.append("(" + " AND ".join(condiciones) + ")")

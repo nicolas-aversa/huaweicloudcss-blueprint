@@ -498,3 +498,11 @@ def test_una_sola_fecha_del_evento():
                 "entry_time=2026-09-18 11:05:12|monto=2|geo_date=2026-09-02\n")
     roles = {f["raw_name"]: f["role"] for f in perfilador.campos(p)}
     assert roles["entry_time"] == "timestamp" and roles["geo_date"] is None
+
+
+def test_un_epoch_nativo_de_json_es_la_fecha():
+    """`"time": 1751338866000`: con nombre de tiempo es la fecha, no una medida."""
+    p = _perfil('{"time": 1751338866000, "bytes": 1751338866000}\n{"time": 1751338867000, "bytes": 12}\n')
+    assert _col(p, "time").tipo == "date" and _col(p, "time").formato_fecha == "UNIX_MS"
+    assert p.fecha_evento == "time" and _col(p, "bytes").tipo == "integer"
+    assert 'match => ["[data][time]", "UNIX_MS"]' in perfilador.armar_filter(p, "data")

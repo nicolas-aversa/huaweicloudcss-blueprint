@@ -28,6 +28,12 @@ _SEGURIDAD = json.loads((_RAIZ / "tests" / "fixtures" / "seguridad_demos.json").
 
 # Lo que cada vertical curada provisiona hoy, en los nombres del Builder.
 ESPERADO = {
+    # El SIEM: cada fuente por separado (se suben juntas como una familia), con
+    # sus reglas de Security Analytics. Muestras sintéticas de build_siem_dataset
+    # en tests/fixtures/siem (el FortiGate del SIEM es el de fortianalyzer).
+    "siem-auth.log": {"fecha": True, "seguridad": True},
+    "siem-waf.log": {"fecha": True, "seguridad": True},
+    "siem-cloudaudit.log": {"fecha": True, "seguridad": True},
     "produccion-pozos.log": {"fecha": True, "medida": "oil_vol", "perfil": "well",
                              # El curado cuenta las lecturas con el pozo parado (`downtime`,
                              # un campo que arma su filter); el Builder, `status_falla`.
@@ -76,7 +82,7 @@ def _descubierto(archivo: str) -> tuple:
     import semantica
     import seguridad_derivada
 
-    ruta = _RAIZ / "datasets" / archivo
+    ruta = _ruta(archivo)
     lineas = muestra_repartida([l for l in ruta.read_text(encoding="utf-8").splitlines() if l.strip()])
 
     def _sin_llm(*_a, **_k):
@@ -100,6 +106,12 @@ def _descubierto(archivo: str) -> tuple:
     campos = [f.model_dump() if hasattr(f, "model_dump") else dict(f) for f in r.fields]
     slug = archivo.removesuffix(".log")
     return campos, {i["plugin"]: i for i in plan_de_cluster.plan(slug, campos, seguridad=r.seguridad)}
+
+
+def _ruta(archivo: str) -> pathlib.Path:
+    """El dataset (no versionado) o, el SIEM, su muestra en los fixtures."""
+    fixture = _RAIZ / "tests" / "fixtures" / "siem" / archivo
+    return fixture if fixture.exists() else _RAIZ / "datasets" / archivo
 
 
 def _nombre(campos: list[dict], ruta: str) -> str:
@@ -149,7 +161,7 @@ def _chequeo(archivo: str, criterio: str):
 def _casos():
     for archivo, crit in ESPERADO.items():
         for criterio in crit:
-            marcas = [pytest.mark.skipif(not (_RAIZ / "datasets" / archivo).exists(),
+            marcas = [pytest.mark.skipif(not _ruta(archivo).exists(),
                                          reason=f"falta datasets/{archivo}")]
             if (archivo, criterio) in HUECOS:
                 marcas.append(pytest.mark.xfail(strict=True, reason=HUECOS[(archivo, criterio)]))

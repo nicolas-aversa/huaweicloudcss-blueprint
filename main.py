@@ -1606,6 +1606,15 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         except ValueError as exc:
             print(f"[raiz] los campos quedan bajo `{raiz.AREA}.`: {exc}")
 
+    # La fecha del evento que el .conf lleva a `@timestamp` (un `date` del
+    # catálogo o del LLM) sin un campo que la declare: se declara `@timestamp`.
+    # Sin esto el plan creía que no había fecha y no ofrecía pronósticos.
+    if (not any(f.get("role") == "timestamp" for f in enriched_fields)
+            and re.search(r"date\s*\{[^}]*target\s*=>\s*\"@timestamp\"", filter_code)):
+        enriched_fields.append({"raw_name": "@timestamp", "field_path": "@timestamp", "ecs_path": "@timestamp",
+                                "normalized_path": "@timestamp", "type": "date", "role": "timestamp",
+                                "business_label": "Fecha del evento", "is_ecs": True, "ecs_type_official": "date"})
+
     # Si es un log de seguridad, sus reglas para Security Analytics (validadas
     # contra los campos y la muestra). Va al final: con los paths definitivos.
     import seguridad_derivada

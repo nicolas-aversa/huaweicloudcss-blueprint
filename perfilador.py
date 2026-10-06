@@ -643,6 +643,13 @@ def _tipar(col: Columna, n_filas: int) -> None:
     if _NOMBRE_ID.search(col.nombre) and not any(isinstance(v, (list, dict)) for v in llenos):
         col.tipo = "string"
         return
+    # Un epoch como número de JSON (`"time": 1751338866000`) con nombre de
+    # tiempo es la fecha del evento, no una medida.
+    if _NOMBRE_TIEMPO.search(col.nombre) and all(isinstance(v, int) and not isinstance(v, bool) for v in llenos):
+        for joda, forma in _EPOCHS:
+            if all(re.fullmatch(forma, str(v)) for v in llenos):
+                col.tipo, col.formato_fecha, col.con_zona = "date", joda, True
+                return
     if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in llenos):
         col.tipo = "integer" if all(float(v).is_integer() and isinstance(v, int) for v in llenos) else "float"
         col.nativo = True

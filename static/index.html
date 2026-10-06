@@ -1841,8 +1841,12 @@
     .perfil__caso.is-active, .insights__tipo.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
     .perfil__tabla { overflow-x: auto; }
     .mapping-marca { text-align: center; }
+    .fuentes-tabs { margin-bottom: 12px; }
+    /* La tabla de campos se desplaza en pantallas angostas en vez de cortarse. */
+    .mapping-table-scroll { overflow-x: auto; }
+    .fuentes-tab__n { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 400; }
     .mapping-rol {
-      font-family: inherit; font-size: var(--fs-xs); padding: 4px 6px; max-width: 100%;
+      font-family: inherit; font-size: var(--fs-xs); padding: 4px 2px; width: 100%; max-width: 118px;
       border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
       background: var(--bg-primary); color: var(--text-primary); cursor: pointer;
     }
@@ -3337,9 +3341,9 @@
                      style="border:1.5px dashed var(--border-strong,var(--border-subtle)); border-radius:var(--radius-md); padding:22px 16px; text-align:center; cursor:pointer; background:var(--bg-subtle); transition:border-color .15s, background .15s;">
                   <svg class="icon" style="width:22px;height:22px;color:var(--accent);"><use href="#ic-upload"/></svg>
                   <div style="font-size:var(--fs-base); font-weight:var(--fw-semi); color:var(--text-primary); margin-top:6px;">Arrastrá tu <code>.log</code> acá o hacé clic para elegirlo</div>
-                  <div style="font-size:var(--fs-sm); color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Va al bucket tal cual, con su nombre.</div>
+                  <div style="font-size:var(--fs-sm); color:var(--text-muted); margin-top:3px;">Un evento por línea, hasta 50 MB. Va al bucket tal cual, con su nombre. Si tus datos vienen de varias fuentes (firewall, WAF, autenticación…), subí todos los archivos juntos.</div>
                 </div>
-                <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" style="display:none;">
+                <input type="file" id="log-file-input" accept=".log,.txt,.json,.csv,.ndjson,text/*" multiple style="display:none;">
               </div>
 
               <div id="source-pane-live" class="hidden">
@@ -3707,6 +3711,11 @@
       // Plugins del plan del cluster que se apagaron en el paso 2: viajan en el
       // deploy y el provisioning no los crea.
       planExcluidos: [],
+      // Varios archivos de un mismo dataset (un SIEM: firewall, WAF, auth…):
+      // cada uno es una fuente con su análisis. La activa vive en los campos de
+      // `state` de siempre (fields, filterCode…) y las demás acá.
+      fuentes: [],
+      fuenteActiva: 0,
     };
 
     // DOM elements
@@ -3855,6 +3864,12 @@
         const errorEl = document.getElementById('mapping-error');
         if (loadingEl) loadingEl.classList.add('hidden');
         if (errorEl) errorEl.classList.add('hidden');
+        return;
+      }
+
+      // Varias fuentes: cada una con su análisis, en pestañas.
+      if ((state.fuentes || []).length > 1) {
+        await analizarFuentes();
         return;
       }
 
@@ -4196,21 +4211,21 @@
               </button>
             </div>
           </div>
-          <table class="mapping-table">
+          <div class="mapping-table-scroll"><table class="mapping-table">
             <thead>
               <tr>
                 <th style="width:40px;">#</th>
                 <th>Campo original</th>
                 <th>Etiqueta · Path</th>
                 <th style="width:100px;">Tipo</th>
-                <th style="width:150px;" title="Qué es el campo para el negocio: decide qué se pronostica, qué se vigila y qué cuenta como falla">Rol</th>
-                <th style="width:70px;" title="El campo que identifica a cada entidad (cliente, usuario, IP…): arma el perfil por entidad">Entidad</th>
-                <th style="width:70px;" title="Datos sensibles: el analista de demo los ve enmascarados">Sensible</th>
+                <th style="width:118px;" title="Qué es el campo para el negocio: decide qué se pronostica, qué se vigila y qué cuenta como falla">Rol</th>
+                <th style="width:58px;" title="El campo que identifica a cada entidad (cliente, usuario, IP…): arma el perfil por entidad">Entidad</th>
+                <th style="width:62px;" title="Datos sensibles: el analista de demo los ve enmascarados">Sensible</th>
                 <th style="width:60px;"></th>
               </tr>
             </thead>
             <tbody>${tbodyHtml}</tbody>
-          </table>
+          </table></div>
           <div class="plan-cluster" id="plan-cluster" aria-live="polite"></div>
           ${bloquePreguntas(state.preguntas)}
         </div>`;
@@ -4739,6 +4754,9 @@
     let CAPABILITY_SLUGS = new Set();
     let SECURITY_SLUGS = new Set();   // los casos con Security Analytics (SIEM, FortiAnalyzer)
     let SLUG_LABELS = {};
+    // Las fuentes de un mismo dataset (se subieron juntas): `fam:<familia>` →
+    // {label, icon, miembros}. En el grid son una tarjeta.
+    let FAMILIAS = {};
 
     function applyVerticalsPayload(data) {
       _VDATA = data || { groups: [], verticals: [] };
@@ -4774,6 +4792,12 @@
       CAPABILITY_SLUGS = new Set(_VVIS.filter(v => v.hasCapability).map(v => v.slug));
       SECURITY_SLUGS = new Set(_VVIS.filter(v => v.hasSecurity).map(v => v.slug));
       SLUG_LABELS = Object.fromEntries(_VVIS.map(v => [v.slug, v.fullLabel]));
+      FAMILIAS = {};
+      _VVIS.filter(v => v.familia).forEach(v => {
+        const id = `fam:${v.familia}`;
+        const f = FAMILIAS[id] || (FAMILIAS[id] = { label: v.familiaLabel || v.familia, icon: v.icon, miembros: [] });
+        f.miembros.push(v.slug);
+      });
 
     }
     applyVerticalsPayload(window.__VERTICALS__);
@@ -4796,6 +4820,11 @@
     let _saveCaseIcon = 'box';
 
     function openSaveCaseModal() {
+      if ((state.fuentes || []).length > 1) guardarFuenteActiva();
+      if ((state.fuentes || []).length > 1 && state.fuentes.some(f => !(f.fields || []).length)) {
+        toast('Falta analizar alguna fuente: revisá las pestañas del paso 2.', 'error');
+        return;
+      }
       if (!state.fields || !state.fields.length) {
         toast('Todavía no hay campos detectados. Analizá el log en el paso 1.', 'error');
         return;
@@ -4832,6 +4861,11 @@
           ? `<strong>Dataset repetible.</strong> Se guarda <strong>${escapeHtml(state.logFileName || 'tu archivo')}</strong> tal cual (${lines.toLocaleString('es')} líneas) y se sube con ese nombre a tu bucket, así lo desplegás las veces que quieras.`
           : `<strong>Dataset en vivo.</strong> Logstash va a leer de <strong>${PLUGIN_LABEL[plugin] || plugin}</strong> con la conexión del paso 3. Esa fuente tiene que estar levantada y ser alcanzable al desplegar.`;
         summary.innerHTML += ` · ${state.fields.length} campo${state.fields.length === 1 ? '' : 's'} detectado${state.fields.length === 1 ? '' : 's'}.`;
+        if ((state.fuentes || []).length > 1) {
+          summary.innerHTML = `<strong>${state.fuentes.length} fuentes en un mismo dataset.</strong> Cada archivo se guarda tal cual y con su análisis: `
+            + state.fuentes.map(f => `<strong>${escapeHtml(f.logFileName)}</strong> (${(f.fields || []).length} campos)`).join(', ')
+            + '. En el grid quedan como una sola tarjeta y se despliegan juntas; con Security Analytics, sus hallazgos se correlacionan.';
+        }
       }
 
       document.getElementById('save-case-status').textContent = '';
@@ -4872,6 +4906,17 @@
       btn.disabled = true;
       statusEl.style.color = 'var(--text-secondary)';
       statusEl.textContent = 'Guardando…';
+      if ((state.fuentes || []).length > 1) {
+        try {
+          await guardarFamilia();
+        } catch (err) {
+          statusEl.style.color = 'var(--accent-red)';
+          statusEl.textContent = err.message;
+        } finally {
+          btn.disabled = false;
+        }
+        return;
+      }
       try {
         const res = await fetch('/api/v1/cases', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4935,22 +4980,72 @@
 
     document.getElementById('save-case-submit')?.addEventListener('click', submitSaveCase);
 
+    // Varias fuentes: un caso por archivo, todos de la misma familia (el nombre
+    // del dataset). Cada uno es un caso normal —su índice, su pipeline, sus
+    // plugins— y el grid los muestra y los despliega juntos.
+    async function guardarFamilia() {
+      guardarFuenteActiva();
+      const statusEl = document.getElementById('save-case-status');
+      const label = document.getElementById('save-case-label').value.trim();
+      const comunes = {
+        description: document.getElementById('save-case-desc').value.trim(),
+        group: document.getElementById('save-case-group').value,
+        icon: _saveCaseIcon,
+        familia: label,
+        familia_label: label,
+        input_config: { plugin_type: 'obs', obs: collectInputConfig() },
+      };
+      const guardados = [];
+      for (const [i, f] of state.fuentes.entries()) {
+        statusEl.textContent = `Guardando ${i + 1} de ${state.fuentes.length}: ${f.logFileName}…`;
+        const res = await fetch('/api/v1/cases', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...comunes,
+            label: `${label} · ${nombreDeFuente(f.logFileName)}`.slice(0, 60),
+            sample: f.rawLog || '', filter_code: f.filterCode || '', fields: f.fields || [],
+            questions: f.preguntas || [], seguridad: f.seguridad || null, excluir: f.planExcluidos || [],
+            log_content: f.logFileContent || '', log_filename: f.logFileName || '',
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(`${f.logFileName}: ${data?.detail?.message || data?.detail || `HTTP ${res.status}`}`
+            + (guardados.length ? ` (ya se guardaron ${guardados.length}: borralos desde su tarjeta si querés reintentar)` : ''));
+        }
+        guardados.push(data.case?.slug);
+      }
+      _closeSaveCase();
+      await refreshVerticals();
+      state.fuentes = [];
+      state.logFileContent = '';
+      state.pipelineCode = '';
+      switchExampleMode('demo');
+      state.selectedExamples = guardados.filter(Boolean);
+      _applySelectionState();
+      goToStep(1);
+      toast(`Dataset "${label}" guardado con ${guardados.length} fuentes. Ya está en el grid: desplegalo desde su tarjeta.`, 'success', 6000);
+    }
+
     // Borrar un caso creado (✕ en la card). Solo aparece para casos custom que
     // el usuario puede borrar; el backend revalida creador/admin.
-    async function deleteCustomCase(slug, label) {
+    async function deleteCustomCase(slugs, label) {
+      slugs = Array.isArray(slugs) ? slugs : [slugs];
       const ok = await confirmModal({
         title: 'Borrar el dataset',
-        message: `Se elimina "${label}" y sus datos. Los entornos ya desplegados no se tocan.`,
+        message: `Se elimina "${label}"${slugs.length > 1 ? ` (sus ${slugs.length} fuentes)` : ''} y sus datos. Los entornos ya desplegados no se tocan.`,
         confirmLabel: 'Borrar',
       });
       if (!ok) return;
       try {
-        const res = await fetch(`/api/v1/cases/${encodeURIComponent(slug)}`, { method: 'DELETE' });
-        if (!res.ok) {
-          const d = await res.json().catch(() => ({}));
-          throw new Error(d?.detail?.message || `HTTP ${res.status}`);
+        for (const slug of slugs) {
+          const res = await fetch(`/api/v1/cases/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            throw new Error(d?.detail?.message || `HTTP ${res.status}`);
+          }
         }
-        state.selectedExamples = state.selectedExamples.filter(s => s !== slug);
+        state.selectedExamples = state.selectedExamples.filter(s => !slugs.includes(s));
         await refreshVerticals();
         _applySelectionState();
         toast(`Dataset "${label}" borrado.`, 'success');
@@ -5112,6 +5207,7 @@
     // Fuerza una regeneración limpia (namespace/overlay cambiaron, o regen manual).
     function forceFilterRegen() {
       clearMapping();
+      if ((state.fuentes || []).length > 1) guardarFuenteActiva();   // la activa, sin campos
       runFilterGeneration();
     }
 
@@ -9200,6 +9296,15 @@
     }
 
     function loadExample(id) {
+      // Una familia se elige (o se suelta) entera: sus fuentes van juntas.
+      if (FAMILIAS[id]) {
+        const miembros = FAMILIAS[id].miembros;
+        const todas = miembros.every(m => state.selectedExamples.includes(m));
+        state.selectedExamples = state.selectedExamples.filter(s => !miembros.includes(s));
+        if (!todas) state.selectedExamples.push(...miembros);
+        _applySelectionState();
+        return;
+      }
       const meta = LOG_EXAMPLES.find(e => e.id === id);
       if (!meta || meta.disabled) return;
 
@@ -9228,7 +9333,10 @@
     function _applySelectionState() {
       document.querySelectorAll('.example-card').forEach(c => {
         const cid = c.dataset.exampleId;
-        c.classList.toggle('is-selected', state.selectedExamples.includes(cid));
+        const fam = FAMILIAS[cid];
+        c.classList.toggle('is-selected', fam
+          ? fam.miembros.every(m => state.selectedExamples.includes(m))
+          : state.selectedExamples.includes(cid));
       });
       // Cualquier cambio de selección invalida el error inline del paso 1.
       document.getElementById('step1-demo-error')?.classList.remove('show');
@@ -9271,6 +9379,9 @@
         state.rawLog = '';
         clearMapping();
         // Reset del archivo importado: cada entrada a custom arranca limpia.
+        state.fuentes = [];
+        state.fuenteActiva = 0;
+        if (typeof renderFuentesTabs === 'function') renderFuentesTabs();
         state.logFileContent = '';
         state.logFileName = '';
         state.logFileLines = 0;
@@ -9363,8 +9474,18 @@
         <button type="button" class="example-card${e.disabled ? ' is-disabled' : ''}" data-example-id="${e.id}"${e.disabled ? ' disabled' : ''} title="${escapeHtml(e.description || '')}">
           ${e.custom ? `<span class="example-card__del" data-delete-case="${escapeHtml(e.id)}" role="button" tabindex="0" title="Borrar este dataset">${icon('x')}</span>` : ''}
           <span class="example-card__tile"><svg class="icon"><use href="#ic-${e.icon || 'box'}"/></svg></span>
-          <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}</span>
+          <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}${e.fuentes ? ` <span class="example-card__soon">${e.fuentes} fuentes</span>` : ''}</span>
         </button>`;
+      // Las fuentes de una familia, una sola tarjeta (la primera ocupa el lugar).
+      const tarjeta = (id) => {
+        const e = LOG_EXAMPLES.find(x => x.id === id && x.id !== 'custom');
+        if (!e || !e.familia) return e;
+        const famId = `fam:${e.familia}`;
+        const fam = FAMILIAS[famId];
+        if (!fam || fam.miembros[0] !== id) return null;
+        return { id: famId, label: fam.label, icon: fam.icon, custom: true, fuentes: fam.miembros.length,
+                 description: fam.miembros.map(m => SLUG_LABELS[m] || m).join(' · ') };
+      };
       // Render agrupado por vertical: cada grupo es un encabezado + una grilla de
       // cards que llenan el ancho (auto-fill). Las demos sin grupo caen a "Otros".
       const grouped = new Set();
@@ -9375,14 +9496,13 @@
         </div>`;
       let html = '';
       DEMO_VERTICALS.forEach(v => {
-        const cards = v.members
-          .map(id => LOG_EXAMPLES.find(e => e.id === id && e.id !== 'custom'))
-          .filter(Boolean);
+        v.members.forEach(id => grouped.add(id));
+        const cards = v.members.map(tarjeta).filter(Boolean);
         if (!cards.length) return;
-        cards.forEach(c => grouped.add(c.id));
         html += groupHtml(v.icon, v.label, cards);
       });
-      const leftover = LOG_EXAMPLES.filter(e => e.id !== 'custom' && !grouped.has(e.id));
+      const leftover = LOG_EXAMPLES.filter(e => e.id !== 'custom' && !grouped.has(e.id))
+        .map(e => tarjeta(e.id)).filter(Boolean);
       if (leftover.length) html += groupHtml('box', 'Otros', leftover);
       demoGrid.innerHTML = html;
     }
@@ -9394,7 +9514,8 @@
         e.preventDefault();
         e.stopPropagation();
         const slug = del.dataset.deleteCase;
-        deleteCustomCase(slug, LOG_EXAMPLES.find(x => x.id === slug)?.label || slug);
+        if (FAMILIAS[slug]) deleteCustomCase(FAMILIAS[slug].miembros, FAMILIAS[slug].label);
+        else deleteCustomCase(slug, LOG_EXAMPLES.find(x => x.id === slug)?.label || slug);
         return;
       }
       const card = e.target.closest('.example-card');
@@ -9496,6 +9617,150 @@
       for (let i = 0; i < mitad; i++) repartidas.push(lineas[mitad + 1 + Math.floor(i * salto)]);
       return lineas.slice(0, mitad + 1).concat(repartidas);
     }
+    // ── Varias fuentes en un mismo dataset ─────────────────────────────────
+    // Lo que es de cada fuente. La activa está en `state`; al cambiar de
+    // pestaña se guarda en su fuente y se carga la otra.
+    const _DE_LA_FUENTE = {
+      logFileContent: '', logFileName: '', logFileLines: 0, muestra: '', rawLog: '',
+      fields: [], filterCode: '', verificacion: null, preguntas: [], inicioRegistro: '',
+      seguridad: null, planExcluidos: [], generatedFromLog: '',
+    };
+    const _MAX_FUENTES = 8;
+    function guardarFuenteActiva() {
+      const f = (state.fuentes || [])[state.fuenteActiva];
+      if (!f) return;
+      Object.keys(_DE_LA_FUENTE).forEach(k => { f[k] = state[k]; });
+    }
+    function cargarFuente(i) {
+      const f = (state.fuentes || [])[i];
+      if (!f) return;
+      state.fuenteActiva = i;
+      Object.entries(_DE_LA_FUENTE).forEach(([k, vacio]) => {
+        state[k] = f[k] ?? (Array.isArray(vacio) ? [] : vacio);
+      });
+      const rawLogEl = document.getElementById('raw-log');
+      if (rawLogEl) rawLogEl.value = state.rawLog || '';
+    }
+    // "fortigate.log" → "fortigate": el nombre de la fuente en el caso guardado.
+    function nombreDeFuente(archivo) {
+      return String(archivo || '').replace(/\.[^.]+$/, '') || 'fuente';
+    }
+    function _fuenteDeTexto(nombre, texto) {
+      const nonEmpty = texto.split(/\r?\n/).filter(l => l.trim().length);
+      const sample = (nonEmpty.find(l => !l.trim().startsWith('#')) || nonEmpty[0] || '').trim();
+      return { ..._DE_LA_FUENTE, fields: [], preguntas: [], planExcluidos: [],
+               logFileContent: texto, logFileName: nombre, logFileLines: nonEmpty.length,
+               muestra: muestraRepartida(nonEmpty).join('\n'), rawLog: sample };
+    }
+    async function _handleLogFiles(lista) {
+      const files = Array.from(lista || []);
+      if (files.length <= 1) {
+        state.fuentes = [];
+        state.fuenteActiva = 0;
+        renderFuentesTabs();
+        return _handleLogFile(files[0]);
+      }
+      if (files.length > _MAX_FUENTES) {
+        toast(`Hasta ${_MAX_FUENTES} archivos por dataset.`, 'error');
+        return;
+      }
+      const grande = files.find(f => f.size > _LOG_FILE_MAX);
+      if (grande) {
+        toast(`${grande.name} supera 50 MB. Importá uno más chico.`, 'error');
+        return;
+      }
+      let textos;
+      try {
+        textos = await Promise.all(files.map(f => f.text()));
+      } catch (_err) {
+        toast('No se pudieron leer los archivos.', 'error');
+        return;
+      }
+      clearMapping();
+      state.fuentes = files.map((f, i) => _fuenteDeTexto(f.name, String(textos[i] || '')));
+      cargarFuente(0);
+      showSample(state.rawLog, `${files.length} fuentes · ` + state.fuentes
+        .map(f => `${f.logFileName} (${f.logFileLines.toLocaleString('es')} líneas)`).join(' · '));
+      document.getElementById('step1-custom-error')?.classList.remove('show');
+      document.getElementById('log-file-drop')?.classList.remove('input-error');
+      if (state.deployMode === 'custom' && state.sourceMode === 'file') renderInputConfig('obs');
+      renderFuentesTabs();
+    }
+    // Las pestañas del paso 2, una por fuente, arriba de la tabla de campos.
+    function renderFuentesTabs() {
+      const tabla = document.getElementById('mapping-table');
+      if (!tabla) return;
+      let tabs = document.getElementById('fuentes-tabs');
+      if (!tabs) {
+        tabs = document.createElement('div');
+        tabs.id = 'fuentes-tabs';
+        tabs.className = 'case-tabs fuentes-tabs';
+        tabs.setAttribute('role', 'tablist');
+        tabla.parentNode.insertBefore(tabs, tabla);
+      }
+      const fuentes = state.fuentes || [];
+      tabs.classList.toggle('hidden', fuentes.length < 2);
+      tabs.innerHTML = fuentes.length < 2 ? '' : fuentes.map((f, i) => {
+        const activa = i === state.fuenteActiva;
+        const n = (activa ? state.fields : f.fields || []).length;
+        return `<button type="button" class="case-tab${activa ? ' is-active' : ''}" data-fuente="${i}" role="tab" aria-selected="${activa}">
+          ${icon('file')}<span class="case-tab__label">${escapeHtml(nombreDeFuente(f.logFileName))}</span>
+          <span class="fuentes-tab__n">${n ? `${n} campos` : 'sin analizar'}</span>
+        </button>`;
+      }).join('');
+    }
+    document.addEventListener('click', (e) => {
+      const tab = e.target.closest('#fuentes-tabs [data-fuente]');
+      if (!tab || generating) return;
+      const i = parseInt(tab.dataset.fuente, 10);
+      if (i === state.fuenteActiva) return;
+      guardarFuenteActiva();
+      cargarFuente(i);
+      renderFuentesTabs();
+      renderMappingTable(state.fields);
+    });
+    // Analiza las fuentes que todavía no tienen campos, una por una (cada
+    // análisis pasa por el perfilador y la semántica de esa fuente).
+    async function analizarFuentes() {
+      guardarFuenteActiva();
+      const loadingEl = document.getElementById('mapping-loading');
+      const errorEl = document.getElementById('mapping-error');
+      const confirmBtn = document.getElementById('mapping-confirm-btn');
+      const regenBtn = document.getElementById('mapping-regenerate-btn');
+      loadingEl?.classList.remove('hidden');
+      errorEl?.classList.add('hidden');
+      if (confirmBtn) confirmBtn.disabled = true;
+      if (regenBtn) regenBtn.disabled = true;
+      const errores = [];
+      generating = true;
+      const activa = state.fuenteActiva;
+      try {
+        for (let i = 0; i < state.fuentes.length; i++) {
+          if ((state.fuentes[i].fields || []).length) continue;
+          cargarFuente(i);
+          renderFuentesTabs();
+          const r = await transformLog();
+          if (!r.ok) errores.push(`${state.fuentes[i].logFileName}: ${r.error}`);
+          guardarFuenteActiva();
+        }
+      } finally {
+        generating = false;
+      }
+      cargarFuente(activa);
+      loadingEl?.classList.add('hidden');
+      renderFuentesTabs();
+      renderMappingTable(state.fields);
+      const listas = state.fuentes.every(f => (f.fields || []).length);
+      if (confirmBtn) confirmBtn.disabled = !listas;
+      if (regenBtn) regenBtn.disabled = false;
+      if (errores.length && errorEl) {
+        errorEl.classList.remove('hidden');
+        errorEl.innerHTML = `<div class="status status-error">No se pudieron analizar: ${escapeHtml(errores.join(' · '))}</div>
+          <button type="button" class="btn btn-secondary btn-sm" id="mapping-retry-btn">${icon('spark')} Reintentar análisis</button>`;
+        errorEl.querySelector('#mapping-retry-btn')?.addEventListener('click', () => analizarFuentes());
+      }
+    }
+
     function _handleLogFile(file) {
       if (!file) return;
       if (file.size > _LOG_FILE_MAX) {
@@ -9534,7 +9799,7 @@
     document.getElementById('log-file-drop')?.addEventListener('click', () =>
       document.getElementById('log-file-input')?.click());
     document.getElementById('log-file-input')?.addEventListener('change', (e) =>
-      _handleLogFile(e.target.files && e.target.files[0]));
+      _handleLogFiles(e.target.files));
     const _logDrop = document.getElementById('log-file-drop');
     if (_logDrop) {
       ['dragenter', 'dragover'].forEach(ev => _logDrop.addEventListener(ev, (e) => {
@@ -9549,7 +9814,7 @@
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _logDrop.click(); }
       });
       _logDrop.addEventListener('drop', (e) =>
-        _handleLogFile(e.dataTransfer?.files && e.dataTransfer.files[0]));
+        _handleLogFiles(e.dataTransfer?.files));
     }
 
     // Selección de plugin de fuente (input) y destino (output) por click.

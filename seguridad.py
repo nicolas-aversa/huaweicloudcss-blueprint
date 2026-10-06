@@ -135,9 +135,16 @@ def consulta_de_reglas(reglas: list[dict]) -> dict[str, Any]:
     lo que el detector TENDRÍA que haber encontrado, cada evento una vez: con el
     cluster saturado Security Analytics registra el mismo evento 2 a 13 veces
     (medido: 251.463 hallazgos para 26.707 eventos en FortiAnalyzer)."""
+    def condicion(campo: str, valor: Any) -> dict:
+        valores = valor if isinstance(valor, list) else [valor]
+        base, _, modificador = campo.partition("|")
+        if modificador == "contains":   # texto libre: la frase, en cualquier parte
+            return {"bool": {"minimum_should_match": 1,
+                             "should": [{"match_phrase": {base: v}} for v in valores]}}
+        return {"terms": {campo: valores}}
+
     return {"bool": {"minimum_should_match": 1, "should": [
-        {"bool": {"filter": [{"terms": {campo: valor if isinstance(valor, list) else [valor]}}
-                             for campo, valor in r["seleccion"].items()]}}
+        {"bool": {"filter": [condicion(campo, valor) for campo, valor in r["seleccion"].items()]}}
         for r in reglas]}}
 
 

@@ -266,3 +266,20 @@ def _no_llamar_al_llm_de_verdad(monkeypatch):
     def _explota():
         raise AssertionError("esto no tiene por qué ir al LLM")
     monkeypatch.setattr(mi, "_build_client", _explota)
+
+
+def test_la_fecha_que_el_conf_lleva_a_timestamp_se_declara(monkeypatch):
+    """Un formato del catálogo (syslog) parsea la fecha a `@timestamp` pero no
+    la lista entre los campos: sin declararla, el plan no ofrecía pronósticos."""
+    lineas = ["<134>2025-07-01T10:21:33Z web-02 sshd[1]: Accepted password for a from 1.2.3.4 port 1 ssh2",
+              "<134>2025-07-01T10:22:33Z web-02 sshd[2]: Failed password for b from 1.2.3.5 port 2 ssh2"]
+    import maas_integrator
+    import seguridad_derivada
+
+    def _sin_llm():
+        raise AssertionError("el catálogo lo lee sin LLM")
+    monkeypatch.setattr(maas_integrator, "_build_client", _sin_llm)
+    monkeypatch.setattr(seguridad_derivada, "_llamar_al_llm", lambda p: '{"es_seguridad": false}')
+    campos = {f["field_path"]: f for f in _generar("\n".join(lineas))["fields"]}
+    assert campos["@timestamp"]["type"] == "date" and campos["@timestamp"]["role"] == "timestamp"
+    assert sum(1 for f in campos.values() if f.get("role") == "timestamp") == 1

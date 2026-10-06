@@ -1,0 +1,201 @@
+<134>2025-07-01T10:21:33Z web-prod-02 sshd[36336]: Accepted password for postgres from 83.30.177.140 port 52077 ssh2 technique=T1078
+<85>2025-07-01T16:35:44Z web-prod-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/usr/bin/docker ps technique=T1053
+<134>2025-07-01T18:58:40Z api-prod-01 sshd[31801]: Accepted password for svc_ci from 10.4.14.125 port 7211 ssh2 technique=T1078
+<85>2025-07-02T09:33:21Z bastion-01 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<134>2025-07-02T10:06:18Z db-prod-01 sshd[46132]: Accepted password for ec2-user from 162.125.212.118 port 18777 ssh2 technique=T1078
+<134>2025-07-02T10:41:20Z web-prod-01 sshd[37782]: Accepted password for postgres from 10.3.93.154 port 3831 ssh2 technique=T1078
+<134>2025-07-02T10:51:16Z db-prod-01 sshd[11644]: Accepted password for svc_ci from 178.179.69.116 port 34734 ssh2 technique=T1078
+<134>2025-07-02T14:54:30Z web-prod-01 sshd[43298]: Accepted password for ubuntu from 10.4.233.51 port 48714 ssh2 technique=T1078
+<85>2025-07-02T17:52:25Z api-prod-01 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2025-07-02T20:19:17Z bastion-01 sshd[57633]: Accepted password for deploy from 10.1.101.196 port 53324 ssh2 technique=T1078
+<85>2025-07-03T08:21:37Z api-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/usr/bin/docker ps technique=T1053
+<134>2025-07-03T08:32:31Z bastion-01 sshd[1332]: Accepted password for svc_ci from 10.4.72.153 port 52701 ssh2 technique=T1078
+<85>2025-07-03T09:49:41Z db-prod-01 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx technique=T1053
+<85>2025-07-03T11:11:34Z bastion-01 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2025-07-03T11:53:05Z bastion-01 sshd[59072]: Accepted password for deploy from 53.133.148.26 port 43887 ssh2 technique=T1078
+<134>2025-07-03T14:03:04Z bastion-01 sshd[49879]: Accepted password for postgres from 10.3.166.75 port 12002 ssh2 technique=T1078
+<134>2025-07-03T16:52:40Z api-prod-01 sshd[53644]: Accepted password for svc_ci from 208.179.144.218 port 30318 ssh2 technique=T1078
+<134>2025-07-04T09:05:29Z bastion-01 sshd[22158]: Failed password for invalid user oracle from 199.249.150.83 port 62525 ssh2 technique=T1110
+<134>2025-07-04T09:05:39Z bastion-01 sshd[56748]: Failed password for invalid user ftpuser from 199.249.150.83 port 2863 ssh2 technique=T1110
+<134>2025-07-04T09:06:41Z bastion-01 sshd[57841]: Failed password for invalid user oracle from 199.249.150.83 port 43034 ssh2 technique=T1110
+<134>2025-07-04T09:06:41Z bastion-01 sshd[9943]: Failed password for guest from 199.249.150.83 port 29028 ssh2 technique=T1110
+<134>2025-07-04T09:37:26Z api-prod-01 sshd[38211]: Accepted password for ec2-user from 10.0.58.73 port 48977 ssh2 technique=T1078
+<134>2025-07-04T10:33:43Z web-prod-02 sshd[26692]: Accepted password for deploy from 183.26.105.62 port 47519 ssh2 technique=T1078
+<85>2025-07-04T10:51:45Z bastion-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2025-07-04T13:22:01Z db-prod-01 sshd[27133]: Accepted password for postgres from 170.182.170.152 port 13989 ssh2 technique=T1078
+<85>2025-07-04T14:54:26Z db-prod-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/bin/journalctl -u pg technique=T1053
+<85>2025-07-04T15:06:47Z bastion-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-07-04T17:28:58Z api-prod-01 sshd[41317]: Accepted password for ubuntu from 183.215.107.23 port 28090 ssh2 technique=T1078
+<134>2025-07-04T19:02:09Z web-prod-01 sshd[15960]: Accepted password for deploy from 136.107.209.21 port 30843 ssh2 technique=T1078
+<134>2025-07-04T20:30:49Z api-prod-01 sshd[57710]: Accepted password for postgres from 10.0.141.15 port 45152 ssh2 technique=T1078
+<134>2025-07-05T09:30:03Z bastion-01 sshd[3214]: Accepted password for ubuntu from 176.195.4.250 port 7290 ssh2 technique=T1078
+<85>2025-07-05T10:30:50Z bastion-01 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<85>2025-07-05T12:59:37Z db-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/bin/cat /etc/shadow technique=T1003
+<134>2025-07-05T21:51:14Z api-prod-01 sshd[24569]: Accepted password for ec2-user from 62.242.36.56 port 3633 ssh2 technique=T1078
+<134>2025-07-06T04:52:09Z web-prod-02 sshd[25084]: Accepted password for ubuntu from 10.1.123.3 port 31448 ssh2 technique=T1078
+<134>2025-07-06T06:39:32Z web-prod-01 sshd[8294]: Failed password for oracle from 176.10.99.200 port 21917 ssh2 technique=T1110
+<134>2025-07-06T06:39:42Z web-prod-01 sshd[13901]: Failed password for invalid user admin from 176.10.99.200 port 23975 ssh2 technique=T1110
+<134>2025-07-06T06:40:03Z web-prod-01 sshd[38973]: Failed password for invalid user admin from 176.10.99.200 port 40124 ssh2 technique=T1110
+<134>2025-07-06T08:13:46Z api-prod-01 sshd[34107]: Accepted password for svc_ci from 10.2.18.124 port 19660 ssh2 technique=T1078
+<134>2025-07-06T16:48:09Z web-prod-02 sshd[19823]: Accepted password for postgres from 17.201.230.105 port 5480 ssh2 technique=T1078
+<134>2025-07-06T20:31:38Z web-prod-02 sshd[4519]: Failed password for invalid user oracle from 45.135.232.99 port 21224 ssh2 technique=T1110
+<134>2025-07-06T20:31:45Z web-prod-02 sshd[28771]: Failed password for invalid user git from 45.135.232.99 port 39191 ssh2 technique=T1110
+<134>2025-07-06T20:32:00Z web-prod-02 sshd[8870]: Failed password for invalid user root from 45.135.232.99 port 6477 ssh2 technique=T1110
+<134>2025-07-06T20:32:17Z web-prod-02 sshd[13521]: Failed password for invalid user oracle from 45.135.232.99 port 1753 ssh2 technique=T1110
+<134>2025-07-06T20:32:20Z web-prod-02 sshd[10738]: Failed password for invalid user ftpuser from 45.135.232.99 port 3874 ssh2 technique=T1110
+<134>2025-07-06T20:32:31Z web-prod-02 sshd[8815]: Failed password for git from 45.135.232.99 port 24641 ssh2 technique=T1110
+<134>2025-07-07T09:49:23Z web-prod-01 sshd[40952]: Accepted password for postgres from 10.0.240.248 port 7848 ssh2 technique=T1078
+<134>2025-07-07T13:13:56Z web-prod-02 sshd[17959]: Accepted password for svc_ci from 150.84.12.49 port 14737 ssh2 technique=T1078
+<134>2025-07-07T15:11:50Z web-prod-01 sshd[57600]: Accepted password for postgres from 10.4.72.52 port 20173 ssh2 technique=T1078
+<134>2025-07-07T15:28:59Z web-prod-01 sshd[14701]: Accepted password for ubuntu from 10.0.187.74 port 41578 ssh2 technique=T1078
+<85>2025-07-07T18:16:08Z web-prod-01 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-07-07T20:07:32Z web-prod-01 sshd[56742]: Accepted password for svc_ci from 10.2.68.248 port 29542 ssh2 technique=T1078
+<134>2025-07-08T07:30:44Z db-prod-01 sshd[33894]: Accepted password for ubuntu from 10.3.254.20 port 43144 ssh2 technique=T1078
+<134>2025-07-08T08:06:34Z api-prod-01 sshd[39079]: Failed password for root from 188.166.73.205 port 5361 ssh2 technique=T1110
+<134>2025-07-08T08:06:49Z api-prod-01 sshd[51679]: Failed password for root from 188.166.73.205 port 7308 ssh2 technique=T1110
+<134>2025-07-08T08:07:00Z api-prod-01 sshd[42174]: Failed password for invalid user oracle from 188.166.73.205 port 7308 ssh2 technique=T1110
+<134>2025-07-08T08:40:26Z bastion-01 sshd[46418]: Accepted password for deploy from 10.3.107.199 port 58181 ssh2 technique=T1078
+<85>2025-07-08T08:45:25Z api-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/bin/journalctl -u pg technique=T1053
+<134>2025-07-08T09:22:46Z db-prod-01 sshd[3870]: Accepted password for deploy from 10.0.249.41 port 36673 ssh2 technique=T1078
+<134>2025-07-08T12:36:54Z web-prod-01 sshd[48318]: Accepted password for deploy from 10.3.185.107 port 40982 ssh2 technique=T1078
+<134>2025-07-08T14:22:44Z web-prod-01 sshd[56995]: Accepted password for deploy from 50.61.213.167 port 12722 ssh2 technique=T1078
+<134>2025-07-08T15:53:17Z bastion-01 sshd[8338]: Accepted password for deploy from 10.3.61.31 port 15548 ssh2 technique=T1078
+<134>2025-07-08T16:11:29Z web-prod-01 sshd[3724]: Accepted password for postgres from 180.70.241.188 port 50722 ssh2 technique=T1078
+<85>2025-07-08T18:53:04Z api-prod-01 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/bin/cat /etc/shadow technique=T1003
+<85>2025-07-09T07:15:10Z web-prod-01 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-07-09T08:29:06Z api-prod-01 sshd[20670]: Accepted password for ec2-user from 79.29.26.42 port 37966 ssh2 technique=T1078
+<134>2025-07-09T09:11:50Z db-prod-01 sshd[18941]: Failed password for ftpuser from 23.154.18.44 port 41650 ssh2 technique=T1110
+<134>2025-07-09T09:12:29Z db-prod-01 sshd[39828]: Failed password for invalid user user from 23.154.18.44 port 30641 ssh2 technique=T1110
+<134>2025-07-09T09:12:50Z db-prod-01 sshd[19683]: Failed password for invalid user admin from 23.154.18.44 port 63231 ssh2 technique=T1110
+<134>2025-07-09T09:12:58Z db-prod-01 sshd[11327]: Failed password for invalid user admin from 23.154.18.44 port 41087 ssh2 technique=T1110
+<134>2025-07-09T09:12:59Z db-prod-01 sshd[18865]: Failed password for user from 23.154.18.44 port 44902 ssh2 technique=T1110
+<134>2025-07-09T09:13:06Z db-prod-01 sshd[9009]: Failed password for invalid user user from 23.154.18.44 port 44369 ssh2 technique=T1110
+<134>2025-07-09T09:13:10Z db-prod-01 sshd[22645]: Failed password for invalid user root from 23.154.18.44 port 49255 ssh2 technique=T1110
+<85>2025-07-09T10:10:15Z db-prod-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2025-07-09T11:35:43Z db-prod-01 sshd[20692]: Accepted password for postgres from 10.1.156.85 port 26352 ssh2 technique=T1078
+<134>2025-07-09T15:01:55Z db-prod-01 sshd[9042]: Accepted password for deploy from 10.4.73.41 port 1094 ssh2 technique=T1078
+<134>2025-07-09T18:37:32Z bastion-01 sshd[5781]: Failed password for git from 199.249.150.83 port 50527 ssh2 technique=T1110
+<134>2025-07-09T18:37:33Z bastion-01 sshd[16319]: Failed password for invalid user ftpuser from 199.249.150.83 port 20492 ssh2 technique=T1110
+<134>2025-07-09T18:37:42Z bastion-01 sshd[21147]: Failed password for invalid user test from 199.249.150.83 port 11621 ssh2 technique=T1110
+<134>2025-07-09T18:37:55Z bastion-01 sshd[8353]: Failed password for invalid user ftpuser from 199.249.150.83 port 33377 ssh2 technique=T1110
+<134>2025-07-09T18:37:56Z bastion-01 sshd[3525]: Failed password for invalid user git from 199.249.150.83 port 27460 ssh2 technique=T1110
+<134>2025-07-09T18:37:59Z bastion-01 sshd[6211]: Failed password for invalid user admin from 199.249.150.83 port 5601 ssh2 technique=T1110
+<134>2025-07-09T18:38:17Z bastion-01 sshd[12511]: Failed password for invalid user oracle from 199.249.150.83 port 50871 ssh2 technique=T1110
+<134>2025-07-10T04:30:56Z db-prod-01 sshd[2722]: Failed password for invalid user user from 107.189.6.18 port 8979 ssh2 technique=T1110
+<134>2025-07-10T04:31:19Z db-prod-01 sshd[57679]: Failed password for git from 107.189.6.18 port 13842 ssh2 technique=T1110
+<134>2025-07-10T04:31:30Z db-prod-01 sshd[6232]: Failed password for invalid user test from 107.189.6.18 port 52854 ssh2 technique=T1110
+<134>2025-07-10T04:32:02Z db-prod-01 sshd[13458]: Failed password for oracle from 107.189.6.18 port 32508 ssh2 technique=T1110
+<85>2025-07-10T09:47:25Z web-prod-02 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<134>2025-07-10T13:09:41Z bastion-01 sshd[49550]: Failed password for invalid user test from 176.10.99.200 port 59756 ssh2 technique=T1110
+<134>2025-07-10T13:09:46Z bastion-01 sshd[11973]: Failed password for root from 176.10.99.200 port 38920 ssh2 technique=T1110
+<134>2025-07-10T13:10:03Z bastion-01 sshd[10818]: Failed password for invalid user admin from 176.10.99.200 port 19606 ssh2 technique=T1110
+<134>2025-07-10T13:10:08Z bastion-01 sshd[22163]: Failed password for git from 176.10.99.200 port 5182 ssh2 technique=T1110
+<134>2025-07-10T13:10:31Z bastion-01 sshd[59465]: Failed password for ftpuser from 176.10.99.200 port 31383 ssh2 technique=T1110
+<134>2025-07-10T13:10:37Z bastion-01 sshd[36666]: Failed password for invalid user git from 176.10.99.200 port 38045 ssh2 technique=T1110
+<134>2025-07-10T13:11:05Z bastion-01 sshd[7243]: Failed password for invalid user root from 176.10.99.200 port 34065 ssh2 technique=T1110
+<85>2025-07-10T15:38:21Z api-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-07-10T16:22:35Z web-prod-01 sshd[24134]: Accepted password for ubuntu from 82.227.193.18 port 39625 ssh2 technique=T1078
+<134>2025-07-10T19:25:35Z web-prod-02 sshd[55018]: Accepted password for ec2-user from 10.2.50.172 port 26345 ssh2 technique=T1078
+<85>2025-07-11T00:27:58Z bastion-01 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/bin/cat /etc/shadow technique=T1003
+<134>2025-07-11T08:05:01Z api-prod-01 sshd[33507]: Accepted password for ec2-user from 10.4.42.199 port 44608 ssh2 technique=T1078
+<134>2025-07-11T08:50:46Z web-prod-01 sshd[44335]: Accepted password for postgres from 167.177.217.65 port 28950 ssh2 technique=T1078
+<134>2025-07-11T09:12:10Z web-prod-02 sshd[43453]: Accepted password for postgres from 10.3.157.194 port 21525 ssh2 technique=T1078
+<134>2025-07-13T14:40:16Z web-prod-02 sshd[38940]: Accepted password for ec2-user from 10.3.251.212 port 19981 ssh2 technique=T1078
+<134>2025-07-16T14:09:48Z web-prod-02 sshd[31782]: Accepted password for ec2-user from 175.136.23.214 port 14352 ssh2 technique=T1078
+<134>2025-07-19T09:41:39Z web-prod-02 sshd[38506]: Accepted password for ubuntu from 215.126.26.230 port 31798 ssh2 technique=T1078
+<85>2025-07-21T16:20:54Z web-prod-01 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/bin/journalctl -u pg technique=T1053
+<85>2025-07-24T18:37:04Z db-prod-01 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2025-07-28T11:38:04Z web-prod-02 sshd[24790]: Failed password for invalid user git from 171.25.193.20 port 38247 ssh2 technique=T1110
+<134>2025-07-31T09:32:35Z web-prod-01 sshd[21951]: Accepted password for ubuntu from 10.0.26.31 port 56413 ssh2 technique=T1078
+<134>2025-08-04T19:10:17Z bastion-01 sshd[17658]: Failed password for test from 194.147.35.12 port 25114 ssh2 technique=T1110
+<134>2025-08-07T18:51:31Z web-prod-01 sshd[22716]: Failed password for invalid user root from 194.165.16.78 port 5459 ssh2 technique=T1110
+<134>2025-08-11T15:14:40Z web-prod-01 sshd[50621]: Failed password for user from 103.143.52.221 port 25260 ssh2 technique=T1110
+<134>2025-08-14T12:56:39Z db-prod-01 sshd[31582]: Accepted password for deploy from 55.152.168.162 port 31357 ssh2 technique=T1078
+<134>2025-08-18T20:53:29Z db-prod-01 sshd[23707]: Accepted password for deploy from 147.83.115.51 port 30355 ssh2 technique=T1078
+<134>2025-08-20T15:15:26Z web-prod-01 sshd[32803]: Accepted password for ubuntu from 10.1.123.145 port 7951 ssh2 technique=T1078
+<134>2025-08-23T23:12:58Z web-prod-01 sshd[15945]: Failed password for admin from 141.95.172.201 port 33081 ssh2 technique=T1110
+<134>2025-08-26T17:46:21Z web-prod-01 sshd[40787]: Failed password for root from 80.94.95.115 port 21810 ssh2 technique=T1110
+<85>2025-09-01T09:55:57Z db-prod-01 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<134>2025-09-03T12:29:20Z bastion-01 sshd[12475]: Failed password for invalid user ftpuser from 103.143.52.221 port 45752 ssh2 technique=T1110
+<134>2025-09-08T08:35:47Z db-prod-01 sshd[22324]: Accepted password for svc_ci from 10.4.54.30 port 53624 ssh2 technique=T1078
+<85>2025-09-10T19:07:13Z db-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/usr/bin/docker ps technique=T1053
+<134>2025-09-16T09:15:39Z api-prod-01 sshd[11802]: Accepted password for svc_ci from 10.4.16.101 port 33654 ssh2 technique=T1078
+<134>2025-09-20T17:37:16Z bastion-01 sshd[11606]: Accepted password for ec2-user from 71.230.153.49 port 22897 ssh2 technique=T1078
+<85>2025-09-24T07:08:14Z web-prod-02 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<134>2025-09-28T08:24:05Z api-prod-01 sshd[30991]: Failed password for test from 23.129.64.130 port 48702 ssh2 technique=T1110
+<85>2025-10-03T08:16:52Z web-prod-02 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/bin/journalctl -u pg technique=T1053
+<134>2025-10-06T18:53:17Z bastion-01 sshd[6962]: Accepted password for postgres from 10.3.151.65 port 11067 ssh2 technique=T1078
+<134>2025-10-11T12:00:37Z web-prod-01 sshd[7383]: Failed password for invalid user ftpuser from 146.70.199.44 port 41469 ssh2 technique=T1110
+<134>2025-10-14T14:30:14Z web-prod-01 sshd[46398]: Failed password for invalid user admin from 107.189.6.18 port 58822 ssh2 technique=T1110
+<134>2025-10-19T15:25:03Z web-prod-01 sshd[32399]: Accepted password for deploy from 10.2.242.56 port 20810 ssh2 technique=T1078
+<134>2025-10-21T12:35:22Z web-prod-02 sshd[16472]: Failed password for git from 146.70.199.44 port 33498 ssh2 technique=T1110
+<134>2025-10-24T14:11:36Z api-prod-01 sshd[18498]: Accepted password for svc_ci from 10.0.13.175 port 10701 ssh2 technique=T1078
+<134>2025-10-28T15:53:09Z db-prod-01 sshd[13481]: Failed password for invalid user ftpuser from 185.244.25.107 port 43376 ssh2 technique=T1110
+<134>2025-10-30T20:49:03Z web-prod-02 sshd[18234]: Accepted password for deploy from 68.162.4.8 port 45041 ssh2 technique=T1078
+<134>2025-11-05T14:42:38Z db-prod-01 sshd[13632]: Accepted password for postgres from 105.250.182.166 port 40259 ssh2 technique=T1078
+<134>2025-11-11T12:26:22Z bastion-01 sshd[28888]: Failed password for user from 51.158.144.91 port 19270 ssh2 technique=T1110
+<85>2025-11-13T06:00:15Z api-prod-01 sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-11-15T09:24:25Z bastion-01 sshd[9474]: Accepted password for deploy from 10.1.184.252 port 64627 ssh2 technique=T1078
+<134>2025-11-18T18:27:37Z web-prod-02 sshd[49859]: Failed password for invalid user ftpuser from 185.244.25.107 port 12583 ssh2 technique=T1110
+<134>2025-11-20T02:04:46Z web-prod-02 sshd[50715]: Failed password for invalid user ftpuser from 192.42.116.14 port 55035 ssh2 technique=T1110
+<134>2025-11-22T16:59:06Z web-prod-02 sshd[48552]: Accepted password for deploy from 24.243.58.102 port 42226 ssh2 technique=T1078
+<134>2025-11-26T16:06:07Z db-prod-01 sshd[55007]: Failed password for test from 104.244.79.61 port 61266 ssh2 technique=T1110
+<85>2025-12-01T13:38:15Z api-prod-01 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-12-05T08:38:23Z web-prod-02 sshd[40396]: Accepted password for deploy from 74.214.69.107 port 9073 ssh2 technique=T1078
+<134>2025-12-10T13:11:34Z bastion-01 sshd[5098]: Accepted password for ubuntu from 10.1.92.159 port 33920 ssh2 technique=T1078
+<134>2025-12-13T14:33:13Z bastion-01 sshd[24000]: Failed password for user from 185.244.25.107 port 45441 ssh2 technique=T1110
+<85>2025-12-18T16:31:16Z db-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/usr/bin/apt-get update technique=T1053
+<134>2025-12-25T10:08:31Z bastion-01 sshd[37531]: Failed password for user from 192.42.116.14 port 17884 ssh2 technique=T1110
+<134>2025-12-29T13:12:28Z web-prod-02 sshd[27988]: Failed password for test from 194.165.16.78 port 2462 ssh2 technique=T1110
+<134>2026-01-01T14:02:06Z bastion-01 sshd[59529]: Accepted password for deploy from 10.0.218.108 port 29851 ssh2 technique=T1078
+<134>2026-01-07T09:15:48Z web-prod-02 sshd[13613]: Accepted password for svc_ci from 10.1.160.89 port 53679 ssh2 technique=T1078
+<85>2026-01-09T16:11:53Z web-prod-02 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/usr/bin/docker ps technique=T1053
+<134>2026-01-12T13:26:51Z web-prod-02 sshd[45029]: Accepted password for deploy from 101.82.11.72 port 9067 ssh2 technique=T1078
+<85>2026-01-15T13:41:55Z bastion-01 sudo:   postgres : TTY=pts/0 ; PWD=/home/postgres ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx technique=T1053
+<134>2026-01-19T14:37:08Z db-prod-01 sshd[36950]: Accepted password for postgres from 179.161.100.111 port 15027 ssh2 technique=T1078
+<134>2026-01-22T10:48:44Z bastion-01 sshd[13239]: Failed password for oracle from 194.165.16.78 port 55530 ssh2 technique=T1110
+<134>2026-01-25T15:44:49Z db-prod-01 sshd[41498]: Failed password for invalid user user from 5.188.206.18 port 28557 ssh2 technique=T1110
+<134>2026-01-27T10:03:10Z web-prod-02 sshd[57412]: Failed password for invalid user oracle from 141.95.172.201 port 20771 ssh2 technique=T1110
+<134>2026-01-27T20:50:54Z web-prod-02 sshd[57738]: Failed password for guest from 188.166.73.205 port 24653 ssh2 technique=T1110
+<134>2026-01-27T21:33:10Z web-prod-02 sshd[1734]: Failed password for invalid user git from 141.98.10.62 port 12898 ssh2 technique=T1110
+<134>2026-01-29T17:39:38Z db-prod-01 sshd[50788]: Accepted password for svc_ci from 89.218.166.47 port 9738 ssh2 technique=T1078
+<134>2026-02-03T21:20:16Z web-prod-01 sshd[39744]: Accepted password for deploy from 59.176.156.139 port 29553 ssh2 technique=T1078
+<85>2026-02-07T22:27:45Z db-prod-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2026-02-10T05:22:26Z web-prod-02 sshd[39266]: Accepted password for svc_ci from 10.0.113.148 port 63042 ssh2 technique=T1078
+<134>2026-02-13T10:04:12Z web-prod-01 sshd[41369]: Accepted password for postgres from 10.1.223.126 port 45672 ssh2 technique=T1078
+<134>2026-02-17T11:51:43Z bastion-01 sshd[9939]: Failed password for invalid user admin from 192.42.116.14 port 48264 ssh2 technique=T1110
+<134>2026-02-20T14:13:58Z web-prod-01 sshd[50882]: Failed password for guest from 141.98.10.62 port 57165 ssh2 technique=T1110
+<134>2026-02-26T15:41:41Z web-prod-01 sshd[25917]: Failed password for invalid user test from 185.244.25.107 port 19087 ssh2 technique=T1110
+<134>2026-02-28T18:13:56Z web-prod-02 sshd[25164]: Failed password for oracle from 185.220.101.47 port 34345 ssh2 technique=T1110
+<85>2026-03-06T00:02:37Z bastion-01 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/cat /etc/shadow technique=T1003
+<134>2026-03-09T09:46:51Z web-prod-01 sshd[3432]: Accepted password for svc_ci from 10.0.151.110 port 50922 ssh2 technique=T1078
+<134>2026-03-13T08:07:53Z api-prod-01 sshd[41104]: Failed password for invalid user git from 171.25.193.20 port 38242 ssh2 technique=T1110
+<134>2026-03-16T14:37:07Z bastion-01 sshd[44595]: Accepted password for svc_ci from 212.86.116.90 port 14684 ssh2 technique=T1078
+<85>2026-03-19T13:22:29Z bastion-01 sudo:   svc_ci : TTY=pts/0 ; PWD=/home/svc_ci ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<134>2026-03-23T20:08:17Z bastion-01 sshd[25269]: Accepted password for svc_ci from 33.23.150.27 port 27579 ssh2 technique=T1078
+<134>2026-03-25T14:01:52Z bastion-01 sshd[32328]: Accepted password for deploy from 210.236.50.35 port 14800 ssh2 technique=T1078
+<134>2026-03-27T01:00:55Z db-prod-01 sshd[11706]: Failed password for invalid user admin from 94.232.46.161 port 45445 ssh2 technique=T1110
+<134>2026-03-30T22:53:37Z web-prod-02 sshd[31214]: Accepted password for ubuntu from 10.4.18.168 port 47650 ssh2 technique=T1078
+<134>2026-04-03T13:18:15Z web-prod-01 sshd[52903]: Failed password for invalid user ftpuser from 185.244.25.107 port 28386 ssh2 technique=T1110
+<134>2026-04-09T01:51:07Z web-prod-01 sshd[45155]: Failed password for invalid user oracle from 23.154.18.44 port 54958 ssh2 technique=T1110
+<134>2026-04-13T07:09:00Z bastion-01 sshd[30341]: Accepted password for ubuntu from 10.0.131.174 port 14175 ssh2 technique=T1078
+<85>2026-04-15T19:54:04Z web-prod-02 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/chmod 4755 /usr/bin/find technique=T1053
+<134>2026-04-19T06:33:26Z api-prod-01 sshd[53557]: Accepted password for ubuntu from 174.209.46.51 port 42064 ssh2 technique=T1078
+<134>2026-04-24T16:49:50Z bastion-01 sshd[2791]: Accepted password for ubuntu from 10.4.233.183 port 41808 ssh2 technique=T1078
+<134>2026-04-28T07:08:13Z web-prod-01 sshd[15113]: Failed password for admin from 94.232.46.161 port 21708 ssh2 technique=T1110
+<134>2026-05-01T09:34:58Z web-prod-01 sshd[20617]: Accepted password for ec2-user from 157.171.242.82 port 6853 ssh2 technique=T1078
+<134>2026-05-04T12:13:11Z db-prod-01 sshd[11574]: Failed password for oracle from 194.165.16.78 port 3623 ssh2 technique=T1110
+<134>2026-05-09T15:55:59Z web-prod-01 sshd[37833]: Accepted password for ubuntu from 137.246.107.52 port 57096 ssh2 technique=T1078
+<134>2026-05-13T11:40:07Z db-prod-01 sshd[17345]: Accepted password for deploy from 73.163.7.210 port 50898 ssh2 technique=T1078
+<134>2026-05-18T14:49:23Z web-prod-02 sshd[37582]: Accepted password for ec2-user from 10.0.111.213 port 21671 ssh2 technique=T1078
+<134>2026-05-20T08:37:36Z web-prod-01 sshd[48971]: Accepted password for ubuntu from 207.134.176.63 port 38407 ssh2 technique=T1078
+<134>2026-05-23T09:11:27Z api-prod-01 sshd[10809]: Failed password for invalid user ftpuser from 104.244.79.61 port 61457 ssh2 technique=T1110
+<85>2026-05-26T18:57:05Z api-prod-01 sudo:   ec2-user : TTY=pts/0 ; PWD=/home/ec2-user ; USER=root ; COMMAND=/usr/bin/useradd -m svc_backdoor technique=T1136
+<134>2026-05-29T21:40:18Z bastion-01 sshd[24133]: Accepted password for ubuntu from 10.1.208.147 port 23423 ssh2 technique=T1078
+<134>2026-06-02T11:30:22Z bastion-01 sshd[32269]: Accepted password for postgres from 10.0.130.233 port 55276 ssh2 technique=T1078
+<134>2026-06-05T14:50:30Z web-prod-01 sshd[21492]: Accepted password for svc_ci from 10.1.227.29 port 54631 ssh2 technique=T1078
+<134>2026-06-10T09:37:05Z api-prod-01 sshd[3807]: Failed password for root from 171.25.193.20 port 13258 ssh2 technique=T1110
+<134>2026-06-12T18:24:41Z api-prod-01 sshd[59205]: Accepted password for ec2-user from 10.1.9.5 port 34488 ssh2 technique=T1078
+<134>2026-06-15T13:40:20Z bastion-01 sshd[25664]: Accepted password for ubuntu from 44.151.127.143 port 14646 ssh2 technique=T1078
+<134>2026-06-19T17:58:30Z web-prod-01 sshd[34439]: Accepted password for ec2-user from 10.0.94.150 port 49274 ssh2 technique=T1078
+<85>2026-06-24T19:55:25Z db-prod-01 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/journalctl -u pg technique=T1053
