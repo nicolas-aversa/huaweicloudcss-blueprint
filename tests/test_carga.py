@@ -10,7 +10,7 @@ import pytest
 
 import main
 import perfiles
-import verticales_de_prueba as verticals
+import verticals
 
 
 # ── Tamaño del nodo ─────────────────────────────────────────────────────────

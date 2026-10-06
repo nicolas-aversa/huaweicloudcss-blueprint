@@ -9,7 +9,7 @@ import pytest
 
 import accesos
 import main
-import verticales_de_prueba as verticals
+import verticals
 
 _INDEX = pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html"
 
@@ -35,6 +35,17 @@ def test_la_contrasena_cumple_la_politica_de_css(_):
     assert len(p) == 16
     assert any(c.islower() for c in p) and any(c.isupper() for c in p) and any(c.isdigit() for c in p)
     assert any(c in "@#%^*_+-" for c in p) and not set(p) & set("\"'\\/ ")
+
+
+def test_los_casos_que_declaran_analista():
+    con = {v["slug"]: v["analista"]["enmascarados"] for v in verticals.all_verticals() if v.get("analista")}
+    assert con == {"encuentros-clinicos": ["patient"],
+                   "transacciones-billetera": ["transaction.customer_id", "transaction.account_ref"],
+                   "transacciones-alyc": ["comitente"]}
+    for slug, campos in con.items():
+        assert set(campos) <= set(verticals.get_vertical(slug)["capability"]["fields"]) | {"transaction.account_ref"}
+    payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
+    assert payload["encuentros-clinicos"]["enmascarados"] == ["patient"] and payload["siem"]["enmascarados"] == []
 
 
 class _R:

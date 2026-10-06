@@ -40,39 +40,9 @@ def necesita_datasets(*nombres):
     )
 
 
-# Los campos de un dataset firewall, para los tests de dashboards: el dashboard
-# sale de los campos (ya no hay specs hechos a mano por slug).
-CAMPOS_FIREWALL = [
-    {"field_path": "type", "type": "string", "dimension": True, "role": "primary_dimension", "business_label": "Tipo"},
-    {"field_path": "action", "type": "string", "dimension": True, "role": "success_indicator", "business_label": "Acción"},
-    {"field_path": "srcip", "type": "ip", "role": "entity_id", "business_label": "IP origen"},
-    {"field_path": "sentbyte", "type": "integer", "role": "measure", "business_label": "Bytes enviados"},
-    {"field_path": "srccountry", "type": "string", "dimension": True, "business_label": "País de origen"},
-    {"field_path": "date", "type": "date", "role": "timestamp", "business_label": "Fecha"},
-]
-
-
-@pytest.fixture
-def entorno_billetera(monkeypatch, tmp_path):
-    """Un entorno con un dataset de transacciones desplegado: su spec (el de
-    la vieja vertical de billetera: 3 pronósticos sobre `transaction.*`) y sus
-    campos en el registro de pipelines. Aislado en tmp_path: antes estos tests
-    leían el directorio de terraform real."""
-    import json as _j
-    viejo = _j.loads((pathlib.Path(__file__).parent / "fixtures" / "specs_de_prueba.json")
-                     .read_text(encoding="utf-8"))["transacciones-billetera"]
-    main._write_pipelines_registry(tmp_path, {"transacciones-billetera": {
-        "fields": viejo["fields"], "index": "transacciones-billetera-%{+YYYY.MM}", "label": "Billetera"}})
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_resolve_capability_spec", lambda slug, *a, **k:
-                        dict(viejo["capability"]) if slug == "transacciones-billetera" else {})
-    return tmp_path
-
-
-# Los datasets de demo que generan los build scripts.
-requires_datasets = necesita_datasets(
-    "encuentros-clinicos.log", "fortianalyzer.log", "fraud-detection.log", "produccion-pozos.log",
-    "streaming-ott.log", "transacciones-alyc.log", "transacciones-billetera.log", "ventas-ecommerce.log")
+# Compat: los tests que solo necesitan "algún" dataset del catálogo.
+requires_datasets = necesita_datasets(*sorted(
+    f for fs in __import__("verticals").demo_dataset_files().values() for f in fs))
 
 
 # Texto libre: no es una tabla ni clave=valor, así que lo arma el LLM.
@@ -854,6 +824,43 @@ def test_index_template_endpoint_preserves_field_path():
     assert "srcip" not in props
 
 
+def test_index_template_endpoint_prefers_curated_template():
+    """El PREVIEW del paso 2 muestra el template CURADO (templates/<slug>.json)
+    verbatim cuando el slug lo tiene — así el preview es fiel a lo que se aplica y
+    se ve idéntico cargando el tipo solo o junto a otros (antes divergía porque el
+    auto-generado dependía de los `fields` crudos vs. enriquecidos). El slug se
+    puede pasar explícito o derivar del índice."""
+    import json as _json
+    import main as _main
+
+    curated = _json.loads(
+        (_main._TEMPLATES_DIR / "transacciones-billetera.json").read_text(encoding="utf-8")
+    )
+    # slug explícito + fields distintos → igual devuelve el curado, no el de fields.
+    res = client.post(
+        "/api/v1/onboarding/index-template",
+        json={
+            "fields": [{"raw_name": "ruido", "type": "keyword"}],
+            "opensearch_index": "transacciones-billetera-%{+YYYY.MM}",
+            "slug": "transacciones-billetera",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["template"] == curated
+    assert body["index_pattern"] == "transacciones-billetera-*"
+    assert "ruido" not in _json.dumps(body["template"])
+    # sin slug: se deriva del índice → mismo curado.
+    res2 = client.post(
+        "/api/v1/onboarding/index-template",
+        json={
+            "fields": [{"raw_name": "otro", "type": "integer"}],
+            "opensearch_index": "transacciones-billetera-%{+YYYY.MM}",
+        },
+    )
+    assert res2.json()["template"] == curated
+
+
 def test_index_template_endpoint_falls_back_when_no_curated():
     """Un slug SIN template curado cae al auto-generado desde los campos."""
     res = client.post(
@@ -1248,12 +1255,6 @@ def test_datasets_preload_uploads_missing(monkeypatch, tmp_path):
             pass
 
     monkeypatch.setattr("obs_client.OBSClient", _FakeObs)
-    # Los datasets guardados (uno ya subido; el SIEM, en tres fuentes).
-    archivos = {"transacciones-alyc": ["alyc.log"], "siem-fw": ["fw.log"], "siem-waf": ["waf.log"],
-                "siem-auth": ["auth.log"]}
-    (tmp_path / "d.log").write_text("x=1\n", encoding="utf-8")
-    monkeypatch.setattr(main, "_demo_dataset_files", lambda: archivos)
-    monkeypatch.setattr(main, "_dataset_source", lambda slug, f: tmp_path / "d.log")
     res = client.post("/api/v1/datasets/preload", json={
         "access_key": "AK", "secret_key": "SK", "bucket": "mis-demos",
         "region": "sa-brazil-1",
@@ -1265,8 +1266,8 @@ def test_datasets_preload_uploads_missing(monkeypatch, tmp_path):
     complete = [e for e in events if e["type"] == "complete"]
     assert complete and complete[0]["skipped"] == 1 and complete[0]["errors"] == 0
     assert calls["ensure"] == ["sa-brazil-1"]
-    # Subió todos los archivos salvo el de alyc, que ya estaba.
-    expected = {f"{slug}-logs/{f}" for slug, files in archivos.items()
+    # Subió todos los archivos del mapa salvo el de alyc; los 4 del SIEM van juntos.
+    expected = {f"{slug}-logs/{f}" for slug, files in main._DEMO_DATASET_FILES.items()
                 for f in files if slug != "transacciones-alyc"}
     assert set(calls["put"]) == expected
     assert complete[0]["uploaded"] == len(expected)
@@ -1285,8 +1286,6 @@ def test_deploy_guard_demo_datasets_missing(monkeypatch):
             pass
 
     monkeypatch.setattr("obs_client.OBSClient", _FakeObs)
-    monkeypatch.setattr(main, "_demo_dataset_files",
-                        lambda: {"transacciones-alyc": ["alyc.log"], "siem": ["siem.log"]})
     # Registry vacío: que el cap de pipelines no interfiera con este test.
     monkeypatch.setattr(main, "_read_pipelines_registry", lambda _dir: {})
     body = {
@@ -1616,9 +1615,11 @@ def test_el_prompt_lleva_un_filter_de_verdad_como_ejemplo():
     mantiene sano."""
     import conf_lint
     import maas_integrator as mi
+    import verticals
 
     ejemplo = mi._ejemplo_filter()
 
+    assert ejemplo in [v.get("filter_code", "").strip() for v in verticals.all_verticals()]
     assert conf_lint.lint_filtro(ejemplo) == []
     assert "convert => {" in ejemplo and "remove_field => [" in ejemplo
     # La forma que el modelo tiene que copiar: hash sin comas, array con comas.
@@ -1718,7 +1719,7 @@ def test_generate_filter_feedback_goes_straight_to_llm(monkeypatch):
     assert seen == {"feedback": "fix", "previous": "filter { old }"}
 
 
-def test_provision_capabilities_uses_configured_maas_key(monkeypatch, tmp_path, entorno_billetera):
+def test_provision_capabilities_uses_configured_maas_key(monkeypatch, tmp_path):
     """Los connectors del chatbot de OpenSearch se crean con la key CONFIGURADA
     (⚙), no con la del env — así el agente consume los recursos del cliente."""
     import maas_integrator as mi
@@ -2484,20 +2485,71 @@ def test_json_nested_mongodb_namespaced():
 
 
 def test_build_ndjson_produces_valid_ndjson():
-    """El dashboard que sale de los campos es NDJSON parseable con saved objects
-    válidos: index-pattern del índice real, visualizaciones y el dashboard."""
+    """build_ndjson(slug) produce NDJSON parseable con saved objects válidos."""
     import json as _json
-    from dashboards import build_ndjson_from_fields
+    from dashboards import build_ndjson, get_available_slugs
 
-    for slug, campos in (("firewall", CAMPOS_FIREWALL), ("chico", CAMPOS_FIREWALL[:2])):
-        objects = [_json.loads(l) for l in build_ndjson_from_fields(slug, f"{slug}-%{{+YYYY.MM}}", campos).strip().split("\n")]
+    for slug in get_available_slugs():
+        ndjson = build_ndjson(slug)
+        lines = ndjson.strip().split("\n")
+
+        assert len(lines) >= 3, f"{slug}: debe tener al menos 3 objetos (ip + viz + dash)"
+
+        objects = []
+        for i, line in enumerate(lines):
+            try:
+                obj = _json.loads(line)
+                objects.append(obj)
+            except _json.JSONDecodeError as exc:
+                raise AssertionError(f"{slug} línea {i} no es JSON válido: {exc}") from exc
+
         types = [obj["type"] for obj in objects]
-        assert types.count("index-pattern") == 1 and types.count("dashboard") == 1, slug
-        assert types.count("visualization") >= 2, slug
+        assert "index-pattern" in types, f"{slug}: debe tener index-pattern"
+        assert "dashboard" in types, f"{slug}: debe tener dashboard"
+        assert types.count("visualization") >= 3, f"{slug}: debe tener al menos 3 visualizaciones"
+
         ip_obj = next(obj for obj in objects if obj["type"] == "index-pattern")
-        assert ip_obj["attributes"]["title"] == f"{slug}-*" and ip_obj["attributes"]["timeFieldName"] == "@timestamp"
+        from dashboards import get_dashboard_spec
+        spec = get_dashboard_spec(slug)
+        expected_ip = (spec.get("ip_id") if spec else None) or f"{slug}-*"
+        assert ip_obj["attributes"]["title"] == expected_ip
+        assert ip_obj["attributes"]["timeFieldName"] == "@timestamp"
+
         dash_obj = next(obj for obj in objects if obj["type"] == "dashboard")
+        assert slug in dash_obj["attributes"]["title"]
         assert "panelsJSON" in dash_obj["attributes"]
+
+
+def test_dashboards_have_input_controls():
+    """Cada dashboard de vertical trae un panel de Controls (input_control_vis):
+    una barra de Options-list que filtra por terms, con una ref
+    control_<i>_index_pattern al index-pattern por cada campo."""
+    import json as _json
+    from dashboards import build_ndjson, get_dashboard_spec
+
+    for slug in ("transacciones-alyc", "fraud-detection", "siem", "produccion-pozos", "fortianalyzer-soc"):
+        objs = [_json.loads(l) for l in build_ndjson(slug).splitlines() if l.strip()]
+        ctrl = next((o for o in objs if o["type"] == "visualization"
+                     and _json.loads(o["attributes"]["visState"]).get("type") == "input_control_vis"), None)
+        assert ctrl is not None, f"{slug}: falta el panel de Controls"
+        vs = _json.loads(ctrl["attributes"]["visState"])
+        controls = vs["params"]["controls"]
+        assert controls and all(c["type"] == "list" for c in controls)
+        # Una ref control_<i>_index_pattern por control, al index-pattern del slug.
+        ip_id = (get_dashboard_spec(slug).get("ip_id") if get_dashboard_spec(slug) else None) or f"{slug}-*"
+        ctrl_refs = [r for r in ctrl["references"] if r["name"].startswith("control_")]
+        assert len(ctrl_refs) == len(controls)
+        assert all(r["id"] == ip_id and r["type"] == "index-pattern" for r in ctrl_refs)
+        assert all(c["indexPatternRefName"] == f"control_{i}_index_pattern"
+                   for i, c in enumerate(controls))
+
+
+def test_build_ndjson_invalid_slug_raises():
+    """build_ndjson con slug inválido debe raisear ValueError."""
+    from dashboards import build_ndjson
+
+    with pytest.raises(ValueError, match="No hay spec"):
+        build_ndjson("slug-inexistente")
 
 
 def test_import_dashboards_returns_false_for_invalid_slug():
@@ -2519,7 +2571,7 @@ def test_import_dashboards_returns_false_without_endpoint():
     import main as _main
 
     result = _main._import_dashboards(
-        slug="firewall", fields=CAMPOS_FIREWALL,
+        slug="firewall",
         cluster={},
         password="test",
         https_enabled=True,
@@ -2533,7 +2585,7 @@ def test_import_dashboards_returns_false_without_password():
     import main as _main
 
     result = _main._import_dashboards(
-        slug="firewall", fields=CAMPOS_FIREWALL,
+        slug="firewall",
         cluster={"endpoint": "10.0.0.5:9200"},
         password="",
         https_enabled=True,
@@ -2569,7 +2621,7 @@ def test_import_dashboards_uses_kibana_backdoor_bulk(monkeypatch):
     monkeypatch.setattr("requests.post", _fake_post)
 
     result = _main._import_dashboards(
-        slug="firewall", fields=CAMPOS_FIREWALL,
+        slug="firewall",
         cluster={"endpoint": "10.0.0.5:9200"},
         password="test-password",
         https_enabled=True,
@@ -2625,7 +2677,7 @@ def test_import_dashboards_retries_on_failure(monkeypatch):
     monkeypatch.setattr(_main.time, "sleep", lambda x: None)
 
     result = _main._import_dashboards(
-        slug="firewall", fields=CAMPOS_FIREWALL,
+        slug="firewall",
         cluster={"endpoint": "10.0.0.5:9200"},
         password="test",
         https_enabled=True,
@@ -2636,13 +2688,293 @@ def test_import_dashboards_retries_on_failure(monkeypatch):
     assert attempts["n"] == _main._DASHBOARDS_IMPORT_RETRIES
 
 
-def test_build_ndjson_ids_are_deterministic():
-    """Dos generaciones con los mismos campos producen ids idénticos (uuid5) →
-    re-import con overwrite=true reemplaza en vez de duplicar."""
-    from dashboards import build_ndjson_from_fields
+def test_import_dashboards_uses_file_from_disk_if_exists(monkeypatch, tmp_path):
+    """_import_dashboards lee el NDJSON de docs/dashboards/<slug>.ndjson y lo manda
+    transformado a bulk de `.kibana`."""
+    import main as _main
 
-    gen = lambda: build_ndjson_from_fields("firewall", "firewall-%{+YYYY.MM}", CAMPOS_FIREWALL)
-    assert gen() == gen()
+    captured = {}
+
+    def _fake_post(url, **kwargs):
+        captured["data"] = kwargs.get("data")
+
+        class _Resp:
+            status_code = 200
+            text = "{}"
+
+            def json(self):
+                return {"errors": False}
+
+        return _Resp()
+
+    monkeypatch.setattr("requests.post", _fake_post)
+
+    ndjson_content = '{"type":"index-pattern","id":"test-*","attributes":{"title":"test-*"}}\n{"exportedCount":1}'
+    docs_dir = tmp_path / "docs" / "dashboards"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "firewall.ndjson").write_text(ndjson_content, encoding="utf-8")
+
+    result = _main._import_dashboards(
+        slug="firewall",
+        cluster={"endpoint": "10.0.0.5:9200"},
+        password="test",
+        https_enabled=True,
+        terraform_dir=tmp_path / "terraform",
+    )
+
+    assert result is True
+    body = captured["data"].decode("utf-8") if isinstance(captured["data"], bytes) else captured["data"]
+    assert '"index-pattern:test-*"' in body  # salió del archivo de disco, transformado
+    assert "exportedCount" not in body       # la línea sin type/id se salteó
+
+
+def test_dashboard_slugs_include_cts_not_huawei_cts():
+    """El slug CTS es `cts` (no `huawei-cts`) — alinea con el case.slug del deploy
+    y resuelve el 'slug no tiene spec — skip import'."""
+    from dashboards import get_available_slugs
+
+    slugs = get_available_slugs()
+    assert "cts" in slugs
+    assert "huawei-cts" not in slugs
+
+
+def test_rich_dashboards_use_real_fields_and_indexref():
+    """Los 3 dashboards rich (firewall/transacciones-billetera/cts) referencian los
+    campos REALES (no `data.*`), encadenan el index-pattern por id==title==`<slug>-*`,
+    y apuntan al index-pattern por references/indexRefName (sin id inline)."""
+    import json as _json
+    from dashboards import build_ndjson
+
+    expected_fields = {
+        "firewall": ["source.ip", "event.action", "source.geo.country_name", "network.application"],
+        "transacciones-billetera": ["transaction.operation_code", "transaction.response_code", "transaction.channel", "transaction.customer_id"],
+        "cts": ["trace_rating", "service_type", "user.user_name", "source_ip"],
+    }
+    for slug, fields in expected_fields.items():
+        objs = [_json.loads(l) for l in build_ndjson(slug).splitlines() if l.strip()]
+        ip = next(o for o in objs if o["type"] == "index-pattern")
+        ip_id = f"{slug}-*"
+        assert ip["id"] == ip_id and ip["attributes"]["title"] == ip_id
+
+        viz = [o for o in objs if o["type"] == "visualization"]
+        dash = next(o for o in objs if o["type"] == "dashboard")
+
+        # Campos reales presentes en algún visState; NUNCA el namespace viejo data.*
+        all_vis_states = " ".join(v["attributes"]["visState"] for v in viz)
+        assert "data." not in all_vis_states, f"{slug}: visState aún referencia data.*"
+        for f in fields:
+            assert f in all_vis_states, f"{slug}: falta el campo {f} en las viz"
+
+        # Viz con índice: apuntan por references + indexRefName (no id inline).
+        for v in viz:
+            refs = [r for r in v["references"] if r["type"] == "index-pattern"]
+            if refs:  # las viz markdown no tienen índice
+                assert refs[0]["id"] == ip_id
+                # Los controles (input_control_vis) referencian por control_N_index_pattern
+                # y no llevan índice en el searchSource — se saltean de esa aserción.
+                if _json.loads(v["attributes"]["visState"]).get("type") == "input_control_vis":
+                    continue
+                ssj = v["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"]
+                assert "indexRefName" in ssj
+
+        # Todo panel del dashboard apunta a una viz existente.
+        vis_ids = {v["id"] for v in viz}
+        panel_ref_ids = {r["id"] for r in dash["references"] if r["type"] == "visualization"}
+        assert panel_ref_ids and panel_ref_ids <= vis_ids
+
+
+def test_build_ndjson_ids_are_deterministic():
+    """Dos generaciones del mismo slug producen ids idénticos (uuid5) → re-import
+    con overwrite=true reemplaza en vez de duplicar."""
+    from dashboards import build_ndjson
+
+    for slug in ("firewall", "transacciones-billetera", "cts"):
+        assert build_ndjson(slug) == build_ndjson(slug)
+
+
+def test_fortianalyzer_fortiview_dashboards():
+    """Los 4 dashboards FortiAnalyzer FortiView (SOC, Traffic, UTM, Event)
+    comparten index pattern fortianalyzer-*, usan campos nativos FortiGate
+    y tienen los paneles esperados."""
+    import json as _json
+    from dashboards import build_ndjson, get_available_slugs
+
+    expected = {
+        "fortianalyzer-soc": 14,
+        "fortianalyzer-traffic": 14,
+        "fortianalyzer-utm": 14,
+        "fortianalyzer-event": 13,
+    }
+    for slug in expected:
+        assert slug in get_available_slugs(), f"{slug} no está en get_available_slugs"
+
+    for slug, viz_count in expected.items():
+        objs = [_json.loads(l) for l in build_ndjson(slug).splitlines() if l.strip()]
+        ip = next(o for o in objs if o["type"] == "index-pattern")
+        assert ip["id"] == "fortianalyzer-*", f"{slug}: ip_id should be fortianalyzer-*"
+        assert ip["attributes"]["title"] == "fortianalyzer-*"
+
+        viz = [o for o in objs if o["type"] == "visualization"]
+        assert len(viz) == viz_count, f"{slug}: expected {viz_count} viz, got {len(viz)}"
+
+        dash = next(o for o in objs if o["type"] == "dashboard")
+        vis_ids = {v["id"] for v in viz}
+        panel_ref_ids = {r["id"] for r in dash["references"] if r["type"] == "visualization"}
+        assert panel_ref_ids and panel_ref_ids <= vis_ids
+
+        all_vis_states = " ".join(v["attributes"]["visState"] for v in viz)
+        assert "data." not in all_vis_states, f"{slug}: should not reference data.* namespace"
+
+        assert build_ndjson(slug) == build_ndjson(slug), f"{slug}: ids not deterministic"
+
+
+def test_build_ndjson_fintech_geo_map():
+    """El dashboard fintech trae index-pattern `transacciones-billetera-*` con el
+    campo geo_point poblado, una viz de mapa (tile_map) y refs que resuelven."""
+    import json as _json
+    from dashboards import build_ndjson
+
+    objs = [_json.loads(l) for l in build_ndjson("transacciones-billetera").splitlines() if l.strip()]
+    ip = next(o for o in objs if o["type"] == "index-pattern")
+    assert ip["id"] == "transacciones-billetera-*"
+    ip_fields = _json.loads(ip["attributes"]["fields"])
+    geo = next((f for f in ip_fields if f["name"] == "transaction.geo_location"), None)
+    assert geo and geo["esTypes"] == ["geo_point"]
+
+    viz = [o for o in objs if o["type"] == "visualization"]
+    vtypes = {_json.loads(v["attributes"]["visState"])["type"] for v in viz}
+    assert "tile_map" in vtypes  # el mapa de coordenadas
+    allvs = " ".join(v["attributes"]["visState"] for v in viz)
+    assert "transaction.operation_code" in allvs and "transaction.geo_location" in allvs
+
+    dash = next(o for o in objs if o["type"] == "dashboard")
+    vis_ids = {v["id"] for v in viz}
+    panel_refs = {r["id"] for r in dash["references"] if r["type"] == "visualization"}
+    assert panel_refs and panel_refs <= vis_ids
+
+
+def test_fraud_vertical():
+    """El vertical fraud (IEEE-CIS Fraud Detection) tiene el slug correcto,
+    index pattern fraud-*, dashboard curado (con Controls), 56 index_fields,
+    3 forecasts y campos clave presentes."""
+    import json as _json
+    from dashboards import build_ndjson, get_dashboard_spec
+    import capabilities as C
+
+    slug = "fraud-detection"
+    spec = get_dashboard_spec(slug)
+    assert spec is not None, f"falta dashboard spec para {slug}"
+
+    # Dashboard curado: header + Controls + KPIs + series + top-N (sin redundancia).
+    assert 12 <= len(spec["panels"]) <= 16, f"panels fuera de rango: {len(spec['panels'])}"
+    assert any(p["type"] == "controls" for p in spec["panels"]), "falta el panel de Controls"
+    assert len(spec["index_fields"]) == 56, f"expected 56 index_fields, got {len(spec['index_fields'])}"
+
+    paths = {p for p, _t in spec["index_fields"]}
+    for required in (
+        "fraud.is_fraud", "fraud.amount", "fraud.product_cd",
+        "fraud.card.brand", "fraud.device.type", "fraud.email.purchaser",
+    ):
+        assert required in paths, f"falta {required} en index_fields"
+
+    objs = [_json.loads(l) for l in build_ndjson(slug).splitlines() if l.strip()]
+    ip = next(o for o in objs if o["type"] == "index-pattern")
+    assert ip["attributes"]["title"] == "fraud-detection-*"
+    assert ip["attributes"]["timeFieldName"] == "@timestamp"
+
+    dash = next(o for o in objs if o["type"] == "dashboard")
+    assert "fraud-detection" in dash["attributes"]["title"].lower() or "Fraude" in dash["attributes"]["title"]
+
+    cap = C.get_capability_spec(slug)
+    assert cap is not None, f"falta capability spec para {slug}"
+    assert len(cap["forecasts"]) == 3
+    fc_names = {fc["name"] for fc in cap["forecasts"]}
+    assert fc_names == {
+        "fraud-volume-forecast",
+        "fraud-count-forecast",
+        "fraud-amount-forecast",
+    }
+    assert build_ndjson(slug) == build_ndjson(slug), "ids not deterministic"
+
+
+def test_dashboard_panel_baked_query():
+    """Las viz con `query` hornean el KQL en su searchSourceJSON — confirma que
+    el filtro por panel se propaga correctamente (fintech + firewall)."""
+    import json as _json
+    from dashboards import build_ndjson
+
+    # Fintech: panel "Failed Transactions" con query transaction.funnel.failed:true
+    objs = [_json.loads(l) for l in build_ndjson("transacciones-billetera").splitlines() if l.strip()]
+    viz = [o for o in objs if o["type"] == "visualization"]
+    queries = []
+    for v in viz:
+        ssj = _json.loads(v["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
+        q = ssj.get("query", {}).get("query", "")
+        if q:
+            queries.append(q)
+    assert "transaction.funnel.failed:true" in queries, (
+        "fintech: debe haber una viz con query transaction.funnel.failed:true"
+    )
+    assert "transaction.operation_code:TRANSFER" in queries, (
+        "fintech: debe haber una viz con query transaction.operation_code:TRANSFER"
+    )
+
+    # Firewall: panel "Blocked Events" con query event.action:(blocked or dropped)
+    objs = [_json.loads(l) for l in build_ndjson("firewall").splitlines() if l.strip()]
+    viz = [o for o in objs if o["type"] == "visualization"]
+    queries = []
+    for v in viz:
+        ssj = _json.loads(v["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
+        q = ssj.get("query", {}).get("query", "")
+        if q:
+            queries.append(q)
+    assert "event.action:(blocked or dropped)" in queries, (
+        "firewall: debe haber una viz con query event.action:(blocked or dropped)"
+    )
+
+
+def test_bundled_index_template_applied_verbatim(monkeypatch):
+    """El template curado de fintech (`templates/transacciones-billetera.json`) se
+    aplica VERBATIM en `_apply_index_templates` (con nested/geo_point/index.sort),
+    NO el auto-generado desde los campos."""
+    import main as _main
+
+    bundled = _main._bundled_index_template("transacciones-billetera")
+    assert bundled is not None
+    assert bundled["index_patterns"] == ["transacciones-billetera-*"]
+    # tiene lo que el auto-generador NO produce.
+    props = bundled["template"]["mappings"]["properties"]["transaction"]["properties"]
+    assert props["geo_location"]["type"] == "geo_point"
+    assert props["steps_parsed"]["properties"]["data"]["properties"]["steps"]["type"] == "nested"
+    assert bundled["template"]["settings"]["index.sort.field"] == "@timestamp"
+
+    put_bodies = []
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+    def _fake_put(url, **kwargs):
+        put_bodies.append({"url": url, "json": kwargs.get("json")})
+        return _Resp()
+
+    monkeypatch.setattr("requests.put", _fake_put)
+
+    req = _main.TerraformDeployRequest(
+        pipeline_conf="x", project_name="log-analytics",
+        opensearch_password="pw", https_enabled=False,
+        cases=[_main.PipelineCase(
+            slug="transacciones-billetera", filter_code="f",
+            fields=[{"raw_name": "operation_code", "field_path": "transaction.operation_code", "type": "keyword"}],
+            index_name="transacciones-billetera-%{+YYYY.MM}",
+        )],
+    )
+    ok = _main._apply_index_templates(req, {"public_endpoint": "1.2.3.4:9200"})
+    assert ok is True
+    assert len(put_bodies) == 1
+    assert put_bodies[0]["url"].endswith("/_index_template/log-analytics-transacciones-billetera")
+    # El body PUTeado es el template curado tal cual (no el auto-generado).
+    assert put_bodies[0]["json"] == bundled
 
 
 def test_import_dashboards_prefers_public_endpoint(monkeypatch):
@@ -2667,7 +2999,7 @@ def test_import_dashboards_prefers_public_endpoint(monkeypatch):
     monkeypatch.setattr("requests.post", _fake_post)
 
     result = _main._import_dashboards(
-        slug="firewall", fields=CAMPOS_FIREWALL,
+        slug="firewall",
         cluster={"endpoint": "192.168.0.63:9200", "public_endpoint": "203.0.113.7:9200"},
         password="test",
         https_enabled=False,
@@ -2700,7 +3032,7 @@ def test_import_dashboards_falls_back_to_kibana_api(monkeypatch):
     monkeypatch.setattr(_main.time, "sleep", lambda x: None)
 
     result = _main._import_dashboards(
-        slug="firewall", fields=CAMPOS_FIREWALL,
+        slug="firewall",
         cluster={
             "public_endpoint": "203.0.113.7:9200",
             "kibana_endpoint": "203.0.113.7:5601",
@@ -3238,24 +3570,32 @@ def test_obs_upload_cleans_prefix_before_uploading(monkeypatch):
     assert any("logs/firewall/" in k for k in uploaded)
 
 
-def test_bundled_dataset_reads_and_strips_comments(monkeypatch, tmp_path):
-    """`_bundled_dataset` devuelve las líneas de datos (sin comentarios `#`) del
-    archivo del caso guardado, y None si el caso no tiene archivo."""
-    import custom_cases
+# ===========================================================================
+# Datasets bundleados: los tipos predefinidos suben su log real entero en
+# vez de generar sintéticos. Solo `custom` (slug `logs`) usa sintéticos.
+# ===========================================================================
+@requires_datasets
+def test_bundled_dataset_reads_and_strips_comments():
+    """`_bundled_dataset` devuelve las líneas de datos (sin comentarios `#`)
+    para un slug predefinido, y None para slugs sin archivo (custom → `logs`)."""
     import main as _main
 
-    archivo = tmp_path / "fw.log"
-    archivo.write_text('# exportado del FortiGate\ntype="traffic" srcip=1.2.3.4\n\ntype="utm" srcip=5.6.7.8\n',
-                       encoding="utf-8")
-    monkeypatch.setattr(custom_cases, "dataset_path", lambda slug: archivo if slug == "firewall" else None)
     fw = _main._bundled_dataset("firewall")
-    assert fw == 'type="traffic" srcip=1.2.3.4\ntype="utm" srcip=5.6.7.8'
+    assert fw is not None
+    # Ninguna línea de comentario sobrevive.
+    assert all(not l.lstrip().startswith("#") for l in fw.splitlines())
+    # Las líneas de datos son logs FortiGate kv (type="traffic", srcip=...).
+    assert 'type="traffic"' in fw
+    assert "srcip=" in fw
+
+    # custom / inexistentes → None (caen al path sintético/raw).
     assert _main._bundled_dataset("logs") is None
     assert _main._bundled_dataset("no-existe") is None
     assert _main._bundled_dataset("") is None
 
 
-def test_obs_upload_uses_dataset_and_skips_synthetic_for_predefined(monkeypatch, tmp_path):
+@requires_datasets
+def test_obs_upload_uses_dataset_and_skips_synthetic_for_predefined(monkeypatch):
     """Para un caso predefinido (firewall), `_do_obs_upload` sube el dataset
     bundleado tal cual. La generación sintética que este test vigilaba ya no
     existe; lo que queda verificado es que el dataset sube verbatim."""
@@ -3275,10 +3615,6 @@ def test_obs_upload_uses_dataset_and_skips_synthetic_for_predefined(monkeypatch,
 
 
     monkeypatch.setattr("obs_client.OBSClient", FakeOBS)
-    import custom_cases
-    archivo = tmp_path / "fw.log"
-    archivo.write_text('type="traffic" srcip=1.2.3.4\n', encoding="utf-8")
-    monkeypatch.setattr(custom_cases, "dataset_path", lambda slug: archivo if slug == "firewall" else None)
 
     request = _main.TerraformDeployRequest(
         pipeline_conf="filter {}",
@@ -3547,6 +3883,77 @@ def test_obs_upload_skips_read_existing_case_in_multi(monkeypatch):
     assert not any("CloudTraces" in u["key"] for u in uploaded)
 
 
+# ===========================================================================
+# Capability provisioner (ml-commons / anomaly detection / forecast / alerting)
+# ===========================================================================
+def test_capability_builders_wellformed():
+    """Los builders producen JSON serializable; el PPL prompt trae el enum de
+    operaciones, campos y el índice; los 8 specs de vertical están completos y
+    el agente único lleva un PPLTool por vertical con su propio system_prompt."""
+    import json as _json
+    import capabilities as C
+
+    spec = C.get_capability_spec("transacciones-billetera")
+    assert spec is not None
+    ip = spec["index_pattern"]
+    ppl = C.build_ppl_system_prompt(ip, spec["operations"], spec["fields"], spec["success_code"])
+    assert "TRANSFER" in ppl and ip in ppl and "transaction.customer_id" in ppl
+    for body in (
+        C.build_cluster_settings(),
+        C.build_llm_connector("KEY"),
+        C.build_ppl_connector("KEY", ppl),
+        C.build_model_group(),
+        C.build_remote_model("m", "C1", "MG", "d"),
+        C.build_forecaster(ip, spec["volume_field"]),
+    ):
+        _json.dumps(body)
+    # El connector PPL toma el prompt por PARÁMETRO (${parameters.system_prompt}),
+    # con el default en parameters: así cada PPLTool pasa el prompt de SU vertical
+    # y un solo modelo PPL sirve a todas las fuentes. Los newlines van ESCAPADOS
+    # (\\n) para no romper el JSON del request_body al sustituir el parámetro.
+    conn = C.build_ppl_connector("KEY", ppl)
+    assert conn["parameters"]["system_prompt"] == ppl.replace("\n", "\\n")
+    assert "${parameters.system_prompt}" in conn["actions"][0]["request_body"]
+
+    # Los specs están completos: fields, operations y forecasts.
+    assert set(C.get_capability_slugs()) == {
+        "transacciones-billetera", "fraud-detection", "siem", "produccion-pozos",
+        "ventas-ecommerce", "encuentros-clinicos",
+        "transacciones-alyc", "fortianalyzer",
+        "fortianalyzer-soc", "fortianalyzer-traffic",
+        "fortianalyzer-utm", "fortianalyzer-event",
+        "streaming-ott", "cts"}
+    verticals = []
+    for slug in C.get_capability_slugs():
+        s = C.get_capability_spec(slug)
+        assert s["fields"] and s["operations"], f"spec incompleto: {slug}"
+        assert len(s.get("forecasts", [])) == 3, f"faltan forecasts: {slug}"
+        for fc in s["forecasts"]:
+            _json.dumps(C.build_forecaster(s["index_pattern"], s["volume_field"],
+                                           name=fc["name"], feature_name=fc["feature_name"],
+                                           aggregation_query=fc.get("aggregation_query"),
+                                           description=fc.get("description", "")))
+        verticals.append({
+            "tool_name": f"PPLTool-{slug}", "label": s["label"],
+            "index_pattern": s["index_pattern"], "operations": s["operations"],
+            "fields": s["fields"], "success_code": s.get("success_code", ""),
+            "ppl_system_prompt": C.build_ppl_system_prompt(
+                s["index_pattern"], s["operations"], s["fields"],
+                s.get("success_code", ""), s["label"]),
+        })
+    # UN solo agente multi-fuente: un PPLTool por vertical, cada uno con su prompt.
+    instr = C.build_agent_system_instruction(verticals)
+    agent = C.build_conversational_agent("LLM_ID", "PPL_ID", instr, verticals)
+    _json.dumps(agent)
+    assert agent["type"] == "conversational"
+    assert agent["llm"]["model_id"] == "LLM_ID"
+    assert {t["name"] for t in agent["tools"]} == {f"PPLTool-{s}" for s in C.get_capability_slugs()} | {"Documentos"}
+    for t in [t for t in agent["tools"] if t["name"] != "Documentos"]:
+        assert t["type"] == "PPLTool" and t["parameters"]["model_id"] == "PPL_ID"
+        assert t["parameters"]["execute"] == "true" and t["parameters"]["system_prompt"]
+    assert "Producción de pozos" in instr and "Encuentros clínicos" in instr
+
+
 def test_model_descriptions_are_ascii_safe():
     """OpenSearch valida las descripciones (solo letras/números/espacios/.,!?():@-_'/\").
     Un `→` o un acento rompía el models/_register con 400. Los builders sanitizan."""
@@ -3575,7 +3982,7 @@ class _FakeResp:
         return self._body
 
 
-def test_provision_capabilities_full_sequence(monkeypatch, entorno_billetera):
+def test_provision_capabilities_full_sequence(monkeypatch):
     """_provision_capabilities corre la secuencia ml-commons + forecasts (AD y
     alerting quedaron fuera por diseño) y persiste los IDs (agent/forecasters).
     El agente se registra multi-fuente (acá solo fintech tiene índice con datos)."""
@@ -3774,7 +4181,7 @@ def test_forecast_usa_el_task_id_del_run_once_y_arma_el_mensaje():
     assert 'fc_ok = n_ok > 0 or (bool(en_curso) and not fallidos)' in src
 
 
-def test_forecast_omitted_without_event_timestamp(monkeypatch, entorno_billetera):
+def test_forecast_omitted_without_event_timestamp(monkeypatch):
     """Índice ingerido pero SIN fecha de evento real (@timestamp sin rango) → no se
     crean forecasters; se reporta el motivo (cierra 'forecasts solo con fecha')."""
     monkeypatch.setenv("MAAS_API_KEY", "KEY")
@@ -3871,7 +4278,6 @@ def test_teardown_orphans_by_name(monkeypatch):
         return _FakeResp(200, {})
 
     monkeypatch.setattr("requests.request", fake_request)
-    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {"siem": {}, "ventas": {}, "pozos": {}})
     main._teardown_orphans_by_name("http://x:9200", "admin", "pw")
     deletes = [u for m, u in calls if m == "DELETE"]
     joined = " ".join(deletes)
@@ -3881,15 +4287,46 @@ def test_teardown_orphans_by_name(monkeypatch):
     # Forecaster se para antes de borrar.
     stops = [u for m, u in calls if m == "POST" and u.endswith("/_stop")]
     assert any("/forecasters/X1/_stop" in u for u in stops)
-    # Busca los forecasters de TODOS los casos del entorno (los cuatro que puede
-    # tener cada uno): uno que quede vivo sigue consumiendo ML del cluster.
+    # Busca los forecasters de TODOS los verticales (specs), no solo fintech.
+    import capabilities as C
+    fc_names = [fc["name"] for s in C.get_capability_slugs()
+                for fc in (C.get_capability_spec(s) or {}).get("forecasts", [])]
     searches = len([1 for m, u in calls if m == "POST" and u.endswith("/forecasters/_search")])
-    assert searches == 3 * 4
+    # Lo que importa: el teardown busca TODOS los forecasters que el registro
+    # define, sin saltearse ninguno (uno que quede vivo sigue consumiendo ML del
+    # cluster). El número fijo es un tripwire de inventario: 14 capabilities × 3.
+    assert searches == len(fc_names) and len(fc_names) == 42
+
+
+@requires_datasets
+def test_dataset_preview_resolves_underscore():
+    """El preview del dataset resuelve dataset_files desde el registro de verticales
+    (transacciones-billetera → transacciones-billetera.log) y devuelve N líneas de datos (sin comentarios)."""
+    res = client.get("/api/v1/datasets/transacciones-billetera/preview?lines=3")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["slug"] == "transacciones-billetera"
+    assert len(body["lines"]) == 3
+    assert all(l.strip() and not l.lstrip().startswith("#") for l in body["lines"])
 
 
 def test_dataset_preview_404_when_no_dataset():
     res = client.get("/api/v1/datasets/no-existe-xyz/preview")
     assert res.status_code == 404
+
+
+@requires_datasets
+def test_dataset_preview_globs_multi_file_siem():
+    """El SIEM no tiene `siem.log` sino varios `siem-*.log` (una fuente c/u). El
+    preview hace glob e INTERCALA líneas de cada archivo, así refleja las 4 fuentes:
+    una línea FortiGate (`date=…`) y al menos una JSON (`{…}`) tienen que aparecer."""
+    res = client.get("/api/v1/datasets/siem/preview?lines=8")
+    assert res.status_code == 200
+    lines = res.json()["lines"]
+    assert len(lines) >= 4
+    assert any(l.startswith("date=") for l in lines), "falta una línea FortiGate"
+    assert any(l.startswith("{") for l in lines), "falta una línea JSON (cloudaudit/waf)"
+    assert any(l.startswith("<") for l in lines), "falta una línea syslog (auth)"
 
 
 def test_ml_register_model_group_reuses_on_conflict(monkeypatch):
@@ -3952,7 +4389,7 @@ def test_add_css_cluster_routes_no_sdk(monkeypatch):
     assert res2["error"]
 
 
-def test_provision_capabilities_skips_conversational_without_mlcommons(monkeypatch, entorno_billetera):
+def test_provision_capabilities_skips_conversational_without_mlcommons(monkeypatch):
     """Preflight ml-commons falla → conversacional se saltea; los forecasts siguen."""
     monkeypatch.setenv("MAAS_API_KEY", "KEY")
     monkeypatch.setattr(main, "_read_capabilities", lambda td: {})
@@ -4030,7 +4467,7 @@ def test_teardown_capabilities_skips_when_cluster_unreachable(monkeypatch):
     assert all(m != "DELETE" for m, _ in calls), f"no debería intentar DELETE: {calls}"
 
 
-def test_provision_capabilities_skips_forecast_when_index_empty(monkeypatch, entorno_billetera):
+def test_provision_capabilities_skips_forecast_when_index_empty(monkeypatch):
     """Índice sin documentos → los forecasts se saltean con reason claro (no se
     crea ningún forecaster)."""
     monkeypatch.setenv("MAAS_API_KEY", "KEY")
@@ -4057,7 +4494,7 @@ def test_provision_capabilities_skips_forecast_when_index_empty(monkeypatch, ent
     assert not any("/_forecast/forecasters" in u for u in posted)
 
 
-def test_provision_capabilities_endpoint(monkeypatch, entorno_billetera):
+def test_provision_capabilities_endpoint(monkeypatch):
     """POST /provision-capabilities provisiona los slugs con spec y devuelve 200."""
     monkeypatch.setattr(main, "_cluster_with_public_access",
                         lambda td: {"public_endpoint": "1.2.3.4:9200"})
@@ -4074,21 +4511,16 @@ def test_provision_capabilities_endpoint(monkeypatch, entorno_billetera):
                         lambda base, u, p, slug, pattern, perfil, force: perfiles_creados.append(slug) or
                         {"ok": True, "reason": "ok"})
 
-    # Dos datasets: uno con su cliente marcado como Entidad y Sensible.
-    main._write_pipelines_registry(entorno_billetera, {
-        "transacciones-billetera": {"index": "transacciones-billetera-%{+YYYY.MM}", "fields": [
-            {"field_path": "customer_id", "type": "string", "entity": True, "sensitive": True},
-            {"field_path": "monto", "type": "float"}]},
-        "ventas": {"index": "ventas-%{+YYYY.MM}", "fields": [{"field_path": "monto", "type": "float"}]}})
     resp = client.post("/api/v1/onboarding/provision-capabilities",
                        json={"opensearch_password": "pw", "https_enabled": False})
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "success"
-    assert set(data["capabilities"]) == {"transacciones-billetera", "ventas"}
-    # El analista y el perfil, solo donde los campos los justifican.
-    assert analistas == [("transacciones-billetera", "transacciones-billetera-*", ["customer_id"])]
-    assert perfiles_creados == ["transacciones-billetera"]
+    assert "transacciones-billetera" in data["capabilities"]
+    # Solo los casos que declaran un analista (salud y fintech), con sus campos.
+    assert {s for s, _, _ in analistas} == {"encuentros-clinicos", "transacciones-billetera", "transacciones-alyc"}
+    assert ("encuentros-clinicos", "encuentros-clinicos-*", ["patient"]) in analistas
+    assert set(perfiles_creados) == {"siem", "ventas-ecommerce", "produccion-pozos"}
 
 
 def test_provision_capabilities_endpoint_no_cluster_503(monkeypatch):
@@ -4423,6 +4855,15 @@ def test_un_campo_geo_de_ecs_se_tipa_solo(monkeypatch):
     assert campo["type"] == "geo_point", campo
 
 
+def test_los_dashboards_curados_no_pasan_por_la_heuristica():
+    """La mejora de visualizaciones es SOLO para los datasets nuevos: los diez
+    verticales eligen sus paneles a mano y no se tocan."""
+    from dashboards import build_ndjson, get_available_slugs
+
+    for slug in get_available_slugs():
+        assert "Dashboard auto-generado" not in build_ndjson(slug), slug
+
+
 def test_provision_capabilities_productive_slug(monkeypatch, tmp_path):
     """(c) _provision_capabilities con un slug productivo en el registry (fields
     persistidos, sin spec curado) construye el spec y provisiona forecasters."""
@@ -4701,6 +5142,76 @@ def test_spec_from_fields_uses_role_entity_for_metric():
     assert "data.customer_id" in str(metrics[0])
 
 
+# ===========================================================================
+# Registro declarativo de verticales (verticals/)
+# ===========================================================================
+def test_verticals_registry_wellformed():
+    """Cada VERTICAL tiene las keys mínimas; los visibles traen card+specs y
+    fraud-detection es el único hidden (sin card). Los agregadores producen
+    exactamente los sets que el resto del backend espera (13 capabilities,
+    13 industry, 8 datasets — cts no tiene dataset: lee su propio bucket)."""
+    import verticals as V
+
+    vs = V.all_verticals()
+    slugs = [v["slug"] for v in vs]
+    assert slugs == [
+        "siem", "fortianalyzer", "transacciones-billetera", "fraud-detection", "transacciones-alyc",
+        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos", "cts"]
+
+    visible = V.visible_verticals()
+    assert [v["slug"] for v in visible] == [
+        "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
+        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos",
+        "cts"]
+    for v in visible:
+        # Card + datos de front + specs backend presentes en cada primario.
+        for k in ("label", "full_label", "group", "icon", "index_base", "description",
+                  "sample", "filter_code", "fields", "suggested_questions",
+                  "capability", "dashboard"):
+            assert v.get(k), f"{v['slug']} sin {k}"
+
+    # `dataset_files` NO entra en la lista de arriba porque dejó de ser universal:
+    # CTS es el único caso visible cuyo dato la plataforma no sube. Son trazas de
+    # auditoría reales que ya viven en OTRO bucket, y de ahí salen dos invariantes
+    # que valen plata.
+    cts = V.get_vertical("cts")
+    assert "dataset_files" not in cts, (
+        "si CTS declarara dataset, 'Preparar bucket' intentaría subirle encima a "
+        "las trazas reales y el guard del deploy exigiría verificarlas")
+    assert cts["obs_bucket"] == "mi-tracker-cts" and cts["obs_prefix"] == "CloudTraces/"
+    assert cts["dedup_id"], "sin dedup, re-ingerir las trazas las duplica"
+
+    for v in visible:
+        if v["slug"] != "cts":
+            assert v.get("dataset_files"), f"{v['slug']} sin dataset_files"
+            # Y nadie más trae bucket propio: el resto lee del bucket de demos.
+            assert not v.get("obs_bucket"), f"{v['slug']} no debería traer bucket propio"
+
+    # Agregadores == lo que consume el backend.
+    assert len(V.capability_specs()) == 14
+    assert set(V.demo_dataset_files()) == {
+        "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
+        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos"}
+    # fortianalyzer aporta sus 4 sub-specs backend-only.
+    assert {"fortianalyzer-soc", "fortianalyzer-traffic", "fortianalyzer-utm",
+            "fortianalyzer-event"} <= set(V.capability_specs())
+
+
+def test_verticals_back_registro_consistente():
+    """capabilities/dashboards/main leen del registro (no de literales sueltos)."""
+    import verticals as V
+    import capabilities as C
+    import dashboards as D
+
+    assert C._CAPABILITY_SPECS == V.capability_specs()
+    assert main._DEMO_DATASET_FILES == V.demo_dataset_files()
+
+    # dashboards = verticales + el spec sin vertical (`firewall`, que no tiene card).
+    assert "firewall" in D._DASHBOARD_SPECS
+    assert "firewall" not in V.dashboard_specs()
+    assert set(D.get_available_slugs()) == set(V.dashboard_specs()) | {"firewall"}
+
+
 def test_obs_read_sample_handles_stream_folder_and_gz():
     """Regresión del 'NoneType' object is not callable en read_sample (vía
     "Llegan en vivo → Bucket OBS"): el download debe ir EN MEMORIA (body.buffer), debe
@@ -4814,27 +5325,30 @@ def test_read_sample_sin_bucket_es_400():
     assert res.status_code == 400 and "bucket" in res.json()["detail"].lower()
 
 
-def test_index_inyecta_verticals_y_endpoint(monkeypatch, tmp_path):
-    """GET / inyecta el catálogo (los datasets guardados, en los grupos del grid)
-    y GET /api/v1/verticals devuelve el mismo payload. No hay casos curados."""
-    import json as _json
+def test_index_inyecta_verticals_y_endpoint():
+    """GET / reemplaza el placeholder por el JSON real (no queda null) y expone
+    los 9 verticales visibles; GET /api/v1/verticals devuelve el mismo payload."""
     import re as _re
-    import auth
-    import custom_cases
 
-    monkeypatch.setattr(auth, "DATA_ROOT", tmp_path)
-    vacio = client.get("/api/v1/verticals").json()
-    assert vacio["verticals"] == [] and len(vacio["groups"]) == 6
-    assert all(g["members"] == [] for g in vacio["groups"])
-    custom_cases.save_case({"label": "Firewall de ACME", "group": "seguridad", "filter_code": "filter { }",
-                            "fields": [{"raw_name": "a", "field_path": "a", "type": "ip"}]}, "a=1\n")
     html = client.get("/").text
     m = _re.search(r"window\.__VERTICALS__ = (.*?);</script>", html, _re.S)
     assert m and m.group(1).strip() != "null"
+    import json as _json
     injected = _json.loads(m.group(1))
-    assert [v["slug"] for v in injected["verticals"]] == ["firewall-de-acme"]
-    assert next(g for g in injected["groups"] if g["id"] == "seguridad")["members"] == ["firewall-de-acme"]
-    assert client.get("/api/v1/verticals").json() == injected
+    assert len(injected["groups"]) == 6
+    visible = [v for v in injected["verticals"] if not v["hidden"]]
+    assert len(visible) == 9
+    assert {v["slug"] for v in visible} >= {"siem", "transacciones-alyc", "fortianalyzer", "cts"}
+
+    # El front necesita el origen propio para no mandar CTS a buscar sus trazas
+    # al bucket de demos: sin estas dos claves el caso se despliega contra el
+    # bucket equivocado y no ingiere nada.
+    cts = next(v for v in injected["verticals"] if v["slug"] == "cts")
+    assert cts["obsBucket"] == "mi-tracker-cts" and cts["obsPrefix"] == "CloudTraces/"
+    assert all(v["obsBucket"] == "" for v in visible if v["slug"] != "cts")
+
+    api = client.get("/api/v1/verticals").json()
+    assert api == injected
 
 
 # ── Cookie de sesión: flag Secure derivado del esquema real del request ──────
@@ -5331,6 +5845,51 @@ def _req_unico_cts(conf=_CONF_CTS, bucket="demoscss", prefix="cts-logs/"):
         obs_endpoint="https://obs.la-south-2.myhuaweicloud.com", read_existing_bucket=True)
 
 
+def test_el_backend_corrige_el_origen_de_un_caso_propio_en_single():
+    """Con una sola tarjeta el `.conf` viaja armado desde el navegador y el
+    backend no lo rearma: es el único camino donde un bucket equivocado llegaba
+    entero a Terraform."""
+    req = _req_unico_cts()
+
+    notas = main._force_case_own_source(req)
+
+    assert notas == ["cts → obs://mi-tracker-cts/CloudTraces/"]
+    assert req.obs_bucket == "mi-tracker-cts" and req.obs_prefix == "CloudTraces/"
+    assert 'bucket => "mi-tracker-cts"' in req.pipeline_conf
+    assert 'prefix => "CloudTraces/"' in req.pipeline_conf
+    assert "demoscss" not in req.pipeline_conf
+    # Se reescriben dos líneas, no el archivo: la edición del paso 3 sobrevive.
+    assert 'add_field => { "marca" => "mia" }' in req.pipeline_conf
+    assert 'index => "cts-%{+YYYY.MM}"' in req.pipeline_conf
+
+
+def test_corregir_el_origen_es_idempotente_y_no_toca_a_los_demas():
+    ya = _req_unico_cts(conf=_CONF_CTS.replace("demoscss", "mi-tracker-cts")
+                        .replace("cts-logs/", "CloudTraces/"),
+                        bucket="mi-tracker-cts", prefix="CloudTraces/")
+    assert main._force_case_own_source(ya) == []
+
+    otro = main.TerraformDeployRequest(
+        pipeline_conf=_CONF_CTS, pipeline_slug="siem", obs_bucket="demoscss",
+        obs_prefix="siem-logs/", obs_access_key="AK", obs_secret_key="SK")
+    assert main._force_case_own_source(otro) == []
+    assert otro.obs_bucket == "demoscss", "un caso sin origen propio no se toca"
+
+
+def test_corregir_el_origen_tambien_cubre_el_deploy_multi_caso():
+    """Una pestaña vieja manda `obs_bucket: ''` para CTS y el backend caía al
+    bucket del request."""
+    req = _deploy_req_b(_case_b("cts", "", ""), _case_b("siem", "siem-logs/"))
+
+    notas = main._force_case_own_source(req)
+
+    assert notas == ["cts → obs://mi-tracker-cts/CloudTraces/"]
+    assert req.cases[0].obs_bucket == "mi-tracker-cts"
+    assert req.cases[0].obs_prefix == "CloudTraces/"
+    assert req.cases[1].obs_bucket == "", "el caso sin origen propio queda como estaba"
+    assert 'bucket => "mi-tracker-cts"' in main._build_pipeline_conf_for_case(req.cases[0], req)
+
+
 # ── El bucket de un caso no se le presta a los demás ────────────────────────
 # `obs_bucket` del body es el bucket COMPARTIDO: de ahí leen los casos de demo y
 # ahí se suben sus datasets si faltan. Elegir la pestaña de CTS en el paso 3
@@ -5453,6 +6012,18 @@ def test_el_deploy_aisla_el_bucket_antes_de_los_guards(fn):
             < src.index("_check_demo_datasets_present")), fn
     assert (src.index("_aislar_bucket_compartido")
             < src.index("_check_conf_reads_from_a_bucket")), fn
+
+
+def test_el_deploy_corrige_el_origen_antes_de_escribir_nada(monkeypatch):
+    """La corrección tiene que correr antes de `_prepare_deploy_tfvars` y del
+    upload a OBS: es `case.obs_bucket` lo que hace que el upload NO escriba
+    encima de las trazas reales de la cuenta."""
+    import inspect
+    src = inspect.getsource(main._deploy_stream_gen_raw)
+
+    assert "_force_case_own_source(request)" in src
+    assert src.index("_force_case_own_source(request)") < src.index("_prepare_deploy_tfvars(request"), \
+        "se corrige después de escribir el tfvars: demasiado tarde"
 
 
 # ── La prueba de que la pipeline ingiere ────────────────────────────────────
@@ -5705,6 +6276,16 @@ def test_sin_el_output_de_terraform_el_estado_cae_al_registro(monkeypatch, tmp_p
 
     pipelines = client.get("/api/v1/terraform/status").json()["pipelines"]
     assert pipelines[0]["active"] is True
+
+
+def test_preparar_bucket_sigue_sin_incluir_cts():
+    """CTS no declara `dataset_files`, y de eso depende que la pre-carga lo
+    ignore. Si alguien le agregara uno, "Preparar bucket" le subiria sinteticos
+    encima a las trazas reales."""
+    import verticals as V
+
+    assert "cts" not in V.demo_dataset_files()
+    assert "cts" not in main._demo_dataset_files()
 
 
 def test_deploy_no_aplica_si_el_state_anterior_no_se_pudo_subir(monkeypatch):

@@ -1,24 +1,43 @@
-# Datasets de ejemplo
+# Datasets de los tipos de log predefinidos
 
-Los archivos de ejemplo de las demos: el SIEM (FortiGate, CloudAudit, auth, WAF),
-FortiAnalyzer, transacciones, pozos, e-commerce, salud y streaming. No se versionan
-(pesan ~1,3 GB): se generan con los scripts `build_*.py` de abajo.
+Esta carpeta contiene el **log entero real** de cada tipo predefinido del wizard. Los tipos
+predefinidos ahora se **leen de OBS** (`read_existing_bucket`): el operador **pre-carga** cada
+archivo una vez en el bucket, y el deploy **NO los sube** (el input es read-only one-shot —
+`delete=false`, `watch_for_new_files=false`). Esto evita re-subir en cada corrida y el timeout de
+`put_object` con datasets grandes (ej. fintech, ~98 MB).
 
-No hay casos curados: una demo se crea como la de un cliente, subiendo el archivo en
-**Pipeline → Dataset nuevo** (el SIEM, sus cuatro archivos juntos: quedan como una sola
-tarjeta con cuatro fuentes). El descubrimiento arma el filter, los campos y el plan del
-cluster; al guardarlo queda como una tarjeta del grid.
+La generación sintética quedó fuera del flujo predefinido; el tipo `custom` ("Traé tu propio log")
+sube el archivo que importa el usuario (`log_file_content`).
 
 ## Pre-carga en OBS (una sola vez)
 
 **Camino recomendado**: en la plataforma, **⚙ Configuración → Preparar bucket de demos**. Sube
 todos los datasets que falten a **tu bucket de demos** (el de "Cuenta Huawei Cloud"), bajo el
-prefijo de cada tipo, y crea el bucket si no existe. Sube los archivos de los datasets guardados
-(cada uno se crea subiendo su archivo en **Pipeline → Dataset nuevo**).
+prefijo de cada tipo, y crea el bucket si no existe. El mapa slug→archivos sale del registro
+declarativo `verticals/` (campo `dataset_files` de cada vertical).
+
+Alternativa manual (consola web de OBS u `obsutil cp`), al MISMO esquema de prefijos:
+
+| Tipo                   | Prefijo en tu bucket        | Archivo fuente                      |
+|------------------------|-----------------------------|-------------------------------------|
+| `siem`                 | `siem-logs/`                | `datasets/siem-{fortigate,cloudaudit,auth,waf}.log` (los 4) |
+| `fortianalyzer`        | `fortianalyzer-logs/`       | `datasets/fortianalyzer.log`        |
+| `fintech-transactions` | `transacciones-billetera-logs/`          | `datasets/transacciones-billetera.log`            |
+| `alyc`                 | `alyc-logs/`                | `datasets/transacciones-alyc.log`                 |
+| `media-streaming`      | `streaming-ott-logs/`           | `datasets/streaming-ott.log`            |
+| `oil-gas`              | `oil-gas-logs/`             | `datasets/produccion-pozos.log`              |
+| `media-retail-ecommerce` | `ventas-ecommerce-logs/`          | `datasets/ventas-ecommerce.log`            |
+| `encuentros-clinicos`               | `encuentros-clinicos-logs/`              | `datasets/encuentros-clinicos.log`               |
+| `cts`                  | `CloudTraces/`              | (traces reales de la cuenta, si existen) |
+
+```
+obsutil cp datasets/transacciones-alyc.log obs://<tu-bucket-de-demos>/alyc-logs/
+```
 
 Como el input es read-only, el archivo **queda** en OBS para futuros deploys; cada ingesta limpia
-el índice antes (`_clear_case_indices`), así que re-desplegar no duplica. El deploy **verifica** el
-prefijo (`<dataset>-logs/`) de cada dataset elegido antes de correr Terraform y lo sube si falta.
+el índice antes (`_clear_case_indices`), así que re-desplegar no duplica. `custom` no se pre-carga
+(sube su archivo importado en el deploy). El deploy demo **verifica** los prefijos de los tipos
+elegidos antes de correr Terraform y avisa si falta alguno.
 
 El dataset se lee por el prefijo del tipo. Formato esperado (un evento por línea):
 

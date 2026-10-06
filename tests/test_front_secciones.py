@@ -64,7 +64,7 @@ check('contador', h.includes('<span class="infra-tab__cuenta">9</span>') && h.sp
 // Cada pestaña carga lo suyo al abrirla, una sola vez por render.
 const clicks = [];
 const boton = (n) => ({ click: () => clicks.push(n) });
-const panelSeg = { dataset: {}, querySelector: (sel) => ({ '#infra-seguridad-ver': boton('hallazgos') })[sel] || null };
+const panelSeg = { dataset: {}, querySelector: (sel) => ({ '#infra-seguridad-ver': boton('hallazgos'), '#infra-campanas-ver': boton('campañas') })[sel] || null };
 const panelPron = { dataset: {}, querySelector: (sel) => sel === '.pron__caso' ? boton('primer caso') : null };
 const raizC = { querySelector: (sel) => ({ '[data-infra-panel="seguridad"]': panelSeg, '[data-infra-panel="pronosticos"]': panelPron })[sel] || null };
 cargarSeccionInfra(raizC, 'seguridad');
@@ -72,7 +72,7 @@ cargarSeccionInfra(raizC, 'seguridad');
 cargarSeccionInfra(raizC, 'pronosticos');
 cargarSeccionInfra(raizC, 'resumen');
 cargarSeccionInfra(raizC, undefined);
-check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['hallazgos', 'primer caso']), JSON.stringify(clicks));
+check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['hallazgos', 'campañas', 'primer caso']), JSON.stringify(clicks));
 
 romper = true;
 check('sin storage no rompe', infraSeccionGuardada() === '');

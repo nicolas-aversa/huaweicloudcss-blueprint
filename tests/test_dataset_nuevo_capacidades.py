@@ -50,13 +50,14 @@ def test_los_sensibles_son_los_marcados():
     assert accesos.enmascarados_desde_campos([]) == []
 
 
-def test_el_perfil_y_los_enmascarados_salen_de_los_campos():
-    """No hay casos curados: todo caso los deriva de sus campos (y de lo
-    marcado en el paso 2)."""
+def test_un_vertical_usa_lo_suyo_y_un_dataset_nuevo_lo_derivado():
+    assert main._perfil_de("siem", {"fields": CAMPOS})["campo"] == "source.ip"
+    assert main._perfil_de("cts", {"fields": CAMPOS}) is None, "un vertical sin perfil no lo deriva"
     assert main._perfil_de("mi-dataset", {"fields": CAMPOS})["campo"] == "data.customer_id"
     assert main._perfil_de("mi-dataset", {}) is None
+    assert main._enmascarados_de("encuentros-clinicos", {"fields": CAMPOS}) == ["patient"]
     assert main._enmascarados_de("mi-dataset", {"fields": CAMPOS}) == ["data.dni"]
-    assert main._enmascarados_de("mi-dataset", {}) == []
+    assert main._enmascarados_de("siem", {"fields": CAMPOS}) == []
 
 
 def test_el_mapa_por_pais_desde_los_campos():

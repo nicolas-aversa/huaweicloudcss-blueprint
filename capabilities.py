@@ -29,6 +29,7 @@ import os
 import re
 from typing import Any
 
+import verticals as _verticals
 
 
 def _sanitize_desc(s: str) -> str:
@@ -677,8 +678,25 @@ def build_monitor_de_anomalias(slug: str, detector_id: str, umbral: float = 0.7)
     }
 
 
+# ── Specs por vertical ───────────────────────────────────────────────────────
+# Specs por vertical: se leen del registro declarativo verticals/ (cada vertical
+# aporta su `capability` + `extra_capabilities` backend-only). Antes vivían acá
+# como un literal de ~550 líneas.
+_CAPABILITY_SPECS: dict[str, dict[str, Any]] = _verticals.capability_specs()
+
+
+def get_capability_slugs() -> list[str]:
+    """Slugs con un bundle de capabilities definido."""
+    return list(_CAPABILITY_SPECS)
+
+
+def get_capability_spec(slug: str) -> dict[str, Any] | None:
+    return _CAPABILITY_SPECS.get(slug)
+
+
 # ── Spec derivado de los campos detectados (despliegue productivo) ───────────
-# El spec de un caso se arma acá con el MISMO shape a partir de los campos del paso 2 (el
+# Los verticales de demo traen su spec curado arriba. Un log productivo no tiene
+# spec: se arma acá con el MISMO shape a partir de los campos del paso 2 (el
 # schema que detectó el LLM) + los enums descubiertos del índice ya ingestado.
 # Así el cliente se lleva en SU cuenta lo mismo que vio en la demo (chatbot +
 # forecasts), pero sobre sus datos.

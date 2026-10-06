@@ -1877,6 +1877,13 @@
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
     .acceso__lbl { color: var(--text-muted); }
     .acceso code { user-select: all; }
+    /* Campañas: los pasos en orden, como una línea de tiempo. */
+    .campana__pasos { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--accent-tint); display: grid; gap: 6px; }
+    .campana__paso { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); position: relative; }
+    .campana__paso::before { content: ''; position: absolute; left: -19px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .campana__hora { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+    .campana__fuente { font-weight: 600; text-transform: uppercase; font-size: var(--fs-xs); letter-spacing: 0.04em; color: var(--text-secondary); }
+    .campana__explicar { margin-left: auto; }
     /* Forecasting: los casos como botones; el elegido, marcado. */
     .pron__casos { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
     .pron__caso.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
@@ -2396,14 +2403,15 @@
 
     /* A todo el ancho, el detalle de cada pestaña va en grilla. */
     .infra-panel .hallazgos__caso,
-    #infra-anomalias-detalle, #infra-accesos-detalle {
+    #infra-anomalias-detalle, #infra-campanas-detalle, #infra-accesos-detalle {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(min(440px, 100%), 1fr)); gap: 10px; align-items: start;
     }
     .infra-panel .hallazgos__titulo { grid-column: 1 / -1; margin-bottom: 0; }
     .infra-panel .hallazgos__caso > .hallazgos__det + .hallazgos__det,
     #infra-anomalias-detalle > .hallazgos__det + .hallazgos__det,
+    #infra-campanas-detalle > .hallazgos__det + .hallazgos__det,
     #infra-accesos-detalle > .hallazgos__det + .hallazgos__det { margin-top: 0; }
-    #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
+    #infra-campanas-detalle:not(:empty), #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
     /* Un pronóstico por fila: la ficha a la izquierda y el gráfico a lo ancho. */
     .infra-panel .pron__lista { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .pron__fila {
@@ -4091,10 +4099,12 @@
       const container = document.getElementById('mapping-table');
       if (!container) return;
 
+      // Contextualizar step 2 según si SIEM está seleccionado.
+      const hasSiem = state.selectedExamples.includes('siem');
       const descEl = document.getElementById('step2-description');
       if (descEl) {
-        descEl.innerHTML = (state.fuentes || []).length > 1
-          ? 'Analizamos cada archivo por separado: una pestaña por fuente, cada una con sus campos y su plan. La columna <strong>Tipo</strong> define el <strong>index template</strong> de OpenSearch.'
+        descEl.innerHTML = hasSiem
+          ? 'Analizamos tu log y detectamos los siguientes campos, agrupados por fuente. La columna <strong>Tipo</strong> define el <strong>index template</strong> de OpenSearch. Los campos ya están normalizados a ECS.'
           : 'Analizamos tu log y detectamos los siguientes campos, fieles a tu sistema. La columna <strong>Tipo</strong> define el <strong>index template</strong> de OpenSearch.';
       }
 
@@ -5496,7 +5506,7 @@
           li('database', `${types.length} pipeline ETL${types.length > 1 ? 's' : ''} de Logstash: ${escapeHtml(labels.join(', '))}`),
           li('dashboard', 'Index template + dashboards por tipo'),
           ...(hasCaps ? [li('spark', 'Plugins de OpenSearch: agente conversacional (NL→PPL), forecasts, detección de anomalías y alertas')] : []),
-          ...(conSeguridad.length ? [li('shield', `Security Analytics para ${escapeHtml(conSeguridad.join(' y '))}: reglas Sigma y detectores, con las fuentes de un mismo dataset correlacionadas`)] : []),
+          ...(conSeguridad.length ? [li('shield', `Security Analytics para ${escapeHtml(conSeguridad.join(' y '))}: reglas Sigma, detectores${types.includes('siem') ? ' y correlaciones entre fuentes' : ''}`)] : []),
         ].join('');
         closureEl.innerHTML = `
           <div class="deploy-panel">
@@ -6819,6 +6829,71 @@
         if (!res.ok) throw detailError(data);
         destino.className = '';
         destino.innerHTML = accesosDetalleHTML(data.analistas || []);
+      } catch (err) {
+        showStatus(destino, `Error: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    // Campañas: la línea de tiempo de cada una, desde los datos (event.campaign).
+    // Solo los casos que declaran correlaciones (hoy el SIEM).
+    function campanasHTML(sa) {
+      const casos = Object.entries(sa || {}).filter(([, c]) => (c.correlaciones || 0) > 0);
+      if (!casos.length) return '';
+      return `<div class="section-card" id="infra-campanas">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('layers')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Campañas</span>
+              <span class="section-card__hint">Cada ataque contado en orden: qué pasó en cada fuente y desde qué IP · ${casos.map(([s]) => escapeHtml(SLUG_LABELS[s] || s)).join(' · ')} · en Dashboards: Security Analytics → Correlations</span>
+            </span>
+            <button type="button" class="btn btn-secondary btn-sm" id="infra-campanas-ver" title="Volver a leer">${icon('refresh')} Actualizar</button>
+          </div>
+          <div id="infra-campanas-detalle"></div>
+        </div>`;
+    }
+    // ISO del agregado ("2025-09-16T20:46:10.000Z") → como @timestamp en PPL.
+    const _horaPpl = (iso) => String(iso || '').replace('T', ' ').slice(0, 19);
+    function campanasDetalleHTML(casos) {
+      const bloques = (casos || []).map(c => {
+        if (c.error) return `<div class="hallazgos__det"><div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(c.error)}</div></div>`;
+        return (c.campanas || []).map(k => {
+          const pasos = (k.pasos || []).map(p =>
+            `<li class="campana__paso"><span class="campana__hora">${escapeHtml(_horaPpl(p.inicio))}</span>`
+            + `<span class="campana__fuente">${escapeHtml(p.fuente)}</span><span class="hallazgo__regla">${escapeHtml(p.accion)}</span>`
+            + `<span class="hallazgo__meta">${p.eventos} evento${p.eventos === 1 ? '' : 's'}</span></li>`).join('');
+          return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(k.id)}${k.nombre ? ` · ${escapeHtml(k.nombre)}` : ''}</strong>`
+            + `<span class="hallazgos__total">${k.eventos} evento${k.eventos === 1 ? '' : 's'} en ${(k.fuentes || []).length} fuente${(k.fuentes || []).length === 1 ? '' : 's'}${(k.ips || []).length ? ` · desde ${escapeHtml(k.ips.join(', '))}` : ''}</span>`
+            + `<button type="button" class="hallazgo__accion campana__explicar" data-slug="${escapeHtml(c.slug)}" `
+            + `data-campana="${escapeHtml(k.id)}" data-nombre="${escapeHtml(k.nombre || '')}" data-desde="${escapeHtml(_horaPpl(k.desde))}" `
+            + `data-hasta="${escapeHtml(_horaPpl(k.hasta))}" data-ips="${escapeHtml((k.ips || []).join(', '))}" title="Explicar con el asistente">${icon('spark')} Explicar</button></div>`
+            + `<ol class="campana__pasos">${pasos}</ol></div>`;
+        }).join('') || `<div class="hallazgos__det"><div class="hallazgos__vacio">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}: sin eventos de campaña en los datos.</div></div>`;
+      }).join('');
+      return bloques || '<div class="hallazgos__vacio">No hay casos con campañas.</div>';
+    }
+    // "Explicar" una campaña: el asistente mide qué cambió en esa ventana.
+    function explicarCampana(b) {
+      const { slug, campana, nombre, desde, hasta, ips } = b.dataset;
+      const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
+        `¿Qué pasó en la campaña ${campana}${nombre ? ` (${nombre})` : ''}?`,
+        `Campaña ${campana}${nombre ? ` "${nombre}"` : ''} entre ${desde} y ${hasta} (UTC)${ips ? `, desde ${ips}` : ''}. `
+        + `Contá qué hizo en cada fuente y en qué orden.`,
+        { desde, hasta }));
+      if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
+      return tomada;
+    }
+    async function verCampanas(btn) {
+      const destino = document.getElementById('infra-campanas-detalle');
+      if (!destino) return;
+      btn.disabled = true;
+      showStatus(destino, 'Leyendo las campañas…', 'loading');
+      try {
+        const res = await fetch('/api/v1/security/campanas');
+        const data = await res.json();
+        if (!res.ok) throw detailError(data);
+        destino.className = '';
+        destino.innerHTML = campanasDetalleHTML(data.casos || []);
       } catch (err) {
         showStatus(destino, `Error: ${err.message}`, 'error');
       } finally {
@@ -8349,7 +8424,7 @@
     // Lo que carga cada pestaña al abrirla (una vez por render): el botón que
     // la actualiza o la primera opción.
     const _CARGA_DE_SECCION = {
-      seguridad: ['#infra-seguridad-ver'],
+      seguridad: ['#infra-seguridad-ver', '#infra-campanas-ver'],
       anomalias: ['#infra-anomalias-ver'],
       pronosticos: ['.pron__caso'],
       perfiles: ['.perfil__caso'],
@@ -8664,7 +8739,7 @@
               <div class="pipe-list">${pipeRows}</div>
             </div>
             ${accesosHTML(pipelines)}` },
-          { id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) },
+          { id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', cuenta: nAnomalias, html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', cuenta: nPronosticos, html: pronosticosHTML(data.capabilities) },
           { id: 'perfiles', label: 'Perfiles', icon: 'layers', cuenta: nPerfiles, html: perfilesHTML(pipelines) },
@@ -8736,6 +8811,12 @@
       });
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
       body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
+      // Campañas: a demanda, y "Explicar" cada una.
+      body.querySelector('#infra-campanas-ver')?.addEventListener('click', (e) => verCampanas(e.currentTarget));
+      body.querySelector('#infra-campanas-detalle')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.campana__explicar');
+        if (b) explicarCampana(b);
+      });
       // Forecasting: por caso, a demanda.
       body.querySelector('#infra-pronosticos')?.addEventListener('click', (e) => {
         const b = e.target.closest('.pron__caso');
@@ -8942,6 +9023,19 @@
                         filas: Array.from({ length: 12 }, (_, i) => [
                           slug === 'siem' ? `185.220.101.${40 + i}` : `${(PERFIL[slug] || 'E').slice(0, 1)}-${100 + i}`,
                           900 - i * 61, [90, 70, 50][i % 3], 1751372608000 + i * 86400000, 1782843939000 - i * 3600000]) });
+        }
+        if (u.includes('/api/v1/security/campanas')) {
+          await espera(600);
+          return json({ casos: [{ slug: 'siem', campanas: [
+            { id: 'CMP-001', nombre: 'Ransomware Precursor', eventos: 14, ips: ['45.155.205.233'], fuentes: ['waf', 'auth', 'cloudaudit'],
+              desde: '2025-09-16T20:46:10.000Z', hasta: '2025-09-16T23:02:44.000Z', pasos: [
+                { fuente: 'waf', accion: 'sqli', eventos: 6, inicio: '2025-09-16T20:46:10.000Z' },
+                { fuente: 'auth', accion: 'ssh_login', eventos: 5, inicio: '2025-09-16T21:30:02.000Z' },
+                { fuente: 'cloudaudit', accion: 'deleteTracker', eventos: 3, inicio: '2025-09-16T22:58:12.000Z' }] },
+            { id: 'CMP-003', nombre: 'Lateral Movement', eventos: 2, ips: ['23.129.64.130'], fuentes: ['fortigate'],
+              desde: '2026-05-20T18:25:57.000Z', hasta: '2026-05-20T18:40:12.000Z', pasos: [
+                { fuente: 'fortigate', accion: 'blocked', eventos: 2, inicio: '2026-05-20T18:25:57.000Z' }] },
+          ] }] });
         }
         if (u.includes('/api/v1/analistas')) {
           await espera(400);
@@ -9320,6 +9414,22 @@
           if (!d) return '';
           const m = LOG_EXAMPLES.find(e => e.id === selId);
           const sample = (d.sample || '').substring(0, 600);
+          // SIEM tiene 4 fuentes en una sola muestra — mostrar un poco de cada una.
+          if (selId === 'siem') {
+            const sources = (d.sample || '').split('\n').filter(l => l.trim());
+            const labels = ['FortiGate', 'Auth (syslog)', 'Cloud Audit (CTS)', 'WAF'];
+            const srcHtml = sources.map((src, i) => {
+              const prev = src.length > 140 ? src.slice(0, 140) + '…' : src;
+              return `<div style="margin-bottom:${i < sources.length - 1 ? 8 : 0}px;">
+                <span style="font-size:var(--fs-xs);font-weight:var(--fw-semi);color:var(--accent);">${labels[i] || 'Origen ' + (i + 1)}</span>
+                <pre style="font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.45;white-space:pre-wrap;word-break:break-all;margin:2px 0 0;color:var(--text-muted);">${escapeHtml(prev)}</pre>
+              </div>`;
+            }).join('');
+            return `<div style="margin-bottom:${multi ? 10 : 0}px;padding:12px 14px;background:var(--bg-subtle);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+              ${multi ? `<div style="font-size:var(--fs-sm);font-weight: var(--fw-semi);color:var(--accent);margin-bottom:8px;">SIEM</div>` : ''}
+              ${srcHtml}
+            </div>`;
+          }
           return `
             <div style="margin-bottom:${multi ? 10 : 0}px;padding:12px 14px;background:var(--bg-subtle);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
               ${multi ? `<div style="font-size:var(--fs-sm);font-weight: var(--fw-semi);color:var(--accent);margin-bottom:6px;">${escapeHtml(m ? m.label : selId)}</div>` : ''}
@@ -10724,12 +10834,12 @@
     }
 
     // ── Auto-cargar ejemplo para pruebas rápidas ───────────────────────────────
-    // ?sample=<slug> pre-carga un dataset guardado (?sample=1 / ?dev=1: el primero).
+    // ?sample=<slug> (o ?sample=1 / ?dev=1 → siem) pre-carga un caso de uso.
     (function autoLoadSample() {
       const params = new URLSearchParams(window.location.search);
       const raw = params.get('sample') || (params.get('dev') === '1' ? '1' : null);
       if (!raw) return;
-      const id = (raw === '1') ? (LOG_EXAMPLES.find(e => e.id !== 'custom') || {}).id : raw;
+      const id = (raw === '1') ? 'siem' : raw;
       if (LOG_EXAMPLES.some(e => e.id === id && !e.disabled)) {
         loadExample(id);
         console.log(`✓ Ejemplo "${id}" cargado automáticamente (modo dev)`);

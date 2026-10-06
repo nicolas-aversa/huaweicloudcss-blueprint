@@ -239,16 +239,13 @@ def test_los_huerfanos_se_buscan_por_nombre(monkeypatch):
 
     monkeypatch.setattr(main, "_search_ids", fake_buscar)
     monkeypatch.setattr(main, "_os_req", lambda m, u, *a, **k: pedidos.append((m, u)))
-    # Los casos del entorno: los del registro de pipelines.
-    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {"siem": {}, "ventas": {}})
     main._teardown_orphans_by_name("http://x", "admin", "pw")
     # El monitor se borra, y el detector se para antes de borrarlo.
     assert ("DELETE", "http://x/_plugins/_alerting/monitors/H-siem-anomalias-alerta") in pedidos
     d = "http://x/_plugins/_anomaly_detection/detectors/H-siem-anomalias"
     i = pedidos.index(("POST", f"{d}/_stop?historical=true"))
     assert pedidos[i + 2] == ("DELETE", d)
-    for s in ("siem", "ventas"):
-        assert ("/_plugins/_forecast/forecasters/_search", f"{s}-volume-forecast", "name.keyword") in buscados
+    for s in caps.get_capability_slugs():
         assert ("/_plugins/_alerting/monitors/_search", f"{s}-anomalias-alerta", "monitor.name.keyword") in buscados
         assert ("/_plugins/_anomaly_detection/detectors/_search", f"{s}-anomalias", "name.keyword") in buscados
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")

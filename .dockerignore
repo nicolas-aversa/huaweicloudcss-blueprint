@@ -27,9 +27,11 @@ datasets/*.csv
 
 # Lo que no corre en producción. El Dockerfile hace `COPY . .`, así que sin esto
 # la imagen se lleva los tests, el panel de la ECS (que se despliega aparte, en
-# FunctionGraph + Cloudflare).
+# FunctionGraph + Cloudflare) y los dashboards ya generados, que el backend
+# reconstruye desde `verticals/` en runtime.
 tests/
 ecs-panel/
+docs/dashboards/
 build_*.py
 
 # Terraform: estado y providers

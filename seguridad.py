@@ -3,17 +3,16 @@ seguridad.py
 ============
 
 Builders **puros** (sin I/O) de lo que la plataforma provisiona en el plugin
-Security Analytics de OpenSearch para los datasets de seguridad: tipos de log
-propios, reglas Sigma, detectores y correlaciones.
+Security Analytics de OpenSearch para los casos de seguridad (SIEM,
+FortiAnalyzer): tipos de log propios, reglas Sigma, detectores y correlaciones.
 
-Lo que se crea sale de la spec de seguridad de cada dataset (la que propone
-`seguridad_derivada` sobre sus campos): un tipo de log por fuente, con sus
-reglas escritas sobre los campos que de verdad deja el filter del caso. La
-orquestación REST vive en `main.py`.
+Lo que se crea sale de la clave `security` de cada vertical (`verticals/`): un
+tipo de log por fuente, con sus reglas escritas sobre los campos que de verdad
+deja el filter del caso. La orquestación REST vive en `main.py`.
 
 Por qué tipos de log propios y no `network`: las reglas usan los campos del
-caso (`action`, `subtype`, …) y un tipo estándar espera los suyos; con un tipo
-propio las reglas se validan contra lo que llega.
+caso (`event.action`, `subtype`, …) y un tipo estándar espera los suyos; con
+un tipo propio las reglas se validan contra lo que llega.
 """
 
 from __future__ import annotations
@@ -206,3 +205,45 @@ def indices_mensuales(index_pattern: str, meses: "tuple[str, str] | list[str]") 
         salida.append(f"{base}-{anio:04d}_{mes:02d}")
         anio, mes = (anio + 1, 1) if mes == 12 else (anio, mes + 1)
     return salida
+
+
+# ── Campañas: la línea de tiempo de cada una, desde los datos ───────────────
+def consulta_de_campanas(n: int = 10) -> dict:
+    """Agregación de los eventos marcados con `event.campaign`: por campaña, su
+    nombre, el rango, las IPs y cada paso (fuente · acción) con su primer y
+    último evento, en orden de aparición."""
+    return {"size": 0, "query": {"exists": {"field": "event.campaign"}}, "aggs": {"c": {
+        "terms": {"field": "event.campaign", "size": n * 2}, "aggs": {
+            "nombre": {"terms": {"field": "event.campaign_name", "size": 1}},
+            "ips": {"terms": {"field": "source.ip", "size": 5}},
+            # terms anidados (composite no va debajo de un terms).
+            "fuentes": {"terms": {"field": "event.dataset", "size": 10}, "aggs": {
+                "acciones": {"terms": {"field": "event.action", "size": 10, "missing": "-"}, "aggs": {
+                    "inicio": {"min": {"field": "@timestamp"}}, "fin": {"max": {"field": "@timestamp"}}}}}}}}}}
+
+
+def campanas(respuesta: dict) -> list[dict]:
+    """Las campañas de la respuesta de `consulta_de_campanas`, con la misma
+    campaña unida aunque el valor venga con espacios ("CMP-003" y "CMP-003\\n"),
+    y sus pasos ordenados por el primer evento."""
+    por_id: dict[str, dict] = {}
+    for b in ((respuesta or {}).get("aggregations") or {}).get("c", {}).get("buckets", []):
+        cid = str(b.get("key", "")).strip()
+        c = por_id.setdefault(cid, {"id": cid, "nombre": "", "eventos": 0, "ips": [], "pasos": []})
+        c["eventos"] += int(b.get("doc_count") or 0)
+        c["nombre"] = c["nombre"] or next((str(x["key"]).strip() for x in b.get("nombre", {}).get("buckets", [])), "")
+        c["ips"] += [x["key"] for x in b.get("ips", {}).get("buckets", []) if x["key"] not in c["ips"]]
+        for f in b.get("fuentes", {}).get("buckets", []):
+            for p in f.get("acciones", {}).get("buckets", []):
+                c["pasos"].append({"fuente": str(f.get("key", "")), "accion": str(p.get("key", "")),
+                                   "eventos": int(p.get("doc_count") or 0),
+                                   "inicio": (p.get("inicio") or {}).get("value_as_string", ""),
+                                   "fin": (p.get("fin") or {}).get("value_as_string", "")})
+    fuera = []
+    for c in por_id.values():
+        c["pasos"].sort(key=lambda x: x["inicio"])
+        c["desde"] = c["pasos"][0]["inicio"] if c["pasos"] else ""
+        c["hasta"] = max((x["fin"] for x in c["pasos"]), default="")
+        c["fuentes"] = sorted({x["fuente"] for x in c["pasos"]})
+        fuera.append(c)
+    return sorted(fuera, key=lambda c: c["desde"])

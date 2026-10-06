@@ -1,6 +1,6 @@
 """Compara modelos de MaaS como generadores de PPL del asistente.
 
-Para cada dataset guardado toma sus preguntas sugeridas y el MISMO system prompt que
+Para cada caso de demo toma sus preguntas sugeridas y el MISMO system prompt que
 usa el chat (`build_ppl_system_prompt` + `_reglas_del_chat`), le pide la
 consulta a cada modelo y la revisa:
 
@@ -20,8 +20,8 @@ import sys
 import time
 
 import capabilities as caps
-import custom_cases
 import maas_integrator as maas
+import verticals
 
 # MaaS admite 1 pedido por segundo por cuenta (ModelArts.81101): se espera entre
 # llamados y se reintenta un 429, o la comparación mide el límite y no al modelo.
@@ -57,14 +57,12 @@ def revisar(ppl: str, index_pattern: str, campos: set[str]) -> list[str]:
 
 
 def casos(n_preguntas: int) -> list[dict]:
-    """Los datasets guardados con campos y preguntas sugeridas; el spec, el
-    mismo que arma el chat de sus campos."""
+    """Los casos con spec curado y preguntas sugeridas."""
     fuera = []
-    for c in custom_cases.list_cases():
-        slug, preguntas = c["slug"], c.get("suggested_questions") or []
-        spec = caps.build_spec_from_fields(slug, f"{c.get('index_base') or slug}-*", c.get("fields") or [],
-                                           c.get("label", slug))
-        if spec.get("fields") and preguntas:
+    for slug in caps.get_capability_slugs():
+        spec = caps.get_capability_spec(slug) or {}
+        preguntas = (verticals.get_vertical(slug) or {}).get("suggested_questions") or []
+        if spec and preguntas:
             fuera.append({"slug": slug, "spec": spec, "preguntas": preguntas[:n_preguntas]})
     return fuera
 

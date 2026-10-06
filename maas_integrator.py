@@ -1773,20 +1773,24 @@ def _ejemplo_filter() -> str:
     """Un filter REAL del catálogo, para que el modelo copie la forma.
 
     El prompt tenía reglas pero ningún ejemplo completo, y los pocos hashes que
-    mostraba eran de UNA entrada: el modelo nunca veía cómo se separan dos. Lo
-    arma el perfilador con una tabla fija —el mismo generador que hace los
-    `.conf` de los datasets, que pasan el lint—: un `convert` con varias
-    entradas y un `remove_field`, la forma exacta donde el modelo mete la coma.
+    mostraba eran de UNA entrada: el modelo nunca veía cómo se separan dos. Este
+    sale del registro de verticales y no de un literal acá, así que es
+    necesariamente uno que hoy corre en CSS — si alguien lo rompe, lo agarra el
+    test que pasa el lint sobre todo el catálogo.
+
+    Se elige el más corto que tenga un `convert` con varias entradas y un
+    `remove_field`: es la forma exacta donde el modelo mete la coma.
     """
     global _EJEMPLO_CACHE
     if _EJEMPLO_CACHE is None:
-        import perfilador
+        import verticals
 
-        tabla = ["fecha,sucursal,monto,unidades,ok",
-                 "2026-09-18 11:04:12,Centro,1250.50,3,true",
-                 "2026-09-18 11:05:40,Norte,980.00,1,false",
-                 "2026-09-18 11:07:02,Centro,310.25,2,true"]
-        _EJEMPLO_CACHE = perfilador.armar_filter(perfilador.perfilar(tabla), "data").strip()
+        candidatos = [
+            (v.get("filter_code") or "").strip() for v in verticals.all_verticals()
+        ]
+        utiles = [c for c in candidatos
+                  if c.count("=>") > 4 and "convert => {" in c and "remove_field => [" in c]
+        _EJEMPLO_CACHE = min(utiles, key=len) if utiles else ""
     return _EJEMPLO_CACHE
 
 
