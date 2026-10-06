@@ -221,8 +221,8 @@ def test_la_semantica_va_con_un_modelo_rapido_sin_thinking_y_con_tope(monkeypatc
 
     r = semantica.enriquecer(_perfil(TELEMETRIA))
     assert r.fuente == "llm"
-    assert visto["pedido"]["model"] == "glm-5.2"
-    assert visto["pedido"]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert visto["pedido"]["model"] == "deepseek-v4.1-flash"
+    assert visto["pedido"]["extra_body"] == {"chat_template_kwargs": {"thinking": False}}
     assert visto["opciones"] == {"timeout": semantica._TIMEOUT_S, "max_retries": 0}
     assert semantica._TIMEOUT_S <= 60
 
@@ -355,3 +355,53 @@ def test_sin_api_key_el_endpoint_sigue_y_las_preguntas_salen_de_las_plantillas()
     # siguen sonando a pregunta y no a título de reporte.
     assert "¿Cuántos registros hay de cada estado?" in body["questions"]
     assert "¿Cuántos registros terminaron en FALLIDO?" in body["questions"]
+
+
+# ── Principales y sensibles ─────────────────────────────────────────────────
+def test_las_principales_eligen_entre_varias_con_el_mismo_rol():
+    """Entre varias medidas o ids, la principal decide qué se pronostica y a
+    quién sigue el perfil; llega a los campos con las marcas del paso 2."""
+    p = _perfil(TELEMETRIA)
+    semantica.enriquecer(p, _responde({
+        "columnas": {"paginas_totales": {"rol": "measure"}, "consumo_tinta_ml": {"rol": "measure"},
+                     "estado": {"rol": "critical_indicator"}},
+        "principales": {"entidad": "cliente", "medida": "consumo_tinta_ml", "critico": "codigo_error"},
+    }))
+    assert (_col(p, "cliente").rol, _col(p, "cliente").principal) == ("entity_id", "entidad")
+    assert _col(p, "consumo_tinta_ml").principal == "medida"
+    assert _col(p, "codigo_error").rol == "critical_indicator"
+    assert _col(p, "estado").rol is None, "el crítico es de un solo campo"
+    campos = {f["raw_name"]: f for f in perfilador.campos(p)}
+    assert campos["cliente"].get("entity") is True
+    assert campos["consumo_tinta_ml"].get("principal") is True
+    assert "principal" not in campos["paginas_totales"] and "entity" not in campos["id_trabajo"]
+
+
+@pytest.mark.parametrize("principales", [
+    {"entidad": "id_trabajo"},          # un valor por fila: es el id del registro
+    {"entidad": "no_existe"},
+    {"medida": "cliente"},              # un texto no se suma
+    {"entidad": 7}, "nada",
+])
+def test_una_principal_invalida_se_descarta(principales):
+    p = _perfil(TELEMETRIA)
+    semantica.enriquecer(p, _responde({"columnas": {}, "principales": principales}))
+    assert not any(c.principal for c in p.columnas)
+
+
+def test_en_un_csv_sin_header_la_principal_usa_el_nombre_nuevo():
+    p = _perfil(SIN_HEADER)
+    semantica.enriquecer(p, _responde({"columnas": {}, "nombres": {"columna_2": "pozo"},
+                                       "principales": {"entidad": "pozo"}}))
+    assert _col(p, "pozo").principal == "entidad"
+
+
+def test_los_sensibles_llegan_marcados():
+    p = _perfil(TELEMETRIA)
+    semantica.enriquecer(p, _responde({"columnas": {
+        "cliente": {"sensible": True}, "fecha_y_hora": {"sensible": True},
+        "estado": {"sensible": "si"}}}))
+    campos = {f["raw_name"]: f for f in perfilador.campos(p)}
+    assert campos["cliente"].get("sensitive") is True
+    assert "sensitive" not in campos["fecha_y_hora"], "una fecha no se enmascara"
+    assert "sensitive" not in campos["estado"], "solo true cuenta"

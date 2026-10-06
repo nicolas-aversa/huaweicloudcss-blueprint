@@ -123,6 +123,22 @@ def test_role_y_dimension_llegan_al_paso_2(monkeypatch):
     assert campo["role"] == "success_indicator"
 
 
+def test_las_marcas_que_propone_la_semantica_llegan_al_paso_2(monkeypatch):
+    """La entidad, la medida principal y los sensibles que propone la semántica
+    viajan con las marcas del paso 2; sin declararlas, Pydantic las tiraba."""
+    monkeypatch.setattr(main, "generate_logstash_filter", lambda raw_log, **kw: {
+        "filter_code": "filter { }",
+        "fields": [{"raw_name": "cliente", "field_path": "data.cliente", "type": "string",
+                    "business_label": "Cliente", "entity": True, "sensitive": True},
+                   {"raw_name": "monto", "field_path": "data.monto", "type": "float",
+                    "business_label": "Monto", "role": "measure", "principal": True}]})
+
+    cliente, monto = _generar("una línea sin formato conocido")["fields"]
+
+    assert cliente["entity"] is True and cliente["sensitive"] is True
+    assert monto["principal"] is True and monto.get("entity") is None
+
+
 def test_el_formato_de_la_fecha_y_las_etiquetas_llegan_al_paso_2(monkeypatch):
     _no_llamar_al_llm(monkeypatch)
 

@@ -31,9 +31,9 @@ def test_las_medidas_salen_de_los_forecasts():
     spec = {"volume_field": "type", "forecasts": [
         {"feature_name": "bytes", "aggregation_query": {"bytes": {"sum": {"field": "sentbyte"}}}},
         {"feature_name": "eventos"},
-        {"feature_name": "c"}, {"feature_name": "d"}]}
+        {"feature_name": "c"}, {"feature_name": "d"}, {"feature_name": "e"}]}
     f = caps.features_de_anomalias(spec)
-    assert [x["feature_name"] for x in f] == ["bytes", "eventos", "c"], "hasta tres"
+    assert [x["feature_name"] for x in f] == ["bytes", "eventos", "c", "d"], "hasta cuatro"
     assert f[0]["aggregation_query"] == {"bytes": {"sum": {"field": "sentbyte"}}}
     assert f[1]["aggregation_query"] == {"eventos": {"value_count": {"field": "type"}}}
     assert caps.features_de_anomalias({"volume_field": "v"}) == [

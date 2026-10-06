@@ -4532,7 +4532,7 @@ def test_provision_capabilities_endpoint_no_cluster_503(monkeypatch):
 
 def test_build_spec_from_fields_produces_valid_spec():
     """(a) build_spec_from_fields produce un spec con la forma de los curados
-    (index_pattern, fields, 1-3 forecasts) y build_ppl_system_prompt lo acepta."""
+    (index_pattern, fields, 1-4 forecasts) y build_ppl_system_prompt lo acepta."""
     import capabilities as C
 
     fields = [
@@ -4551,7 +4551,7 @@ def test_build_spec_from_fields_produces_valid_spec():
     assert isinstance(spec["operations"], list)
     assert isinstance(spec["fields"], dict)
     assert isinstance(spec["forecasts"], list)
-    assert 1 <= len(spec["forecasts"]) <= 3
+    assert 1 <= len(spec["forecasts"]) <= 4
     assert spec["volume_field"]
 
     # El texto libre sí está (sin él, "¿de qué se quejan?" no tenía qué leer),
@@ -5061,8 +5061,8 @@ def test_build_spec_uses_role_for_forecasts():
     fc_names = " ".join(fc["name"] for fc in spec["forecasts"])
     assert "critical" in fc_names
     assert "entities" in fc_names
-    assert "volume" in fc_names
-    assert len(spec["forecasts"]) == 3  # cap: volume + critical + entities (measure dropea)
+    assert "volume" in fc_names and "measure" in fc_names
+    assert len(spec["forecasts"]) == 4  # volumen, críticos, entidades y la medida
 
 
 def test_build_spec_uses_role_for_success_code():

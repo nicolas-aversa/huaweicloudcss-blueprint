@@ -971,6 +971,12 @@ class FieldMapping(BaseModel):
     sample: str | None = Field(default=None, description="Un valor de ejemplo de la muestra.")
     frecuentes: list[str] = Field(
         default_factory=list, description="Valores más frecuentes (para las preguntas de ejemplo).")
+    # Lo que propone la semántica, con las mismas marcas que el paso 2 (y que
+    # el usuario puede cambiar ahí): sin declararlas, Pydantic las descartaba.
+    entity: bool | None = Field(default=None, description="La entidad del perfil (columna Entidad del paso 2).")
+    sensitive: bool | None = Field(default=None, description="Dato personal: el analista lo ve enmascarado.")
+    principal: bool | None = Field(
+        default=None, description="La medida o el indicador crítico principal, entre varios con el mismo rol.")
 
 
 class Verificacion(BaseModel):

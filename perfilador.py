@@ -114,6 +114,9 @@ class Columna:
     frecuentes: list[str] = field(default_factory=list)
     dimension: bool = False
     rol: str | None = None      # el que puso la semántica; None = se infiere por nombre
+    # "entidad" | "medida" | "critico": la principal de su rol, según la semántica.
+    principal: str = ""
+    sensible: bool = False      # dato personal, según la semántica: se propone enmascararlo
     # La etiqueta salió de un nombre técnico (`CantidadFacturas`, `medio_pago`,
     # una clave de JSON, `columna_3`): el LLM la puede mejorar. La que escribió
     # una persona ("Páginas Totales") es el vocabulario del cliente y no se toca.
@@ -976,6 +979,12 @@ def campos(perfil: Perfil, ns: str = "data") -> list[dict]:
             "ecs_overlay_path": None,
             "sample": muestra[:200],
             "frecuentes": c.frecuentes[:6] if c.dimension else [],
+            # La entidad principal llega marcada como en la columna Entidad del
+            # paso 2; la medida y el crítico principales, como `principal`.
+            **({"entity": True} if c.principal == "entidad" else {}),
+            **({"principal": True} if c.principal in ("medida", "critico") else {}),
+            # Sensible llega marcado como en el paso 2 (se puede desmarcar ahí).
+            **({"sensitive": True} if c.sensible else {}),
         })
     return fuera
 

@@ -24,12 +24,13 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-# El modelo de la semántica NO es el del .conf. glm-5.3 razona siempre y para
-# esto tardaba ~95 s (medido con la telemetría de 14 columnas); glm-5.2 sin
-# thinking contesta en ~25 s. Acá no hace falta razonar: son etiquetas, roles y
-# preguntas, todo validado después, y un error no rompe nada. La sintaxis del
-# .conf —lo que sí puede romper la pipeline— sigue con glm-5.3 y thinking.
-_MODELO = "glm-5.2"
+# El modelo de la semántica NO es el del .conf. Acá no hace falta razonar: son
+# etiquetas, roles y preguntas, todo validado después, y un error no rompe nada.
+# glm-5.3 razona siempre (~95 s con 14 columnas). glm-5.2 sin thinking pasaba
+# el tope con un dataset ancho (FortiAnalyzer, 88 columnas: 69 s) y el caso se
+# quedaba sin roles; deepseek-v4.1-flash sin thinking lo contesta en 15 s con
+# los mismos roles. La sintaxis del .conf sigue con glm-5.3 y thinking.
+_MODELO = "deepseek-v4.1-flash"
 # Tope del llamado: el paso 1 → 2 no puede quedar colgado por la semántica. Si
 # el modelo no contesta en este tiempo, siguen las heurísticas.
 _TIMEOUT_S = 60
@@ -64,7 +65,8 @@ _PROMPT = """Sos analista de datos. Te paso las columnas de un dataset (ya tipad
 los tipos NO se discuten) y unas filas de muestra. Devolvé SOLO un JSON así:
 
 {{"columnas": {{"<nombre>": {{"etiqueta": "...", "rol": "...", "dimension": true, \
-"unidad": "..."}}}}, "nombres": {{"<columna_N>": "<nombre_snake_case>"}}, \
+"unidad": "...", "sensible": false}}}}, "nombres": {{"<columna_N>": "<nombre_snake_case>"}}, \
+"principales": {{"entidad": "<nombre>", "medida": "<nombre>", "critico": "<nombre>"}}, \
 "filas": "las <cosas>", "preguntas": ["..."]}}
 
 - "etiqueta": cómo le diría una persona a la columna, en castellano, corta.
@@ -77,8 +79,17 @@ los tipos NO se discuten) y unas filas de muestra. Devolvé SOLO un JSON así:
   timestamp = la fecha del evento.
 - "dimension": true si sirve para agrupar (pocos valores que se repiten).
 - "unidad": solo para números, si se deduce (ml, kg, ms, ARS, %…); si no, null.
+- "sensible": true si identifica a una persona o su cuenta (nombre, documento, \
+email, teléfono, número de tarjeta o de cuenta, id de cliente o de paciente). Un \
+analista sin permiso lo va a ver enmascarado.
 - "nombres": SOLO para las columnas que se llaman columna_N, un nombre snake_case \
 ASCII que diga qué son.
+- "principales": de las columnas con ese rol, LA más importante para el negocio \
+(o null si no hay): "entidad" = la entidad que conviene seguir en el tiempo y que \
+se repite entre filas (el cliente, el usuario, el pozo, la IP de origen; nunca el \
+id del propio registro); "medida" = el número principal (la facturación, la \
+producción, los bytes); "critico" = la señal de que algo salió mal (el error, el \
+ataque, la falla).
 - "filas": qué es cada fila, en plural y con artículo: "las facturas", "los \
 trabajos de impresión", "las transacciones". Si no se deduce, "los registros".
 - "preguntas": 10 preguntas en castellano, **como se las harías a un colega en \
@@ -125,7 +136,7 @@ def _llamar_al_llm(prompt: str) -> str:
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
         temperature=0,
-        extra_body={"thinking": {"type": "disabled"}},
+        extra_body={"chat_template_kwargs": {"thinking": False}},
     )
     return respuesta.choices[0].message.content or ""
 
@@ -249,6 +260,9 @@ def aplicar(perfil, datos: dict) -> None:
         if rol:
             c.rol = rol
 
+        if info.get("sensible") is True and c.tipo in ("string", "text", "integer"):
+            c.sensible = True
+
         unidad = info.get("unidad")
         if (c.unidad is None and c.tipo in _NUMERICOS and isinstance(unidad, str)
                 and 0 < len(unidad.strip()) <= _MAX_UNIDAD):
@@ -269,6 +283,36 @@ def aplicar(perfil, datos: dict) -> None:
                 continue
             _renombrar(perfil, c, nuevo)
             tomados.add(nuevo)
+
+    # Después de los nombres: en un CSV sin header nombra a `id_paciente`, no
+    # a `columna_5`.
+    _principales(perfil, datos.get("principales"))
+
+
+def _principales(perfil, principales: Any) -> None:
+    """La entidad, la medida y el indicador crítico principales. Cuando hay
+    varias columnas con el mismo rol (tres ids, doce medidas), de esto depende
+    a quién sigue el perfil y qué se pronostica: antes era la primera en orden
+    de columnas (`logid` en vez de la IP de origen, `choke_size` en vez del
+    petróleo producido)."""
+    if not isinstance(principales, dict):
+        return
+    por_nombre = {c.nombre: c for c in perfil.columnas}
+    for clave, rol in (("entidad", "entity_id"), ("medida", "measure"), ("critico", "critical_indicator")):
+        nombre = principales.get(clave)
+        c = por_nombre.get(nombre) if isinstance(nombre, str) else None
+        if c is None or _rol_valido(rol, c.tipo) is None:
+            continue
+        llenos = max(1, len(c.valores) - c.vacios)
+        if clave == "entidad" and not 1 < c.distintos < llenos:
+            continue   # un id por fila (o un solo valor) no es una entidad a seguir
+        if rol == "critical_indicator":
+            # Es de un solo campo: se lo saca al que lo tenía.
+            for otra in perfil.columnas:
+                if otra.rol == rol:
+                    otra.rol = None
+        c.rol = rol
+        c.principal = clave
 
 
 def _renombrar(perfil, c, nuevo: str) -> None:

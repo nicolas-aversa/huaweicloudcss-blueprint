@@ -98,7 +98,10 @@ def _clean_fields(fields: list) -> list[dict]:
     # de una dimensión: las preguntas de ejemplo los nombran entre paréntesis.
     keep = ("raw_name", "field_path", "ecs_path", "ecs_overlay_path", "type",
             "business_label", "unit", "dimension", "role", "is_ecs",
-            "ecs_type_official", "normalized_path", "date_format", "frecuentes")
+            "ecs_type_official", "normalized_path", "date_format", "frecuentes",
+            # Las marcas del paso 2: sin ellas, un caso guardado perdía su
+            # perfil (Entidad) y su analista enmascarado (Sensible).
+            "entity", "sensitive", "principal")
     out = []
     for f in fields or []:
         if not isinstance(f, dict):

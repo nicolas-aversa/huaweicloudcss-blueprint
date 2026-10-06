@@ -610,15 +610,15 @@ def build_forecaster(index_pattern: str, volume_field: str,
 
 def features_de_anomalias(spec: dict[str, Any]) -> list[dict[str, Any]]:
     """Las features del detector: las de los forecasts del caso (volumen,
-    fallos, entidades únicas), que ya están probadas contra sus datos. Sin
-    forecasts, el volumen. Hasta tres."""
+    fallos, entidades únicas, la medida), que ya están probadas contra sus
+    datos. Sin forecasts, el volumen. Hasta cuatro (el plugin acepta cinco)."""
     out = []
     for fc in spec.get("forecasts") or []:
         agg = fc.get("aggregation_query") or {fc["feature_name"]: {"value_count": {"field": spec.get("volume_field", "")}}}
         out.append({"feature_name": fc["feature_name"], "aggregation_query": agg})
     if not out and spec.get("volume_field"):
         out = [{"feature_name": "volumen", "aggregation_query": {"volumen": {"value_count": {"field": spec["volume_field"]}}}}]
-    return out[:3]
+    return out[:4]
 
 
 def nombre_de_detector_ad(slug: str) -> str:
@@ -757,6 +757,29 @@ def _es_texto_libre(f: dict[str, Any]) -> bool:
     return not _NOMBRE_ID.search((f.get("field_path") or "").rsplit(".", 1)[-1])
 
 
+# Los nombres de un campo que cuenta qué pasó: el mensaje, la acción, el motivo.
+_PISTA_DE_MENSAJE = re.compile(
+    r"(^|[._])(msg|message|mensaje|log|logdesc|desc|description|descripcion|detail|detalle|"
+    r"reason|motivo|action|accion|event|evento)([._]|$)", re.IGNORECASE)
+
+
+def campo_de_patrones(fields: list[dict[str, Any]]) -> str:
+    """El campo donde "Explicar" busca patrones (LogPatternAnalysisTool): el
+    texto libre si hay; si no, el que por su nombre cuenta qué pasó (el
+    mensaje, la acción); si no, la dimensión principal. '' si no hay ninguno:
+    Explicar igual compara la distribución de todos los campos."""
+    textos = [f for f in fields or [] if (f.get("field_path") or "").strip()
+              and (f.get("type") or "") in ("text", "string", "keyword")]
+    for f in textos:
+        if f.get("type") == "text":
+            return f["field_path"].strip()
+    for f in textos:
+        if _PISTA_DE_MENSAJE.search(f["field_path"]):
+            return f["field_path"].strip()
+    principal = next((f for f in textos if f.get("role") == "primary_dimension"), None)
+    return principal["field_path"].strip() if principal else ""
+
+
 def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str, Any]],
                            label: str = "", enums: "dict[str, list[str]] | None" = None
                            ) -> dict[str, Any]:
@@ -799,9 +822,13 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
     dims = [f for f in usable if _is_dim(f)]
     measures = [f for f in usable if (f.get("type") or "") in _MEASURE_TYPES]
 
-    # Helper: encontrar campo por role (primario) con fallback a regex.
+    # Helper: encontrar campo por role (primario) con fallback a regex. Entre
+    # varios con el mismo rol, el principal (la Entidad marcada en el paso 2, o
+    # la medida y el crítico que eligió la semántica).
     def _by_role(role: str) -> "dict | None":
-        return next((f for f in usable if (f.get("role") or "") == role), None)
+        con_rol = [f for f in usable if (f.get("role") or "") == role]
+        return next((f for f in con_rol if f.get("principal") or f.get("entity")),
+                    con_rol[0] if con_rol else None)
 
     # ── Dimensión principal: role → enum descubierto → primer dim ──
     primary = _by_role("primary_dimension")
@@ -849,10 +876,13 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         cf_path = critical_field["field_path"]
         if (critical_field.get("type") or "") == "text":
             cf_path = f"{cf_path}.keyword"
+        # Un indicador numérico (`is_fraud` 0/1) está en todos los registros:
+        # contarlo da el volumen. Sumado, da los casos.
+        operacion = "sum" if (critical_field.get("type") or "") in _MEASURE_TYPES else "value_count"
         forecasts.append({
             "name": f"{slug}-critical-forecast",
             "feature_name": "critical_events",
-            "aggregation_query": {"critical_events": {"value_count": {"field": cf_path}}},
+            "aggregation_query": {"critical_events": {operacion: {"field": cf_path}}},
             "description": f"Forecast de eventos criticos/fallidos ({critical_field.get('business_label') or 'campo critico'}) por intervalo",
         })
 
@@ -882,12 +912,8 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
             "description": f"Forecast de {measure_field.get('business_label') or 'la medida principal'} por intervalo",
         })
 
-    # Capar a 3 forecasts (mismo tope que los verticales de demo).
-    if len(forecasts) > 3:
-        _priority = {"volume": 0, "critical": 1, "entities": 2, "measure": 3}
-        forecasts.sort(key=lambda fc: _priority.get(
-            next((k for k in _priority if k in fc["name"]), 9), 9))
-        forecasts = forecasts[:3]
+    # Entran los cuatro (volumen, críticos, entidades, medida): con tope 3 se
+    # caía la medida, que es justo la facturación o la producción del caso.
 
     # ── success_code: role → regex → más frecuente ──
     success_code = ""
@@ -910,6 +936,7 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         "forecast_interval_minutes": 240,
         "forecast_horizon": 8,
         "forecasts": forecasts,
+        "pattern_field": campo_de_patrones(usable),
     }
 
     # Asegurar que campos con rol semántico estén en el prompt del PPLTool
