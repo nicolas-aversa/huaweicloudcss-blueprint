@@ -815,7 +815,8 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
             prompt_fields[path] = _field_desc(f, enums.get(path))
         elif _es_texto_libre(f):
             como = (f"read sample rows with `fields {path} | head 30`"
-                    + (f", or search words with match({path}, 'words') written in the language of the data"
+                    + (f", or search words with match({path}.es, 'palabras') for Spanish text or "
+                       f"match({path}.en, 'words') for English (they match every form of the word)"
                        if ftype == "text" else ""))
             prompt_fields[path] = f"{_field_desc(f)} — free text: {como}"
 

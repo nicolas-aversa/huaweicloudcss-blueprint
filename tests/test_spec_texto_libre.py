@@ -20,7 +20,8 @@ def test_el_comentario_entra_como_texto_libre():
     spec = capabilities.build_spec_from_fields("reviews-ordenes", "reviews-ordenes-*", RESENAS, "Reseñas")
     campos = spec["fields"]
     assert "free text" in campos["review_comment_message"]
-    assert "match(review_comment_message, 'words')" in campos["review_comment_message"]
+    assert "match(review_comment_message.es, 'palabras')" in campos["review_comment_message"]
+    assert "match(review_comment_message.en, 'words')" in campos["review_comment_message"]
     assert "fields review_comment_message | head 30" in campos["review_comment_message"]
     # Un string (keyword) se lee, pero `match` es para campos de texto.
     assert "free text" in campos["review_comment_title"] and "match(" not in campos["review_comment_title"]
@@ -37,3 +38,14 @@ def test_una_dimension_no_es_texto_libre():
     assert capabilities._es_texto_libre(f) is False
     assert capabilities._es_texto_libre({"field_path": "comentario", "type": "text"}) is True
     assert capabilities._es_texto_libre({"field_path": "monto", "type": "float"}) is False
+
+
+def test_un_texto_se_busca_por_idioma():
+    """`.es` y `.en` con su analizador, como la base de conocimiento: buscar
+    "devolución" encuentra "devoluciones"."""
+    from index_template import build_index_template
+
+    t = build_index_template([{"field_path": "comentario", "type": "text"}], "", "resenas-%{+YYYY.MM}")
+    sub = t["template"]["mappings"]["properties"]["comentario"]["fields"]
+    assert sub["es"] == {"type": "text", "analyzer": "spanish"} and sub["en"]["analyzer"] == "english"
+    assert sub["keyword"]["type"] == "keyword"
