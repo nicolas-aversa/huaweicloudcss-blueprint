@@ -1793,8 +1793,8 @@
        - Arriba, en vez de la barra de desplazamiento del navegador (gruesa, y
          con un largo que medía cuánto se salía la fila), un riel fino propio
          (`.tabs-riel`, lo arma `marcarPestanas`): el segmento mide una pestaña
-         sobre el total. Si la fila entra entera marca la activa; si se
-         desplaza, marca hasta dónde, y se arrastra (o se toca) para desplazarla.
+         sobre el total y está en la posición de la activa. Deslizarlo (o
+         tocarlo) elige la pestaña que queda debajo.
        - La línea de base es una sombra y no un borde: con overflow, la pestaña
          activa que se montaba sobre el borde se recortaba. */
     .case-tabs {
@@ -1810,7 +1810,6 @@
       background: var(--border-subtle); background-clip: content-box;
       cursor: pointer; touch-action: none; user-select: none;
     }
-    .tabs-riel.is-fijo { cursor: default; }
     .tabs-riel[hidden] { display: none; }
     .tabs-riel__pulgar {
       position: absolute; top: 4px; height: 2px; border-radius: 999px;
@@ -10843,15 +10842,18 @@
 
     // ── Pestañas: el riel de posición ──────────────────────────────────────
     // Arriba de cada fila de pestañas (.case-tabs), un riel fino: el segmento
-    // mide una pestaña sobre el total. Si la fila entra entera, marca la
-    // activa; si se desplaza, marca hasta dónde y se arrastra para desplazarla,
-    // como la barra de antes. Las filas las arman varias vistas y cambian
-    // solas: un observador mantiene cada riel al día.
-    function posicionDelRiel(n, activa, scrollLeft, scrollWidth, clientWidth) {
+    // mide una pestaña sobre el total y está donde está la activa. Deslizarlo
+    // o tocarlo elige la pestaña de esa posición (y la fila se corre para
+    // mostrarla). Las filas las arman varias vistas y cambian solas: un
+    // observador mantiene cada riel al día.
+    function posicionDelRiel(n, activa) {
       const ancho = 100 / Math.max(1, n);
-      const sobra = scrollWidth - clientWidth;
-      const frac = sobra > 1 ? scrollLeft / sobra : (n > 1 ? activa / (n - 1) : 0);
-      return { ancho, izquierda: Math.min(1, Math.max(0, frac)) * (100 - ancho), desplaza: sobra > 1 };
+      const frac = n > 1 ? Math.min(1, Math.max(0, activa / (n - 1))) : 0;
+      return { ancho, izquierda: frac * (100 - ancho) };
+    }
+    // La pestaña que queda bajo el punto `frac` (0 a 1) del riel.
+    function pestanaEnElRiel(n, frac) {
+      return Math.min(n - 1, Math.max(0, Math.floor(Math.min(0.9999, Math.max(0, frac)) * n)));
     }
     function _rielDe(fila) {
       let riel = fila.previousElementSibling;
@@ -10861,15 +10863,15 @@
       riel.setAttribute('aria-hidden', 'true');
       riel.innerHTML = '<span class="tabs-riel__pulgar"></span>';
       fila.parentNode.insertBefore(riel, fila);
-      // Arrastrar o tocar el riel desplaza la fila.
+      // Deslizar o tocar el riel elige la pestaña de esa posición.
       const mover = (e) => {
+        const tabs = [...fila.querySelectorAll(':scope > .case-tab')];
         const r = riel.getBoundingClientRect();
-        const pulgar = riel.firstElementChild.getBoundingClientRect().width;
-        const frac = (e.clientX - r.left - pulgar / 2) / Math.max(1, r.width - pulgar);
-        fila.scrollLeft = Math.min(1, Math.max(0, frac)) * (fila.scrollWidth - fila.clientWidth);
+        const tab = tabs[pestanaEnElRiel(tabs.length, (e.clientX - r.left) / Math.max(1, r.width))];
+        if (tab && !tab.classList.contains('is-active')) tab.click();
       };
       riel.addEventListener('pointerdown', (e) => {
-        if (fila.scrollWidth - fila.clientWidth <= 1) return;
+        if (fila.querySelectorAll(':scope > .case-tab').length < 2) return;
         riel.setPointerCapture(e.pointerId);
         riel.classList.add('is-arrastrando');
         mover(e);
@@ -10878,7 +10880,6 @@
       const soltar = (e) => { riel.classList.remove('is-arrastrando'); if (riel.hasPointerCapture(e.pointerId)) riel.releasePointerCapture(e.pointerId); };
       riel.addEventListener('pointerup', soltar);
       riel.addEventListener('pointercancel', soltar);
-      fila.addEventListener('scroll', () => marcarPestanas(fila, false), { passive: true });
       return riel;
     }
     function marcarPestanas(fila, verActiva = true) {
@@ -10896,8 +10897,7 @@
       }
       const riel = _rielDe(fila);
       riel.hidden = tabs.length < 2;
-      const pos = posicionDelRiel(tabs.length, i, fila.scrollLeft, fila.scrollWidth, fila.clientWidth);
-      riel.classList.toggle('is-fijo', !pos.desplaza);
+      const pos = posicionDelRiel(tabs.length, i);
       const pulgar = riel.firstElementChild;
       pulgar.style.width = pos.ancho + '%';
       pulgar.style.left = pos.izquierda + '%';

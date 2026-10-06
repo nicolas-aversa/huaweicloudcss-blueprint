@@ -184,8 +184,8 @@ def test_las_pestanas_de_casos_no_se_salen_con_muchos_casos():
     assert "transform" not in tabs and "transform" not in tab
     assert "box-shadow: inset 0 -2px 0 var(--border-subtle)" in tabs
     assert "scrollbar-width: none" in tabs and ".case-tabs::-webkit-scrollbar { display: none; }" in html
-    # El riel propio: fino, y se arrastra para desplazar la fila.
-    assert "riel.addEventListener('pointerdown'" in html and "fila.scrollLeft = Math.min(1, Math.max(0, frac))" in html
+    # El riel propio: fino, y deslizarlo elige la pestaña de esa posición.
+    assert "riel.addEventListener('pointerdown'" in html and "if (tab && !tab.classList.contains('is-active')) tab.click();" in html
     assert "white-space: nowrap" in tab and "flex: 1 0 auto" in tab and "margin-bottom: -2px" not in tab
     assert html.count("tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });") == 2
 
@@ -200,8 +200,8 @@ def test_las_pestanas_del_entorno_van_centradas_sin_recortarse():
 
 
 def test_el_riel_marca_la_posicion(tmp_path):
-    """Una pestaña sobre el total; la activa si la fila entra entera, y hasta
-    dónde se desplazó si no entra."""
+    """El segmento mide una pestaña sobre el total y está donde está la activa;
+    deslizarlo elige la pestaña que queda debajo."""
     import json
     import shutil
     import subprocess
@@ -213,20 +213,15 @@ def test_el_riel_marca_la_posicion(tmp_path):
     fn = html[i:html.index("    function _rielDe(", i)]
     js = tmp_path / "t.mjs"
     js.write_text(fn + """
-console.log(JSON.stringify([
-  posicionDelRiel(4, 0, 0, 800, 800),       // entra entera: la primera
-  posicionDelRiel(4, 3, 0, 800, 800),       // entra entera: la última
-  posicionDelRiel(10, 2, 0, 1500, 800),     // se desplaza: al principio
-  posicionDelRiel(10, 2, 700, 1500, 800),   // se desplaza: al final
-  posicionDelRiel(1, 0, 0, 800, 800),
-]));
+console.log(JSON.stringify({
+  pos: [posicionDelRiel(4, 0), posicionDelRiel(4, 3), posicionDelRiel(8, 4), posicionDelRiel(1, 0)],
+  tab: [pestanaEnElRiel(8, 0), pestanaEnElRiel(8, 0.56), pestanaEnElRiel(8, 1), pestanaEnElRiel(8, 1.4), pestanaEnElRiel(8, -1)],
+}));
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
-    assert json.loads(r.stdout) == [
-        {"ancho": 25, "izquierda": 0, "desplaza": False},
-        {"ancho": 25, "izquierda": 75, "desplaza": False},
-        {"ancho": 10, "izquierda": 0, "desplaza": True},
-        {"ancho": 10, "izquierda": 90, "desplaza": True},
-        {"ancho": 100, "izquierda": 0, "desplaza": False},
-    ]
+    salida = json.loads(r.stdout)
+    assert salida["pos"][:2] == [{"ancho": 25, "izquierda": 0}, {"ancho": 25, "izquierda": 75}]
+    assert salida["pos"][2]["ancho"] == 12.5 and abs(salida["pos"][2]["izquierda"] - 50) < 0.01, "la 5.ª de 8"
+    assert salida["pos"][3] == {"ancho": 100, "izquierda": 0}
+    assert salida["tab"] == [0, 4, 7, 7, 0]
