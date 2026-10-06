@@ -6403,7 +6403,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                     # todavía no está habilitado, el config queda igual y toma efecto
                     # cuando lo prendan + reinicien Dashboards.
                     _set_os_chat_root_agent(base, user, password, agent_id)
-                    result["text2viz"] = _provisionar_text2viz(base, user, password, llm_model)
+                    result["text2viz"] = _provisionar_text2viz(base, user, password, api_key)
                     # El agente es GLOBAL (multi-fuente): el re-register borró el
                     # anterior, así que actualizar el id guardado por los otros slugs
                     # para que sus chips/teardown no apunten a un agente inexistente.
@@ -8529,18 +8529,40 @@ def _visualizar(base: str, user: str, password: str, pregunta: str, ppl: str, re
         return None
 
 
-def _provisionar_text2viz(base: str, user: str, password: str, llm_model: str) -> dict:
+def _provisionar_text2viz(base: str, user: str, password: str, api_key: str) -> dict:
     """Los agentes de text to visualization con el flow framework (plantilla
-    oficial sobre el LLM del entorno) y su configuración para OpenSearch
+    oficial, con su propio modelo de MaaS sin razonamiento) y su configuración para OpenSearch
     Dashboards (`os_text2vega`, `os_text2vega_with_instructions`). Idempotente
     por nombre."""
+    import capabilities as caps
     import text2viz
 
     ya = {n: (_search_ids(base, user, password, "/_plugins/_ml/agents/_search", n) or [None])[0]
           for n in (text2viz.AGENTE, text2viz.AGENTE_CON_INSTRUCCIONES)}
     if not all(ya.values()):
+        # Su modelo, sin razonamiento (ver text2viz.build_connector).
+        modelo = (_search_ids(base, user, password, "/_plugins/_ml/models/_search", text2viz.NOMBRE_DEL_MODELO) or [None])[0]
+        if not modelo:
+            cid = _ml_create(base, user, password, "/_plugins/_ml/connectors/_create",
+                             text2viz.build_connector(api_key, caps.maas_connector_endpoint(), caps.maas_llm_model()),
+                             "connector_id")
+            rm = _os_req("POST", f"{base}/_plugins/_ml/models/_register", user, password, timeout=60, json_body={
+                "name": text2viz.NOMBRE_DEL_MODELO, "function_name": "remote", "connector_id": cid,
+                "description": "LLM de text to visualization"}) if cid else None
+            try:
+                datos = rm.json() if _resp_ok(rm) else {}
+            except ValueError:
+                datos = {}
+            modelo = datos.get("model_id") or (_ml_wait_model(base, user, password, datos["task_id"])
+                                               if datos.get("task_id") else None)
+            if not modelo:
+                return {"ok": False, "reason": f"no se pudo crear el modelo de text to visualization: {_resp_motivo(rm)}"}
+        _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_deploy", user, password, timeout=60)
+        ok, estado_m = _ml_wait_deployed(base, user, password, modelo)
+        if not ok:
+            return {"ok": False, "reason": f"el modelo de text to visualization quedó {estado_m}"}
         rw = _os_req("POST", f"{base}/_plugins/_flow_framework/workflow?provision=true", user, password, timeout=60,
-                     json_body=text2viz.build_workflow(llm_model))
+                     json_body=text2viz.build_workflow(modelo))
         # Con `provision=true` el flow framework contesta 202 (lo provisiona en
         # segundo plano), no 200/201.
         try:

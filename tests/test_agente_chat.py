@@ -59,12 +59,19 @@ def test_la_que_respondio_es_la_ultima_que_corrio():
 
 
 # ── Text to visualization ───────────────────────────────────────────────────
-def test_el_workflow_es_la_plantilla_oficial_sobre_el_llm_del_entorno():
-    w = text2viz.build_workflow("LLM")
+def test_text2viz_tiene_su_modelo_sin_razonar():
+    """Con el LLM del agente (que razona) cada gráfico tardaba 6 a 12 s."""
+    c = text2viz.build_connector("CLAVE", "e", "deepseek-v4.1-flash")
+    assert '"chat_template_kwargs": {"thinking": false}' in c["actions"][0]["request_body"]
+    assert c["credential"] == {"maas_key": "CLAVE"} and c["parameters"]["model"] == "deepseek-v4.1-flash"
+
+
+def test_el_workflow_es_la_plantilla_oficial_sobre_ese_modelo():
+    w = text2viz.build_workflow("T2V")
     nodos = w["workflows"]["provision"]["nodes"]
     assert [n["type"] for n in nodos] == ["create_tool", "create_tool", "register_agent", "register_agent"]
     herr = nodos[0]["user_inputs"]
-    assert herr["type"] == "MLModelTool" and herr["parameters"]["model_id"] == "LLM"
+    assert herr["type"] == "MLModelTool" and herr["parameters"]["model_id"] == "T2V"
     assert herr["parameters"]["response_filter"] == "$.choices[0].message.content"
     assert "wrap your vega-lite json in <vega-lite> </vega-lite> tags" in herr["parameters"]["prompt"]
     assert "${parameters.input_instruction}" in nodos[1]["user_inputs"]["parameters"]["prompt"]
@@ -171,8 +178,10 @@ def test_el_paso_3_provisiona_text2viz_y_acepta_el_202(monkeypatch):
         return _R(200, {})
 
     monkeypatch.setattr(main, "_os_req", req)
-    monkeypatch.setattr(main, "_search_ids", lambda *a, **k: [])
-    r = main._provisionar_text2viz("http://x:9200", "a", "p", "LLM")
+    # Los agentes no están; el modelo platform-t2v sí (desplegado).
+    monkeypatch.setattr(main, "_search_ids", lambda b, u, p, ruta, nombre, *a: ["T2V"] if "models" in ruta else [])
+    monkeypatch.setattr(main, "_ml_wait_deployed", lambda *a: (True, "DEPLOYED"))
+    r = main._provisionar_text2viz("http://x:9200", "a", "p", "CLAVE")
     assert r["ok"] and estado["agentes"] == {"os_text2vega": "A1", "os_text2vega_with_instructions": "A2"}
 
 

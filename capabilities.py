@@ -186,16 +186,18 @@ def _connector_action(request_body: str, endpoint: str) -> dict[str, Any]:
     }
 
 
-def build_llm_connector(api_key: str, endpoint: str | None = None, model: str | None = None) -> dict[str, Any]:
+def build_llm_connector(api_key: str, endpoint: str | None = None, model: str | None = None,
+                        razonar: bool | None = None) -> dict[str, Any]:
     """Connector del LLM del agente conversacional: chat genérico
-    (system_instruction + prompt) sin thinking."""
+    (system_instruction + prompt). `razonar`: None = según el modelo."""
     endpoint = endpoint or maas_connector_endpoint()
     model = model or maas_llm_model()
+    razona = _razona(model) if razonar is None else ("true" if razonar else "false")
     request_body = (
         '{ "model": "${parameters.model}", "messages": ['
         '{"role": "system", "content": "${parameters.system_instruction:-You are a helpful assistant}"}, '
         '{"role": "user", "content": "${parameters.prompt}"}], '
-        '"temperature": 0, "chat_template_kwargs": {"thinking": ' + _razona(model) + '} }'
+        '"temperature": 0, "chat_template_kwargs": {"thinking": ' + razona + '} }'
     )
     return {
         "name": "MaaS LLM (platform)",

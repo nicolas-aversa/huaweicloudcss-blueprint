@@ -98,14 +98,32 @@ PROMPT_CON_INSTRUCCIONES = (
 )
 
 
+NOMBRE_DEL_MODELO = "platform-t2v"
+
+
+def build_connector(api_key: str, endpoint: str, model: str) -> dict[str, Any]:
+    """El connector del modelo de text to visualization: MaaS SIN razonamiento.
+    Con el prompt largo de las reglas, el LLM del agente (que razona) tardaba 6 a
+    12 s por gráfico (medido en CSS 3.4). La plantilla oficial también le da su
+    propio modelo (Claude en Bedrock)."""
+    from capabilities import build_llm_connector
+
+    conector = build_llm_connector(api_key, endpoint, model, razonar=False)
+    conector["name"] = "MaaS text to visualization (platform)"
+    return conector
+
+
 def build_workflow(model_id: str) -> dict[str, Any]:
     """`POST _plugins/_flow_framework/workflow`: las dos herramientas y los dos
-    agentes de la plantilla oficial, sobre el LLM que ya está desplegado."""
+    agentes de la plantilla oficial sobre `model_id`. El connector y el modelo
+    se crean aparte con ml-commons: el paso register_remote_model del flow
+    framework fallaba en CSS 3.4 con un error interno sin detalle."""
     def herramienta(nodo: str, prompt: str) -> dict[str, Any]:
-        return {"id": nodo, "type": "create_tool", "previous_node_inputs": {}, "user_inputs": {
-            "name": "Text2Vega", "type": "MLModelTool",
-            # response_filter: el connector de MaaS devuelve el JSON de OpenAI entero.
-            "parameters": {"model_id": model_id, "prompt": prompt, "response_filter": "$.choices[0].message.content"}}}
+        return {"id": nodo, "type": "create_tool", "previous_node_inputs": {},
+                "user_inputs": {"name": "Text2Vega", "type": "MLModelTool",
+                                # response_filter: el connector de MaaS devuelve el JSON de OpenAI entero.
+                                "parameters": {"model_id": model_id, "prompt": prompt,
+                                               "response_filter": "$.choices[0].message.content"}}}
 
     def agente(nodo: str, herramienta_id: str, nombre: str, descripcion: str) -> dict[str, Any]:
         return {"id": nodo, "type": "register_agent", "previous_node_inputs": {herramienta_id: "tools"},
