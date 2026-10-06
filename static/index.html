@@ -1804,19 +1804,20 @@
       scrollbar-width: none;
     }
     .case-tabs::-webkit-scrollbar { display: none; }
-    /* El riel: 2 px a la vista, con 10 px de alto para agarrarlo cómodo. */
+    /* El riel: 4 px a la vista, con 16 px de alto para agarrarlo cómodo. */
     .tabs-riel {
-      position: relative; height: 2px; padding: 4px 0; margin-bottom: 2px;
+      position: relative; box-sizing: content-box; height: 4px; padding: 6px 0; margin-bottom: 0;
       background: var(--border-subtle); background-clip: content-box;
-      cursor: pointer; touch-action: none; user-select: none;
+      cursor: grab; touch-action: none; user-select: none;
     }
+    .tabs-riel.is-arrastrando { cursor: grabbing; }
     .tabs-riel[hidden] { display: none; }
     .tabs-riel__pulgar {
-      position: absolute; top: 4px; height: 2px; border-radius: 999px;
+      position: absolute; top: 6px; height: 4px; border-radius: 999px;
       background: var(--accent); transition: left var(--t-base);
     }
     .tabs-riel.is-arrastrando .tabs-riel__pulgar { transition: none; }
-    .tabs-riel:hover .tabs-riel__pulgar, .tabs-riel.is-arrastrando .tabs-riel__pulgar { top: 3px; height: 4px; }
+    .tabs-riel:hover .tabs-riel__pulgar, .tabs-riel.is-arrastrando .tabs-riel__pulgar { top: 5px; height: 6px; }
     .case-tab {
       flex: 1 0 auto;
       white-space: nowrap;
