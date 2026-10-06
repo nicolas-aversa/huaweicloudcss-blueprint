@@ -223,8 +223,3 @@ def test_el_chat_usa_las_herramientas_antes_que_ppl():
     assert a < b < c
 
 
-def test_siem_y_cts_declaran_su_campo_de_patrones():
-    import verticals
-    specs = verticals.capability_specs()
-    assert specs["siem"]["pattern_field"] == "event.action"
-    assert specs["cts"]["pattern_field"] == "trace_name"

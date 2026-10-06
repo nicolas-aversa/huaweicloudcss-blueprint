@@ -79,7 +79,6 @@ from index_template import (  # noqa: E402
     put_snippet,
 )
 from ecs_validator import classify_field, spec_loaded, spec_size  # noqa: E402
-import verticals  # noqa: E402  (registro declarativo de los verticales de demo)
 # OBSClient se importa lazy dentro de cada función que lo usa para que el resto
 # del backend arranque aunque esdk-obs-python no esté instalado.
 
@@ -117,7 +116,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # como siempre (dev local, tests, nativo). Ver auth.py.
 import auth  # noqa: E402
 import audit  # noqa: E402
-# Casos de demo creados desde la UI (se mergean con los de `verticals/`).
+# Los datasets creados desde la UI: todo el catálogo del grid.
 import custom_cases  # noqa: E402
 # Historial persistido de ejecuciones (vista Actividad + cola de jobs del deploy).
 import runs  # noqa: E402
@@ -1086,29 +1085,17 @@ _VERTICALS_MARKER = "/*__VERTICALS_JSON__*/null"
 
 
 def _front_payload() -> dict:
-    """Catálogo que ve el front: los verticales built-in (`verticals/`) MÁS los
-    casos creados desde la plataforma (`custom_cases`).
-
-    El merge se hace acá y no dentro de `verticals/` a propósito: ese paquete es
-    el registro declarativo del repo (con su inventario fijo y sus tests), y los
-    casos de runtime viven en el volumen de datos. Cada caso custom aporta su
-    card; el grupo "Mis casos" se agrega solo si hay al menos uno.
-    """
-    payload = verticals.front_payload()
+    """Catálogo que ve el front: los datasets creados desde la plataforma
+    (`custom_cases`), en los grupos del grid. No hay casos curados: todo caso
+    sale del flujo de dataset nuevo. Un grupo sin datasets va igual, vacío."""
     entries = custom_cases.front_entries()
-    if not entries:
-        return payload
-    payload["verticals"] = payload["verticals"] + entries
     by_group: dict[str, list[str]] = {}
     for e in entries:
         by_group.setdefault(e["group"], []).append(e["slug"])
-    for g in payload["groups"]:
-        if g["id"] in by_group:
-            g["members"] = g["members"] + by_group.pop(g["id"])
+    groups = [{**g, "members": by_group.pop(g["id"], [])} for g in custom_cases.GRUPOS]
     if by_group:
-        payload["groups"] = payload["groups"] + [
-            {**custom_cases.GROUP, "members": sum(by_group.values(), [])}]
-    return payload
+        groups.append({**custom_cases.GROUP, "members": sum(by_group.values(), [])})
+    return {"groups": groups, "verticals": entries}
 
 
 @app.get("/", include_in_schema=False)
@@ -1332,7 +1319,7 @@ def list_custom_cases() -> dict:
             "can_delete": custom_cases.can_delete(c["slug"], email),
         })
     return {"cases": cases, "icons": custom_cases.ICONS,
-            "groups": [{"id": g["id"], "label": g["label"]} for g in verticals.GROUPS]
+            "groups": [{"id": g["id"], "label": g["label"]} for g in custom_cases.GRUPOS]
                       + [{"id": custom_cases.GROUP["id"], "label": custom_cases.GROUP["label"]}]}
 
 
@@ -1383,7 +1370,7 @@ def _datos_para_exportar(slug: str) -> dict:
     """Lo que hace falta para exportar un dataset: sus campos y lo decidido en
     el paso 2, del caso guardado o de lo desplegado. Nunca el pipeline .conf
     entero: lleva las credenciales del bucket y del cluster."""
-    guardado = custom_cases.get_case(slug) or verticals.get_vertical(slug) or {}
+    guardado = custom_cases.get_case(slug) or {}
     entrada = _read_pipelines_registry(_active_terraform_dir()).get(slug) or {}
     fields = entrada.get("fields") or guardado.get("fields") or []
     if not fields:
@@ -1711,27 +1698,11 @@ def index_template_endpoint(request: IndexTemplateRequest) -> IndexTemplateRespo
     operador aplica el `put_snippet` en Kibana Dev Tools sobre el cluster
     vacío, ANTES de iniciar la ingesta (ver deploy en dos fases).
 
-    Precedencia (misma que `_apply_index_templates`, para que el PREVIEW del
-    paso 2 sea fiel a lo que realmente se aplica): si el `slug` (o el derivado
-    del índice) tiene un template curado en ``templates/<slug>.json``, se
-    previsualiza ese **verbatim**; si no, el auto-generado desde los campos.
-    Esto además hace que un tipo curado (ej. fintech-transactions) se vea
-    idéntico cargándolo solo o junto a otros — antes divergía porque el
-    auto-generado dependía de los `fields` que llegaban (crudos vs. enriquecidos
-    por el paso de mapping del wizard).
+    El mismo que aplica `_apply_index_templates`: el de los campos.
     """
     template_name = request.project_name or "log-analytics"
-    slug = (request.slug or "").strip() or _slug_from_index(request.opensearch_index)
-    bundled = _bundled_index_template(slug)
-    if bundled is not None:
-        template = bundled
-        patterns = bundled.get("index_patterns") or [index_pattern_from_name(request.opensearch_index)]
-        index_pattern = patterns[0]
-    else:
-        template = build_index_template(
-            request.fields, request.namespace, request.opensearch_index
-        )
-        index_pattern = index_pattern_from_name(request.opensearch_index)
+    template = build_index_template(request.fields, request.namespace, request.opensearch_index)
+    index_pattern = index_pattern_from_name(request.opensearch_index)
     return IndexTemplateResponse(
         template_name=template_name,
         index_pattern=index_pattern,
@@ -2041,26 +2012,16 @@ def set_obs_settings(request: dict) -> dict:
 
 
 # ── Pre-carga de datasets de demo al bucket del SA ──────────────────────────
-# Cada demo lee su dataset de `<slug>-logs/` en el bucket configurado. El mapa
-# (slug → archivos de datasets/) sale del registro declarativo verticals/ y
-# reemplaza la pre-carga manual con obsutil: el botón "Preparar bucket" de
-# ⚙ Configuración sube lo que falte.
-_DEMO_DATASET_FILES: dict[str, list[str]] = verticals.demo_dataset_files()
-
-
+# Cada dataset lee su archivo de `<slug>-logs/` en el bucket configurado. El
+# botón "Preparar bucket" de ⚙ Configuración sube lo que falte.
 def _demo_dataset_files() -> dict[str, list[str]]:
-    """`slug -> [archivos]` a pre-cargar en OBS: los datasets bundleados del repo
-    MÁS los `.log` de los casos creados desde la plataforma. Es función (y no
-    constante) porque los casos custom se dan de alta en runtime."""
-    return {**_DEMO_DATASET_FILES, **custom_cases.dataset_files()}
+    """`slug -> [archivos]` a pre-cargar en OBS: los `.log` de los datasets
+    creados desde la plataforma. Función: los casos se dan de alta en runtime."""
+    return custom_cases.dataset_files()
 
 
 def _dataset_source(slug: str, fname: str) -> Path | None:
-    """Ruta en disco del dataset `fname` del caso `slug`: `datasets/` para los
-    built-in, el store de casos para los creados desde la UI."""
-    src = _DATASETS_DIR / fname
-    if src.is_file():
-        return src
+    """Ruta en disco del dataset del caso `slug` (el store de casos)."""
     return custom_cases.dataset_path(slug)
 
 
@@ -2306,30 +2267,12 @@ class TerraformStatusResponse(BaseModel):
     missing_settings: list[str] = Field(default_factory=list)
 
 
-_DATASETS_DIR = Path(__file__).parent / "datasets"
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 def _bundled_dataset(slug: str) -> str | None:
-    """Devuelve el contenido del dataset bundleado para `slug`, o None.
-
-    Para los tipos predefinidos (firewall, app-monitoring, ecommerce-search,
-    fintech-transactions) hay un log real entero en ``datasets/<slug>.log`` que
-    se sube tal cual a OBS en vez de generar variaciones sintéticas. Las líneas
-    que empiezan con ``#`` son comentarios (placeholder/instrucciones) y se
-    ignoran. Si el archivo no existe o queda sin líneas de datos, devuelve
-    None y el caller cae al comportamiento anterior (synthetic / raw único).
-    El tipo ``custom`` (slug ``logs``) no tiene archivo → siempre None.
-
-    Los casos creados desde la plataforma guardan su `.log` en el store de
-    `custom_cases` (volumen de datos) en vez de en `datasets/`: se busca ahí como
-    fallback, así se comportan igual que un caso built-in.
-    """
-    if not slug:
-        return None
-    path = _DATASETS_DIR / f"{slug}.log"
-    if not path.is_file():
-        path = custom_cases.dataset_path(slug)
+    """El contenido del dataset del caso `slug` (su `.log` en el store de
+    casos), sin líneas vacías ni comentarios `#`; None si no tiene."""
+    path = custom_cases.dataset_path(slug) if slug else None
     if path is None or not path.is_file():
         return None
     lines = [
@@ -2337,28 +2280,6 @@ def _bundled_dataset(slug: str) -> str | None:
         if l.strip() and not l.lstrip().startswith("#")
     ]
     return "\n".join(lines) if lines else None
-
-
-def _bundled_index_template(slug: str) -> dict[str, Any] | None:
-    """Devuelve el index template hecho a mano para `slug`, o None.
-
-    Algunos tipos predefinidos (ej. ``fintech-transactions``) traen un template
-    curado en ``templates/<slug>.json`` con mappings que el auto-generador no
-    produce (``nested``, ``index.sort``, dynamic_templates propios). Se aplica
-    **verbatim** — tal cual el JSON — en `_apply_index_templates`, con
-    prioridad sobre el template auto-generado desde los campos. Si no hay
-    archivo (o no parsea), devuelve None y el caller cae al auto-generado.
-    """
-    if not slug:
-        return None
-    path = _TEMPLATES_DIR / f"{slug}.json"
-    if not path.is_file():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"[index-template] no pude leer templates/{slug}.json: {exc!r}")
-        return None
 
 
 def _do_obs_upload(request: TerraformDeployRequest) -> None:
@@ -3326,7 +3247,7 @@ def _spec_de_seguridad_del_caso(caso: "PipelineCase", propuesta: dict) -> dict:
 def _specs_de_seguridad(terraform_dir: "Path | None" = None) -> dict:
     """slug → spec de Security Analytics: la de las verticales curadas y la de
     cada dataset nuevo desplegado (la que guardó el deploy en el registro)."""
-    specs = dict(verticals.security_specs())
+    specs: dict = {}
     for slug, entrada in _read_pipelines_registry(terraform_dir or _active_terraform_dir()).items():
         if slug not in specs and (entrada or {}).get("seguridad") and "security_analytics" not in _excluidos(entrada):
             specs[slug] = entrada["seguridad"]
@@ -3340,12 +3261,8 @@ def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> 
     puede traer el `%{+YYYY.MM}` de antes."""
     import seguridad
 
-    specs = verticals.security_specs()
     for caso in request.cases or []:
-        v = verticals.get_vertical(caso.slug) if caso.slug in specs else None
-        if v and v.get("index_base"):
-            caso.index_name = seguridad.indice_de_salida(v["index_base"])
-        elif _propuesta_de_seguridad(caso)[0]:
+        if _propuesta_de_seguridad(caso)[0]:
             base = (caso.index_name or "").split("%{")[0].rstrip("-._") or caso.slug
             caso.index_name = seguridad.indice_de_salida(base)
 
@@ -3553,13 +3470,6 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     yield _sse({"type": "progress", "percent": 1, "phase": "Preparando",
                 "message": "Escribiendo configuración…"})
 
-    # Antes de escribir nada: un caso con origen propio lee de SU bucket, diga lo
-    # que diga el body. Va acá —y no en el endpoint— porque también corre para el
-    # deploy como job, y porque `_do_obs_upload`, más abajo, decide qué NO subir
-    # mirando `case.obs_bucket`.
-    for nota in _force_case_own_source(request):
-        print(f"[deploy-stream] origen propio corregido: {nota}")
-        yield _sse({"type": "log", "message": f"Origen del caso corregido: {nota}"})
 
     # Lo que el lint sospecha pero no afirma (un patrón grok que no está en
     # nuestra lista): frenar el deploy por eso sería peor que dejarlo pasar, pero
@@ -4149,62 +4059,6 @@ def _check_conf_compila(request: "TerraformDeployRequest") -> None:
                                 + ". Volvé al paso 3, corregilo y tocá «Revisar y desplegar».")})
 
 
-def _origen_propio(slug: str) -> tuple[str, str]:
-    """`(bucket, prefijo)` propios de un vertical, o `("", "")` si lee del del SA.
-
-    Solo lo declara un caso cuyo dato NO sube la plataforma: hoy CTS, con las
-    trazas de auditoría reales de la cuenta en `mi-tracker-cts/CloudTraces/`.
-    """
-    v = verticals.get_vertical((slug or "").strip()) or {}
-    return str(v.get("obs_bucket") or ""), str(v.get("obs_prefix") or "")
-
-
-def _force_case_own_source(request: "TerraformDeployRequest") -> list[str]:
-    """Un caso con origen propio lee de SU bucket, venga como venga el body.
-
-    El bucket propio viajaba del backend al navegador y el navegador lo perdía,
-    así que CTS terminaba desplegado contra el bucket de demos —donde no hay una
-    sola traza— y Logstash arrancaba a poleer la nada sin un solo error. El front
-    ya está arreglado, pero esto es lo que hace que el arreglo no dependa de él:
-    una pestaña vieja cacheada, o una regresión futura, se corrigen acá.
-
-    Corrige en vez de rechazar, a propósito: lo que el operador eligió es el
-    CASO, y el origen de ese caso no es una opinión suya. Devuelve una nota por
-    corrección, para dejar constancia en el log del deploy.
-    """
-    notas: list[str] = []
-    if request.cases:
-        for case in request.cases:
-            if case.input_config:
-                continue                      # caso live: su fuente es propia y ya viene
-            bucket, prefijo = _origen_propio(case.slug)
-            if not bucket or (case.obs_bucket == bucket and case.obs_prefix == prefijo):
-                continue
-            case.obs_bucket, case.obs_prefix = bucket, prefijo
-            notas.append(f"{case.slug} → obs://{bucket}/{prefijo}")
-        return notas
-
-    slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
-    bucket, prefijo = _origen_propio(slug)
-    if not bucket:
-        return notas
-    conf = request.pipeline_conf or ""
-    s3 = conf_lint.buscar_plugin(conf, "s3", "input")
-    ya_esta = (request.obs_bucket == bucket and request.obs_prefix == prefijo
-               and (s3 is None or conf_lint.leer_setting(conf, s3, "bucket") == bucket))
-    if ya_esta:
-        return notas
-    request.obs_bucket, request.obs_prefix = bucket, prefijo
-    if s3 is not None:
-        # Se reescriben las dos líneas, no el `.conf`: lo que el operador haya
-        # editado en el paso 3 (el filter, sobre todo) se conserva entero.
-        conf = conf_lint.escribir_setting(conf, s3, "bucket", bucket)
-        s3 = conf_lint.buscar_plugin(conf, "s3", "input")
-        request.pipeline_conf = conf_lint.escribir_setting(conf, s3, "prefix", prefijo)
-    notas.append(f"{slug} → obs://{bucket}/{prefijo}")
-    return notas
-
-
 def _aislar_bucket_compartido(request: "TerraformDeployRequest") -> list[str]:
     """Un caso con origen propio no le presta su bucket a los demás.
 
@@ -4226,13 +4080,12 @@ def _aislar_bucket_compartido(request: "TerraformDeployRequest") -> list[str]:
     """
     if not request.cases or not request.obs_bucket:
         return []
-    propios = {b for c in request.cases
-               if (b := (c.obs_bucket or _origen_propio(c.slug)[0]))}
+    propios = {c.obs_bucket for c in request.cases if c.obs_bucket}
     if request.obs_bucket not in propios:
         return []
     # Si TODOS los casos traen su propio bucket, el compartido no lo usa nadie.
     comparten = [c.slug for c in request.cases
-                 if not (c.obs_bucket or _origen_propio(c.slug)[0])
+                 if not c.obs_bucket
                  and not (c.input_config or custom_cases.case_type_for(c.slug) == "live")]
     if not comparten:
         return []
@@ -4295,7 +4148,7 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
         # la plataforma, y este guard SUBE lo que falta. Sobre el bucket de
         # trazas de un cliente eso sería escribirle sintéticos encima.
         objetivos = [(c.slug, c.obs_prefix, c.read_existing_bucket,
-                      bool(c.input_config) or bool(c.obs_bucket or _origen_propio(c.slug)[0]))
+                      bool(c.input_config) or bool(c.obs_bucket))
                      for c in request.cases]
     else:
         slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
@@ -5033,12 +4886,6 @@ def _apply_index_templates(
     templates: list[tuple[str, dict[str, Any]]] = []
     if request.cases:
         for case in request.cases:
-            # Precedencia: template curado (verbatim, ej. fintech-transactions con
-            # nested/geo_point/index.sort) → si no, el auto-generado de los campos.
-            bundled = _bundled_index_template(case.slug)
-            if bundled is not None:
-                templates.append((f"{base_name}-{case.slug}", bundled))
-                continue
             if not case.fields:
                 continue
             # Predefinidos: parsean a top-level (namespace "").
@@ -5047,10 +4894,7 @@ def _apply_index_templates(
                 build_index_template(case.fields, "", case.index_name),
             ))
     else:
-        bundled = _bundled_index_template(request.pipeline_slug)
-        if bundled is not None:
-            templates.append((base_name, bundled))
-        elif request.fields:
+        if request.fields:
             templates.append((
                 base_name,
                 build_index_template(request.fields, request.namespace, request.opensearch_index),
@@ -5406,10 +5250,8 @@ def _import_dashboards(
 ) -> bool:
     """Importa dashboards baseline al cluster OpenSearch Dashboards.
 
-    El NDJSON sale, en orden: docs/dashboards/<slug>.ndjson (disco) → spec hecho a
-    mano (`build_ndjson(slug)`) → **genérico de los campos detectados**
-    (`build_ndjson_from_fields`) cuando el slug no tiene spec pero vienen `fields`
-    (caso custom / "Tu log específico"). Best-effort con reintentos.
+    El NDJSON sale de los campos detectados (`build_ndjson_from_fields`).
+    Best-effort con reintentos.
 
     Args:
         slug: Identificador del caso (firewall, fintech-transactions, logs custom, …)
@@ -5423,29 +5265,15 @@ def _import_dashboards(
         True si la importación fue exitosa, False si falló.
     """
     import requests
-    from dashboards import build_ndjson, build_ndjson_from_fields, get_available_slugs
+    from dashboards import build_ndjson_from_fields
 
     if not password:
         print("[dashboards] no hay password de OpenSearch — skip import")
         return False
 
-    # NDJSON: disco → spec hecho a mano → genérico de los campos detectados.
+    # NDJSON: el de los campos detectados.
     ndjson_content: str | None = None
-    if terraform_dir:
-        ndjson_file = terraform_dir.parent / "docs" / "dashboards" / f"{slug}.ndjson"
-        if ndjson_file.exists():
-            try:
-                ndjson_content = ndjson_file.read_text(encoding="utf-8")
-                print(f"[dashboards] usando NDJSON de disco: {ndjson_file}")
-            except OSError as exc:
-                print(f"[dashboards] error leyendo {ndjson_file}: {exc!r}")
-    if ndjson_content is None and slug in get_available_slugs():
-        try:
-            ndjson_content = build_ndjson(slug)
-            print(f"[dashboards] NDJSON generado (spec) para '{slug}'")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[dashboards] error generando NDJSON de spec: {exc!r}")
-    if ndjson_content is None and fields:
+    if fields:
         try:
             ndjson_content = build_ndjson_from_fields(slug, index_name or f"{slug}-*", fields)
             print(f"[dashboards] NDJSON auto-generado de {len(fields)} campos para '{slug}'")
@@ -6281,16 +6109,17 @@ def _teardown_orphans_by_name(base: str, user: str, password: str) -> None:
     de los builders/spec de `capabilities.py`."""
     import capabilities as caps
 
-    # Forecasters: hay que _stop antes de _delete. Los nombres salen de los specs
-    # de TODOS los verticales (cada uno define sus 3 forecasts).
-    fc_names = [fc["name"] for s in caps.get_capability_slugs()
-                for fc in (caps.get_capability_spec(s) or {}).get("forecasts", [])]
+    # Los casos del entorno: los del registro de pipelines.
+    slugs = list(_read_pipelines_registry(_active_terraform_dir()))
+    # Forecasters: hay que _stop antes de _delete. Los nombres son los que arma
+    # `build_spec_from_fields` (`<caso>-volume-forecast`, …).
+    fc_names = [f"{s}-{k}-forecast" for s in slugs for k in ("volume", "critical", "entities", "measure")]
     for fc_name in fc_names:
         for fid in _search_ids(base, user, password, "/_plugins/_forecast/forecasters/_search", fc_name):
             _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fid}/_stop", user, password, timeout=20)
             _os_req("DELETE", f"{base}/_plugins/_forecast/forecasters/{fid}", user, password, timeout=20)
     # Monitores de anomalías ANTES que sus detectores, de todos los casos.
-    for s in caps.get_capability_slugs():
+    for s in slugs:
         for mid in _search_ids(base, user, password, "/_plugins/_alerting/monitors/_search",
                                caps.nombre_de_monitor_ad(s), name_field="monitor.name.keyword"):
             _os_req("DELETE", f"{base}/_plugins/_alerting/monitors/{mid}", user, password, timeout=20)
@@ -6330,9 +6159,6 @@ def _resolve_capability_spec(slug: str, base: str = "", user: str = "",
     """
     import capabilities as caps
 
-    spec = caps.get_capability_spec(slug)
-    if spec:
-        return spec
     if terraform_dir is None:
         terraform_dir = _active_terraform_dir()
     entry = _read_pipelines_registry(terraform_dir).get(slug, {})
@@ -6496,33 +6322,10 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                 # el system prompt de SU vertical (el connector lo recibe por
                 # ${parameters.system_prompt}); el LLM elige la fuente según la pregunta.
                 agent_verticals = []
-                # Fuentes curadas (demo) + productivas (registry con fields).
+                # Una fuente por caso del registro (con sus campos).
                 pipe_reg = _read_pipelines_registry(terraform_dir)
                 seen_slugs: set[str] = set()
-                # 1) Specs curados.
-                for slug2 in caps.get_capability_slugs():
-                    seen_slugs.add(slug2)
-                    spec2 = caps.get_capability_spec(slug2) or {}
-                    if not spec2.get("fields"):
-                        continue   # spec placeholder sin schema aún
-                    ip2 = spec2["index_pattern"]
-                    if slug2 != slug:
-                        ok2, _ = _index_ready_for_capabilities(base, user, password, ip2,
-                                                               spec2.get("volume_field", ""), need_docs=True)
-                        if not ok2:
-                            continue
-                    agent_verticals.append({
-                        "tool_name": f"PPLTool-{slug2}",
-                        "label": spec2.get("label", slug2),
-                        "index_pattern": ip2,
-                        "operations": spec2["operations"],
-                        "fields": spec2["fields"],
-                        "success_code": spec2.get("success_code", ""),
-                        "ppl_system_prompt": caps.build_ppl_system_prompt(
-                            ip2, spec2["operations"], spec2["fields"],
-                            spec2.get("success_code", ""), spec2.get("label", slug2)),
-                    })
-                # 2) Slugs productivos del registry (fields persistidos, sin spec curado).
+                # Los casos del registry (fields persistidos).
                 for slug2, entry2 in pipe_reg.items():
                     if slug2 in seen_slugs:
                         continue
@@ -6791,9 +6594,6 @@ def _perfil_de(slug: str, entry: dict) -> "dict | None":
 
     if "perfil" in _excluidos(entry):
         return None
-    v = verticals.get_vertical(slug)
-    if v is not None:
-        return v.get("perfil")
     return perfiles.perfil_desde_campos((entry or {}).get("fields") or [])
 
 
@@ -6804,9 +6604,6 @@ def _enmascarados_de(slug: str, entry: dict) -> list[str]:
 
     if "analista" in _excluidos(entry):
         return []
-    v = verticals.get_vertical(slug)
-    if v is not None:
-        return list((v.get("analista") or {}).get("enmascarados") or [])
     return accesos.enmascarados_desde_campos((entry or {}).get("fields") or [])
 
 
@@ -7398,41 +7195,6 @@ def analistas() -> AnalistasResponse:
     return AnalistasResponse(analistas=[{"slug": s, **v} for s, v in sorted(registro.items())])
 
 
-class CampanasResponse(BaseModel):
-    casos: list[dict] = Field(default_factory=list)
-
-
-@app.get("/api/v1/security/campanas", response_model=CampanasResponse, tags=["capabilities"])
-def campanas_de_seguridad() -> CampanasResponse:
-    """La línea de tiempo de cada campaña de los casos de seguridad que las
-    declaran (correlaciones), desde los datos: qué pasó, en qué orden, en qué
-    fuentes y desde qué IPs. En vivo y a demanda."""
-    import seguridad
-
-    terraform_dir = _active_terraform_dir()
-    registro = _read_security(terraform_dir)
-    specs = verticals.security_specs()
-    con_campanas = [s for s in registro if (specs.get(s) or {}).get("correlaciones")]
-    if not con_campanas:
-        return CampanasResponse()
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "campanas", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    user, password = "admin", _cluster_admin_password(terraform_dir)
-    casos = []
-    for slug in con_campanas:
-        indice = ((verticals.capability_specs().get(slug) or {}).get("index_pattern")) or f"{slug}*"
-        r = _os_req("POST", f"{base}/{indice}/_search", user, password,
-                    json_body=seguridad.consulta_de_campanas(), timeout=30)
-        try:
-            lista = seguridad.campanas(r.json() or {}) if _resp_ok(r) else []
-        except ValueError:
-            lista = []
-        casos.append({"slug": slug, "campanas": lista, "error": "" if _resp_ok(r) else _resp_motivo(r)})
-    return CampanasResponse(casos=casos)
-
 
 class ResumenSeguridadResponse(BaseModel):
     casos: list[dict] = Field(default_factory=list)
@@ -7445,8 +7207,7 @@ _TOPES_DE_LOS_DETECTORES = {
 
 
 def _caps_spec_de(slug: str) -> dict:
-    import capabilities as _caps
-    return _caps.get_capability_spec(slug) or {}
+    return _resolve_capability_spec(slug)
 
 
 def _eventos_detectados(base: str, user: str, password: str, patron: str, spec: dict,
@@ -7965,8 +7726,6 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     documentos); si el índice aún no tiene datos, se saltean con un `reason`
     claro en vez de fallar.
     """
-    import capabilities as _caps
-
     audit.record("provision_capabilities", f"slugs={','.join(request.slugs or [])}")
     terraform_dir = _active_terraform_dir()
     cluster = _cluster_with_public_access(terraform_dir)
@@ -7984,10 +7743,9 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     password = request.opensearch_password or _cluster_admin_password(terraform_dir)
     user = request.opensearch_user or "admin"
 
-    slugs = request.slugs or _caps.get_capability_slugs()
-    # Incluir también slugs productivos del registry (fields persistidos, sin spec
-    # curado) — si el frontend los manda, se provisionan.
+    # Los casos que pide el front o, si no dice, todos los del entorno.
     pipe_reg = _read_pipelines_registry(terraform_dir)
+    slugs = request.slugs or list(pipe_reg)
     caps_result: dict = {}
     any_ok = False
     if request.force:
@@ -8002,9 +7760,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
     for slug in slugs:
-        has_spec = _caps.get_capability_spec(slug) is not None
-        has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
-        if not has_spec and not has_fields:
+        if not (pipe_reg.get(slug, {}) or {}).get("fields"):
             continue
         # Con el cluster saturado (Security Analytics procesando la ingesta) lo
         # que se lanza ahora se rechaza: primero, que haya lugar.
@@ -8870,54 +8626,14 @@ def _dataset_head(path: "Path", n: int) -> "list[str]":
 
 @app.get("/api/v1/datasets/{slug}/preview", response_model=DatasetPreviewResponse, tags=["datasets"])
 def dataset_preview(slug: str, lines: int = 6) -> DatasetPreviewResponse:
-    """Primeras N líneas de datos (no comentadas) del dataset bundleado del `slug` —
-    para el panel 'qué va a hacer Logstash' durante el deploy. Resuelve la variante
-    guión/guión_bajo del nombre (fintech es `fintech_transactions.log`). Si el tipo
-    tiene VARIOS archivos (ej. el SIEM: `siem-fortigate.log`, `siem-cloudaudit.log`,
-    …), hace glob de `<slug>-*.log` e INTERCALA líneas de cada uno, para que el preview
-    refleje que ingiere varias fuentes. 404 si no hay ningún dataset para el tipo."""
+    """Primeras N líneas de datos (no comentadas) del dataset del caso, para el
+    panel 'qué va a hacer Logstash' durante el deploy. 404 si no tiene."""
     n = max(1, min(int(lines or 6), 20))
-    # Resolver dataset_files desde el registro de verticales (source of truth).
-    v = verticals.get_vertical(slug)
-    ds_files = v.get("dataset_files", []) if v else []
-    if ds_files and len(ds_files) == 1:
-        single = _DATASETS_DIR / ds_files[0]
-        if single.is_file():
-            return DatasetPreviewResponse(slug=slug, lines=_dataset_head(single, n))
-    if ds_files and len(ds_files) > 1:
-        files = [(_DATASETS_DIR / f) for f in ds_files if (_DATASETS_DIR / f).is_file()]
-        per_file = [_dataset_head(f, 3) for f in files]
-        out: list[str] = []
-        i = 0
-        while len(out) < n and any(i < len(pf) for pf in per_file):
-            for pf in per_file:
-                if i < len(pf) and len(out) < n:
-                    out.append(pf[i])
-            i += 1
-        return DatasetPreviewResponse(slug=slug, lines=out)
-    # Fallback: resolver por slug (compat con verticales sin dataset_files).
-    single = next(
-        ((_DATASETS_DIR / f"{c}.log") for c in (slug, slug.replace("-", "_"))
-         if (_DATASETS_DIR / f"{c}.log").is_file()),
-        None,
-    )
-    if single is not None:
-        return DatasetPreviewResponse(slug=slug, lines=_dataset_head(single, n))
-    # Multi-archivo bajo el mismo tipo (ej. SIEM): glob e intercalar.
-    files = sorted(_DATASETS_DIR.glob(f"{slug}-*.log")) or \
-        sorted(_DATASETS_DIR.glob(f"{slug.replace('-', '_')}-*.log"))
-    if not files:
+    archivo = custom_cases.dataset_path(slug)
+    if archivo is None or not archivo.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail={"message": "sin dataset bundleado para este tipo"})
-    per_file = [_dataset_head(f, 3) for f in files]   # hasta 3 por fuente
-    out: list[str] = []
-    i = 0
-    while len(out) < n and any(i < len(pf) for pf in per_file):
-        for pf in per_file:
-            if i < len(pf) and len(out) < n:
-                out.append(pf[i])
-        i += 1
-    return DatasetPreviewResponse(slug=slug, lines=out)
+                            detail={"message": "sin dataset para este caso"})
+    return DatasetPreviewResponse(slug=slug, lines=_dataset_head(archivo, n))
 
 
 # Lo mínimo para que esta cuenta pueda desplegar, con el nombre que tiene el
@@ -9056,8 +8772,6 @@ def terraform_status() -> TerraformStatusResponse:
 
     # Pipelines corriendo en paralelo (registro persistido en el deploy).
     registry = _read_pipelines_registry(terraform_dir)
-    import capabilities as _caps
-    _curated_slugs = set(_caps.get_capability_slugs())
     # Qué pipelines activó Terraform de verdad. El registro local dice lo que
     # PEDIMOS; este output dice lo que quedó. Divergen cuando un apply falló a
     # medias, y hasta ahora ganaba el registro: la tarjeta decía "Ingestando"
@@ -9084,7 +8798,7 @@ def terraform_status() -> TerraformStatusResponse:
             # has_capabilities: el slug tiene spec curado (demo) O fields persistidos
             # (productivo) → el backend es la única fuente de verdad para el gate del
             # frontend (no más CAPABILITY_SLUGS hardcodeado).
-            "has_capabilities": slug in _curated_slugs or bool(entry.get("fields")),
+            "has_capabilities": bool(entry.get("fields")),
             # Para las tarjetas "Perfil por entidad" y "Accesos de demo": también
             # en un dataset nuevo (sale de sus campos), no solo en los de demo.
             "perfil": (_perfil_de(slug, entry) or {}).get("etiqueta", ""),

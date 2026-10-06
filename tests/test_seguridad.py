@@ -17,9 +17,18 @@ import pytest
 
 import main
 import seguridad
-import verticals
+import verticales_de_prueba as verticals
 
 SPECS = verticals.security_specs()
+
+
+@pytest.fixture(autouse=True)
+def _specs_en_el_registro(monkeypatch, tmp_path):
+    """Como las deja el deploy de un dataset con reglas: la spec de cada caso en
+    el registro de pipelines del entorno (de ahí la leen todos los pasos)."""
+    main._write_pipelines_registry(tmp_path, {slug: {"index": f"{slug}-%{{+YYYY_MM}}", "seguridad": spec}
+                                              for slug, spec in SPECS.items()})
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
 
 
 # ── Los specs ───────────────────────────────────────────────────────────────
@@ -176,20 +185,6 @@ def _meses_del_archivo(path: pathlib.Path) -> set[str]:
                     meses.add(f"{m.group(1)}-{m.group(2)}")
                 break
     return meses
-
-
-@pytest.mark.parametrize("slug", sorted(SPECS))
-def test_los_meses_declarados_cubren_el_dataset(slug):
-    """Un mes del dataset fuera del rango lo crearía Logstash durante la
-    ingesta, y de ese índice el detector solo vería el comienzo."""
-    desde, hasta = SPECS[slug]["meses"]
-    archivos = [main._DATASETS_DIR / f for f in verticals.get_vertical(slug)["dataset_files"]]
-    presentes = [a for a in archivos if a.is_file()]
-    if not presentes:
-        pytest.skip("el dataset no está en este checkout (vive en el bucket de demos)")
-    meses = set().union(*(_meses_del_archivo(a) for a in presentes))
-    assert meses, "no se reconoció la fecha de ningún evento"
-    assert desde <= min(meses) and max(meses) <= hasta, (min(meses), max(meses))
 
 
 # ── Provisionar ─────────────────────────────────────────────────────────────
@@ -590,7 +585,7 @@ def test_la_tarjeta_y_los_hallazgos_en_node(tmp_path):
 
 def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) }," in html
+    assert "{ id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) }," in html
     assert "body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));" in html
     assert "const b = e.target.closest('.hallazgo__explicar');\n        if (b) explicarHallazgo(b);" in html
     i = html.index("      capChatPreguntar = (slug, pregunta, contexto, explicar = null) => {")
@@ -612,9 +607,6 @@ def test_que_se_va_a_crear_lo_dice():
     assert "Plugins de OpenSearch: agente conversacional (NL→PPL), forecasts, detección de anomalías y alertas" in html
     assert "const conSeguridad = types.filter(t => SECURITY_SLUGS.has(t))" in html
     assert "li('shield', `Security Analytics para ${escapeHtml(conSeguridad.join(' y '))}" in html
-    payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
-    assert payload["siem"]["hasSecurity"] and payload["fortianalyzer"]["hasSecurity"]
-    assert not payload["transacciones-billetera"]["hasSecurity"]
 
 
 # ── Iniciar ingesta: índices y detectores antes de Logstash ─────────────────
@@ -675,11 +667,13 @@ def test_en_la_ingesta_va_despues_de_limpiar_y_antes_de_terraform():
     assert fase2 < preparar < cuerpo.index("    else:\n        yield _sse({\"type\": \"progress\", \"percent\": 2")
 
 
-def test_los_casos_de_seguridad_nombran_el_mes_con_guion_bajo():
-    payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
-    for slug in SPECS:
-        assert payload[slug]["outputIndex"] == f"{slug}-%{{+YYYY_MM}}"
-    assert payload["transacciones-billetera"]["outputIndex"] == ""
+def test_los_casos_de_seguridad_nombran_el_mes_con_guion_bajo(monkeypatch):
+    import custom_cases
+    casos = [{"slug": "fw", "label": "FW", "fields": [{"field_path": "a"}], "seguridad": {"reglas": [1]}},
+             {"slug": "ventas", "label": "V", "fields": [{"field_path": "a"}]}]
+    monkeypatch.setattr(custom_cases, "list_cases", lambda: casos)
+    payload = {v["slug"]: v for v in custom_cases.front_entries()}
+    assert payload["fw"]["outputIndex"] == "fw-%{+YYYY_MM}" and payload["ventas"]["outputIndex"] == ""
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("function caseMeta(id)")
     assert "(meta.outputIndex || `${meta.indexBase}-%{+YYYY.MM}`)" in html[i:html.index("\n    }\n", i)]
@@ -689,7 +683,7 @@ def test_el_backend_fuerza_el_mes_con_guion_bajo():
     """El body de "Reiniciar ingesta" se rearma del registro del deploy, que
     puede traer `siem-%{+YYYY.MM}` de antes."""
     req = main.TerraformDeployRequest(project_name="p", opensearch_password="pw", pipeline_conf="x", cases=[
-        main.PipelineCase(slug="siem", index_name="siem-%{+YYYY.MM}"),
+        main.PipelineCase(slug="siem", index_name="siem-%{+YYYY.MM}", seguridad={"reglas": [{"titulo": "x"}]}),
         main.PipelineCase(slug="transacciones-billetera", index_name="tb-%{+YYYY.MM}")])
     main._casos_de_seguridad_al_indice_mensual(req)
     assert [c.index_name for c in req.cases] == ["siem-%{+YYYY_MM}", "tb-%{+YYYY.MM}"]
@@ -747,7 +741,7 @@ def test_sin_security_analytics_provisionado_no_se_revisa(monkeypatch, tmp_path)
 
 
 def test_la_revision_usa_el_indice_del_deploy(monkeypatch, tmp_path):
-    main._write_pipelines_registry(tmp_path, {"siem": {"index": "siem-%{+YYYY.MM}"}})
+    main._write_pipelines_registry(tmp_path, {"siem": {"index": "siem-%{+YYYY.MM}", "seguridad": SPECS["siem"]}})
     c = _Cluster(indices=MESES_SIEM)
     _revisar(monkeypatch, tmp_path, c)
     assert c.pedidos == [("GET", "http://x:9200/_cat/indices/siem-*?format=json&h=index")]
@@ -821,7 +815,7 @@ def test_el_total_son_los_eventos_y_lo_de_sa_va_aparte(monkeypatch, tmp_path):
     assert det["total"] == 1279 and det["hallazgos_sa"] == 4616
     assert len(det["recientes"]) == 3, "el mismo evento repetido se muestra una vez"
     (url, cuerpo), = contados
-    assert url == "http://x:9200/siem*/_count"
+    assert url == "http://x:9200/siem-*/_count"
     reglas_auth = next(lt["reglas"] for lt in verticals.security_specs()["siem"]["log_types"] if lt["nombre"] == "siem_auth")
     import seguridad
     assert cuerpo == {"query": seguridad.consulta_de_reglas(reglas_auth)}

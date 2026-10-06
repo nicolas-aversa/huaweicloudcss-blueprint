@@ -149,7 +149,7 @@ def test_un_caso_con_reglas_va_al_indice_mensual_y_al_registro(tmp_path, monkeyp
     assert spec["log_types"][0]["nombre"] == "fw" and spec["meses"] == ["2026-04", "2026-06"]
     assert reg["ventas"]["seguridad"] is None
     specs = main._specs_de_seguridad(td)
-    assert specs["fw"] == spec and "ventas" not in specs and "siem" in specs, "las curadas siguen"
+    assert specs["fw"] == spec and "ventas" not in specs
 
 
 def test_apagado_en_el_paso_2_no_hay_security_analytics(tmp_path, monkeypatch):

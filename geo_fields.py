@@ -113,7 +113,7 @@ def _corchetes(path: str) -> str:
 def bloque_ruby(geo: Geo, destino: str) -> str:
     """El `ruby` que fusiona lat y lon en `"lat,lon"`.
 
-    Es el de `verticals/transacciones_billetera.py`, que ya corre en CSS: no se
+    Es el que corría en CSS para las transacciones de billetera: no se
     reescribe un filtro que funciona.
     """
     lat, lon, dst = _corchetes(geo.lat), _corchetes(geo.lon), _corchetes(destino)

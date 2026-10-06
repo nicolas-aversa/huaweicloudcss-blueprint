@@ -1,9 +1,7 @@
-"""Casos de demo creados desde la plataforma (no hardcodeados en `verticals/`).
-
-Los 8 casos built-in viven en `verticals/<slug>.py` y solo se agregan tocando
-código + rebuild. Este módulo permite crear casos **en runtime** desde el
-Builder: el SA sube su `.log`, GLM-5.2 detecta el filter + los campos, y el caso
-queda guardado como uno más del flujo de demo.
+"""Los datasets de la plataforma: todo caso, de demo o de cliente, se crea
+desde el flujo de dataset nuevo. El SA sube su `.log` (o varios, las fuentes de
+un mismo dataset), el descubrimiento arma el filter y los campos, y el caso
+queda guardado como una tarjeta del grid.
 
 Alcance: **compartido por instancia** (no por usuario). Todos los usuarios de esa
 ECS ven los casos creados; borrar queda limitado al creador o a un admin.
@@ -19,13 +17,11 @@ Layout (en el volumen `appdata`, que ya persiste):
 El archivo se guarda byte a byte: ni se le sacan las líneas `#`, ni se
 renombra a `.log`. Lo que el SA subió es lo que aparece en el bucket.
 
-El JSON respeta las convenciones de `verticals/__init__.py` (slug, label,
-full_label, group, icon, index_base, description, sample, filter_code, fields,
-suggested_questions, dataset_files) para que el merge con el registro built-in
-sea directo. **No** lleva `capability` ni `dashboard`: esas dos piezas se
-auto-derivan en runtime desde `fields` (`capabilities.build_spec_from_fields` y
-`dashboards.build_ndjson_from_fields`), que es el camino que ya usaba el
-despliegue productivo.
+El JSON lleva slug, label, full_label, group, icon, index_base, description,
+sample, filter_code, fields (con las marcas del paso 2), suggested_questions,
+dataset_files, y lo decidido en el plan del cluster (seguridad, excluir) y la
+familia. Lo demás —asistente, pronósticos, dashboard, perfil— se deriva en
+runtime de `fields` (`plan_de_cluster`).
 """
 from __future__ import annotations
 
@@ -38,11 +34,22 @@ from pathlib import Path
 
 import auth as _auth
 import maas_integrator as _mi
+import seguridad as _seguridad
 import preguntas as _preguntas
-import verticals as _verticals
 
 # Grupo propio en el grid del paso 1. Se agrega al payload solo si hay ≥1 caso.
 GROUP = {"id": "mis-casos", "label": "Mis casos", "icon": "plus"}
+
+# Los grupos del grid del paso 1, en su orden. Un dataset elige el suyo al
+# guardarse; sin grupo (o con uno desconocido) va a "Mis casos".
+GRUPOS: list[dict] = [
+    {"id": "seguridad", "label": "Seguridad", "icon": "shield"},
+    {"id": "fintech", "label": "Fintech", "icon": "activity"},
+    {"id": "retail", "label": "Retail", "icon": "shopping-cart"},
+    {"id": "media", "label": "Media", "icon": "play"},
+    {"id": "energia", "label": "Oil & Gas", "icon": "droplet"},
+    {"id": "salud", "label": "Salud", "icon": "heart"},
+]
 
 # Iconos ofrecidos en la UI: sprites que YA existen en el <svg> de index.html.
 ICONS = ["shield", "activity", "shopping-cart", "play", "droplet", "heart",
@@ -232,7 +239,7 @@ def dataset_path(slug: str) -> Path | None:
 
 
 def dataset_files() -> dict[str, list[str]]:
-    """`slug -> [archivo]`, para mergear con `verticals.demo_dataset_files()`.
+    """`slug -> [archivo]`: los datasets a precargar en el bucket de demos.
     El nombre es el del archivo en disco: es lo que va a la key de OBS."""
     out: dict[str, list[str]] = {}
     for case in list_cases():
@@ -248,9 +255,13 @@ def label_for(slug: str) -> str:
     return str(case.get("label", "")) if case else ""
 
 
+def _con_seguridad(c: dict) -> bool:
+    return bool(c.get("seguridad")) and "security_analytics" not in (c.get("excluir") or [])
+
+
 def front_entries() -> list[dict]:
     """Entradas para `front_payload()['verticals']` (mismo shape que
-    `verticals.front_payload`, + `custom`/`createdBy` para la UI de borrado)."""
+    el payload del front, + `custom`/`createdBy` para la UI de borrado)."""
     out = []
     for c in list_cases():
         out.append({
@@ -264,7 +275,9 @@ def front_entries() -> list[dict]:
             "dedupId": "",
             "hidden": False,
             "hasCapability": bool(c.get("fields")),  # el asistente sale de sus campos
-            "hasSecurity": bool(c.get("seguridad")) and "security_analytics" not in (c.get("excluir") or []),
+            "hasSecurity": _con_seguridad(c),
+            # Con Security Analytics el mes va con guion bajo (ver seguridad.py).
+            "outputIndex": _seguridad.indice_de_salida(c.get("index_base") or c["slug"]) if _con_seguridad(c) else "",
             "familia": c.get("familia", ""),
             "familiaLabel": c.get("familia_label", ""),
             "sample": c.get("sample", ""),
@@ -307,9 +320,6 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
             "caracteres en minúscula, números y guiones.")
     if slug in _RESERVED:
         raise CaseError(f"'{slug}' es un identificador reservado. Elegí otro nombre.")
-    if _verticals.get_vertical(slug) is not None:
-        raise CaseError(f"Ya existe un caso de demo built-in con el identificador '{slug}'. "
-                        "Elegí otro nombre.")
     if get_case(slug) is not None:
         raise CaseError(f"Ya existe un caso guardado con el identificador '{slug}'. "
                         "Elegí otro nombre o borrá el anterior.")
@@ -351,7 +361,7 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
     if icon not in ICONS:
         icon = "box"
     group = str(meta.get("group", "") or "").strip() or GROUP["id"]
-    known_groups = {g["id"] for g in _verticals.GROUPS} | {GROUP["id"]}
+    known_groups = {g["id"] for g in GRUPOS} | {GROUP["id"]}
     if group not in known_groups:
         group = GROUP["id"]
     questions = [str(q).strip() for q in (meta.get("suggested_questions") or []) if str(q).strip()]

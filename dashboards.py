@@ -10,12 +10,9 @@ REALES de cada tipo. Hubo un segundo formato (`"visualizations"`) con su propio
 builder, pero ningún spec lo usaba desde hacía tiempo: la rama era inalcanzable y
 se fue con su cadena de funciones.
 
-Los specs de cada vertical salen del registro declarativo `verticals/`
-(`_verticals.dashboard_specs()`); acá solo queda `_SPECS_SIN_VERTICAL` con los que
-NO tienen un vertical asociado (hoy `firewall`, naming ECS previo al SIEM).
-
-`build_ndjson(slug)` arma los saved objects (visState/searchSourceJSON/panelsJSON
-+ references) y emite NDJSON listo para importar vía
+El spec sale de los campos de cada dataset (`_spec_from_fields`) y
+`build_ndjson_from_fields` arma los saved objects (visState/searchSourceJSON/
+panelsJSON + references) en NDJSON listo para importar vía
 POST /api/saved_objects/_import?overwrite=true.
 
 Decisiones de identidad (clave para que re-importar sea idempotente):
@@ -38,7 +35,6 @@ import re
 import uuid
 from typing import Any
 
-import verticals as _verticals
 
 
 # ── Identidad determinista ───────────────────────────────────────────────────
@@ -536,92 +532,6 @@ def _build_rich_ndjson(slug: str, spec: dict[str, Any]) -> str:
 # ancha, breakdowns abajo. Modelado en los sample dashboards de OpenSearch.
 
 
-# Specs de dashboard que NO tienen un vertical en `verticals/`. Hoy solo
-# `firewall`: el slug no esta en el registro, asi que ninguna card del grid lo
-# puede seleccionar y el producto nunca importa este dashboard. Se conserva
-# porque es un spec rich completo y varios tests lo usan como fixture canonica;
-# vivia en un dict llamado `_LEGACY_DASHBOARD_SPECS`, nombre que enganaba: el
-# formato legacy ("visualizations") era otra cosa, y ese si estaba muerto.
-_SPECS_SIN_VERTICAL: dict[str, dict[str, Any]] = {
-    "firewall": {
-        "title": "Eventos de Firewall",
-        "index_fields": [
-            ("@timestamp", "date"),
-            ("type", "keyword"), ("subtype", "keyword"), ("level", "keyword"),
-            ("source.ip", "ip"), ("destination.ip", "ip"),
-            ("source.port", "long"), ("destination.port", "long"),
-            ("event.action", "keyword"),
-            ("network.protocol", "keyword"), ("network.application", "keyword"),
-            ("network.iana_number", "long"),
-            ("source.geo.country_name", "keyword"), ("destination.geo.country_name", "keyword"),
-            ("source.bytes", "long"), ("destination.bytes", "long"),
-        ],
-        "panels": [
-            {"type": "markdown", "title": "Header", "grid": [0, 0, 48, 4],
-             "md": "## Firewall Events (FortiGate) — seguridad y tráfico\nEventos permitidos/denegados, severidad, IPs y puertos bajo ataque, geo-IP y ancho de banda."},
-            # Métricas (h=8)
-            {"type": "metric", "title": "Total de Eventos", "agg": "count", "grid": [0, 4, 12, 8]},
-            {"type": "metric", "title": "Eventos Bloqueados", "agg": "count", "label": "Eventos Bloqueados",
-             "query": "event.action:(blocked or dropped)", "grid": [12, 4, 12, 8]},
-            {"type": "metric", "title": "IPs de Origen Únicas", "agg": "cardinality", "field": "source.ip",
-             "label": "IPs de Origen Únicas", "grid": [24, 4, 12, 8]},
-            {"type": "metric", "title": "Bytes Enviados", "agg": "sum", "field": "source.bytes",
-             "label": "Bytes Enviados", "grid": [36, 4, 12, 8]},
-            # Serie temporal
-            {"type": "area", "title": "Eventos en el tiempo por acción", "metric": "count",
-             "split": "event.action", "grid": [0, 12, 48, 12]},
-            # Amenazas (y=24, h=15)
-            {"type": "pie", "title": "Permitir vs Denegar", "field": "event.action", "grid": [0, 24, 12, 15]},
-            {"type": "pie", "title": "Severidad", "field": "level", "grid": [12, 24, 12, 15]},
-            {"type": "table", "title": "Top IPs de Origen Bloqueadas", "field": "source.ip",
-             "query": "event.action:(blocked or dropped)", "grid": [24, 24, 12, 15]},
-            {"type": "bar", "title": "Top Puertos de Destino Bloqueados", "field": "destination.port",
-             "horizontal": True, "query": "event.action:(blocked or dropped)", "grid": [36, 24, 12, 15]},
-            # Tráfico (y=39, h=15)
-            {"type": "bar", "title": "Top Países de Origen", "field": "source.geo.country_name",
-             "horizontal": True, "grid": [0, 39, 16, 15]},
-            {"type": "bar", "title": "Top Aplicaciones", "field": "network.application",
-             "horizontal": True, "grid": [16, 39, 16, 15]},
-            {"type": "table", "title": "Top IPs de Origen", "field": "source.ip", "grid": [32, 39, 16, 15]},
-            # Ancho de banda en el tiempo
-            {"type": "line", "title": "Bytes enviados en el tiempo", "metric": "sum",
-             "field": "source.bytes", "grid": [0, 54, 48, 12]},
-        ],
-    },
-}
-
-
-_DASHBOARD_SPECS: dict[str, dict[str, Any]] = {
-    **_SPECS_SIN_VERTICAL,
-    **_verticals.dashboard_specs(),
-}
-
-
-# ── API pública ──────────────────────────────────────────────────────────────
-
-def build_ndjson(slug: str) -> str:
-    """Genera el NDJSON baseline para el caso dado (1 index-pattern + N viz + 1
-    dashboard, una línea por saved object).
-
-    Hubo un segundo formato de spec (`"visualizations"`) con su propio builder.
-    Ningún spec lo usaba desde hace tiempo —los 15 declaran `"panels"`— así que
-    la rama era inalcanzable y se fue junto con su cadena de tres funciones."""
-    spec = _DASHBOARD_SPECS.get(slug)
-    if not spec:
-        raise ValueError(f"No hay spec para el slug '{slug}'. Slugs válidos: {list(_DASHBOARD_SPECS)}")
-    return _build_rich_ndjson(slug, spec)
-
-
-def get_available_slugs() -> list[str]:
-    """Retorna la lista de slugs con spec definida."""
-    return list(_DASHBOARD_SPECS)
-
-
-def get_dashboard_spec(slug: str) -> dict[str, Any] | None:
-    """Retorna la spec para el slug dado, o None si no existe."""
-    return _DASHBOARD_SPECS.get(slug)
-
-
 # ── Generador genérico desde campos (custom / "Tu log específico") ───────────
 # Para logs sin spec hecho a mano (custom), armamos un dashboard automático a
 # partir de los campos detectados — misma visibilidad que los predefinidos.
@@ -884,33 +794,3 @@ def build_ndjson_from_fields(slug: str, index_name: str, fields: list[dict[str, 
     """
     spec = _spec_from_fields(slug, index_name, fields)
     return _build_rich_ndjson(slug, spec)
-
-
-# ── Regeneración de los .ndjson de disco ─────────────────────────────────────
-
-# Slugs cuyos .ndjson se (re)generan a disco: todos los que tienen spec.
-_DISK_REGEN_SLUGS = list(_DASHBOARD_SPECS)
-
-
-def write_all_ndjson(out_dir: "str | None" = None) -> list[str]:
-    """Escribe docs/dashboards/<slug>.ndjson para los slugs en alcance.
-
-    Devuelve la lista de paths escritos. Usado por `python -m dashboards` para
-    regenerar los artefactos de disco que el importer (disk-first) y el Starter
-    Kit consumen.
-    """
-    from pathlib import Path
-
-    base = Path(out_dir) if out_dir else Path(__file__).parent / "docs" / "dashboards"
-    base.mkdir(parents=True, exist_ok=True)
-    written: list[str] = []
-    for slug in _DISK_REGEN_SLUGS:
-        path = base / f"{slug}.ndjson"
-        path.write_text(build_ndjson(slug) + "\n", encoding="utf-8")
-        written.append(str(path))
-    return written
-
-
-if __name__ == "__main__":
-    for p in write_all_ndjson():
-        print(f"[dashboards] escrito {p}")

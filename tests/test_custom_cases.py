@@ -1,9 +1,8 @@
 """Tests del alta de casos de demo desde la plataforma (`custom_cases.py`).
 
-Los 8 casos built-in viven en `verticals/` (registro del repo, inventario fijo con
-sus propios tests). Los casos creados desde el Builder viven en el volumen de datos
-y se **mergean** al catálogo en `main._front_payload()`. Estos tests cubren el store,
-la validación y ese merge — y que el registro built-in quede intacto.
+No hay casos curados: todo caso sale del flujo de dataset nuevo y vive en el
+volumen de datos; `main._front_payload()` arma el catálogo con ellos, en los grupos
+del grid. Estos tests cubren el store, la validación y ese catálogo.
 """
 
 import json
@@ -14,7 +13,6 @@ import auth
 import custom_cases
 import maas_integrator
 import main
-import verticals
 
 
 @pytest.fixture
@@ -96,7 +94,6 @@ def test_list_and_get_and_delete_roundtrip(store):
     ({"label": ""}, LOG, "Falta el nombre"),
     ({"label": "ab"}, LOG, "no es válido"),
     ({"label": "custom"}, LOG, "reservado"),
-    ({"label": "siem"}, LOG, "built-in"),
     ({"label": "Sin campos", "fields": []}, LOG, "campos detectados"),
     ({"label": "Sin filter", "filter_code": ""}, LOG, "filter de Logstash"),
     # Sin archivo el caso pasa a ser `live` → hace falta decir de dónde salen los datos.
@@ -232,20 +229,11 @@ def test_front_payload_adds_mis_casos_group_only_when_needed(store):
     assert grupos["mis-casos"]["members"] == ["suelto"]
 
 
-def test_builtin_registry_is_untouched_by_custom_cases(store):
-    """El merge vive en main, no en `verticals/`: el registro del repo (y sus
-    tests de inventario) no se ven afectados por lo que se cree en runtime."""
-    custom_cases.save_case(_meta(), LOG)
-    assert verticals.get_vertical("firewall-de-acme") is None
-    assert len(verticals.front_payload()["verticals"]) == len(verticals.all_verticals())
-
-
 def test_demo_dataset_files_and_source_include_custom_case(store):
     custom_cases.save_case(_meta(), LOG)
     mapping = main._demo_dataset_files()
 
     assert mapping["firewall-de-acme"] == ["firewall-de-acme.log"]
-    assert mapping["siem"], "los built-in siguen presentes"
 
     src = main._dataset_source("firewall-de-acme", "firewall-de-acme.log")
     assert src is not None and src.is_file()
@@ -367,13 +355,6 @@ def test_sin_fields_no_hay_spec(store, monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {"x": {"fields": []}})
     assert main._resolve_capability_spec("x", terraform_dir=tmp_path) == {}
     assert main._resolve_capability_spec("no-existe", terraform_dir=tmp_path) == {}
-
-
-def test_un_vertical_del_repo_usa_su_spec_curado(store, tmp_path):
-    """El spec curado gana siempre: derivar de fields perdería los forecasts y las
-    operaciones que el vertical declara a mano."""
-    spec = main._resolve_capability_spec("siem", terraform_dir=tmp_path)
-    assert spec and spec["index_pattern"] == "siem*"
 
 
 def test_el_label_del_registry_cae_al_nombre_del_caso(store):
@@ -700,9 +681,9 @@ def test_create_live_case_endpoint(client, store, monkeypatch):
 
 
 def test_create_case_endpoint_rejects_bad_payload(client, store):
-    res = client.post("/api/v1/cases", json={**_meta(label="siem"), "log_content": LOG})
+    res = client.post("/api/v1/cases", json={**_meta(), "fields": [], "log_content": LOG})
     assert res.status_code == 400
-    assert "built-in" in res.json()["detail"]["message"]
+    assert "campos" in res.json()["detail"]["message"]
 
 
 def test_delete_case_endpoint(client, store, monkeypatch):

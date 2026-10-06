@@ -8,7 +8,7 @@ import pytest
 
 import main
 import perfiles
-import verticals
+import verticales_de_prueba as verticals
 
 _INDEX = pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html"
 PERFIL = verticals.get_vertical("siem")["perfil"]

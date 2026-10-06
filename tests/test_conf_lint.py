@@ -341,18 +341,6 @@ def test_una_condicion_numerica_no_es_un_plugin():
     assert conf_lint.lint(conf) == []
 
 
-def test_los_filtros_de_todos_los_casos_del_catalogo_pasan_el_lint():
-    """La red que evita que la whitelist deje afuera algo que YA usamos: si
-    agregar un plugin al catálogo de verticales rompe el lint, salta acá y no en
-    un deploy de 10 minutos."""
-    import verticals
-
-    problemas = {v["slug"]: [str(p) for p in conf_lint.lint_filtro(v.get("filter_code", ""))]
-                 for v in verticals.all_verticals()}
-
-    assert not {k: v for k, v in problemas.items() if v}
-
-
 def test_un_patron_grok_inexistente_avisa_sin_frenar():
     """Un patrón que no existe impide que la pipeline arranque, pero la lista de
     patrones del core puede quedarse corta: frenar un deploy bueno por eso sería

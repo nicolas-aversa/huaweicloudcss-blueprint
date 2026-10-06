@@ -38,12 +38,12 @@ Dos maneras de usarlo:
 | **Builder de pipeline** | Pegás log crudo → un LLM (GLM) arma el `filter{}` de Logstash (grok/json/kv/csv/dissect, namespacing, `@timestamp`). |
 | **Multi-fuente** | Inputs: **OBS/S3**, **Kafka** (incl. Huawei **DMS for Kafka**, plaintext y **SASL_SSL**), **Beats/Filebeat**, **JDBC**, HTTP, File. |
 | **Index templates** | Genera el `_index_template` con los tipos inferidos y namespacing por campo. |
-| **Dashboards curados** | Un dashboard por vertical (métricas, series, tablas top-N) + panel de **Controls** para filtrar. |
+| **Dashboards** | Uno por dataset, armado de sus campos (métricas, series, tablas top-N, mapa) + panel de **Controls** para filtrar. |
 | **Chatbot NL→PPL** | Agente conversacional de OpenSearch (ml-commons): traduce preguntas en lenguaje natural a **PPL** y responde con el dato real. Se provisiona solo al desplegar. |
-| **Forecasting** | Forecasters (RCF) sobre las series de volumen del vertical. |
+| **Plan del cluster** | Del descubrimiento de los datos sale qué plugins de OpenSearch aplican y por qué: asistente, Forecasting, Anomaly Detection, Alerting, perfil por entidad (Transforms), analista enmascarado, Security Analytics con reglas Sigma propias, text to visualization, base de conocimiento (RAG). |
+| **Llevarse el cluster** | La configuración de cada dataset como requests de Dev Tools, para aplicarla en otro cluster sin la plataforma. |
 | **Deploy con Terraform** | Levanta los clusters CSS (OpenSearch + Logstash) + NAT/DNAT en tu cuenta. |
-| **Registro declarativo** | Cada vertical se define en **un solo módulo** `verticals/<slug>.py`; backend y frontend lo consumen. |
-| **Datasets creados desde la app** | El modo "Dataset nuevo" guarda un log propio como un dataset más (card + datos + dashboards + chatbot), sin tocar código ni rebuildear la imagen. |
+| **Todo desde "Dataset nuevo"** | No hay casos curados: cada demo y cada cliente sube su log (o varios, las fuentes de un mismo dataset) y queda como una tarjeta del grid, sin tocar código. |
 | **Actividad** | Historial persistido de cada ejecución: sub-pasos con ✓/✗ y motivo, más la salida cruda de Terraform. |
 
 ---
@@ -74,8 +74,8 @@ flowchart LR
 - **Backend**: FastAPI (`main.py`) — onboarding, generación de pipeline, casos de demo, capabilities
   (chatbot/forecasts), deploy Terraform, settings.
 - **Frontend**: SPA en un solo archivo (`static/index.html`) — wizard, infraestructura, config.
-- **Registro de verticales**: `verticals/` (un módulo por vertical) → inyectado en `GET /` como
-  `window.__VERTICALS__`, y leído por `capabilities.py` / `dashboards.py`.
+- **Catálogo**: los datasets guardados (`custom_cases.py`) → inyectados en `GET /` como
+  `window.__VERTICALS__`; lo que provisiona cada uno sale de sus campos (`plan_de_cluster.py`).
 - **LLM**: Huawei **MaaS (ModelArts as a Service)**, compatible con la API de OpenAI. GLM para
   armar el pipeline; DeepSeek para el agente (razonador + generador de PPL).
 
@@ -205,16 +205,17 @@ runs.py                 Historial persistido de ejecuciones (vista Actividad)
 maas_integrator.py      Integración con MaaS/LLM (análisis de log, generación de filter)
                         y el settings file por usuario, cifrado con Fernet
 capabilities.py         Builders del chatbot (connectors, modelos, agente) y forecasts
-dashboards.py           Motor de dashboards (ndjson) desde el registro de verticales
+dashboards.py           Motor de dashboards (ndjson) desde los campos de cada dataset
 index_template.py       Generación del _index_template
 ecs_validator.py        Clasifica cada campo contra el ECS field reference (docs/fields.csv)
 log_format_catalog.py   Formatos de log conocidos (Apache, syslog…) para acelerar el LLM
 plugin_rag.py           Catálogo de plugins de Logstash que se le pasa al LLM
 obs_client.py           Cliente OBS (subida de datasets, lectura de muestras)
 tfstate.py              Estado de Terraform en OBS: backend remoto y workspace por usuario
-custom_cases.py         Casos de demo creados desde la UI (store en el volumen de datos)
-verticals/              Registro declarativo: un módulo por vertical (card, filter, campos,
-                        capability spec, dashboard, preguntas, datasets)
+custom_cases.py         Los datasets (store en el volumen de datos)
+plan_de_cluster.py      Qué plugins aplica a un dataset y por qué, desde sus campos
+seguridad_derivada.py   Reglas Sigma propuestas sobre los campos de un log de seguridad
+exportar.py             La configuración de un dataset como requests de Dev Tools
 static/index.html       Frontend completo (SPA)
 terraform/              HCL de los clusters CSS + NAT/DNAT
 docs/                   Contexto para el LLM, dashboards de referencia, guías (docs/guides/)
@@ -228,26 +229,19 @@ ecs-panel/              Proyecto aparte: prende/apaga la ECS desde el celular
 
 ---
 
-## Agregar un vertical de demo
+## Agregar una demo
 
-Toda la definición vive en **un solo módulo** `verticals/<slug>.py` (card del grid, filtro Logstash,
-campos, capability spec del chatbot/forecasts, dashboard, preguntas, vocabulario de industria y
-datasets). Backend y frontend lo consumen del registro `verticals/__init__.py` — no hay que tocar
-7 lugares.
-
-1. Copiá un módulo existente (ej. `verticals/transacciones_alyc.py`) y editá el dict `VERTICAL`
-   (ver el docstring de `verticals/__init__.py` para el shape).
-2. Importalo y sumalo a `_MODULES` en `verticals/__init__.py`; si estrena grupo, agregalo a `GROUPS`.
-3. Poné el dataset en `datasets/<archivo>.log` (el `dataset_files` del módulo) y regenerá los
-   dashboards de disco: `python -m dashboards`.
-4. `python -m pytest tests/test_integration.py -q` para validar.
+Igual que un cliente: **Pipeline → Dataset nuevo**, subí el archivo (o los archivos, si son varias
+fuentes de un mismo dataset), revisá en el paso 2 los campos, sus roles y lo que va a tener el
+cluster, y guardalo. Queda como una tarjeta del grid. Los archivos de ejemplo se generan con los
+scripts `build_*.py` (ver `datasets/README.md`).
 
 ---
 
 ## Tests
 
 ```bash
-python -m pytest -q          # la suite entera: 383 tests
+python -m pytest -q          # la suite entera
 ```
 
 Los 5 `skipped` son esperables en un checkout limpio: 5 tests marcados
