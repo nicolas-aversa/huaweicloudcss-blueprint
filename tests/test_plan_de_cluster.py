@@ -129,3 +129,13 @@ def test_en_un_deploy_de_varios_casos_cada_uno_lleva_lo_suyo(tmp_path):
     ]), td)
     registro = json.loads((td / main._PIPELINES_REGISTRY_NAME).read_text(encoding="utf-8"))
     assert registro["hotel"]["excluir"] == ["anomalias"] and registro["otro"]["excluir"] == []
+
+
+def test_la_entidad_marcada_tambien_se_pronostica():
+    """La Entidad del paso 2 (sin rol) arma el perfil y también el pronóstico
+    de entidades únicas: son la misma."""
+    campos = [{"field_path": "fecha", "type": "date", "role": "timestamp"},
+              {"field_path": "cliente", "type": "string", "entity": True},
+              {"field_path": "id_pedido", "type": "string", "role": "entity_id"}]
+    fcs = {fc["feature_name"]: fc for fc in caps.build_spec_from_fields("x", "x-*", campos)["forecasts"]}
+    assert fcs["unique_entities"]["aggregation_query"] == {"unique_entities": {"cardinality": {"field": "cliente"}}}

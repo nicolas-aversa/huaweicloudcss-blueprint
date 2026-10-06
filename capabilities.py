@@ -887,7 +887,9 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         })
 
     # ── Forecast de entidades únicas: role → regex ──
-    entity = _by_role("entity_id")
+    # La Entidad marcada en el paso 2 primero: es la misma que sigue el perfil.
+    entity = next((f for f in usable if f.get("entity") and (f.get("type") or "") not in _MEASURE_TYPES),
+                  None) or _by_role("entity_id")
     if not entity:
         entity = next((f for f in usable if _ENTITY_HINT_RE.search(f["field_path"])
                        and (f.get("type") or "") not in _MEASURE_TYPES), None)
