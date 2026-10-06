@@ -2030,6 +2030,10 @@
     }
     .caso-card__datos { display: flex; gap: 4px 12px; flex-wrap: wrap; min-height: 18px; }
     .caso-card__chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+    .caso-card__llevar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-muted); }
+    .caso-card__llevar a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); text-decoration: none; }
+    .caso-card__llevar a:hover { text-decoration: underline; }
+    .caso-card__llevar .icon { width: 12px; height: 12px; }
     .caso-chip {
       font-family: inherit; font-size: var(--fs-xs); font-weight: 600; line-height: 1.4;
       padding: 2px 9px; border-radius: var(--radius-pill);
@@ -8606,6 +8610,11 @@
                 ${chipDocs(p)}
               </div>
               <div class="caso-card__chips">${chipsCaso(p)}</div>
+              <div class="caso-card__llevar" title="Para aplicarlo en otro cluster, sin la plataforma">
+                <span>Llevarse:</span>
+                <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/export" download>${icon('download')} Dev Tools</a>
+                <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/export/dashboards" download>${icon('download')} Dashboards</a>
+              </div>
             </article>`).join('')
         : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;
 

@@ -1379,6 +1379,54 @@ def create_custom_case(request: dict) -> dict:
     return {"case": case, "uploaded": uploaded, "upload_error": upload_error}
 
 
+def _datos_para_exportar(slug: str) -> dict:
+    """Lo que hace falta para exportar un dataset: sus campos y lo decidido en
+    el paso 2, del caso guardado o de lo desplegado. Nunca el pipeline .conf
+    entero: lleva las credenciales del bucket y del cluster."""
+    guardado = custom_cases.get_case(slug) or verticals.get_vertical(slug) or {}
+    entrada = _read_pipelines_registry(_active_terraform_dir()).get(slug) or {}
+    fields = entrada.get("fields") or guardado.get("fields") or []
+    if not fields:
+        raise HTTPException(status_code=404, detail={"stage": "export",
+                                                     "message": f"No hay un dataset '{slug}' con campos para exportar."})
+    base = guardado.get("index_base") or slug
+    return {
+        "fields": fields,
+        "label": guardado.get("label") or entrada.get("label") or slug,
+        "index_name": entrada.get("index") or f"{base}-%{{+YYYY.MM}}",
+        "seguridad_propuesta": guardado.get("seguridad"),
+        # Lo desplegado manda, aunque no se haya apagado nada.
+        "excluir": list(entrada["excluir"] if "excluir" in entrada else guardado.get("excluir") or []),
+        "filter_code": guardado.get("filter_code") or "",
+    }
+
+
+@app.get("/api/v1/cases/{slug}/export", tags=["verticals"],
+         summary="La configuración del dataset como requests de Dev Tools, para llevársela")
+def export_case(slug: str) -> Response:
+    """Index template, asistente, pronósticos, anomalías, alerta, perfil,
+    analista y Security Analytics del dataset, para pegar en Dev Tools de otro
+    cluster. Sin secretos: la API key, las contraseñas y los IDs van como
+    `<PLACEHOLDER>` (ver `exportar.py`)."""
+    import exportar
+
+    datos = _datos_para_exportar(slug)
+    texto = exportar.devtools(slug, **datos)
+    return Response(content=texto, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{slug}-devtools.txt"'})
+
+
+@app.get("/api/v1/cases/{slug}/export/dashboards", tags=["verticals"],
+         summary="Los dashboards del dataset, para importar en Saved objects")
+def export_case_dashboards(slug: str) -> Response:
+    import dashboards
+
+    datos = _datos_para_exportar(slug)
+    ndjson = dashboards.build_ndjson_from_fields(slug, datos["index_name"], datos["fields"])
+    return Response(content=ndjson, media_type="application/x-ndjson",
+                    headers={"Content-Disposition": f'attachment; filename="{slug}-dashboards.ndjson"'})
+
+
 @app.delete("/api/v1/cases/{slug}", tags=["verticals"], summary="Borra un caso de demo creado")
 def delete_custom_case(slug: str) -> dict:
     ctx = auth.current_user_var.get()
