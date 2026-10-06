@@ -1790,29 +1790,34 @@
     /* Una sola fila: con pocos casos las pestañas reparten el ancho; con muchos
        (9 en un deploy) conservan su ancho y la fila se desplaza. Antes cada
        etiqueta se partía en dos líneas y la última se salía de la tarjeta.
-       - Arriba, en vez de la barra de desplazamiento (que era gruesa y medía
-         cuánto se salía la fila, no dónde estás), un indicador de 2 px: un
-         segmento del ancho de una pestaña sobre el total, en la posición de la
-         activa, sobre un riel tenue. Lo dibujan dos gradientes de fondo con
-         `--tab-n` (cuántas) y `--tab-pos` (cuál), que pone `marcarPestanas`.
-         Un fondo y no un elemento: no se desplaza con las pestañas.
+       - Arriba, en vez de la barra de desplazamiento del navegador (gruesa, y
+         con un largo que medía cuánto se salía la fila), un riel fino propio
+         (`.tabs-riel`, lo arma `marcarPestanas`): el segmento mide una pestaña
+         sobre el total. Si la fila entra entera marca la activa; si se
+         desplaza, marca hasta dónde, y se arrastra (o se toca) para desplazarla.
        - La línea de base es una sombra y no un borde: con overflow, la pestaña
          activa que se montaba sobre el borde se recortaba. */
     .case-tabs {
       display: flex; gap: 4px; margin-bottom: 20px;
       box-shadow: inset 0 -2px 0 var(--border-subtle);
-      padding-top: 10px;
       overflow-x: auto; overflow-y: hidden;
       scrollbar-width: none;
-      background:
-        linear-gradient(var(--accent), var(--accent)) no-repeat,
-        linear-gradient(var(--border-subtle), var(--border-subtle)) no-repeat;
-      background-size: calc(100% / var(--tab-n, 1)) 2px, 100% 2px;
-      background-position: calc(var(--tab-pos, 0) * 100% / max(var(--tab-n, 1) - 1, 1)) 0, 0 0;
     }
     .case-tabs::-webkit-scrollbar { display: none; }
-    /* Una sola pestaña: no hay posición que mostrar. */
-    .case-tabs[data-tab-n="1"], .case-tabs:not([data-tab-n]) { background: none; padding-top: 0; }
+    /* El riel: 2 px a la vista, con 10 px de alto para agarrarlo cómodo. */
+    .tabs-riel {
+      position: relative; height: 2px; padding: 4px 0; margin-bottom: 2px;
+      background: var(--border-subtle); background-clip: content-box;
+      cursor: pointer; touch-action: none; user-select: none;
+    }
+    .tabs-riel.is-fijo { cursor: default; }
+    .tabs-riel[hidden] { display: none; }
+    .tabs-riel__pulgar {
+      position: absolute; top: 4px; height: 2px; border-radius: 999px;
+      background: var(--accent); transition: left var(--t-base);
+    }
+    .tabs-riel.is-arrastrando .tabs-riel__pulgar { transition: none; }
+    .tabs-riel:hover .tabs-riel__pulgar, .tabs-riel.is-arrastrando .tabs-riel__pulgar { top: 3px; height: 4px; }
     .case-tab {
       flex: 1 0 auto;
       white-space: nowrap;
@@ -10836,36 +10841,83 @@
       box.classList.remove('hidden');
     }
 
-    // ── Pestañas: el indicador de posición ─────────────────────────────────
-    // Cada fila de pestañas (.case-tabs) muestra arriba un segmento en la
-    // posición de la activa (ver el CSS de .case-tabs). Las filas las arman
-    // varias vistas y cambian solas: un observador las mantiene al día, y la
-    // activa se desplaza a la vista si quedó afuera (la barra nativa no se ve).
-    function marcarPestanas(fila) {
+    // ── Pestañas: el riel de posición ──────────────────────────────────────
+    // Arriba de cada fila de pestañas (.case-tabs), un riel fino: el segmento
+    // mide una pestaña sobre el total. Si la fila entra entera, marca la
+    // activa; si se desplaza, marca hasta dónde y se arrastra para desplazarla,
+    // como la barra de antes. Las filas las arman varias vistas y cambian
+    // solas: un observador mantiene cada riel al día.
+    function posicionDelRiel(n, activa, scrollLeft, scrollWidth, clientWidth) {
+      const ancho = 100 / Math.max(1, n);
+      const sobra = scrollWidth - clientWidth;
+      const frac = sobra > 1 ? scrollLeft / sobra : (n > 1 ? activa / (n - 1) : 0);
+      return { ancho, izquierda: Math.min(1, Math.max(0, frac)) * (100 - ancho), desplaza: sobra > 1 };
+    }
+    function _rielDe(fila) {
+      let riel = fila.previousElementSibling;
+      if (riel && riel.classList.contains('tabs-riel')) return riel;
+      riel = document.createElement('div');
+      riel.className = 'tabs-riel';
+      riel.setAttribute('aria-hidden', 'true');
+      riel.innerHTML = '<span class="tabs-riel__pulgar"></span>';
+      fila.parentNode.insertBefore(riel, fila);
+      // Arrastrar o tocar el riel desplaza la fila.
+      const mover = (e) => {
+        const r = riel.getBoundingClientRect();
+        const pulgar = riel.firstElementChild.getBoundingClientRect().width;
+        const frac = (e.clientX - r.left - pulgar / 2) / Math.max(1, r.width - pulgar);
+        fila.scrollLeft = Math.min(1, Math.max(0, frac)) * (fila.scrollWidth - fila.clientWidth);
+      };
+      riel.addEventListener('pointerdown', (e) => {
+        if (fila.scrollWidth - fila.clientWidth <= 1) return;
+        riel.setPointerCapture(e.pointerId);
+        riel.classList.add('is-arrastrando');
+        mover(e);
+      });
+      riel.addEventListener('pointermove', (e) => { if (riel.hasPointerCapture(e.pointerId)) mover(e); });
+      const soltar = (e) => { riel.classList.remove('is-arrastrando'); if (riel.hasPointerCapture(e.pointerId)) riel.releasePointerCapture(e.pointerId); };
+      riel.addEventListener('pointerup', soltar);
+      riel.addEventListener('pointercancel', soltar);
+      fila.addEventListener('scroll', () => marcarPestanas(fila, false), { passive: true });
+      return riel;
+    }
+    function marcarPestanas(fila, verActiva = true) {
+      if (!fila.parentNode) return;
       const tabs = [...fila.querySelectorAll(':scope > .case-tab')];
       const i = Math.max(0, tabs.findIndex(t => t.classList.contains('is-active')));
-      const n = String(tabs.length);
-      if (fila.dataset.tabN !== n) fila.dataset.tabN = n;
-      fila.style.setProperty('--tab-n', n);
-      fila.style.setProperty('--tab-pos', String(i));
       const activa = tabs[i];
-      if (activa && fila.scrollWidth > fila.clientWidth) {
+      // La activa, a la vista (la fila no tiene barra propia).
+      if (verActiva && activa && fila.scrollWidth > fila.clientWidth) {
         const izq = activa.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
         if (izq < fila.scrollLeft) fila.scrollLeft = izq - 8;
         else if (izq + activa.offsetWidth > fila.scrollLeft + fila.clientWidth) {
           fila.scrollLeft = izq + activa.offsetWidth - fila.clientWidth + 8;
         }
       }
+      const riel = _rielDe(fila);
+      riel.hidden = tabs.length < 2;
+      const pos = posicionDelRiel(tabs.length, i, fila.scrollLeft, fila.scrollWidth, fila.clientWidth);
+      riel.classList.toggle('is-fijo', !pos.desplaza);
+      const pulgar = riel.firstElementChild;
+      pulgar.style.width = pos.ancho + '%';
+      pulgar.style.left = pos.izquierda + '%';
     }
     let _pestanasPendiente = false;
-    new MutationObserver(() => {
+    new MutationObserver((cambios) => {
+      // Lo que cambia el propio riel (al arrastrarlo) no es un cambio de
+      // pestañas: si se tomara, se volvería a la activa y no se podría deslizar.
+      const delRiel = (c) => c.target.closest?.('.tabs-riel')
+        || (c.type === 'childList' && !c.removedNodes.length && c.addedNodes.length
+            && [...c.addedNodes].every(n => n.classList?.contains('tabs-riel')));
+      if (cambios.every(delRiel)) return;
       if (_pestanasPendiente) return;
       _pestanasPendiente = true;
       requestAnimationFrame(() => {
         _pestanasPendiente = false;
-        document.querySelectorAll('.case-tabs').forEach(marcarPestanas);
+        document.querySelectorAll('.case-tabs').forEach(f => marcarPestanas(f));
       });
     }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('resize', () => document.querySelectorAll('.case-tabs').forEach(f => marcarPestanas(f, false)));
 
     // ── Auto-cargar ejemplo para pruebas rápidas ───────────────────────────────
     // ?sample=<slug> (o ?sample=1 / ?dev=1 → siem) pre-carga un caso de uso.

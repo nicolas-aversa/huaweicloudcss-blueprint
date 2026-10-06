@@ -184,8 +184,8 @@ def test_las_pestanas_de_casos_no_se_salen_con_muchos_casos():
     assert "transform" not in tabs and "transform" not in tab
     assert "box-shadow: inset 0 -2px 0 var(--border-subtle)" in tabs
     assert "scrollbar-width: none" in tabs and ".case-tabs::-webkit-scrollbar { display: none; }" in html
-    assert "background-size: calc(100% / var(--tab-n, 1)) 2px, 100% 2px;" in tabs
-    assert "calc(var(--tab-pos, 0) * 100% / max(var(--tab-n, 1) - 1, 1)) 0" in tabs
+    # El riel propio: fino, y se arrastra para desplazar la fila.
+    assert "riel.addEventListener('pointerdown'" in html and "fila.scrollLeft = Math.min(1, Math.max(0, frac))" in html
     assert "white-space: nowrap" in tab and "flex: 1 0 auto" in tab and "margin-bottom: -2px" not in tab
     assert html.count("tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });") == 2
 
@@ -199,37 +199,34 @@ def test_las_pestanas_del_entorno_van_centradas_sin_recortarse():
 
 
 
-def test_el_indicador_marca_la_pestana_activa(tmp_path):
-    """`marcarPestanas`: cuántas hay, cuál está activa, y la activa a la vista."""
+def test_el_riel_marca_la_posicion(tmp_path):
+    """Una pestaña sobre el total; la activa si la fila entra entera, y hasta
+    dónde se desplazó si no entra."""
+    import json
     import shutil
     import subprocess
     if shutil.which("node") is None:
         import pytest
         pytest.skip("node no está instalado")
     html = (pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
-    i = html.index("    function marcarPestanas(fila) {")
-    fn = html[i:html.index("    let _pestanasPendiente", i)]
+    i = html.index("    function posicionDelRiel(")
+    fn = html[i:html.index("    function _rielDe(", i)]
     js = tmp_path / "t.mjs"
     js.write_text(fn + """
-const tab = (activa, left) => ({ classList: { contains: (c) => c === 'is-active' && activa }, offsetWidth: 100,
-  getBoundingClientRect: () => ({ left }) });
-const fila = (tabs, scrollWidth, clientWidth) => ({ tabs, dataset: {}, props: {}, scrollLeft: 0, scrollWidth, clientWidth,
-  querySelectorAll: () => tabs, getBoundingClientRect: () => ({ left: 0 }),
-  style: { setProperty(k, v) { fila.ult.props[k] = v; } } });
-const salida = [];
-for (const [activa, n, ancho] of [[2, 5, 300], [0, 3, 1000], [-1, 4, 1000]]) {
-  const f = fila(Array.from({ length: n }, (_, k) => tab(k === activa, k * 120)), n * 120, ancho);
-  fila.ult = f;
-  marcarPestanas(f);
-  salida.push([f.dataset.tabN, f.props['--tab-n'], f.props['--tab-pos'], f.scrollLeft]);
-}
-console.log(JSON.stringify(salida));
+console.log(JSON.stringify([
+  posicionDelRiel(4, 0, 0, 800, 800),       // entra entera: la primera
+  posicionDelRiel(4, 3, 0, 800, 800),       // entra entera: la última
+  posicionDelRiel(10, 2, 0, 1500, 800),     // se desplaza: al principio
+  posicionDelRiel(10, 2, 700, 1500, 800),   // se desplaza: al final
+  posicionDelRiel(1, 0, 0, 800, 800),
+]));
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
-    import json
     assert json.loads(r.stdout) == [
-        ["5", "5", "2", 48],     # la tercera de cinco, desplazada hasta verse entera
-        ["3", "3", "0", 0],      # entran todas: no se desplaza
-        ["4", "4", "0", 0],      # ninguna activa: la primera
+        {"ancho": 25, "izquierda": 0, "desplaza": False},
+        {"ancho": 25, "izquierda": 75, "desplaza": False},
+        {"ancho": 10, "izquierda": 0, "desplaza": True},
+        {"ancho": 10, "izquierda": 90, "desplaza": True},
+        {"ancho": 100, "izquierda": 0, "desplaza": False},
     ]
