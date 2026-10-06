@@ -1790,23 +1790,30 @@
     /* Una sola fila: con pocos casos las pestañas reparten el ancho; con muchos
        (9 en un deploy) conservan su ancho y la fila se desplaza. Antes cada
        etiqueta se partía en dos líneas y la última se salía de la tarjeta.
-       - La barra de desplazamiento va ARRIBA de las pestañas: la fila se da
-         vuelta en vertical (la barra, que el navegador pone abajo, queda
-         arriba) y cada pestaña se vuelve a dar vuelta para leerse bien. Por
-         eso la línea de base es una sombra en el borde de ARRIBA de la fila:
-         dada vuelta, queda abajo. Una sombra y no un borde: con overflow, la
-         pestaña activa que se montaba sobre el borde (margin -2px) se recortaba.
-       - Sin `scrollbar-width`: en Chrome anula `::-webkit-scrollbar` y la barra
-         salía gris y con flechas en vez de la finita roja de la app. */
+       - Arriba, en vez de la barra de desplazamiento (que era gruesa y medía
+         cuánto se salía la fila, no dónde estás), un indicador de 2 px: un
+         segmento del ancho de una pestaña sobre el total, en la posición de la
+         activa, sobre un riel tenue. Lo dibujan dos gradientes de fondo con
+         `--tab-n` (cuántas) y `--tab-pos` (cuál), que pone `marcarPestanas`.
+         Un fondo y no un elemento: no se desplaza con las pestañas.
+       - La línea de base es una sombra y no un borde: con overflow, la pestaña
+         activa que se montaba sobre el borde se recortaba. */
     .case-tabs {
       display: flex; gap: 4px; margin-bottom: 20px;
-      box-shadow: inset 0 2px 0 var(--border-subtle);
-      padding-bottom: 6px;
+      box-shadow: inset 0 -2px 0 var(--border-subtle);
+      padding-top: 10px;
       overflow-x: auto; overflow-y: hidden;
-      transform: scaleY(-1);
+      scrollbar-width: none;
+      background:
+        linear-gradient(var(--accent), var(--accent)) no-repeat,
+        linear-gradient(var(--border-subtle), var(--border-subtle)) no-repeat;
+      background-size: calc(100% / var(--tab-n, 1)) 2px, 100% 2px;
+      background-position: calc(var(--tab-pos, 0) * 100% / max(var(--tab-n, 1) - 1, 1)) 0, 0 0;
     }
+    .case-tabs::-webkit-scrollbar { display: none; }
+    /* Una sola pestaña: no hay posición que mostrar. */
+    .case-tabs[data-tab-n="1"], .case-tabs:not([data-tab-n]) { background: none; padding-top: 0; }
     .case-tab {
-      transform: scaleY(-1);
       flex: 1 0 auto;
       white-space: nowrap;
       display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -2353,10 +2360,6 @@
        que con scroll recorta las del principio y no se pueden alcanzar. */
     .infra-tabs .case-tab:first-child { margin-left: auto; }
     .infra-tabs .case-tab:last-child { margin-right: auto; }
-    /* Si igual no entran, la barra es finita y gris; roja recién al pasar. */
-    .infra-tabs::-webkit-scrollbar { height: 3px; }
-    .infra-tabs::-webkit-scrollbar-thumb { background: var(--border-default); }
-    .infra-tabs:hover::-webkit-scrollbar-thumb { background: var(--accent); }
     /* El clic no deja el recuadro de foco; con teclado, sí se ve. */
     .infra-tabs .case-tab:focus { outline: none; }
     .infra-tabs .case-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -10832,6 +10835,37 @@
       if (lab) lab.textContent = origen || 'Muestra detectada';
       box.classList.remove('hidden');
     }
+
+    // ── Pestañas: el indicador de posición ─────────────────────────────────
+    // Cada fila de pestañas (.case-tabs) muestra arriba un segmento en la
+    // posición de la activa (ver el CSS de .case-tabs). Las filas las arman
+    // varias vistas y cambian solas: un observador las mantiene al día, y la
+    // activa se desplaza a la vista si quedó afuera (la barra nativa no se ve).
+    function marcarPestanas(fila) {
+      const tabs = [...fila.querySelectorAll(':scope > .case-tab')];
+      const i = Math.max(0, tabs.findIndex(t => t.classList.contains('is-active')));
+      const n = String(tabs.length);
+      if (fila.dataset.tabN !== n) fila.dataset.tabN = n;
+      fila.style.setProperty('--tab-n', n);
+      fila.style.setProperty('--tab-pos', String(i));
+      const activa = tabs[i];
+      if (activa && fila.scrollWidth > fila.clientWidth) {
+        const izq = activa.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+        if (izq < fila.scrollLeft) fila.scrollLeft = izq - 8;
+        else if (izq + activa.offsetWidth > fila.scrollLeft + fila.clientWidth) {
+          fila.scrollLeft = izq + activa.offsetWidth - fila.clientWidth + 8;
+        }
+      }
+    }
+    let _pestanasPendiente = false;
+    new MutationObserver(() => {
+      if (_pestanasPendiente) return;
+      _pestanasPendiente = true;
+      requestAnimationFrame(() => {
+        _pestanasPendiente = false;
+        document.querySelectorAll('.case-tabs').forEach(marcarPestanas);
+      });
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
 
     // ── Auto-cargar ejemplo para pruebas rápidas ───────────────────────────────
     // ?sample=<slug> (o ?sample=1 / ?dev=1 → siem) pre-carga un caso de uso.
