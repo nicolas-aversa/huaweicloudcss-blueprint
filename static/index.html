@@ -1841,6 +1841,28 @@
     .perfil__caso.is-active, .insights__tipo.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
     .perfil__tabla { overflow-x: auto; }
     .mapping-marca { text-align: center; }
+    .mapping-rol {
+      font-family: inherit; font-size: var(--fs-xs); padding: 4px 6px; max-width: 100%;
+      border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
+      background: var(--bg-primary); color: var(--text-primary); cursor: pointer;
+    }
+    /* "Lo que va a tener tu cluster": el plan derivado de los campos. */
+    .plan-cluster__bloque { border-top: 1px solid var(--border-subtle); padding: 14px 20px 16px; }
+    .plan-cluster__bloque > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
+    .plan-cluster__bloque > summary::-webkit-details-marker { display: none; }
+    .plan-cluster__lista { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+    .plan-cluster__item {
+      display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+      border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary);
+    }
+    .plan-cluster__icono .icon { width: 15px; height: 15px; color: var(--accent); margin-top: 2px; }
+    .plan-cluster__texto { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; font-size: var(--fs-sm); }
+    .plan-cluster__texto span { color: var(--text-muted); font-size: var(--fs-xs); }
+    .plan-cluster__item.is-off { background: transparent; border-style: dashed; }
+    .plan-cluster__item.is-off .plan-cluster__icono .icon { color: var(--text-muted); }
+    .plan-cluster__item.is-off strong, .plan-cluster__item.is-apagado strong { color: var(--text-muted); }
+    .plan-cluster__switch { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; margin-top: 2px; }
+    .plan-cluster__global { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .mapping-marca input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
     .perfil__tabla table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
     .perfil__tabla th, .perfil__tabla td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
@@ -3682,6 +3704,9 @@
       // Líneas reales del dataset por slug (cache del preview): { [slug]: string[] }.
       // Harness de dev: ?preview=logpanel muestra el panel sin desplegar.
       previewMode: false,
+      // Plugins del plan del cluster que se apagaron en el paso 2: viajan en el
+      // deploy y el provisioning no los crea.
+      planExcluidos: [],
     };
 
     // DOM elements
@@ -3884,6 +3909,7 @@
     // mostrando los campos del dataset anterior.
     function clearMapping() {
       state.fields = [];
+      state.planExcluidos = [];
       state.filterCode = '';
       state.generatedFromLog = '';
       state.inicioRegistro = '';   // el patrón multilínea es de ESE dataset
@@ -3959,6 +3985,93 @@
     }
     function marcarEntidad(fields, idx) {
       (fields || []).forEach((f, i) => { f.entity = i === idx; });
+    }
+    // El rol decide qué se pronostica, qué vigilan las anomalías y qué cuenta
+    // como falla. Lo propone el descubrimiento; acá se corrige.
+    const _ROLES = [
+      ['', '—'], ['primary_dimension', 'Dimensión principal'], ['success_indicator', 'Resultado'],
+      ['critical_indicator', 'Señal de falla'], ['entity_id', 'Identificador'], ['measure', 'Medida'],
+      ['timestamp', 'Fecha del evento'],
+    ];
+    const _ROLES_UNICOS = ['primary_dimension', 'success_indicator', 'critical_indicator', 'timestamp'];
+    function selectorDeRol(f, idx) {
+      return `<select class="mapping-rol" data-index="${idx}" aria-label="Rol: ${escapeHtml(f.business_label || f.raw_name || '')}">
+        ${_ROLES.map(([v, t]) => `<option value="${v}" ${(f.role || '') === v ? 'selected' : ''}>${t}</option>`).join('')}
+      </select>`;
+    }
+    function marcarRol(fields, idx, rol) {
+      const f = fields[idx];
+      f.role = rol || null;
+      // Los de un solo campo pasan a este; entre varias medidas, la elegida
+      // es la principal (la que se pronostica).
+      fields.forEach((g, i) => {
+        if (i === idx) return;
+        if (rol && _ROLES_UNICOS.includes(rol) && g.role === rol) g.role = null;
+        if (rol === 'measure' || rol === 'critical_indicator') g.principal = false;
+      });
+      f.principal = rol === 'measure' || rol === 'critical_indicator';
+    }
+
+    // "Lo que va a tener tu cluster": el plan que deriva el backend de los
+    // campos y sus marcas, el mismo que después provisiona.
+    let _planTimer = null;
+    let _planPedido = 0;
+    function pedirPlanDelCluster() {
+      clearTimeout(_planTimer);
+      _planTimer = setTimeout(cargarPlanDelCluster, 250);
+    }
+    async function cargarPlanDelCluster() {
+      const lugar = document.getElementById('plan-cluster');
+      if (!lugar) return;
+      const pedido = ++_planPedido;
+      try {
+        const res = await fetch('/api/v1/onboarding/plan-del-cluster', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: state.fields || [] }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        if (pedido !== _planPedido) return;   // llegó uno más nuevo
+        lugar.innerHTML = planDelClusterHTML(data.items || []);
+        lugar.querySelectorAll('.plan-cluster__switch').forEach(c => c.addEventListener('change', (e) => {
+          const plugin = e.currentTarget.dataset.plugin;
+          const fuera = new Set(state.planExcluidos || []);
+          if (e.currentTarget.checked) fuera.delete(plugin); else fuera.add(plugin);
+          state.planExcluidos = [...fuera];
+          e.currentTarget.closest('.plan-cluster__item')?.classList.toggle('is-apagado', !e.currentTarget.checked);
+        }));
+      } catch (_err) {
+        if (pedido === _planPedido) lugar.innerHTML = '';
+      }
+    }
+    function planDelClusterHTML(items) {
+      if (!items.length) return '';
+      const fuera = new Set(state.planExcluidos || []);
+      const delCluster = (i) => (i.config || {}).alcance === 'cluster';
+      const fila = (i) => {
+        const apagado = i.aplica && fuera.has(i.plugin);
+        return `<li class="plan-cluster__item${i.aplica ? '' : ' is-off'}${apagado ? ' is-apagado' : ''}">
+          <span class="plan-cluster__icono">${icon(i.aplica ? 'check' : 'x')}</span>
+          <span class="plan-cluster__texto"><strong>${escapeHtml(i.titulo)}</strong><span>${escapeHtml(i.motivo)}</span></span>
+          ${i.opcional && i.aplica
+            ? `<input type="checkbox" class="plan-cluster__switch" data-plugin="${escapeHtml(i.plugin)}" ${apagado ? '' : 'checked'}
+                 aria-label="Incluir ${escapeHtml(i.titulo)}" title="Incluirlo en el cluster">`
+            : ''}
+        </li>`;
+      };
+      const propios = items.filter(i => !delCluster(i));
+      const n = propios.filter(i => i.aplica).length;
+      return `<details class="plan-cluster__bloque" open>
+        <summary>
+          <span class="mapping-preguntas__tile">${icon('layers')}</span>
+          <span class="mapping-preguntas__titulo">
+            <strong>Lo que va a tener tu cluster · ${n} de ${propios.length}</strong>
+            <span>Sale de tus datos y de las marcas de la tabla: cambiá un Rol, la Entidad o Sensible y se recalcula.</span>
+          </span>
+        </summary>
+        <ul class="plan-cluster__lista">${propios.map(fila).join('')}</ul>
+        <p class="plan-cluster__global">Y para todo el cluster: ${items.filter(delCluster).map(i => escapeHtml(i.titulo)).join(' · ')}.</p>
+      </details>`;
     }
     function renderMappingTable(fields) {
       const container = document.getElementById('mapping-table');
@@ -4036,6 +4149,7 @@
                 <option value="geo_point" ${f.type === 'geo_point' ? 'selected' : ''}>geo_point</option>
               </select>
             </td>
+            <td>${selectorDeRol(f, idx)}</td>
             <td class="mapping-marca"><input type="radio" name="mapping-entidad" class="mapping-entidad" data-index="${idx}"
                        ${f.entity ? 'checked' : ''} aria-label="Entidad: ${escapeHtml(f.business_label || f.raw_name || '')}"></td>
             <td class="mapping-marca"><input type="checkbox" class="mapping-sensible" data-index="${idx}"
@@ -4056,7 +4170,7 @@
           if (f.group && !seen.includes(f.group)) {
             seen.push(f.group);
             const count = fields.filter(ff => ff.group === f.group).length;
-            parts.push(`<tr class="mapping-group-header" data-group="${escapeHtml(f.group)}"><td colspan="7"><span class="mapping-group-toggle"><svg class="icon"><use href="#ic-chevron"/></svg></span><span class="mapping-group-title">${escapeHtml(f.group)}</span><span class="mapping-group-count">${count} campos</span></td></tr>`);
+            parts.push(`<tr class="mapping-group-header" data-group="${escapeHtml(f.group)}"><td colspan="8"><span class="mapping-group-toggle"><svg class="icon"><use href="#ic-chevron"/></svg></span><span class="mapping-group-title">${escapeHtml(f.group)}</span><span class="mapping-group-count">${count} campos</span></td></tr>`);
           }
           parts.push(rowArr[idx]);
         });
@@ -4086,6 +4200,7 @@
                 <th>Campo original</th>
                 <th>Etiqueta · Path</th>
                 <th style="width:100px;">Tipo</th>
+                <th style="width:150px;" title="Qué es el campo para el negocio: decide qué se pronostica, qué se vigila y qué cuenta como falla">Rol</th>
                 <th style="width:70px;" title="El campo que identifica a cada entidad (cliente, usuario, IP…): arma el perfil por entidad">Entidad</th>
                 <th style="width:70px;" title="Datos sensibles: el analista de demo los ve enmascarados">Sensible</th>
                 <th style="width:60px;"></th>
@@ -4093,6 +4208,7 @@
             </thead>
             <tbody>${tbodyHtml}</tbody>
           </table>
+          <div class="plan-cluster" id="plan-cluster" aria-live="polite"></div>
           ${bloquePreguntas(state.preguntas)}
         </div>`;
 
@@ -4104,11 +4220,21 @@
         });
       });
       // Entidad (una sola) y Sensible: van en el campo y viajan con el deploy.
-      container.querySelectorAll('.mapping-entidad').forEach(r => r.addEventListener('change', (e) =>
-        marcarEntidad(fields, parseInt(e.currentTarget.dataset.index))));
+      container.querySelectorAll('.mapping-entidad').forEach(r => r.addEventListener('change', (e) => {
+        marcarEntidad(fields, parseInt(e.currentTarget.dataset.index));
+        pedirPlanDelCluster();
+      }));
       container.querySelectorAll('.mapping-sensible').forEach(c => c.addEventListener('change', (e) => {
         fields[parseInt(e.currentTarget.dataset.index)].sensitive = e.currentTarget.checked;
+        pedirPlanDelCluster();
       }));
+      container.querySelectorAll('.mapping-rol').forEach(s => s.addEventListener('change', (e) => {
+        marcarRol(fields, parseInt(e.currentTarget.dataset.index), e.currentTarget.value);
+        // Un rol único que se movió deja al anterior sin rol: se re-pinta.
+        container.querySelectorAll('.mapping-rol').forEach(o => { o.value = fields[parseInt(o.dataset.index)].role || ''; });
+        pedirPlanDelCluster();
+      }));
+      cargarPlanDelCluster();
 
       // Toggle de grupos colapsables (click en el header → mostrar/ocultar rows).
       container.querySelectorAll('.mapping-group-header').forEach(header => {
@@ -4974,6 +5100,7 @@
         displayEls.type.textContent = state.fields[idx].type || 'string';
         displayEls.type.dataset.type = state.fields[idx].type || 'string';
       }
+      pedirPlanDelCluster();
     }
 
     // Fuerza una regeneración limpia (namespace/overlay cambiaron, o regen manual).
@@ -5638,6 +5765,7 @@
         opensearch_index: indexName,
         https_enabled: outputCfg.ssl === true,
         fields: state.fields,
+        excluir: state.planExcluidos || [],
         namespace: pipelineNamespace(),
         read_existing_bucket: !!state.readExistingMode,
         document_id: state.dedupId || '',

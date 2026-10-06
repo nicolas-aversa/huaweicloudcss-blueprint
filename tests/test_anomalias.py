@@ -422,3 +422,13 @@ def test_el_rango_espera_cada_vez_mas(monkeypatch):
     _rango_fake(monkeypatch, [None, None, None])
     main._index_time_bounds("http://x", "a", "p", "x*")
     assert esperas == [3.0, 6.0], "entre intentos, no después del último"
+
+
+def test_lo_apagado_en_el_paso_2_no_se_crea(monkeypatch, tmp_path):
+    """El plan del cluster deja apagar forecasting y anomalías: el registro lo
+    guarda y el provisioning no los crea (ni la alerta, que depende del detector)."""
+    (tmp_path / main._PIPELINES_REGISTRY_NAME).write_text(
+        json.dumps({"s": {"fields": [], "excluir": ["anomalias", "forecasting"]}}), encoding="utf-8")
+    res, guardado, pedidos = _provisionar_caso(monkeypatch, tmp_path, {"ad": True, "alerting": True})
+    assert "anomalias" not in res and "alertas" not in res and "forecast" not in res
+    assert "detector_id" not in guardado["s"] and not [u for _m, u, _b in pedidos if "monitors" in u]

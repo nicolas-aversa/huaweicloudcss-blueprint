@@ -56,8 +56,14 @@ def campo_de_mapa(fields: list[dict]) -> "tuple[str, str] | None":
     return None
 
 
+# Los que se pueden apagar en el paso 2 (el provisioning los saltea, ver
+# `main._excluidos`). El resto es la base: el asistente y lo del cluster.
+OPCIONALES = ("forecasting", "anomalias", "alertas", "perfil", "analista")
+
+
 def _item(plugin: str, titulo: str, aplica: bool, motivo: str, config: Any = None) -> dict:
-    return {"plugin": plugin, "titulo": titulo, "aplica": aplica, "motivo": motivo, "config": config}
+    return {"plugin": plugin, "titulo": titulo, "aplica": aplica, "motivo": motivo, "config": config,
+            "opcional": plugin in OPCIONALES}
 
 
 def _forecast_en_palabras(fc: dict, fields: list[dict]) -> str:

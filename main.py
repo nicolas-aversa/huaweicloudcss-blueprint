@@ -1603,6 +1603,24 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
     )
 
 
+class PlanDelClusterRequest(BaseModel):
+    slug: str = Field(default="", max_length=120)
+    label: str = Field(default="", max_length=200)
+    fields: list[dict] = Field(default_factory=list)
+
+
+@app.post("/api/v1/onboarding/plan-del-cluster", tags=["onboarding"],
+          summary="Qué plugins de OpenSearch va a tener el cluster de este dataset, y por qué")
+def plan_del_cluster_endpoint(request: PlanDelClusterRequest) -> dict:
+    """El plan del paso 2: cada plugin con `aplica` y su motivo, derivado de
+    los campos y las marcas (Entidad, Sensible, Rol). Es la misma derivación
+    que usa el provisioning (`plan_de_cluster`)."""
+    import plan_de_cluster
+
+    slug = (request.slug or "").strip() or "dataset"
+    return {"items": plan_de_cluster.plan(slug, request.fields, request.label)}
+
+
 @app.post(
     "/api/v1/onboarding/index-template",
     response_model=IndexTemplateResponse,
@@ -2092,6 +2110,7 @@ class PipelineCase(BaseModel):
     log_file_content: str = Field(default="", description="Contenido completo del archivo importado por el usuario (custom). Se sube tal cual a OBS, sin sintéticos.")
     document_id: str = Field(default="", description="document_id de dedup para read_existing (ej. CTS → %{trace_id}, fintech → %{[@metadata][generated_id]}). Vacío = ids auto de Logstash.")
     input_config: dict = Field(default_factory=dict, description="Fuente propia del caso (`{plugin_type, <plugin>: {...}}`) para casos que NO leen de OBS (Kafka/Beats/JDBC del cliente). Vacío = input s3 sobre el bucket de demos.")
+    excluir: list[str] = Field(default_factory=list, description="Plugins del plan del cluster que se apagaron en el paso 2 (forecasting, anomalias, alertas, perfil, analista).")
 
 
 class TerraformDeployRequest(BaseModel):
@@ -2112,6 +2131,7 @@ class TerraformDeployRequest(BaseModel):
     read_existing_bucket: bool = Field(default=False)
     https_enabled: bool = Field(default=True, description="Habilitar HTTPS para OpenSearch")
     fields: list[dict] = Field(default_factory=list)
+    excluir: list[str] = Field(default_factory=list, description="Plugins del plan del cluster que se apagaron en el paso 2.")
     namespace: str = Field(default="data", description="Namespace de los campos (para el index template).")
     log_file_content: str = Field(default="", description="Contenido del archivo importado (custom single-case). Se sube tal cual a OBS, sin sintéticos.")
     start_ingestion: bool = Field(default=False)
@@ -2593,6 +2613,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
                 "index": case.index_name,
                 "obs_prefix": case.obs_prefix,
                 "fields": case.fields or [],
+                "excluir": list(case.excluir or []),
                 # Cada caso creado desde la plataforma aporta su propio label →
                 # el chatbot nombra bien la fuente en vez de rotular todo igual.
                 "label": _registry_label(case.slug),
@@ -2605,6 +2626,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
             "index": request.opensearch_index,
             "obs_prefix": request.obs_prefix,
             "fields": request.fields or [],
+            "excluir": list(request.excluir or []),
             "label": _registry_label(slug),
         }
     _write_pipelines_registry(terraform_dir, registry)
@@ -6218,6 +6240,8 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     ids: dict = dict(registry.get(slug, {}))
     result: dict = {}
     ip = spec["index_pattern"]
+    # Lo que se apagó en el paso 2 ("Lo que va a tener tu cluster") no se crea.
+    excluidos = _excluidos(_read_pipelines_registry(terraform_dir).get(slug) or {})
 
     # ── Cluster Routes del CSS → salida a MaaS (prerequisito del agente) ──────
     # El agente/chatbot llama a MaaS por el connector; sin las Cluster Routes del
@@ -6429,7 +6453,9 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
 
     # ── Forecasting ──────────────────────────────────────────────────────────
     forecast_specs = spec.get("forecasts")
-    if not forecast_specs:
+    if "forecasting" in excluidos:
+        print(f"[capabilities] '{slug}': forecasting excluido en el paso 2")
+    elif not forecast_specs:
         result["forecast"] = {"ok": False, "reason": "no hay forecasts definidos para este vertical (placeholder)"}
     else:
         forecaster_ids = ids.get("forecaster_ids") or []
@@ -6515,13 +6541,17 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     # pasado). Ahora el intervalo sale del rango real y se corre un análisis
     # histórico sobre ese rango; el monitor alerta con las anomalías altas.
     feats = _read_cluster_features(terraform_dir)
-    if feats and not feats.get("ad"):
+    if "anomalias" in excluidos:
+        print(f"[capabilities] '{slug}': anomalías (y su alerta) excluidas en el paso 2")
+    elif feats and not feats.get("ad"):
         result["anomalias"] = {"ok": False, "reason": "Anomaly Detection no está en este cluster"}
     elif ids.get("detector_id"):
         result["anomalias"] = {"ok": True, "detector_id": ids["detector_id"], "reason": "ya provisionado"}
     else:
         result["anomalias"] = _provisionar_anomalias(base, user, password, slug, ip, spec, ids)
-    if not ids.get("detector_id"):
+    if excluidos & {"anomalias", "alertas"}:
+        pass
+    elif not ids.get("detector_id"):
         result["alertas"] = {"ok": False, "reason": "sin detector de anomalías"}
     elif feats and not feats.get("alerting"):
         result["alertas"] = {"ok": False, "reason": "Alerting no está en este cluster"}
@@ -6611,12 +6641,19 @@ def _write_analistas(terraform_dir: Path, registro: dict) -> None:
     (terraform_dir / _ANALISTAS_NAME).write_text(json.dumps(registro, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _excluidos(entry: dict) -> set[str]:
+    """Los plugins del plan del cluster que se apagaron en el paso 2."""
+    return {str(x) for x in (entry or {}).get("excluir") or []}
+
+
 def _perfil_de(slug: str, entry: dict) -> "dict | None":
     """El perfil por entidad del caso: el que declara su vertical o, en un
     dataset nuevo, el que sale de sus campos (la entidad marcada en el paso 2 o
-    la que se propone)."""
+    la que se propone). None si se apagó en el paso 2."""
     import perfiles
 
+    if "perfil" in _excluidos(entry):
+        return None
     v = verticals.get_vertical(slug)
     if v is not None:
         return v.get("perfil")
@@ -6625,9 +6662,11 @@ def _perfil_de(slug: str, entry: dict) -> "dict | None":
 
 def _enmascarados_de(slug: str, entry: dict) -> list[str]:
     """Los campos sensibles del caso: los del vertical o, en un dataset nuevo,
-    los que se marcaron como sensibles en el paso 2."""
+    los que se marcaron como sensibles en el paso 2. Ninguno si se apagó."""
     import accesos
 
+    if "analista" in _excluidos(entry):
+        return []
     v = verticals.get_vertical(slug)
     if v is not None:
         return list((v.get("analista") or {}).get("enmascarados") or [])

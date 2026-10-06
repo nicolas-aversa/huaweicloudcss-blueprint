@@ -87,3 +87,45 @@ def test_un_caso_guardado_conserva_las_marcas_del_paso_2():
     limpios = {f["field_path"]: f for f in custom_cases._clean_fields(HOTEL)}
     assert limpios["huesped"]["entity"] is True and limpios["huesped"]["sensitive"] is True
     assert limpios["importe"]["principal"] is True
+
+
+def test_el_endpoint_del_paso_2():
+    from fastapi.testclient import TestClient
+    import main
+
+    r = TestClient(main.app).post("/api/v1/onboarding/plan-del-cluster", json={"fields": HOTEL})
+    assert r.status_code == 200
+    items = {i["plugin"]: i for i in r.json()["items"]}
+    assert items["perfil"]["aplica"] and items["perfil"]["opcional"]
+    assert not items["agente"]["opcional"] and not items["text2viz"]["opcional"]
+
+
+def test_lo_apagado_viaja_en_el_registro_y_apaga_perfil_y_analista(tmp_path):
+    import json
+    import main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    main._prepare_deploy_tfvars(main.TerraformDeployRequest(
+        pipeline_conf="filter { }", opensearch_index="hotel-%{+YYYY.MM}", fields=HOTEL,
+        excluir=["perfil", "analista"]), td)
+    entrada = json.loads((td / main._PIPELINES_REGISTRY_NAME).read_text(encoding="utf-8"))["hotel"]
+    assert entrada["excluir"] == ["perfil", "analista"]
+    assert main._perfil_de("hotel", entrada) is None and main._enmascarados_de("hotel", entrada) == []
+    assert main._perfil_de("hotel", {"fields": HOTEL})["campo"] == "huesped"
+    assert main._enmascarados_de("hotel", {"fields": HOTEL}) == ["huesped"]
+
+
+def test_en_un_deploy_de_varios_casos_cada_uno_lleva_lo_suyo(tmp_path):
+    import json
+    import main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    main._prepare_deploy_tfvars(main.TerraformDeployRequest(pipeline_conf="filter { }", cases=[
+        main.PipelineCase(slug="hotel", filter_code="filter { }", fields=HOTEL, index_name="hotel-%{+YYYY.MM}",
+                          excluir=["anomalias"]),
+        main.PipelineCase(slug="otro", filter_code="filter { }", index_name="otro-%{+YYYY.MM}"),
+    ]), td)
+    registro = json.loads((td / main._PIPELINES_REGISTRY_NAME).read_text(encoding="utf-8"))
+    assert registro["hotel"]["excluir"] == ["anomalias"] and registro["otro"]["excluir"] == []

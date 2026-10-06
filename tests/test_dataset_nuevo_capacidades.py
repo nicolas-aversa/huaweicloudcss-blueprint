@@ -78,6 +78,9 @@ def _funciones(html: str) -> str:
 
 
 _ARNES = r"""
+const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const icon = (n) => `<i data-icon="${n}"></i>`;
+const state = { planExcluidos: ['perfil'] };
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
@@ -91,6 +94,32 @@ marcarEntidad(campos, 0);
 check('una sola marcada', campos[0].entity === true && campos[1].entity === false && campos[2].entity === false);
 check('la marcada manda', entidadPropuesta(campos) === 'data.status');
 check('sin pistas, ninguna', entidadPropuesta([{ field_path: 'x', type: 'string' }]) === '');
+// Rol: los únicos se mueven; entre medidas, la elegida es la principal.
+const roles = [
+  { field_path: 'a', role: 'critical_indicator', principal: true },
+  { field_path: 'b', role: 'measure', principal: true },
+  { field_path: 'c', role: 'measure' },
+  { field_path: 'd' },
+];
+marcarRol(roles, 3, 'critical_indicator');
+check('el crítico se mueve', roles[3].role === 'critical_indicator' && roles[0].role === null && roles[3].principal && !roles[0].principal);
+marcarRol(roles, 2, 'measure');
+check('la medida elegida es la principal', roles[2].principal === true && roles[1].principal === false && roles[1].role === 'measure');
+marcarRol(roles, 2, '');
+check('sin rol', roles[2].role === null && roles[2].principal === false);
+// El plan: lo que aplica con su switch (y el apagado, apagado); lo global aparte.
+const html = planDelClusterHTML([
+  { plugin: 'perfil', titulo: 'Perfil', aplica: true, motivo: 'por <Cliente>', opcional: true, config: {} },
+  { plugin: 'mapa', titulo: 'Mapa', aplica: false, motivo: 'no hay país', opcional: false, config: null },
+  { plugin: 'agente', titulo: 'Asistente', aplica: true, motivo: 'm', opcional: false, config: {} },
+  { plugin: 'text2viz', titulo: 'Gráficos', aplica: true, motivo: 'm', opcional: false, config: { alcance: 'cluster' } },
+]);
+check('cuenta lo que aplica', html.includes('2 de 3'), html);
+check('lo que no se puede apagar no tiene switch', !html.includes('data-plugin="agente"'));
+check('escapa el motivo', html.includes('por &lt;Cliente>'));
+check('el apagado sale apagado', html.includes('is-apagado') && !/data-plugin="perfil" checked/.test(html));
+check('lo que no aplica no tiene switch', !html.includes('data-plugin="mapa"') && html.includes('is-off'));
+check('lo global va aparte', html.includes('Y para todo el cluster: Gráficos.') && !html.includes('data-plugin="text2viz"'));
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -110,7 +139,9 @@ def test_la_tabla_del_paso_2_tiene_entidad_y_sensible():
     fn = html[i:html.index("    function renderMultiCaseMapping(", i)] if "    function renderMultiCaseMapping(" in html[i:] else html[i:i + 12000]
     assert '<input type="radio" name="mapping-entidad" class="mapping-entidad"' in fn
     assert '<input type="checkbox" class="mapping-sensible"' in fn
-    assert ">Entidad</th>" in fn and ">Sensible</th>" in fn and '<td colspan="7">' in fn
+    assert ">Entidad</th>" in fn and ">Sensible</th>" in fn and ">Rol</th>" in fn and '<td colspan="8">' in fn
+    assert "${selectorDeRol(f, idx)}" in fn and '<div class="plan-cluster" id="plan-cluster"' in fn
+    assert "cargarPlanDelCluster();" in fn and fn.count("pedirPlanDelCluster();") == 3
     # La propuesta queda marcada en el campo: viaja con el deploy.
     assert "if (!fields.some(f => f.entity)) {" in fn
     assert "fields[parseInt(e.currentTarget.dataset.index)].sensitive = e.currentTarget.checked;" in html
