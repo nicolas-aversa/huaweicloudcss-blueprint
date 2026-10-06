@@ -9473,6 +9473,23 @@
     // Filas de datos que se mandan a analizar. Con 200 alcanza para ver el
     // formato de cada fecha, el locale de cada número y qué columnas son ids.
     const _MUESTRA_FILAS = 200;
+    // La muestra: la primera línea (el header, si hay), las primeras filas y
+    // otras repartidas por todo el archivo. Solo las primeras doscientas
+    // dejaban afuera lo que pasa más adelante (en pozos, ningún DOWN: la falla
+    // no se podía descubrir). Con registros de varias líneas (una comilla que
+    // abre y no cierra) van las primeras: saltear líneas cortaría un registro.
+    // Igual que `muestra_repartida` en los tests de paridad.
+    function muestraRepartida(lineas, n = _MUESTRA_FILAS) {
+      if (lineas.length <= n + 1) return lineas.slice();
+      const partida = lineas.slice(0, n + 1).some(l => ((l.match(/"/g) || []).length % 2) === 1);
+      if (partida) return lineas.slice(0, n + 1);
+      const mitad = Math.floor(n / 2);
+      const resto = lineas.length - (mitad + 1);
+      const salto = resto / mitad;
+      const repartidas = [];
+      for (let i = 0; i < mitad; i++) repartidas.push(lineas[mitad + 1 + Math.floor(i * salto)]);
+      return lineas.slice(0, mitad + 1).concat(repartidas);
+    }
     function _handleLogFile(file) {
       if (!file) return;
       if (file.size > _LOG_FILE_MAX) {
@@ -9489,7 +9506,7 @@
         // Lo que se analiza es una MUESTRA de verdad: header + hasta 200 filas.
         // Antes viajaba solo la primera línea —en un CSV, el header—, y los
         // tipos salían de adivinar por el nombre, sin haber visto un valor.
-        state.muestra = nonEmpty.slice(0, _MUESTRA_FILAS + 1).join('\n');
+        state.muestra = muestraRepartida(nonEmpty).join('\n');
         // Muestra para detectar campos: primera línea no vacía y no comentario.
         const sample = (nonEmpty.find(l => !l.trim().startsWith('#')) || nonEmpty[0] || '').trim();
         const rawLogEl = document.getElementById('raw-log');

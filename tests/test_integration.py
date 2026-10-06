@@ -45,6 +45,9 @@ requires_datasets = necesita_datasets(*sorted(
     f for fs in __import__("verticals").demo_dataset_files().values() for f in fs))
 
 
+# Texto libre: no es una tabla ni clave=valor, así que lo arma el LLM.
+SAMPLE_TEXTO_LIBRE = "May 19 10:15:30 pay-gw-03 payment authorized for jdoe after 87 ms, amount 1530.75 USD"
+
 SAMPLE_FINANCIAL_LOG = (
     "2026-05-19T10:15:30.123Z host=pay-gw-03 level=INFO src_ip=10.20.30.40 "
     "dst_ip=10.20.30.5 user=jdoe txn_id=TXN-2026-0098123 amount=1530.75 "
@@ -144,7 +147,7 @@ def test_generate_filter_calls_llm(monkeypatch):
 
     res = client.post(
         "/api/v1/onboarding/generate-filter",
-        json={"raw_log": SAMPLE_FINANCIAL_LOG},
+        json={"raw_log": SAMPLE_TEXTO_LIBRE},
     )
 
     assert res.status_code == 200, res.text
@@ -201,7 +204,7 @@ def test_generate_filter_maas_502(monkeypatch):
 
     res = client.post(
         "/api/v1/onboarding/generate-filter",
-        json={"raw_log": SAMPLE_FINANCIAL_LOG},
+        json={"raw_log": SAMPLE_TEXTO_LIBRE},
     )
     assert res.status_code == 502
 
@@ -221,7 +224,7 @@ def test_generate_filter_missing_api_key_500(monkeypatch):
 
     res = client.post(
         "/api/v1/onboarding/generate-filter",
-        json={"raw_log": SAMPLE_FINANCIAL_LOG},
+        json={"raw_log": SAMPLE_TEXTO_LIBRE},
     )
     assert res.status_code == 500
 
@@ -240,7 +243,7 @@ def test_generate_filter_401_de_maas_apunta_a_la_key(monkeypatch):
     monkeypatch.setattr(main, "generate_logstash_filter", boom)
 
     res = client.post("/api/v1/onboarding/generate-filter",
-                      json={"raw_log": SAMPLE_FINANCIAL_LOG})
+                      json={"raw_log": SAMPLE_TEXTO_LIBRE})
     assert res.status_code == 502
     detalle = str(res.json()["detail"])
     assert "API key" in detalle and "Configuración" in detalle, detalle

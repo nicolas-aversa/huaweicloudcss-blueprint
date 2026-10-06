@@ -67,6 +67,7 @@ los tipos NO se discuten) y unas filas de muestra. Devolvé SOLO un JSON así:
 {{"columnas": {{"<nombre>": {{"etiqueta": "...", "rol": "...", "dimension": true, \
 "unidad": "...", "sensible": false}}}}, "nombres": {{"<columna_N>": "<nombre_snake_case>"}}, \
 "principales": {{"entidad": "<nombre>", "medida": "<nombre>", "critico": "<nombre>"}}, \
+"falla": {{"campo": "<nombre>", "ok": ["..."]}}, \
 "filas": "las <cosas>", "preguntas": ["..."]}}
 
 - "etiqueta": cómo le diría una persona a la columna, en castellano, corta.
@@ -88,8 +89,14 @@ ASCII que diga qué son.
 (o null si no hay): "entidad" = la entidad que conviene seguir en el tiempo y que \
 se repite entre filas (el cliente, el usuario, el pozo, la IP de origen; nunca el \
 id del propio registro); "medida" = el número principal (la facturación, la \
-producción, los bytes); "critico" = la señal de que algo salió mal (el error, el \
-ataque, la falla).
+producción, los bytes transferidos: el volumen del negocio o del tráfico, \
+nunca una duración, una latencia ni un contador técnico); "critico" = una columna \
+que EXISTE y que solo tiene valor cuando algo salió mal (el error, el ataque, el \
+motivo de la falla); si no hay ninguna así, null, y la falla va en "falla".
+- "falla": SOLO si la señal de falla es un campo que está en TODOS los registros \
+(un estado, un código de respuesta): su "campo" y cómo reconocer la falla con \
+valores de valores_frecuentes, o "ok" (los valores que significan que salió \
+bien; todo lo demás es falla) o "falla" (los que significan falla). Si no, null.
 - "filas": qué es cada fila, en plural y con artículo: "las facturas", "los \
 trabajos de impresión", "las transacciones". Si no se deduce, "los registros".
 - "preguntas": 10 preguntas en castellano, **como se las harías a un colega en \
@@ -272,7 +279,9 @@ def aplicar(perfil, datos: dict) -> None:
     # nombre se valida (snake_case ASCII, único) y el .conf se arma después con
     # él, así que la gramática no corre ningún riesgo.
     nombres = datos.get("nombres")
-    if isinstance(nombres, dict) and not perfil.header and perfil.formato == "delimitado":
+    # También los del envoltorio de un log clave=valor (`columna_1` = la fecha).
+    if isinstance(nombres, dict) and ((not perfil.header and perfil.formato == "delimitado")
+                                      or getattr(perfil, "envoltorio", None)):
         tomados = {c.nombre for c in perfil.columnas}
         for c in perfil.columnas:
             nuevo = nombres.get(c.nombre)
@@ -287,6 +296,7 @@ def aplicar(perfil, datos: dict) -> None:
     # Después de los nombres: en un CSV sin header nombra a `id_paciente`, no
     # a `columna_5`.
     _principales(perfil, datos.get("principales"))
+    _falla(perfil, datos.get("falla"))
 
 
 def _principales(perfil, principales: Any) -> None:
@@ -313,6 +323,42 @@ def _principales(perfil, principales: Any) -> None:
                     otra.rol = None
         c.rol = rol
         c.principal = clave
+
+
+def _falla(perfil, falla: Any) -> None:
+    """La falla dicha por los valores de un campo que está en todos los
+    registros (`status=SHUT_IN`, `response_code` distinto de `000`). Contar ese
+    campo daba el volumen: el .conf arma `<campo>_falla` solo en las fallas
+    (ver `perfilador.armar_filter`), y ese es el crítico principal."""
+    if not isinstance(falla, dict):
+        return
+    # Un crítico que solo aparece cuando algo sale mal (`attack`, `error_code`)
+    # ya cuenta las fallas: es mejor que deducirlas de un estado.
+    critico = next((o for o in perfil.columnas if o.principal == "critico"), None)
+    if critico is not None and critico.nombre != falla.get("campo") and critico.vacios > 0:
+        return
+    c = perfil.columna(falla.get("campo")) if isinstance(falla.get("campo"), str) else None
+    if c is None or c.tipo not in ("string", "integer", "boolean"):
+        return
+    vistos = {str(v).strip() for v in c.valores if v is not None and str(v).strip()}
+    for modo in ("ok", "falla"):
+        valores = falla.get(modo)
+        if not (isinstance(valores, list) and valores):
+            continue
+        valores = [str(v).strip() for v in valores if isinstance(v, (str, int)) and str(v).strip()]
+        # Solo valores de verdad. Con "ok", lo que no está es falla aunque la
+        # muestra no traiga ninguna; con "falla", los valores se tienen que ver.
+        if not valores or not set(valores) <= vistos:
+            continue
+        perfil.falla = (c, modo, sorted(set(valores)))
+        if c.rol == "critical_indicator":
+            c.rol = "success_indicator" if not any(o.rol == "success_indicator" for o in perfil.columnas) else None
+        for otra in perfil.columnas:
+            if otra.rol == "critical_indicator":
+                otra.rol = None
+            if otra.principal == "critico":
+                otra.principal = ""
+        return
 
 
 def _renombrar(perfil, c, nuevo: str) -> None:

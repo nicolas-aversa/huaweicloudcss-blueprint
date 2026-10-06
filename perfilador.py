@@ -86,6 +86,8 @@ _FECHAS: tuple[_Fecha, ...] = (
     _Fecha("MM/dd/yyyy", r"\d{2}/\d{2}/\d{4}", "%m/%d/%Y"),
     _Fecha("dd-MM-yyyy HH:mm:ss", r"\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}", "%d-%m-%Y %H:%M:%S"),
     _Fecha("dd-MM-yyyy", r"\d{2}-\d{2}-\d{4}", "%d-%m-%Y"),
+    _Fecha("yyyyMMdd-HH:mm:ss.SSS", r"\d{8}-\d{2}:\d{2}:\d{2}\.\d{3}", "%Y%m%d-%H:%M:%S.%f"),
+    _Fecha("yyyyMMdd-HH:mm:ss", r"\d{8}-\d{2}:\d{2}:\d{2}", "%Y%m%d-%H:%M:%S"),
     _Fecha("yyyyMMddHHmmssSSS", r"\d{17}", "%Y%m%d%H%M%S%f"),
     _Fecha("yyyyMMddHHmmss", r"\d{14}", "%Y%m%d%H%M%S"),
 )
@@ -136,6 +138,14 @@ class Perfil:
     comillas: str = '"'
     header: str = ""            # la línea exacta del header, si hay
     kv_separador: str = " "
+    # Clave=valor con un envoltorio adelante (`<fecha> <mercado> a=1 b=2`): cada
+    # token del envoltorio es ("col", Columna) o ("lit", texto fijo como "-").
+    envoltorio: list = field(default_factory=list)
+    # Valores que son a su vez clave=valor (`detail=a=1~b=2`): clave → separador.
+    sub_kv: dict = field(default_factory=dict)
+    # La falla por valores, según la semántica: (columna, "ok" | "falla", valores).
+    # El .conf arma `<columna>_falla` solo en las fallas.
+    falla: tuple | None = None
     fecha_evento: str = ""      # campo que va a @timestamp
     fecha_compuesta: tuple[str, str] | None = None   # (columna fecha, columna hora)
     lineas_datos: list[str] = field(default_factory=list)
@@ -265,42 +275,112 @@ def _aplanar(obj: dict, prefijo: tuple[str, ...] = ()) -> dict[tuple[str, ...], 
     return fuera
 
 
-def _es_kv(lineas: list[str]) -> str | None:
-    """El separador de campos si las líneas son clave=valor desde el principio.
+_PRIMER_PAR = re.compile(r"(?:^|(?<=\s))[A-Za-z_][\w.\-]*=")
+# Tokens de un envoltorio: más ya no es un envoltorio, es texto libre.
+_MAX_ENVOLTORIO = 6
 
-    Pide que la línea ARRANQUE con un par: un log con un prefijo libre (fecha,
-    host, mercado…) antes de los pares tiene un envoltorio que un `kv` solo no
-    entiende, y ese va al LLM.
+
+def _partir_envoltorio(linea: str) -> tuple[list[str], str] | None:
+    """(tokens antes del primer par, el resto desde el primer par), o None."""
+    m = _PRIMER_PAR.search(linea)
+    if not m:
+        return None
+    return linea[:m.start()].split(), linea[m.start():]
+
+
+def _es_kv(lineas: list[str]) -> tuple[str, int] | None:
+    """(separador de campos, tokens del envoltorio) si las líneas son
+    clave=valor, o None.
+
+    Los pares pueden venir después de un envoltorio fijo (`<fecha> <mercado>
+    a=1 b=2`, `<fecha> - <hilo> a=1|b=2`): mismo número de tokens antes del
+    primer par en casi todas las líneas. Una línea de syslog, CEF o log4j no
+    es un envoltorio aunque tenga pares: su texto libre varía de línea en
+    línea, y tiene su generador.
     """
     buenas = 0
     separador = " "
+    largos: Counter = Counter()
     datos = [l.strip() for l in lineas if l.strip()]
     for l in datos:
-        if "|" in l and l.count("=") >= 2 and _KV.match(l.split("|", 1)[0]):
+        partes = _partir_envoltorio(l)
+        if partes is None:
+            continue
+        envoltorio, resto = partes
+        if envoltorio and _LINEA_DE_LOG.match(l):
+            continue
+        sep = "|" if ("|" in resto and resto.count("=") >= 2 and _KV.match(resto.split("|", 1)[0])) else " "
+        if sep == "|":
             separador = "|"
-        pares = _KV.findall(l)
-        if len(pares) >= 3 and _KV.match(l):
+        if len(_pares(resto, sep)) >= 3:
             buenas += 1
-    if datos and buenas >= max(1, int(len(datos) * 0.9)):
-        return separador
-    return None
+            largos[len(envoltorio)] += 1
+    if not datos or buenas < max(1, int(len(datos) * 0.9)):
+        return None
+    n, veces = largos.most_common(1)[0]
+    if n > _MAX_ENVOLTORIO or veces < max(1, int(len(datos) * 0.9)):
+        return None
+    return separador, n
 
 
-def _leer_kv(lineas: list[str], separador: str) -> list[dict]:
-    filas = []
+def _pares(texto: str, separador: str) -> dict:
+    """Los pares de `texto`. Con `|` el valor es todo hasta el próximo `|` (un
+    JSON o un texto con espacios entero), como lo lee el `kv` de Logstash."""
+    fila = {}
+    if separador == "|":
+        for parte in texto.split("|"):
+            k, igual, v = parte.partition("=")
+            if igual and re.fullmatch(r"[A-Za-z_][\w.\-]*", k.strip()):
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] == '"':
+                    v = v[1:-1]
+                fila[k.strip()] = v
+        return fila
+    for k, v in _KV.findall(texto):
+        if len(v) >= 2 and v[0] == v[-1] == '"':
+            v = v[1:-1]
+        fila[k] = v
+    return fila
+
+
+def _leer_kv(lineas: list[str], separador: str, n_envoltorio: int = 0) -> tuple[list[dict], list]:
+    """Las filas (con las columnas del envoltorio adelante) y el envoltorio."""
+    filas, tokens = [], []
     for l in lineas:
         s = l.strip()
         if not s:
             continue
-        partes = s.split("|") if separador == "|" else [s]
-        fila = {}
-        for parte in partes:
-            for k, v in _KV.findall(parte):
-                if len(v) >= 2 and v[0] == v[-1] == '"':
-                    v = v[1:-1]
-                fila[k] = v
-        filas.append(fila)
-    return filas
+        envoltorio, resto = (_partir_envoltorio(s) or ([], s)) if n_envoltorio else ([], s)
+        filas.append(_pares(resto, separador))
+        tokens.append(envoltorio if len(envoltorio) == n_envoltorio else None)
+    forma = []
+    for i in range(n_envoltorio):
+        valores = {t[i] for t in tokens if t is not None}
+        fijo = next(iter(valores)) if len(valores) == 1 else ""
+        # Un separador fijo ("-", "|", "::") va literal; todo lo demás es dato.
+        if fijo and re.fullmatch(r"[^\w\s\"']+", fijo):
+            forma.append(("lit", fijo))
+        else:
+            forma.append(("col", f"columna_{i + 1}"))
+    con_envoltorio = []
+    for fila, t in zip(filas, tokens):
+        delante = {nombre: (t[i] if t is not None else None)
+                   for i, (tipo, nombre) in enumerate(forma) if tipo == "col"}
+        con_envoltorio.append({**delante, **fila})
+    return con_envoltorio, forma
+
+
+def _sub_kv(valores: list) -> str | None:
+    """El separador si TODOS los valores de una clave son a su vez clave=valor
+    (`carrier=Personal~platform=ANDROID`), o None."""
+    llenos = [v for v in valores if isinstance(v, str) and v.strip()]
+    if not llenos:
+        return None
+    for sep in ("~", ";", ","):
+        if all(len(v.split(sep)) >= 2 and all(re.match(r"[A-Za-z_][\w.\-]*=", p) for p in v.split(sep))
+               for v in llenos):
+            return sep
+    return None
 
 
 # Líneas de log que un separador parte en columnas "consistentes" sin ser una
@@ -657,10 +737,26 @@ def perfilar(lineas: list[str]) -> Perfil:
     if filas_json is not None:
         return _perfil_de_dicts("json", filas_json, lineas)
 
-    sep_kv = _es_kv(lineas)
-    if sep_kv:
-        perfil = _perfil_de_dicts("kv", _leer_kv(lineas, sep_kv), lineas)
+    es_kv = _es_kv(lineas)
+    if es_kv:
+        sep_kv, n_envoltorio = es_kv
+        filas, forma = _leer_kv(lineas, sep_kv, n_envoltorio)
+        # Un valor que es clave=valor se abre en sus campos (con un segundo kv).
+        sub = {}
+        for clave in {k for f in filas for k in f}:
+            sep = _sub_kv([f.get(clave) for f in filas])
+            if sep:
+                sub[clave] = sep
+                for f in filas:
+                    if isinstance(f.get(clave), str) and f[clave].strip():
+                        f[clave] = dict(p.split("=", 1) for p in f[clave].split(sep))
+        perfil = _perfil_de_dicts("kv", filas, lineas)
         perfil.kv_separador = sep_kv
+        perfil.sub_kv = sub
+        perfil.envoltorio = [(t, perfil.columna(x) if t == "col" else x) for t, x in forma]
+        for c in perfil.columnas:
+            if any(t == "col" and col is c for t, col in perfil.envoltorio):
+                c.etiqueta = f"Columna {c.nombre.rsplit('_', 1)[-1]}"
         return perfil
 
     if sum(1 for l in lineas if _LINEA_DE_LOG.match(l)) * 2 >= len(lineas):
@@ -878,12 +974,29 @@ def armar_filter(perfil: Perfil, ns: str = "data") -> str:
               "    autogenerate_column_names => false",
               "  }"]
     elif perfil.formato == "kv":
+        fuente = "message"
+        if perfil.envoltorio:
+            # El envoltorio por grok; los pares, de lo que sigue.
+            partes = [f"%{{NOTSPACE:{_ref(ns, x.path)}}}" if t == "col" else re.escape(x)
+                      for t, x in perfil.envoltorio]
+            patron = "^" + r"\s+".join(partes) + r"\s+%{GREEDYDATA:[@metadata][_pares]}$"
+            L += ["  grok {",
+                  f'    match => {{ "message" => "{patron}" }}',
+                  '    tag_on_failure => ["_envoltorio_no_reconocido"]',
+                  "  }"]
+            fuente = "[@metadata][_pares]"
         L += ["  kv {",
-              '    source => "message"',
+              f'    source => "{fuente}"',
               f'    field_split => "{perfil.kv_separador}"',
               '    value_split => "="',
               f'    target => "{ns}"',
               "  }"]
+        for clave, sep in sorted(perfil.sub_kv.items()):
+            ref = _ref(ns, (clave,))
+            L += [f"  if {ref} {{",
+                  f'    mutate {{ rename => {{ "{ref}" => "[@metadata][_sub_{clave}]" }} }}',
+                  f'    kv {{ source => "[@metadata][_sub_{clave}]" field_split => "{sep}" value_split => "=" target => "{ref}" }}',
+                  "  }"]
     else:
         L += ["  json {",
               '    source => "message"',
@@ -914,8 +1027,47 @@ def armar_filter(perfil: Perfil, ns: str = "data") -> str:
         L += ["    }", "  }"]
 
     L += _bloque_fecha(perfil, ns)
+    L += _bloque_falla(perfil, ns)
     L += ["", '  mutate { remove_field => ["message"] }', "}"]
     return "\n".join(L) + "\n"
+
+
+def nombre_de_falla(perfil: Perfil) -> str:
+    """`status` → `status_falla` (o con un número si ya existe ese nombre)."""
+    if not perfil.falla:
+        return ""
+    base = f"{perfil.falla[0].nombre}_falla"
+    nombre, n = base, 2
+    while perfil.columna(nombre) is not None:
+        nombre, n = f"{base}_{n}", n + 1
+    return nombre
+
+
+def _literal(col: Columna, valor: str) -> str:
+    if col.tipo in ("integer", "float"):
+        return valor
+    return _cadena(valor) or '"' + valor.replace('"', "") + '"'
+
+
+def _bloque_falla(perfil: Perfil, ns: str) -> list[str]:
+    """`<campo>_falla` = el valor, solo cuando es una falla. Va después de los
+    convert: un código numérico ya es número. Un solo valor va con `==`/`!=`
+    (`in` con un array de un elemento lo compara como texto)."""
+    if not perfil.falla:
+        return []
+    col, modo, valores = perfil.falla
+    ref = _ref(ns, col.path)
+    lits = [_literal(col, v) for v in valores]
+    if len(lits) == 1:
+        cond = f"{ref} == {lits[0]}" if modo == "falla" else f"{ref} and {ref} != {lits[0]}"
+    else:
+        lista = "[" + ", ".join(lits) + "]"
+        cond = f"{ref} in {lista}" if modo == "falla" else f"{ref} and {ref} not in {lista}"
+    destino = _ref(ns, (*col.path[:-1], nombre_de_falla(perfil)))
+    return ["",
+            f"  if {cond} {{",
+            f'    mutate {{ add_field => {{ "{destino}" => "%{{{ref}}}" }} }}',
+            "  }"]
 
 
 def _bloque_fecha(perfil: Perfil, ns: str) -> list[str]:
@@ -961,6 +1113,9 @@ def campos(perfil: Perfil, ns: str = "data") -> list[dict]:
         # dashboard creía tener serie temporal y graficaba la hora de ingesta.
         if rol == "timestamp" and c.tipo != "date":
             rol = None
+        # Una sola fecha del evento: otra fecha (`geo_date`) es un dato más.
+        if rol == "timestamp" and perfil.fecha_evento and c.nombre != perfil.fecha_evento:
+            rol = None
         muestra = next((str(v) for v in c.valores
                         if v is not None and not (isinstance(v, str) and es_vacio(v))), "")
         fuera.append({
@@ -985,6 +1140,20 @@ def campos(perfil: Perfil, ns: str = "data") -> list[dict]:
             **({"principal": True} if c.principal in ("medida", "critico") else {}),
             # Sensible llega marcado como en el paso 2 (se puede desmarcar ahí).
             **({"sensitive": True} if c.sensible else {}),
+        })
+    if perfil.falla:
+        col, modo, valores = perfil.falla
+        nombre = nombre_de_falla(perfil)
+        path = ".".join([ns, *col.path[:-1], nombre])
+        fuera.append({
+            "raw_name": nombre, "field_path": path, "ecs_path": path, "type": "string",
+            "date_format": None, "business_label": f"{col.etiqueta} (falla)", "unit": None,
+            "dimension": True, "role": "critical_indicator", "is_ecs": False,
+            "ecs_type_official": None, "normalized_path": path, "ecs_overlay_path": None,
+            "sample": "", "frecuentes": [], "principal": True,
+            # Para mostrar en el paso 2 de dónde sale.
+            "derivado_de": ".".join([ns, *col.path]),
+            "falla_si": {"modo": modo, "valores": valores},
         })
     return fuera
 
@@ -1049,8 +1218,25 @@ def _valores_de_linea(perfil: Perfil, linea: str) -> dict | None:
             return None
         return {c.path: (celdas[i] if i < len(celdas) else None) for i, c in enumerate(perfil.columnas)}
     if perfil.formato == "kv":
-        filas = _leer_kv([linea], perfil.kv_separador)
-        return {(k,): v for k, v in (filas[0] if filas else {}).items()}
+        resto = linea
+        fuera: dict = {}
+        if perfil.envoltorio:
+            partes = _partir_envoltorio(linea)
+            if partes is None or len(partes[0]) != len(perfil.envoltorio):
+                return None
+            for (t, x), token in zip(perfil.envoltorio, partes[0]):
+                if t == "col":
+                    fuera[x.path] = token
+                elif token != x:
+                    return None
+            resto = partes[1]
+        for k, v in _pares(resto, perfil.kv_separador).items():
+            sep = perfil.sub_kv.get(k)
+            if sep and v.strip():
+                fuera.update({(k, kk): vv for kk, vv in (p.split("=", 1) for p in v.split(sep) if "=" in p)})
+            else:
+                fuera[(k,)] = v
+        return fuera
     try:
         obj = json.loads(linea)
     except ValueError:

@@ -101,7 +101,7 @@ def _clean_fields(fields: list) -> list[dict]:
             "ecs_type_official", "normalized_path", "date_format", "frecuentes",
             # Las marcas del paso 2: sin ellas, un caso guardado perdía su
             # perfil (Entidad) y su analista enmascarado (Sensible).
-            "entity", "sensitive", "principal")
+            "entity", "sensitive", "principal", "derivado_de", "falla_si")
     out = []
     for f in fields or []:
         if not isinstance(f, dict):

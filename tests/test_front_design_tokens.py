@@ -314,7 +314,7 @@ def test_se_analiza_una_muestra_y_no_una_linea():
 
     i = html.index("function _handleLogFile(file)")
     lectura = html[i:html.index("reader.onerror", i)]
-    assert "state.muestra = nonEmpty.slice(0, _MUESTRA_FILAS + 1)" in lectura
+    assert "state.muestra = muestraRepartida(nonEmpty).join(" in lectura
 
     j = html.index("async function transformLog()")
     envio = html[j:html.index("let generating = false;", j)]
@@ -438,3 +438,34 @@ def test_crear_un_caso_solo_lo_guarda():
     assert "goToStep(1)" in fn, "tras guardar se vuelve al grid, que es desde donde se despliega"
     # El archivo ya está en el store: no viaja en cada request de la puesta en marcha.
     assert "state.logFileContent = ''" in fn
+
+
+def test_la_muestra_repartida_del_front_es_la_de_los_tests(tmp_path):
+    """El front manda el header, las primeras filas y otras repartidas por el
+    archivo; la paridad descubre con la misma muestra (`muestra_repartida`)."""
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    if shutil.which("node") is None:
+        pytest.skip("node no está instalado")
+    sys.path.insert(0, str(_INDEX.parent.parent / "tests"))
+    from test_paridad_builder import muestra_repartida
+
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("    const _MUESTRA_FILAS = 200;")
+    fin = html.index("\n    }\n", html.index("function muestraRepartida", i)) + len("\n    }\n")
+    casos = {"largo": [f"l{n}" for n in range(5000)], "corto": [f"l{n}" for n in range(150)],
+             "multilinea": ['a,"b'] + [f"l{n}" for n in range(999)]}
+    js = tmp_path / "m.mjs"
+    js.write_text(html[i:fin] + "\nconst casos = " + json.dumps(casos) + ";\n"
+                  "console.log(JSON.stringify(Object.fromEntries("
+                  "Object.entries(casos).map(([k, v]) => [k, muestraRepartida(v)]))));\n", encoding="utf-8")
+    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    salida = json.loads(r.stdout)
+    for k, v in casos.items():
+        assert salida[k] == muestra_repartida(v), k
+    assert len(salida["largo"]) == 201 and salida["largo"][-1] != "l200", "llega al final del archivo"
+    assert salida["multilinea"] == casos["multilinea"][:201], "con registros partidos, las primeras"

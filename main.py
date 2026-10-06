@@ -977,6 +977,10 @@ class FieldMapping(BaseModel):
     sensitive: bool | None = Field(default=None, description="Dato personal: el analista lo ve enmascarado.")
     principal: bool | None = Field(
         default=None, description="La medida o el indicador crítico principal, entre varios con el mismo rol.")
+    derivado_de: str | None = Field(
+        default=None, description="Campo armado por el .conf: el campo del que sale (p. ej. la falla de `status`).")
+    falla_si: dict | None = Field(
+        default=None, description="Cómo se reconoce la falla: {modo: ok | falla, valores}.")
 
 
 class Verificacion(BaseModel):

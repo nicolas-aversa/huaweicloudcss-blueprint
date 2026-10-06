@@ -30,32 +30,41 @@ ESPERADO = {
                              "perfil": "customer_id"},
     "produccion-pozos.log": {"fecha": True, "medida": "oil_vol", "perfil": "well",
                              # El curado cuenta las lecturas con el pozo parado (`downtime`,
-                             # un campo que arma su filter).
-                             "critico": "downtime"},
+                             # un campo que arma su filter); el Builder, `status_falla`.
+                             "critico": "status_falla"},
     "streaming-ott.log": {"fecha": True, "medida": "watch_seconds", "entidad": "user_id",
                           "critico": "error_code"},
-    "encuentros-clinicos.log": {"fecha": True, "entidad": "id_paciente", "critico": "triaje",
-                                "sensibles": {"id_paciente"}},
+    # Sin header: el nombre de la columna lo pone la semántica (triage o triaje).
+    "encuentros-clinicos.log": {"fecha": True, "entidad": ("id_paciente", "paciente_id"),
+                                "critico": ("triage", "triaje"),
+                                "sensibles": [("id_paciente", "paciente_id")]},
     "fortianalyzer.log": {"fecha": True, "medida": "sentbyte", "entidad": "srcip", "critico": "attack",
                           "seguridad": True},
     "fraud-detection.log": {"fecha": True, "medida": "amount", "critico": "is_fraud"},
-    "transacciones-billetera.log": {"fecha": True, "entidad": "customer_id", "critico": "failed_at_code",
-                                    "sensibles": {"customer_id", "account_ref"}},
+    # El curado cuenta el paso que falló dentro de `steps`; el Builder, las
+    # respuestas distintas de 000 (`response_code_falla`): las mismas transacciones.
+    # `account_ref` (el curado lo enmascaraba) es un índice de 1 a 4: no identifica a nadie.
+    "transacciones-billetera.log": {"fecha": True, "entidad": "customer_id", "critico": "response_code_falla",
+                                    "sensibles": ["customer_id"]},
     "transacciones-alyc.log": {"fecha": True, "medida": "notional", "entidad": "comitente",
-                               "sensibles": {"comitente"}},
+                               "sensibles": ["comitente"]},
 }
 
 # Los huecos de hoy: (archivo, criterio) → por qué.
 HUECOS = {
-    ("produccion-pozos.log", "critico"): "el crítico es un valor de `status` (parado), no un campo propio",
     ("fortianalyzer.log", "seguridad"): "Security Analytics sale solo de las verticales curadas",
-    ("transacciones-billetera.log", "critico"): "el fallo está dentro del JSON de `steps`",
-    ("transacciones-billetera.log", "sensibles"): "un log clave=valor no pasa por la semántica",
-    ("transacciones-alyc.log", "fecha"): "la fecha del principio de la línea no se reconoce",
-    ("transacciones-alyc.log", "medida"): "un log clave=valor no pasa por la semántica",
-    ("transacciones-alyc.log", "entidad"): "un log clave=valor no pasa por la semántica",
-    ("transacciones-alyc.log", "sensibles"): "un log clave=valor no pasa por la semántica",
 }
+
+
+def muestra_repartida(lineas: list[str], n: int = 200) -> list[str]:
+    """La muestra que manda el front (`muestraRepartida` en index.html)."""
+    if len(lineas) <= n + 1:
+        return list(lineas)
+    if any(l.count('"') % 2 == 1 for l in lineas[:n + 1]):
+        return lineas[:n + 1]
+    mitad = n // 2
+    salto = (len(lineas) - (mitad + 1)) / mitad
+    return lineas[:mitad + 1] + [lineas[mitad + 1 + int(i * salto)] for i in range(mitad)]
 
 
 @functools.lru_cache(maxsize=None)
@@ -65,7 +74,7 @@ def _descubierto(archivo: str) -> tuple:
     import semantica
 
     ruta = _RAIZ / "datasets" / archivo
-    lineas = [l for l in ruta.read_text(encoding="utf-8").splitlines() if l.strip()][:201]
+    lineas = muestra_repartida([l for l in ruta.read_text(encoding="utf-8").splitlines() if l.strip()])
 
     def _sin_llm(*_a, **_k):
         raise RuntimeError("sin LLM en la paridad")
@@ -101,6 +110,8 @@ def _forecasts(campos, plan) -> dict[str, tuple[str, str]]:
 
 def _chequeo(archivo: str, criterio: str):
     esperado = ESPERADO[archivo][criterio]
+    # Un nombre o varios aceptables (los que pone la semántica a un CSV sin header).
+    nombres = esperado if isinstance(esperado, tuple) else (esperado,)
     campos, plan = _descubierto(archivo)
     fcs = _forecasts(campos, plan)
     if criterio == "fecha":
@@ -108,13 +119,18 @@ def _chequeo(archivo: str, criterio: str):
     elif criterio == "medida":
         assert fcs.get("measure_sum") == ("sum", esperado), fcs
     elif criterio == "entidad":
-        assert fcs.get("unique_entities") == ("cardinality", esperado), fcs
+        assert fcs.get("unique_entities") in {("cardinality", n) for n in nombres}, fcs
     elif criterio == "perfil":
         assert plan["perfil"]["aplica"] and _nombre(campos, plan["perfil"]["config"]["campo"]) == esperado
     elif criterio == "critico":
-        assert (fcs.get("critical_events") or ("", ""))[1] == esperado, fcs
+        # `is_fraud` o el `is_fraud_falla` que arma el .conf: cuentan lo mismo.
+        assert (fcs.get("critical_events") or ("", ""))[1] in {x for n in nombres for x in (n, f"{n}_falla")}, fcs
     elif criterio == "sensibles":
-        assert esperado <= {_nombre(campos, s) for s in plan["analista"]["config"] or []}, plan["analista"]
+        # Cada uno, por cualquiera de sus nombres posibles.
+        marcados = {_nombre(campos, s) for s in plan["analista"]["config"] or []}
+        for alternativas in esperado:
+            alternativas = alternativas if isinstance(alternativas, tuple) else (alternativas,)
+            assert marcados & set(alternativas), (alternativas, plan["analista"])
     elif criterio == "seguridad":
         assert (plan.get("security_analytics") or {}).get("aplica"), "sin Security Analytics"
     else:

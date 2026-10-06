@@ -234,8 +234,9 @@ def test_el_llm_ve_hasta_cinco_lineas(monkeypatch):
     ("<34>Oct 11 22:14:15 mymachine su: 'su root' failed for lonvick on /dev/pts/8\n"
      "<34>Oct 11 22:14:16 mymachine su: 'su root' failed for lonvick on /dev/pts/9", "catalogo"),
     ('{\n  "a": 1,\n  "b": {"c": "x"}\n}', "determinista"),
+    # Clave=valor con un envoltorio (fecha, hora, host): lo lee el perfilador.
     ("2026-05-19 10:15:30 - host01 a=1|b=2|c=hola\n2026-05-19 10:15:31 - host01 a=2|b=3|c=chau",
-     "determinista"),
+     "perfilador"),
     (TELEMETRIA, "perfilador"),
 ], ids=["syslog", "json-indentado", "pipe-kv", "csv"])
 def test_la_respuesta_dice_quien_armo_el_conf(monkeypatch, raw, fuente):

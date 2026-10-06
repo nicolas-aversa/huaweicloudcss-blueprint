@@ -405,3 +405,74 @@ def test_los_sensibles_llegan_marcados():
     assert campos["cliente"].get("sensitive") is True
     assert "sensitive" not in campos["fecha_y_hora"], "una fecha no se enmascara"
     assert "sensitive" not in campos["estado"], "solo true cuenta"
+
+
+
+# ── La falla por valores ────────────────────────────────────────────────────
+POZOS = """fecha,pozo,estado,produccion
+2026-09-18 11:04:12,P-1,FLOWING,120.5
+2026-09-18 12:04:12,P-2,INJECTING,0
+2026-09-18 13:04:12,P-1,FLOWING,118.0
+2026-09-18 14:04:12,P-3,DOWN,0
+"""
+
+
+def test_la_falla_por_valores_arma_su_campo_en_el_conf():
+    """Un estado que está en todos los registros: contarlo daba el volumen. El
+    .conf arma `estado_falla` solo en las fallas, y ese es el crítico."""
+    p = _perfil(POZOS)
+    semantica.enriquecer(p, _responde({"columnas": {"estado": {"rol": "critical_indicator"}},
+                                       "falla": {"campo": "estado", "ok": ["FLOWING", "INJECTING"]}}))
+    filtro = perfilador.armar_filter(p, "data")
+    assert ('if [data][estado] and [data][estado] not in ["FLOWING", "INJECTING"] {\n'
+            '    mutate { add_field => { "[data][estado_falla]" => "%{[data][estado]}" } }') in filtro
+    conf_lint.parse(filtro)
+    assert [e for e in conf_lint.lint_filtro(filtro) if e.nivel == conf_lint.ERROR] == []
+    campos = {f["raw_name"]: f for f in perfilador.campos(p)}
+    falla = campos["estado_falla"]
+    assert falla["role"] == "critical_indicator" and falla["principal"] and falla["field_path"] == "data.estado_falla"
+    assert falla["derivado_de"] == "data.estado" and falla["falla_si"] == {"modo": "ok", "valores": ["FLOWING", "INJECTING"]}
+    assert campos["estado"]["role"] == "success_indicator", "el estado deja de ser el crítico"
+    assert _col(p, "estado").rol == "success_indicator"
+
+
+def test_un_solo_valor_va_con_igual_y_no_con_in():
+    """`in` con un array de un elemento lo compara como texto (substring)."""
+    p = _perfil(POZOS)
+    semantica.enriquecer(p, _responde({"falla": {"campo": "estado", "falla": ["DOWN"]}}))
+    assert 'if [data][estado] == "DOWN" {' in perfilador.armar_filter(p, "data")
+    p = _perfil(POZOS)
+    semantica.enriquecer(p, _responde({"falla": {"campo": "estado", "ok": ["FLOWING"]}}))
+    assert 'if [data][estado] and [data][estado] != "FLOWING" {' in perfilador.armar_filter(p, "data")
+
+
+@pytest.mark.parametrize("falla", [
+    {"campo": "estado", "falla": ["ROTO"]},          # un valor que no está en los datos
+    {"campo": "estado", "ok": ["FLOWING", "OTRO"]},
+    {"campo": "produccion", "ok": ["0"]},           # un float no
+    {"campo": "no_existe", "ok": ["x"]},
+    {"campo": "estado"}, "nada", {"campo": "estado", "ok": []},
+])
+def test_una_falla_invalida_se_descarta(falla):
+    p = _perfil(POZOS)
+    semantica.enriquecer(p, _responde({"falla": falla}))
+    assert p.falla is None and "_falla" not in perfilador.armar_filter(p, "data")
+
+
+def test_un_critico_que_solo_aparece_en_las_fallas_gana():
+    """`codigo_error` vacío salvo en las fallas ya las cuenta: no se deduce
+    nada del estado."""
+    p = _perfil(TELEMETRIA)
+    semantica.enriquecer(p, _responde({"principales": {"critico": "codigo_error"},
+                                       "falla": {"campo": "estado", "ok": ["COMPLETADO"]}}))
+    assert p.falla is None and _col(p, "codigo_error").principal == "critico"
+
+
+
+def test_las_columnas_del_envoltorio_se_pueden_nombrar():
+    p = _perfil("20250701-11:00:26.461 BYMA evt=NEW qty=1 price=10.5\n"
+                "20250701-11:02:19.504 MAE evt=FILL qty=2 price=11\n")
+    semantica.enriquecer(p, _responde({"nombres": {"columna_1": "fecha_hora", "columna_2": "mercado",
+                                                   "evt": "evento"}}))
+    assert [c.nombre for c in p.columnas][:3] == ["fecha_hora", "mercado", "evt"], "solo las columna_N"
+    assert "%{NOTSPACE:[data][mercado]}" in perfilador.armar_filter(p, "data")

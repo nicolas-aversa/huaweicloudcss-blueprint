@@ -293,12 +293,44 @@ def test_solo_el_header_igual_arma_un_conf_valido():
 
 
 # ── Lo que NO es una tabla ──────────────────────────────────────────────────
-def test_un_log_con_envoltorio_va_al_llm():
-    """`<fecha> - <host> a=1|b=2|…`: partido por `|` daba columnas "a=1", "b=2".
-    Eso no es una tabla, y lo arma el LLM."""
+def test_un_log_con_envoltorio_es_clave_valor_con_sus_columnas():
+    """`<id> - <hilo> a=1|b=2|…`: los tokens del envoltorio son columnas (el
+    "-" fijo va literal) y los pares, clave=valor. Antes iba al LLM y la fecha o
+    el mercado del envoltorio se perdían."""
     p = _perfil("20251113014806:726 - 7846:17874 operation_code=TRANSFER|message_type=210|response_code=000\n"
                 "20251113014807:726 - 7846:17875 operation_code=PAYMENT|message_type=210|response_code=051\n")
 
+    assert p.estructurado and p.formato == "kv" and p.kv_separador == "|"
+    assert [t for t, _ in p.envoltorio] == ["col", "lit", "col"]
+    assert [c.nombre for c in p.columnas][:2] == ["columna_1", "columna_3"]
+    filtro = perfilador.armar_filter(p, "data")
+    assert '%{NOTSPACE:[data][columna_1]}\\s+\\-\\s+%{NOTSPACE:[data][columna_3]}' in filtro
+    assert 'source => "[@metadata][_pares]"' in filtro
+    assert _sin_errores(p) == [] and perfilador.verificar(p).completa
+
+
+def test_la_fecha_del_envoltorio_es_la_del_evento():
+    p = _perfil("20250701-11:00:26.461 BYMA evt=NEW qty=1 price=10.5\n"
+                "20250701-11:02:19.504 MAE evt=FILL qty=2 price=11\n")
+    assert _col(p, "columna_1").tipo == "date" and p.fecha_evento == "columna_1"
+    assert _col(p, "columna_1").formato_fecha == "yyyyMMdd-HH:mm:ss.SSS"
+    assert perfilador.verificar(p).completa
+
+
+def test_un_valor_que_es_clave_valor_se_abre():
+    p = _perfil("a=1|b=x|detail=carrier=Claro~lat=-34.6~lon=-58.4\n"
+                "a=2|b=y|detail=carrier=Personal~lat=-34.9~lon=-57.9\n"
+                "a=3|b=x|detail=carrier=Claro~lat=-31.4~lon=-64.2\n")
+    assert p.sub_kv == {"detail": "~"}
+    assert _col(p, "detail_lat").path == ("detail", "lat") and _col(p, "detail_lat").tipo == "float"
+    filtro = perfilador.armar_filter(p, "data")
+    assert 'kv { source => "[@metadata][_sub_detail]" field_split => "~"' in filtro
+    assert _sin_errores(p) == [] and perfilador.verificar(p).completa
+
+
+def test_syslog_con_pares_no_es_un_envoltorio():
+    p = _perfil("<34>Oct 11 22:14:15 host app: user=juan action=login result=ok\n"
+                "<34>Oct 11 22:14:16 host app: user=ana action=logout result=ok\n")
     assert not p.estructurado
 
 
@@ -342,9 +374,10 @@ def test_una_columna_casi_unica_no_es_dimension():
 
 
 # ── El corpus: los datasets reales del repo ─────────────────────────────────
+# Todos, también los de envoltorio (alyc, billetera), que antes iban al LLM.
 _ESTRUCTURADOS = ["encuentros-clinicos.log", "fortianalyzer.log", "fraud-detection.log",
-                  "produccion-pozos.log", "streaming-ott.log", "ventas-ecommerce.log"]
-_CON_ENVOLTORIO = ["transacciones-alyc.log", "transacciones-billetera.log"]
+                  "produccion-pozos.log", "streaming-ott.log", "ventas-ecommerce.log",
+                  "transacciones-alyc.log", "transacciones-billetera.log"]
 
 
 def _primeras(nombre, n=200):
@@ -360,11 +393,6 @@ def test_cada_dataset_del_repo_da_un_conf_que_compila_y_verifica(nombre):
     assert _sin_errores(p) == [], nombre
     v = perfilador.verificar(p)
     assert v.completa, (nombre, v.ok, v.total, v.problemas)
-
-
-@pytest.mark.parametrize("nombre", _CON_ENVOLTORIO)
-def test_los_datasets_con_envoltorio_van_al_llm(nombre):
-    assert not perfilador.perfilar(_primeras(nombre)).estructurado
 
 
 @pytest.mark.parametrize("lineas", [
@@ -442,3 +470,31 @@ def test_los_campos_llevan_el_formato_de_fecha():
     assert fecha["role"] == "timestamp"
     tot = next(f for f in fs if f["field_path"] == "data.paginas_totales")
     assert tot["business_label"] == "Páginas Totales" and tot["date_format"] is None
+
+
+
+def test_un_envoltorio_largo_es_texto_libre():
+    """Siete tokens antes de los pares ya no son un envoltorio."""
+    p = _perfil("a b c d e f g x=1 y=2 z=3\na b c d e f g x=2 y=3 z=4\n")
+    assert not p.estructurado
+
+
+def test_una_parte_sin_igual_no_es_un_campo():
+    p = _perfil("a=1|suelto|b=2|c=3\na=2|suelto|b=3|c=4\n")
+    assert p.formato == "kv" and [c.nombre for c in p.columnas] == ["a", "b", "c"]
+
+
+def test_la_verificacion_mira_el_envoltorio():
+    """Una línea cuyo separador fijo no es el de las demás no la lee el grok."""
+    p = _perfil("20251113 - 7846 a=1|b=2|c=3\n20251114 - 7847 a=2|b=3|c=4\n")
+    p.lineas_datos.append("20251115 + 7848 a=2|b=3|c=4")
+    v = perfilador.verificar(p)
+    assert (v.ok, v.total) == (2, 3)
+
+
+def test_una_sola_fecha_del_evento():
+    """Otra fecha (`geo_date`) es un dato más, no la fecha del evento."""
+    p = _perfil("entry_time=2026-09-18 11:04:12|monto=1|geo_date=2026-09-01\n"
+                "entry_time=2026-09-18 11:05:12|monto=2|geo_date=2026-09-02\n")
+    roles = {f["raw_name"]: f["role"] for f in perfilador.campos(p)}
+    assert roles["entry_time"] == "timestamp" and roles["geo_date"] is None
