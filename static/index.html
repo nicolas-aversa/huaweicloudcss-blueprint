@@ -2468,6 +2468,23 @@
     /* Forecasting y Perfiles: los casos en una lista a la izquierda, el
        detalle a la derecha. Con 9 casos, los botones en dos filas se veían
        desordenados. En pantallas angostas la lista pasa arriba, en una fila. */
+    /* ── Plugins: una tarjeta por plugin, con su estado y el link a Dashboards ── */
+    .plug-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
+    .plug { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3);
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-primary); }
+    .plug--excluido { opacity: .6; }
+    .plug__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-md); }
+    .plug__que { margin: 0; font-size: var(--fs-sm); line-height: 1.45; color: var(--text-secondary); }
+    .plug__motivo { margin: 0; font-size: var(--fs-sm); line-height: 1.45; color: var(--accent-hover); }
+    .plug__filas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .plug__fila { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) 0;
+                  border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
+    .plug__fila-texto { flex: 1 1 140px; min-width: 0; }
+    .plug__ir { display: inline-flex; color: var(--text-muted); }
+    .plug__ir:hover { color: var(--accent-hover); }
+    .plug__numero { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
+    .plug__numero:empty { display: none; }
+    .plug__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
     .maestro { display: grid; grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 14px; }
     .maestro__lista {
       display: flex; flex-direction: column; gap: 2px; padding-right: 14px;
@@ -7065,6 +7082,121 @@
         btn.disabled = false;
       }
     }
+    // ── Plugins: lo que quedó en el cluster, por caso ──────────────────────────
+    // La plataforma no muestra resultados (eso es OpenSearch Dashboards): guía
+    // la demo. Las tarjetas vienen armadas en /terraform/status (plugins_vista.py)
+    // y el número de cada una se pide al elegir el caso.
+    const _ESTADO_PLUGIN = { ok: ['Listo', 'sev--ok'], parcial: ['Parcial', 'sev--high'], falla: ['Falló', 'sev--critical'],
+                             en_curso: ['En curso', 'sev--low'], excluido: ['Excluido', ''] };
+    const _nPlugins = (tarjetas) => (Array.isArray(tarjetas) ? tarjetas : []).filter(t => t.estado !== 'excluido').length;
+    function pluginsHTML(plugins) {
+      const casos = Object.keys(plugins || {}).filter(s => s !== '_cluster' && _nPlugins(plugins[s]));
+      if (!casos.length) return '';
+      const items = casos.map(s => [s, SLUG_LABELS[s] || s, _nPlugins(plugins[s])]);
+      if (_nPlugins(plugins._cluster)) items.push(['_cluster', 'Todo el cluster', _nPlugins(plugins._cluster)]);
+      return `<div class="section-card" id="infra-plugins">
+          <div class="section-card__head">
+            <span class="section-card__tile">${icon('layers')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Plugins</span>
+              <span class="section-card__hint">Lo que quedó en el cluster, caso por caso: qué se configuró con sus datos, si quedó bien y el link directo a OpenSearch Dashboards.</span>
+            </span>
+          </div>
+          <div class="maestro">
+            <div class="maestro__lista" role="group" aria-label="Caso">${items.map(([slug, nombre, n]) =>
+              `<button type="button" class="maestro__item plug__caso" data-slug="${escapeHtml(slug)}">`
+              + `<span>${escapeHtml(nombre)}</span><span class="maestro__n">${n}</span></button>`).join('')}</div>
+            <div class="maestro__detalle" id="infra-plugins-detalle"><div class="hallazgos__vacio">Elegí un caso para ver sus plugins.</div></div>
+          </div>
+        </div>`;
+    }
+    function pluginsDetalleHTML(tarjetas) {
+      if (!(tarjetas || []).length) return '<div class="hallazgos__vacio">Este caso no tiene plugins provisionados.</div>';
+      const ir = (url) => url
+        ? `<a class="plug__ir" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Ver en Dashboards" aria-label="Ver en Dashboards">${icon('arrow-right')}</a>` : '';
+      return `<div class="plug-grid">${tarjetas.map(t => {
+        const [texto, clase] = _ESTADO_PLUGIN[t.estado] || [t.estado, ''];
+        const filas = (t.filas || []).map(f => `<li class="plug__fila"><span class="plug__fila-texto">${escapeHtml(f.texto)}</span>`
+          + `<span class="sev ${(_ESTADO_PLUGIN[f.estado] || [])[1] || ''}">${escapeHtml(f.detalle)}</span>`
+          + (f.numero ? `<span class="plug__numero" data-numero="${escapeHtml(f.numero)}" data-estado="${escapeHtml(f.estado || '')}"></span>` : '')
+          + `${ir(f.url)}</li>`).join('');
+        const links = (t.links || []).map(l =>
+          `<a class="btn btn-secondary btn-sm" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${icon('dashboard')} ${escapeHtml(l.texto)}</a>`).join('');
+        return `<article class="plug${t.estado === 'excluido' ? ' plug--excluido' : ''}" data-plugin="${escapeHtml(t.plugin)}">`
+          + `<div class="plug__head"><strong>${escapeHtml(t.titulo)}</strong><span class="sev ${clase}">${escapeHtml(texto)}</span></div>`
+          + (t.que ? `<p class="plug__que">${escapeHtml(t.que)}</p>` : '')
+          + (t.motivo ? `<p class="plug__motivo">${escapeHtml(t.motivo)}</p>` : '')
+          + (filas ? `<ul class="plug__filas">${filas}</ul>` : '')
+          + (t.numero ? `<div class="plug__numero" data-numero="${escapeHtml(t.numero)}"></div>` : '')
+          + (links ? `<div class="plug__links">${links}</div>` : '')
+          + `</article>`;
+      }).join('')}</div>`;
+    }
+    const _fmtN = (v) => Number(v).toLocaleString('es-AR');
+    // El número clave de cada plugin (lo que devuelve /api/v1/plugins/numeros).
+    // `estado`: el de la fila; si no quedó bien, ya dice por qué y no se repite.
+    function numeroDePlugin(clave, n, slug, estado) {
+      if (!n) return '';
+      if (clave.startsWith('forecast:')) {
+        if (n.error_pct === null || n.error_pct === undefined) return n.error && (estado || 'ok') === 'ok' ? `<span>${escapeHtml(n.error)}</span>` : '';
+        const sev = n.error_pct <= 20 ? 'sev--ok' : n.error_pct <= 40 ? 'sev--high' : 'sev--critical';
+        return `<span class="sev ${sev}">error medio ${_fmtPron(n.error_pct)} %</span>`;
+      }
+      if (clave === 'anomalias') {
+        if (n.error) return `<span>No se pudieron leer: ${escapeHtml(n.error)}</span>`;
+        if (!n.total) {
+          const corriendo = 'el análisis histórico sigue corriendo';
+          const estado = { FINISHED: 'el análisis terminó y no encontró ninguna', FAILED: 'el análisis histórico falló',
+                           INIT_FAILURE: 'el análisis histórico falló', STOPPED: 'el análisis histórico está detenido',
+                           RUNNING: corriendo, INIT: corriendo, CREATED: corriendo }[n.estado]
+            || 'no se pudo leer el estado del análisis';
+          return `<span>Sin anomalías: ${estado}.</span>`;
+        }
+        const a = n.top || {};
+        const grado = Math.round((a.grado || 0) * 100);
+        const valores = (a.valores || []).map(v => `${v.nombre}: ${typeof v.valor === 'number' ? v.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : v.valor}`).join(' · ');
+        return `<span><strong>${_fmtN(n.total)}</strong> anomalía${n.total === 1 ? '' : 's'} · la más fuerte, grado ${grado} %, el ${escapeHtml(a.inicio || '')}</span>`
+          + (a.inicio ? `<button type="button" class="btn btn-secondary btn-sm anomalia__explicar" data-slug="${escapeHtml(slug)}" `
+            + `data-inicio="${escapeHtml(a.inicio)}" data-fin="${escapeHtml(a.fin || '')}" data-grado="${grado}" `
+            + `data-valores="${escapeHtml(valores)}">${icon('spark')} Explicarla con IA</button>` : '');
+      }
+      if (clave.startsWith('seguridad:')) {
+        return n.eventos === null || n.eventos === undefined ? '' : `<span><strong>${_fmtN(n.eventos)}</strong> evento${n.eventos === 1 ? '' : 's'} detectado${n.eventos === 1 ? '' : 's'}</span>`;
+      }
+      if (clave === 'perfil') {
+        return n.entidades === null || n.entidades === undefined ? '<span>El Transform todavía no escribió el perfil.</span>'
+          : `<span><strong>${_fmtN(n.entidades)}</strong> fila${n.entidades === 1 ? '' : 's'} en el perfil</span>`;
+      }
+      if (clave === 'insights') {
+        if (n.latencia_ms === null || n.latencia_ms === undefined) return `<span>${n.error ? 'No se pudo leer: ' + escapeHtml(n.error) : 'Sin consultas en las últimas 24 h.'}</span>`;
+        return `<span>La consulta más lenta de las últimas 24 h: <strong>${_fmtN(n.latencia_ms)} ms</strong></span>`;
+      }
+      return '';
+    }
+    function aplicarNumerosDePlugins(destino, numeros, slug) {
+      destino.querySelectorAll('[data-numero]').forEach(el => {
+        el.innerHTML = numeroDePlugin(el.dataset.numero, (numeros || {})[el.dataset.numero], slug, el.dataset.estado);
+      });
+    }
+    async function verPlugins(btn) {
+      const destino = document.getElementById('infra-plugins-detalle');
+      if (!destino) return;
+      const slug = btn.dataset.slug;
+      state.pluginsCaso = slug;
+      document.querySelectorAll('.plug__caso').forEach(b => b.classList.toggle('is-active', b === btn));
+      destino.className = 'maestro__detalle';
+      destino.innerHTML = pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug]);
+      if (!destino.querySelector('[data-numero]')) return;
+      destino.querySelectorAll('[data-numero]').forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
+      let numeros = {};
+      try {
+        const res = await fetch('/api/v1/plugins/numeros' + (slug === '_cluster' ? '' : '?slug=' + encodeURIComponent(slug)));
+        if (res.ok) numeros = await res.json();
+      } catch (_err) { /* sin números: las tarjetas igual sirven */ }
+      // Si mientras tanto se eligió otro caso, esto ya no va.
+      if (!btn.classList.contains('is-active')) return;
+      aplicarNumerosDePlugins(destino, numeros, slug);
+    }
     // Anomaly Detection: qué casos tienen detector (del registro, sin tocar el
     // cluster). Las anomalías se piden a demanda.
     function anomaliasHTML(capabilities) {
@@ -8455,6 +8587,9 @@
     // Lo que carga cada pestaña al abrirla (una vez por render): el botón que
     // la actualiza o la primera opción.
     const _CARGA_DE_SECCION = {
+      // El caso que se estaba mirando (un refresco re-pinta la vista) o el primero.
+      plugins: [(panel) => (state.pluginsCaso && [...panel.querySelectorAll('.plug__caso')]
+        .find(b => b.dataset.slug === state.pluginsCaso)) || panel.querySelector('.plug__caso')],
       seguridad: ['#infra-seguridad-ver', '#infra-campanas-ver'],
       anomalias: ['#infra-anomalias-ver'],
       pronosticos: ['.pron__caso'],
@@ -8466,7 +8601,7 @@
       const panel = id && raiz.querySelector(`[data-infra-panel="${id}"]`);
       if (!panel || panel.dataset.cargada) return;
       panel.dataset.cargada = '1';
-      for (const sel of _CARGA_DE_SECCION[id] || []) panel.querySelector(sel)?.click();
+      for (const sel of _CARGA_DE_SECCION[id] || []) (typeof sel === 'function' ? sel(panel) : panel.querySelector(sel))?.click();
     }
     function elegirSeccionInfra(raiz, id) {
       raiz.querySelectorAll('[data-infra-tab]').forEach(t => {
@@ -8658,6 +8793,7 @@
       const nAnomalias = Object.values(caps).filter(ids => ids && ids.detector_id).length;
       const nPronosticos = Object.values(caps).reduce((t, ids) => t + _forecastersDe(ids).length, 0);
       const nPerfiles = pipelines.filter(p => p.perfil).length;
+      const nPlugins = Object.values(data.plugins || {}).reduce((t, ts) => t + _nPlugins(ts), 0);
       const kpi = (ir, etiqueta, valor, sub, extra = '') => `
         <div class="env-kpi${ir ? ' is-link' : ''}"${ir ? ` data-ir="${ir}" role="button" tabindex="0"` : ''}>
           <span class="env-kpi__lbl">${etiqueta}</span>
@@ -8770,6 +8906,7 @@
               <div class="pipe-list">${pipeRows}</div>
             </div>
             ${accesosHTML(pipelines)}` },
+          { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: nPlugins, html: pluginsHTML(data.plugins) },
           { id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
           { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', cuenta: nAnomalias, html: anomaliasHTML(data.capabilities) },
           { id: 'pronosticos', label: 'Forecasting', icon: 'trending', cuenta: nPronosticos, html: pronosticosHTML(data.capabilities) },
@@ -8801,7 +8938,6 @@
         const k = e.target.closest('.env-kpi[data-ir]');
         if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irASeccion(k.dataset.ir); }
       });
-      cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);
 
       // Security Analytics: los hallazgos a demanda, y "Explicar" cada uno.
       body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));
@@ -8853,6 +8989,13 @@
         const b = e.target.closest('.pron__caso');
         if (b) verPronosticos(b);
       });
+      // Plugins: por caso, las tarjetas y su número; "Explicarla con IA" va al asistente.
+      body.querySelector('#infra-plugins')?.addEventListener('click', (e) => {
+        const caso = e.target.closest('.plug__caso');
+        if (caso) return verPlugins(caso);
+        const explicar = e.target.closest('.anomalia__explicar');
+        if (explicar) explicarAnomalia(explicar);
+      });
       // Anomaly Detection: igual, a demanda y con "Explicar".
       body.querySelector('#infra-anomalias-ver')?.addEventListener('click', (e) => verAnomalias(e.currentTarget));
       body.querySelector('#infra-anomalias-detalle')?.addEventListener('click', (e) => {
@@ -8883,6 +9026,9 @@
       // Contador en vivo (el span #infra-age recién existe ahora).
       startActiveEnvTicker(data.deployed_seconds_ago || 0);
 
+      // La pestaña activa se carga recién con los clicks ya enganchados: antes
+      // el "click" al primer caso se perdía y la pestaña quedaba vacía.
+      cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);
       // Reconectar a un deploy/ingesta en curso (cola de jobs): sobrevive refresh.
       _reconnectDeployJob();
 
@@ -9011,7 +9157,27 @@
       window.fetch = async (url, opts = {}) => {
         const u = String(url);
         const metodo = (opts.method || 'GET').toUpperCase();
-        if (u.includes('/api/v1/terraform/status')) return json(estado);
+        if (u.includes('/api/v1/terraform/status')) {
+          if (!estado.plugins && Object.keys(estado.capabilities || {}).length) {
+            try {
+              const r = await real('/api/v1/dev/plugins-preview?slugs=' + encodeURIComponent(slugs.join(',')));
+              estado.plugins = r.ok ? await r.json() : {};
+            } catch (_err) { estado.plugins = {}; }
+          }
+          return json(estado);
+        }
+        if (u.includes('/api/v1/plugins/numeros')) {
+          await espera(500);
+          const slug = new URL(u, location.href).searchParams.get('slug') || '';
+          if (!slug) return json({ insights: { latencia_ms: 1840, n: 10, error: '' } });
+          const fuera = { anomalias: { total: 37, estado: 'FINISHED', error: '', top: { inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00',
+                          grado: 0.93, valores: [{ nombre: 'eventos', valor: 1840 }] } }, perfil: { entidades: 412 } };
+          ((estado.plugins || {})[slug] || []).forEach(t => (t.filas || []).forEach((f, i) => {
+            if (f.numero.startsWith('forecast:')) fuera[f.numero] = i === 0 ? { error_pct: null, error: 'backtest parcial: 360 de 600 pasos' } : { error_pct: [0, 6.4, 27.9][i] || 12, error: '' };
+            if (f.numero.startsWith('seguridad:')) fuera[f.numero] = { eventos: 1842 - i * 400 };
+          }));
+          return json(fuera);
+        }
         // Una sesión de ejemplo, para ver la cuenta arriba como en el hosteado.
         if (u.includes('/auth/me')) return json({ auth: true, logged_in: true, email: 'demo@vista-previa.com', is_admin: false });
         if (u.includes('/auth/logout')) return json({ ok: true });

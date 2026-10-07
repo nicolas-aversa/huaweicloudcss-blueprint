@@ -42,3 +42,11 @@ def _settings_aislados(tmp_path, monkeypatch):
     monkeypatch.setattr(_main, "_ESPERA_CLUSTER_MAX_S", 0.0)
     # Sin cluster de verdad: la cola de búsquedas no se mide (se sigue de largo).
     monkeypatch.setattr(_main, "_cola_de_busquedas", lambda *a, **k: None)
+    # El estado de cada plugin (vista Plugins): un test del endpoint de
+    # provisión lo escribía en `terraform/` del repo, la carpeta que lee la app
+    # local. Ahí va a la carpeta del test; en cualquier otra, donde dijo.
+    import pathlib
+    repo_tf = (pathlib.Path(_main.__file__).parent / "terraform").resolve()
+    guardar = _main._guardar_estados
+    monkeypatch.setattr(_main, "_guardar_estados", lambda td, slug, nuevo: guardar(
+        tmp_path if pathlib.Path(td).resolve() == repo_tf else td, slug, nuevo))

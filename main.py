@@ -121,6 +121,7 @@ import audit  # noqa: E402
 import custom_cases  # noqa: E402
 # Historial persistido de ejecuciones (vista Actividad + cola de jobs del deploy).
 import runs  # noqa: E402
+import plugins_vista  # noqa: E402
 
 import tfstate  # noqa: E402  (lectura del state de Terraform, local o en OBS)
 # Lectura del .conf de Logstash sin regex (bloques, settings, máscara de strings).
@@ -2293,6 +2294,9 @@ class TerraformStatusResponse(BaseModel):
     # Lo provisionado en Security Analytics, por caso: detectores (con su tipo
     # de log), cuántas reglas y correlaciones. Sin tocar el cluster.
     security_analytics: dict = Field(default_factory=dict)
+    # La vista Plugins: por caso (y `_cluster`), las tarjetas de lo que quedó en
+    # el cluster con su link a Dashboards (ver plugins_vista.py).
+    plugins: dict = Field(default_factory=dict)
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -3953,6 +3957,41 @@ def deploy_preview(paso: float = 0.2):
                              media_type="text/event-stream")
 
 
+@app.get("/api/v1/dev/plugins-preview", tags=["dev"],
+         summary="Vista previa de la vista Plugins (casos de demo, sin cluster)")
+def plugins_preview(slugs: str = "") -> dict:
+    """Las tarjetas de la vista Plugins para los casos de demo pedidos, con IDs
+    de ejemplo: las arma el mismo código que /terraform/status (para
+    `?preview=entorno`). Un backtest parcial, para ver cómo se muestra."""
+    base = "https://example.invalid"
+    specs_sa = verticals.security_specs()
+    fuera: dict = {}
+    for slug in [s for s in slugs.split(",") if s]:
+        if verticals.get_vertical(slug) is None:
+            continue
+        spec = _caps_spec_de(slug)
+        fcs = [f"{slug}-fc{i}" for i in range(len(spec.get("forecasts") or []))]
+        ids = {"agent_id": "vista-previa", "forecaster_ids": fcs, "detector_id": f"{slug}-ad", "monitor_id": f"{slug}-alerta"}
+        sa = specs_sa.get(slug) or {}
+        sa_reg = {"detectores": {f"{slug}-{lt['nombre']}": {"id": f"{slug}-{lt['nombre']}", "log_type": lt["nombre"]}
+                                 for lt in sa.get("log_types") or []},
+                  "reglas": {r["titulo"]: "x" for lt in sa.get("log_types") or [] for r in lt.get("reglas") or []},
+                  "correlaciones": {c["nombre"]: "x" for c in sa.get("correlaciones") or []}}
+        estados = {"forecasting": {"ok": True, "motivo": "", "ventana": {"interval_min": 30},
+                                   "forecasters": [{"id": f, "estado": "parcial: 360 de 600 pasos" if i == 0 else "TEST_COMPLETE"}
+                                                   for i, f in enumerate(fcs)]},
+                   "anomalias": {"ok": True, "motivo": "", "intervalo_min": 30}, "alertas": {"ok": True, "motivo": ""},
+                   "perfil": {"ok": True, "motivo": ""}, "analista": {"ok": True, "motivo": ""}}
+        entry = {"dashboards_imported": True, "dashboard_id": f"{slug}-dashboard"}
+        fuera[slug] = plugins_vista.tarjetas_del_caso(
+            slug, entry=entry, ids=ids, spec=spec, perfil=_perfil_de(slug, entry), enmascarados=_enmascarados_de(slug, entry),
+            seguridad_reg=sa_reg if sa else {}, seguridad_spec=sa, estados=estados, analista_creado=True, base=base,
+            fields=(verticals.get_vertical(slug) or {}).get("fields") or [])
+    if fuera:
+        fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(agente=True, text2viz={"ok": True}, base=base)
+    return fuera
+
+
 # ── Cola de jobs de deploy (reconectable) ────────────────────────────────────
 # El deploy/ingesta corre en un thread de background y sobrevive que el browser se
 # cierre o refresque: el cliente reengancha por `job_id` al stream, que reproduce
@@ -4799,10 +4838,40 @@ def _write_cluster_features(terraform_dir: Path, feats: dict) -> None:
 
 
 def _remove_capabilities(terraform_dir: Path) -> None:
+    for nombre in (_CAPABILITIES_REGISTRY_NAME, _ESTADOS_NAME):
+        try:
+            (terraform_dir / nombre).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+# Cómo quedó cada plugin en la última provisión, por caso (y `_cluster` para lo
+# que es de todo el cluster): lo muestra la vista Plugins. Antes solo vivía en
+# la respuesta de "Provisionar plugins" y en Actividad, sin el detalle de los
+# backtests.
+_ESTADOS_NAME = ".estado_plugins.json"
+
+
+def _read_estados(terraform_dir: Path) -> dict:
     try:
-        (terraform_dir / _CAPABILITIES_REGISTRY_NAME).unlink(missing_ok=True)
-    except OSError:
-        pass
+        data = json.loads((terraform_dir / _ESTADOS_NAME).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _guardar_estados(terraform_dir: Path, slug: str, nuevo: dict) -> None:
+    import plugins_vista as pv
+
+    nuevo = {k: v for k, v in (nuevo or {}).items() if v}
+    if not nuevo:
+        return
+    todo = _read_estados(terraform_dir)
+    todo[slug] = pv.mezclar(todo.get(slug) or {}, nuevo)
+    try:
+        (terraform_dir / _ESTADOS_NAME).write_text(json.dumps(todo, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        print(f"[plugins] no se pudo guardar el estado: {exc!r}")
 
 
 def _stored_opensearch_password(terraform_dir: Path) -> str:
@@ -5454,6 +5523,25 @@ def _import_dashboards(
     if ndjson_content is None:
         print(f"[dashboards] '{slug}' sin spec, sin disco y sin campos — skip import")
         return False
+    from dashboards import con_panel_de_perfil, id_del_dashboard
+    dashboard_id = id_del_dashboard(ndjson_content)
+    # El perfil por entidad, como una tabla más del dashboard: se mira en
+    # Dashboards, no en una vista propia de la plataforma.
+    if terraform_dir:
+        try:
+            ndjson_content = con_panel_de_perfil(
+                ndjson_content, slug, _perfil_de(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
+        except Exception as exc:  # noqa: BLE001 — el dashboard va igual, sin la tabla
+            print(f"[dashboards] '{slug}': sin el panel del perfil ({exc!r})")
+
+    def importado() -> bool:
+        # El id del dashboard, para que la vista Plugins lleve directo a él.
+        if terraform_dir and dashboard_id:
+            registry = _read_pipelines_registry(terraform_dir)
+            if slug in registry:
+                registry[slug]["dashboard_id"] = dashboard_id
+                _write_pipelines_registry(terraform_dir, registry)
+        return True
 
     user = "admin"
     proto = "https" if https_enabled else "http"
@@ -5485,7 +5573,7 @@ def _import_dashboards(
         if os_endpoint and _import_dashboards_via_opensearch(
             ndjson_content, slug, os_endpoint, password, https_enabled, user
         ):
-            return True
+            return importado()
         # 2) Fallback: API saved_objects de Kibana (si hay un endpoint Kibana
         #    alcanzable, ej. kibana_public_access). Raíz y basePath /_dashboards.
         if kibana:
@@ -5501,7 +5589,7 @@ def _import_dashboards(
                     )
                     if resp.status_code == 200:
                         print(f"[dashboards] import exitoso para '{slug}' via {url}")
-                        return True
+                        return importado()
                     print(f"[dashboards] '{slug}' status {resp.status_code} via {url}: {resp.text[:200]}")
                 except requests.exceptions.RequestException as exc:
                     print(f"[dashboards] error import '{slug}' via {url}: {exc!r}")
@@ -6542,6 +6630,7 @@ def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_ena
     runs.step(run, "Asistente", True, f"un agente para {fuentes} caso{'s' if fuentes != 1 else ''}")
     if t2v:
         runs.step(run, "text2viz", bool(t2v.get("ok")), str(t2v.get("reason") or t2v.get("note") or "")[:300])
+        _guardar_estados(terraform_dir, "_cluster", {"text2viz": plugins_vista.estado_simple(t2v)})
     for s in pendientes:
         conv = caps_result[s]["conversational"]
         conv.pop("agente_pendiente", None)
@@ -7217,6 +7306,63 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
               if ancla - paso * pr.PASOS_DE_CONTEXTO <= int(r.get("data_end_time") or 0) <= ancla + paso * n]
     horizonte = buscar([{"term": {"data_end_time": ancla}}, {"exists": {"field": "horizon_index"}}], "asc", 50)
     return {**fuera, **pr.serie(reales, horizonte, ancla, paso)}
+
+
+@app.get("/api/v1/plugins/numeros", tags=["capabilities"])
+def numeros_de_plugins(slug: str = "") -> dict:
+    """El número clave de cada plugin de un caso, en vivo (o de todo el cluster,
+    sin `slug`): el error de cada pronóstico, cuántas anomalías y la más fuerte
+    (para "Explicar"), los eventos de cada detector de seguridad, cuántas
+    entidades tiene el perfil y la consulta más lenta. Lo pide la vista Plugins
+    al elegir un caso; si una pieza falla, las demás igual llegan."""
+    import insights
+    import perfiles
+
+    terraform_dir = _active_terraform_dir()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "plugins", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    fuera: dict = {}
+    if not slug:
+        desde, hasta = insights.ventana(datetime.now(timezone.utc))
+        r = _os_req("GET", f"{base}/_insights/top_queries?type=latency&from={desde}&to={hasta}", user, password,
+                    timeout=60)
+        try:
+            top = insights.consultas((r.json() or {}).get("top_queries") or [], "latency") if _resp_ok(r) else []
+        except ValueError:
+            top = []
+        fuera["insights"] = {"latencia_ms": top[0].get("latencia_ms") if top else None,
+                             "n": len(top), "error": "" if _resp_ok(r) else _resp_motivo(r)}
+        return fuera
+    ids = _read_capabilities(terraform_dir).get(slug) or {}
+    for fc_id in ids.get("forecaster_ids") or ([ids["forecaster_id"]] if ids.get("forecaster_id") else []):
+        try:
+            p = _pronostico_de(base, user, password, fc_id)
+            fuera[f"forecast:{fc_id}"] = {"error_pct": p.get("error_pct"), "error": p.get("error", "")}
+        except Exception as exc:  # noqa: BLE001
+            fuera[f"forecast:{fc_id}"] = {"error_pct": None, "error": repr(exc)[:200]}
+    if ids.get("detector_id"):
+        total, top, error = _top_anomalias(base, user, password, ids["detector_id"], 1)
+        fuera["anomalias"] = {"total": total, "top": top[0] if top else None, "error": error,
+                              "estado": _estado_historico(base, user, password, ids["detector_id"], intentos=1)}
+    reg = _read_security(terraform_dir).get(slug) or {}
+    if reg.get("detectores"):
+        spec_sa = _specs_de_seguridad(terraform_dir).get(slug) or {}
+        patron = (_caps_spec_de(slug) or {}).get("index_pattern") or f"{slug}-*"
+        for nombre, d in reg["detectores"].items():
+            fuera[f"seguridad:{nombre}"] = {"eventos": _eventos_detectados(base, user, password, patron, spec_sa,
+                                                                           d.get("log_type", ""))}
+    entry = _read_pipelines_registry(terraform_dir).get(slug) or {}
+    if _perfil_de(slug, entry):
+        r = _os_req("GET", f"{base}/{perfiles.indice_destino(slug)}/_count", user, password, timeout=20)
+        try:
+            fuera["perfil"] = {"entidades": int(r.json()["count"]) if _resp_ok(r) else None}
+        except (ValueError, KeyError, TypeError):
+            fuera["perfil"] = {"entidades": None}
+    return fuera
 
 
 @app.get("/api/v1/forecast/{slug}", response_model=PronosticosResponse, tags=["capabilities"])
@@ -7980,7 +8126,11 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
                 _os_req("POST", f"{os_base}/.kibana/_update/{cfg_id}", os_user,
                         request.opensearch_password,
                         json_body={"doc": {"config": {"timepicker:timeDefaults":
-                            f'{{"from":"{t_from}","to":"{t_to}","mode":"absolute"}}'}}},
+                            f'{{"from":"{t_from}","to":"{t_to}","mode":"absolute"}}',
+                            # La tabla del perfil (índice `perfil-<slug>`) comparte el
+                            # dashboard con los controles: un filtro sobre un campo que
+                            # ese índice no tiene la dejaba vacía.
+                            "courier:ignoreFilterIfFieldNotInIndex": True}}},
                         timeout=15)
                 print(f"[apply-schema] timepicker global → {t_from} .. {t_to}")
         except Exception as exc:  # noqa: BLE001
@@ -8155,6 +8305,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             )
             if caps_result[slug]:
                 any_ok = True
+            _guardar_estados(terraform_dir, slug, plugins_vista.estados_desde_resultado(caps_result[slug] or {}))
             for cap_name, cap in (caps_result[slug] or {}).items():
                 if isinstance(cap, dict) and "ok" in cap:
                     runs.step(run, f"{cap_name} · {slug}", cap.get("ok"),
@@ -8180,6 +8331,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         except Exception as exc:  # noqa: BLE001 — pieza de demo, no frena el paso
             res = {"ok": False, "reason": repr(exc)}
         runs.step(run, f"Perfil por entidad · {slug}", res["ok"], res["reason"][:300])
+        _guardar_estados(terraform_dir, slug, {"perfil": plugins_vista.estado_simple(res)})
     for slug in slugs:
         enmascarados = _enmascarados_de(slug, pipe_reg.get(slug) or {})
         if not enmascarados:
@@ -8191,6 +8343,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         except Exception as exc:  # noqa: BLE001 — es una pieza de demo, no frena el paso
             res = {"ok": False, "reason": repr(exc)}
         runs.step(run, f"Analista con datos enmascarados · {slug}", res["ok"], res["reason"][:300])
+        _guardar_estados(terraform_dir, slug, {"analista": plugins_vista.estado_simple(res)})
     try:
         _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
                                     list(slugs), terraform_dir, run)
@@ -9265,8 +9418,41 @@ def terraform_status() -> TerraformStatusResponse:
         capabilities=_read_capabilities(terraform_dir),
         cluster_features=_read_cluster_features(terraform_dir) or None,
         security_analytics=_resumen_de_seguridad(terraform_dir),
+        plugins=_plugins_de_la_vista(terraform_dir, registry, dashboards_url),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
+
+
+def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: str) -> dict:
+    """Las tarjetas de la vista Plugins, sin tocar el cluster. Una falla acá no
+    puede tirar /terraform/status: la vista queda vacía y se dice en el log."""
+    try:
+        base = plugins_vista.base_de_dashboards(dashboards_url)
+        caps_reg = _read_capabilities(terraform_dir)
+        estados = _read_estados(terraform_dir)
+        seguridad_reg = _read_security(terraform_dir)
+        seguridad_specs = _specs_de_seguridad(terraform_dir)
+        analistas = _read_analistas(terraform_dir)
+        fuera: dict = {}
+        for slug, entry in registry.items():
+            ids = caps_reg.get(slug) or {}
+            spec = _resolve_capability_spec(slug, terraform_dir=terraform_dir) if (ids or estados.get(slug)) else {}
+            tarjetas = plugins_vista.tarjetas_del_caso(
+                slug, entry=entry or {}, ids=ids, spec=spec, perfil=_perfil_de(slug, entry or {}),
+                enmascarados=_enmascarados_de(slug, entry or {}), seguridad_reg=seguridad_reg.get(slug) or {},
+                seguridad_spec=seguridad_specs.get(slug) or {}, estados=estados.get(slug) or {},
+                analista_creado=slug in analistas, base=base,
+                fields=(entry or {}).get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or [])
+            if tarjetas:
+                fuera[slug] = tarjetas
+        if fuera:
+            fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(
+                agente=any((ids or {}).get("agent_id") for ids in caps_reg.values()),
+                text2viz=(estados.get("_cluster") or {}).get("text2viz") or {}, base=base)
+        return fuera
+    except Exception as exc:  # noqa: BLE001
+        print(f"[plugins] la vista no se pudo armar: {exc!r}")
+        return {}
 
 
 @app.get("/api/v1/pipelines/health", tags=["terraform"],

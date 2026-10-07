@@ -45,6 +45,7 @@ terraform/.index_template.json
 terraform/.capabilities.json
 terraform/.cluster_features.json
 terraform/.security_analytics.json
+terraform/.estado_plugins.json
 # Usuarios de demo con su contraseña (analista con datos enmascarados).
 terraform/.analistas.json
 # Backend remoto del state (OBS): lo genera tfstate.prepare() por workspace y

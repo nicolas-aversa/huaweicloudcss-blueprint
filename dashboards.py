@@ -875,6 +875,70 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
     }
 
 
+def con_panel_de_perfil(ndjson: str, slug: str, perfil: "dict | None") -> str:
+    """El dashboard del caso con una tabla más: su perfil por entidad (el
+    índice `perfil-<slug>` que escribe el Transform), una fila por entidad y
+    una columna por medida, ordenada por la primera. Sirve sobre cualquier
+    NDJSON (también el de disco) y no lo duplica si ya lo tiene.
+
+    El índice no tiene fecha: su index pattern va sin `timeFieldName`, así el
+    rango del dashboard no lo vacía. Hasta que el Transform corre, la tabla
+    queda vacía (el dashboard se importa antes de "Provisionar plugins")."""
+    import perfiles
+
+    if not perfil or not perfil.get("medidas"):
+        return ndjson
+    objetos = []
+    for linea in (ndjson or "").splitlines():
+        try:
+            objetos.append(json.loads(linea))
+        except ValueError:
+            continue
+    tablero = next((o for o in objetos if isinstance(o, dict) and o.get("type") == "dashboard"), None)
+    vis_id = _stable_id(slug, "vis", "perfil por entidad")
+    if tablero is None or any(o.get("id") == vis_id for o in objetos):
+        return ndjson
+    ip_id = perfiles.indice_destino(slug)
+    fechas = set(perfil.get("fechas") or [])
+    nombres = perfil.get("nombres") or {}
+    medidas = list(perfil["medidas"])
+    patron = _index_pattern_obj(slug, [("entidad", "keyword")] + [(m, "date" if m in fechas else "double") for m in medidas],
+                                ip_id)
+    patron["attributes"].pop("timeFieldName", None)
+    etiqueta = perfil.get("etiqueta") or perfil.get("campo") or "Entidad"
+    aggs = [_metric_agg("max", m, nombres.get(m, m), str(i + 1)) for i, m in enumerate(medidas)]
+    filas = _terms_agg(str(len(medidas) + 1), "entidad", "bucket", 15)
+    filas["params"]["orderBy"] = str(medidas.index(perfiles.orden_del_perfil(perfil)) + 1)
+    filas["params"]["customLabel"] = etiqueta
+    titulo = f"Perfil por {etiqueta}"
+    tabla = {"title": titulo, "type": "table", "aggs": aggs + [filas],
+             "params": {"perPage": 15, "showPartialRows": False, "showMetricsAtAllLevels": False,
+                        "showTotal": False, "totalFunc": "sum", "percentageCol": ""}}
+    paneles = json.loads(tablero["attributes"].get("panelsJSON") or "[]")
+    abajo = max((p["gridData"]["y"] + p["gridData"]["h"] for p in paneles if p.get("gridData")), default=0)
+    i = len(paneles)
+    paneles.append({"version": "7.10.0", "gridData": {"x": 0, "y": abajo, "w": 48, "h": 15, "i": str(i)},
+                    "panelIndex": str(i), "embeddableConfig": {}, "panelRefName": f"panel_{i}"})
+    tablero["attributes"]["panelsJSON"] = json.dumps(paneles)
+    tablero["references"] = list(tablero.get("references") or []) + [
+        {"name": f"panel_{i}", "type": "visualization", "id": vis_id}]
+    otros = [o for o in objetos if o is not tablero]
+    return "\n".join(json.dumps(o) for o in otros + [patron, _viz_obj(slug, vis_id, titulo, tabla, ip_id, True), tablero])
+
+
+def id_del_dashboard(ndjson: str) -> str:
+    """El id del dashboard de un NDJSON (para el link directo desde la
+    plataforma), o "" si no trae uno."""
+    for linea in (ndjson or "").splitlines():
+        try:
+            obj = json.loads(linea)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "dashboard" and obj.get("id"):
+            return str(obj["id"])
+    return ""
+
+
 def build_ndjson_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) -> str:
     """Genera el NDJSON de un dashboard AUTO-derivado de los campos detectados (custom).
 
