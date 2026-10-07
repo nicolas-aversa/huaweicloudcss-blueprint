@@ -7181,46 +7181,6 @@ def _resumen_de_seguridad(terraform_dir: Path) -> dict:
             if reg.get("detectores")}
 
 
-_SEVERIDAD_DE_ALERTA = {"1": "critical", "2": "high", "3": "medium", "4": "low", "5": "low"}
-
-
-def _hallazgo(f: dict, regla_por_id: dict) -> dict:
-    """Un hallazgo para la vista: qué regla, qué severidad, cuándo y desde qué
-    IP. El documento viene como JSON en `document_list`."""
-    reglas = [regla_por_id.get((q or {}).get("id"), {}) for q in f.get("queries") or []]
-    regla = next((r for r in reglas if r), {})
-    doc: dict = {}
-    for d in f.get("document_list") or []:
-        crudo = (d or {}).get("document")
-        try:
-            doc = json.loads(crudo) if isinstance(crudo, str) else (crudo or {})
-        except ValueError:
-            doc = {}
-        if doc:
-            break
-    ip = ((doc.get("source") or {}).get("ip") if isinstance(doc.get("source"), dict) else None) \
-        or doc.get("source.ip") or doc.get("srcip") or ""
-    hora = doc.get("@timestamp") or f.get("timestamp") or ""
-    return {"regla": regla.get("titulo") or ((f.get("queries") or [{}])[0] or {}).get("name", ""),
-            "nivel": regla.get("nivel", ""), "hora": hora, "hora_ppl": _hora_utc_ppl(hora),
-            "ip": str(ip), "indice": f.get("index", "")}
-
-
-def _hora_utc_ppl(valor) -> str:
-    """La hora del evento como la guarda @timestamp: UTC, 'YYYY-MM-DD HH:mm:ss'.
-    Es lo que va al asistente en "Explicar": la vista la muestra en hora local
-    y sin año ("28/2, 09:26"), y el modelo filtraba otra hora y otro año."""
-    if isinstance(valor, (int, float)) or (isinstance(valor, str) and valor.isdigit()):
-        return _fecha_ppl(valor)
-    try:
-        t = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
-    except ValueError:
-        return ""
-    if t.tzinfo is None:
-        t = t.replace(tzinfo=timezone.utc)
-    return t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-
 def _fecha_ppl(ms) -> str:
     """Epoch ms → 'YYYY-MM-DD HH:mm:ss' (UTC): se lee y se puede pegar en un
     filtro PPL sobre @timestamp tal cual."""
@@ -7241,15 +7201,6 @@ def _anomalia(fuente: dict) -> dict:
         "valores": [{"nombre": f.get("feature_name", ""), "valor": f.get("data")}
                     for f in fuente.get("feature_data") or []],
     }
-
-
-class ResumenAnomaliasResponse(BaseModel):
-    casos: list[dict] = Field(default_factory=list)
-
-
-class PronosticosResponse(BaseModel):
-    slug: str
-    pronosticos: list[dict] = Field(default_factory=list)
 
 
 def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> dict:
@@ -7365,52 +7316,6 @@ def numeros_de_plugins(slug: str = "") -> dict:
     return fuera
 
 
-@app.get("/api/v1/forecast/{slug}", response_model=PronosticosResponse, tags=["capabilities"])
-def pronosticos_del_caso(slug: str) -> PronosticosResponse:
-    """Los pronósticos de un caso, en vivo y a demanda (pestaña Forecasting):
-    por forecaster, la serie real, el pronóstico con su banda y el error contra
-    lo que pasó. No se guarda nada."""
-    terraform_dir = _active_terraform_dir()
-    ids = _read_capabilities(terraform_dir).get(slug) or {}
-    fids = ids.get("forecaster_ids") or ([ids["forecaster_id"]] if ids.get("forecaster_id") else [])
-    if not fids:
-        return PronosticosResponse(slug=slug)
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "forecast", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    user, password = "admin", _cluster_admin_password(terraform_dir)
-    return PronosticosResponse(slug=slug, pronosticos=[_pronostico_de(base, user, password, f) for f in fids if f])
-
-
-@app.get("/api/v1/anomalias/resumen", response_model=ResumenAnomaliasResponse, tags=["capabilities"])
-def resumen_anomalias() -> ResumenAnomaliasResponse:
-    """Las anomalías más fuertes de cada detector, en vivo: el estado del
-    análisis histórico, cuántas hay y las 5 de mayor grado. A demanda ("Ver
-    anomalías"); no se guarda."""
-    terraform_dir = _active_terraform_dir()
-    con_detector = {s: ids for s, ids in _read_capabilities(terraform_dir).items() if ids.get("detector_id")}
-    if not con_detector:
-        return ResumenAnomaliasResponse()
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "anomalias", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    user, password = "admin", _cluster_admin_password(terraform_dir)
-    casos = []
-    for slug, ids in con_detector.items():
-        did = ids["detector_id"]
-        total, top, error = _top_anomalias(base, user, password, did, 5)
-        casos.append({
-            "slug": slug,
-            "estado": _estado_historico(base, user, password, did, intentos=1),
-            "total": total, "top": top, "error": error,
-        })
-    return ResumenAnomaliasResponse(casos=casos)
-
-
 def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int) -> tuple[int, list[dict], str]:
     """(total, las `n` de mayor grado, error) de los resultados de un detector."""
     r = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/results/_search", user, password,
@@ -7428,16 +7333,6 @@ def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int
     return (int(total.get("value", 0) if isinstance(total, dict) else total or 0),
             [_anomalia(h.get("_source") or {}) for h in (hits.get("hits") or [])[:n]],
             "" if _resp_ok(r) else _resp_motivo(r))
-
-
-class PerfilResponse(BaseModel):
-    slug: str
-    etiqueta: str = ""
-    estado: str = ""
-    columnas: list[str] = Field(default_factory=list)
-    fechas: list[int] = Field(default_factory=list)
-    filas: list[list] = Field(default_factory=list)
-    error: str = ""
 
 
 # ── Base de conocimiento (RAG sobre los documentos del usuario) ─────────────
@@ -7603,74 +7498,6 @@ def preguntar_a_los_documentos(request: PreguntaConocimientoRequest) -> dict:
     return salida
 
 
-@app.get("/api/v1/perfiles/{slug}", response_model=PerfilResponse, tags=["capabilities"])
-def perfil_del_caso(slug: str) -> PerfilResponse:
-    """El perfil por entidad de un caso (el índice que arma su Transform), en
-    vivo y a demanda: el estado del Transform y las entidades de mayor peso."""
-    import perfiles
-
-    terraform_dir = _active_terraform_dir()
-    perfil = _perfil_de(slug, _read_pipelines_registry(terraform_dir).get(slug) or {})
-    if not perfil:
-        return PerfilResponse(slug=slug, error="este caso no tiene perfil por entidad")
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "perfil", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    user, password = "admin", _cluster_admin_password(terraform_dir)
-    tid = perfiles.nombre_del_transform(slug)
-    ex = _os_req("GET", f"{base}/_plugins/_transform/{tid}/_explain", user, password, timeout=20)
-    try:
-        # Si el Transform no existe, `_explain` trae un texto en vez del objeto.
-        info = (ex.json() or {}).get(tid) if _resp_ok(ex) else None
-    except ValueError:
-        info = None
-    meta = (info.get("transform_metadata") or {}) if isinstance(info, dict) else {}
-    estado = str(meta.get("status") or "").lower()
-    r = _os_req("POST", f"{base}/{perfiles.indice_destino(slug)}/_search", user, password, timeout=20,
-                json_body={"size": 15, "sort": [{perfiles.orden_del_perfil(perfil): {"order": "desc"}}]})
-    if not _resp_ok(r):
-        return PerfilResponse(slug=slug, etiqueta=perfil.get("etiqueta", ""), estado=estado,
-                              error="el perfil todavía no existe: corré \"Provisionar plugins\""
-                              if getattr(r, "status_code", 0) == 404 else _resp_motivo(r))
-    tabla = perfiles.tabla_del_perfil(((r.json() or {}).get("hits") or {}).get("hits") or [], perfil)
-    return PerfilResponse(slug=slug, etiqueta=perfil.get("etiqueta", ""), estado=estado, **tabla)
-
-
-class ConsultasPesadasResponse(BaseModel):
-    tipo: str
-    consultas: list[dict] = Field(default_factory=list)
-    error: str = ""
-
-
-@app.get("/api/v1/insights/consultas", response_model=ConsultasPesadasResponse, tags=["capabilities"])
-def consultas_pesadas(tipo: str = "latency") -> ConsultasPesadasResponse:
-    """Las consultas sobre datos más pesadas de las últimas 24 h, según Query
-    Insights (ya activo en CSS 3.4): latencia, CPU o memoria. A demanda."""
-    import insights
-
-    if tipo not in insights.TIPOS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail={"stage": "insights", "message": f"tipo: {', '.join(insights.TIPOS)}"})
-    terraform_dir = _active_terraform_dir()
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "insights", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    desde, hasta = insights.ventana(datetime.now(timezone.utc))
-    r = _os_req("GET", f"{base}/_insights/top_queries?type={tipo}&from={desde}&to={hasta}", "admin",
-                _cluster_admin_password(terraform_dir), timeout=60)
-    if not _resp_ok(r):
-        return ConsultasPesadasResponse(tipo=tipo, error=_resp_motivo(r))
-    try:
-        top = (r.json() or {}).get("top_queries") or []
-    except ValueError:
-        top = []
-    return ConsultasPesadasResponse(tipo=tipo, consultas=insights.consultas(top, tipo))
-
-
 class AnalistasResponse(BaseModel):
     analistas: list[dict] = Field(default_factory=list)
 
@@ -7681,46 +7508,6 @@ def analistas() -> AnalistasResponse:
     el SA entre a Dashboards como ese analista. Solo lo que creó la plataforma."""
     registro = _read_analistas(_active_terraform_dir())
     return AnalistasResponse(analistas=[{"slug": s, **v} for s, v in sorted(registro.items())])
-
-
-class CampanasResponse(BaseModel):
-    casos: list[dict] = Field(default_factory=list)
-
-
-@app.get("/api/v1/security/campanas", response_model=CampanasResponse, tags=["capabilities"])
-def campanas_de_seguridad() -> CampanasResponse:
-    """La línea de tiempo de cada campaña de los casos de seguridad que las
-    declaran (correlaciones), desde los datos: qué pasó, en qué orden, en qué
-    fuentes y desde qué IPs. En vivo y a demanda."""
-    import seguridad
-
-    terraform_dir = _active_terraform_dir()
-    registro = _read_security(terraform_dir)
-    specs = verticals.security_specs()
-    con_campanas = [s for s in registro if (specs.get(s) or {}).get("correlaciones")]
-    if not con_campanas:
-        return CampanasResponse()
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "campanas", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    user, password = "admin", _cluster_admin_password(terraform_dir)
-    casos = []
-    for slug in con_campanas:
-        indice = ((verticals.capability_specs().get(slug) or {}).get("index_pattern")) or f"{slug}*"
-        r = _os_req("POST", f"{base}/{indice}/_search", user, password,
-                    json_body=seguridad.consulta_de_campanas(), timeout=30)
-        try:
-            lista = seguridad.campanas(r.json() or {}) if _resp_ok(r) else []
-        except ValueError:
-            lista = []
-        casos.append({"slug": slug, "campanas": lista, "error": "" if _resp_ok(r) else _resp_motivo(r)})
-    return CampanasResponse(casos=casos)
-
-
-class ResumenSeguridadResponse(BaseModel):
-    casos: list[dict] = Field(default_factory=list)
 
 
 _TOPES_DE_LOS_DETECTORES = {
@@ -7751,82 +7538,6 @@ def _eventos_detectados(base: str, user: str, password: str, patron: str, spec: 
         return int(r.json()["count"]) if _resp_ok(r) else None
     except (ValueError, KeyError, TypeError):
         return None
-
-
-def _sin_repetidos(findings: list[dict], n: int) -> list[dict]:
-    """Los primeros `n` hallazgos de eventos distintos (el mismo evento puede
-    venir repetido, ver `_eventos_detectados`)."""
-    vistos, fuera = set(), []
-    for i, f in enumerate(findings):
-        ids = [x for x in (f.get("related_doc_ids") or [d.get("id") for d in f.get("document_list") or []]) if x]
-        clave = tuple(ids) if ids else i   # sin id no se puede saber: se muestra
-        if clave in vistos:
-            continue
-        vistos.add(clave)
-        fuera.append(f)
-        if len(fuera) == n:
-            break
-    return fuera
-
-
-@app.get("/api/v1/security/resumen", response_model=ResumenSeguridadResponse, tags=["capabilities"])
-def resumen_seguridad() -> ResumenSeguridadResponse:
-    """Hallazgos y alertas de los detectores de Security Analytics, en vivo.
-    Por detector: el total de hallazgos, los 5 últimos y las alertas por
-    severidad. Lo pide la vista a demanda ("Ver hallazgos"); no se guarda."""
-    terraform_dir = _active_terraform_dir()
-    registro = _read_security(terraform_dir)
-    if not registro:
-        return ResumenSeguridadResponse()
-    cluster = _cluster_with_public_access(terraform_dir)
-    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"stage": "security", "message": "No hay un cluster alcanzable."})
-    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
-    user, password = "admin", _cluster_admin_password(terraform_dir)
-    specs = _specs_de_seguridad(terraform_dir)
-    casos = []
-    for slug, reg in registro.items():
-        regla_por_id = {rid: next((r for lt in (specs.get(slug) or {}).get("log_types", [])
-                                   for r in lt.get("reglas", []) if r["titulo"] == titulo), {"titulo": titulo})
-                        for titulo, rid in (reg.get("reglas") or {}).items()}
-        detectores = []
-        patron = ((_caps_spec_de(slug) or {}).get("index_pattern")) or f"{slug}-*"
-        for nombre, d in (reg.get("detectores") or {}).items():
-            # De más: con el cluster saturado el mismo evento viene repetido.
-            rf = _os_req("GET", f"{base}{_SA_BASE}/findings/_search?detector_id={d['id']}"
-                                "&size=25&sortOrder=desc", user, password, timeout=20)
-            hallazgos = rf.json() if _resp_ok(rf) else {}
-            eventos = _eventos_detectados(base, user, password, patron, specs.get(slug) or {},
-                                          d.get("log_type", ""))
-            ra = _os_req("GET", f"{base}{_SA_BASE}/alerts?detector_id={d['id']}&size=500",
-                         user, password, timeout=20)
-            alertas: dict[str, int] = {}
-            fallas: list[str] = []
-            for a in ((ra.json() if _resp_ok(ra) else {}) or {}).get("alerts") or []:
-                # Una alerta en ERROR no es un hallazgo: es el detector que no
-                # pudo correr (p. ej. el alias todavía no existía). Va aparte.
-                if str(a.get("state", "")).upper() == "ERROR":
-                    fallas.append(str(a.get("error_message") or "error del detector")[:200])
-                    continue
-                sev = _SEVERIDAD_DE_ALERTA.get(str(a.get("severity")), str(a.get("severity") or ""))
-                alertas[sev] = alertas.get(sev, 0) + 1
-            detectores.append({
-                "nombre": nombre, "log_type": d.get("log_type", ""),
-                "descripcion": _descripcion_log_type(specs, slug, d.get("log_type", "")),
-                # Eventos detectados (cada uno una vez); si no se pudieron
-                # contar, lo que dice Security Analytics.
-                "total": eventos if eventos is not None else int((hallazgos or {}).get("total_findings") or 0),
-                "hallazgos_sa": int((hallazgos or {}).get("total_findings") or 0),
-                "recientes": [_hallazgo(f, regla_por_id)
-                              for f in _sin_repetidos((hallazgos or {}).get("findings") or [], 5)],
-                "alertas": alertas,
-                "fallas": fallas,
-                "error": "" if _resp_ok(rf) else _resp_motivo(rf),
-            })
-        casos.append({"slug": slug, "detectores": detectores,
-                      "correlaciones": len(reg.get("correlaciones") or {})})
-    return ResumenSeguridadResponse(casos=casos)
 
 
 def _provision_security_analytics(cluster: dict, user: str, password: str, https_enabled: bool,

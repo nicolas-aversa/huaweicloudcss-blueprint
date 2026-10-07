@@ -73,20 +73,6 @@ def orden_del_perfil(perfil: dict) -> str:
     return perfil.get("orden") or next(iter(perfil["medidas"]))
 
 
-def tabla_del_perfil(hits: list[dict], perfil: dict) -> dict:
-    """Las filas del índice destino, para la tabla de la vista: la entidad y
-    sus medidas, en el orden declarado. Las fechas (epoch ms) se dejan como
-    número: el front las formatea."""
-    medidas = list(perfil["medidas"])
-    filas = []
-    for h in hits:
-        d = h.get("_source") or {}
-        filas.append([d.get("entidad")] + [d.get(m) for m in medidas])
-    return {"columnas": [perfil.get("etiqueta") or perfil["campo"]] + [perfil.get("nombres", {}).get(m, m) for m in medidas],
-            "fechas": [i + 1 for i, m in enumerate(medidas) if m in set(perfil.get("fechas", []))],
-            "filas": filas}
-
-
 # ── Datasets nuevos: el perfil sale de los campos del paso 2 ────────────────
 import re as _re
 

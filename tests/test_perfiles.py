@@ -1,8 +1,6 @@
 """Perfil por entidad (Transforms): una fila por IP, cliente o pozo."""
 import json
 import pathlib
-import shutil
-import subprocess
 
 import pytest
 
@@ -33,16 +31,6 @@ def test_las_medidas_son_las_que_soporta_transforms(slug):
         assert set(agg) <= {"value_count", "sum", "avg", "min", "max"}, (nombre, agg)
     assert set(p.get("fechas", [])) <= set(p["medidas"]) and set(p["nombres"]) == set(p["medidas"])
     assert p["campo"] in verticals.get_vertical(slug)["capability"]["fields"]
-
-
-def test_la_tabla_del_perfil():
-    hits = [{"_source": {"entidad": "5.188.206.18", "eventos": 571.0, "riesgo_max": 30.0, "primero": 1751372608000.0,
-                         "ultimo": 1782843939000.0}}]
-    t = perfiles.tabla_del_perfil(hits, PERFIL)
-    assert t["columnas"] == ["IP de origen", "Eventos", "Riesgo máx.", "Primer evento", "Último evento"]
-    assert t["filas"] == [["5.188.206.18", 571.0, 30.0, 1751372608000.0, 1782843939000.0]]
-    assert t["fechas"] == [3, 4]
-    assert perfiles.orden_del_perfil(PERFIL) == "eventos"
 
 
 class _R:
@@ -124,20 +112,6 @@ check('vacío', perfilDetalleHTML({ error: '', filas: [], estado: 'started' }).i
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_pestana_en_node(tmp_path):
-    js = tmp_path / "perfiles.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", _funciones(_INDEX.read_text(encoding="utf-8"))), encoding="utf-8")
-    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
-    assert r.returncode == 0, r.stdout + r.stderr
-
-
-def test_la_vista_la_registra():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'perfiles', label: 'Perfiles', icon: 'layers', cuenta: nPerfiles, html: perfilesHTML(pipelines) }," in html
-    assert "const b = e.target.closest('.perfil__caso');\n        if (b) verPerfil(b);" in html
 
 
 def test_si_habia_fallado_se_rehace(monkeypatch):

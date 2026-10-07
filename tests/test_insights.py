@@ -2,14 +2,11 @@
 `top_queries` como lo devolvió el cluster real."""
 import json
 import pathlib
-import shutil
-import subprocess
 from datetime import datetime, timezone
 
 import pytest
 
 import insights
-import main
 
 _INDEX = pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html"
 
@@ -63,19 +60,6 @@ class _R:
         return self._d
 
 
-def test_el_endpoint(monkeypatch):
-    pedidos = []
-    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, **k: pedidos.append(url) or _R(200, {"top_queries": TOP}))
-    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
-    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
-    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
-    r = main.consultas_pesadas("cpu")
-    assert r.tipo == "cpu" and r.error == "" and r.consultas[0]["indices"] == "fortianalyzer*"
-    assert pedidos[0].startswith("http://x:9200/_insights/top_queries?type=cpu&from=") and "&to=" in pedidos[0]
-    with pytest.raises(main.HTTPException):
-        main.consultas_pesadas("disco")
-
-
 def _funciones(html: str) -> str:
     i = html.index("    const _TIPOS_INSIGHTS = ")
     return html[i:html.index("    async function verRendimiento(btn) {", i)]
@@ -97,17 +81,3 @@ check('error', rendimientoDetalleHTML({ error: 'boom', consultas: [] }).includes
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_pestana_en_node(tmp_path):
-    js = tmp_path / "insights.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", _funciones(_INDEX.read_text(encoding="utf-8"))), encoding="utf-8")
-    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
-    assert r.returncode == 0, r.stdout + r.stderr
-
-
-def test_la_vista_la_registra():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'rendimiento', label: 'Rendimiento', icon: 'clock', html: rendimientoHTML() }," in html
-    assert "const b = e.target.closest('.insights__tipo');\n        if (b) verRendimiento(b);" in html

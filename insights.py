@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-TIPOS = ("latency", "cpu", "memory")
-
 
 def ventana(ahora: datetime, horas: int = 24) -> tuple[str, str]:
     """`from` y `to` para `_insights/top_queries` (ISO UTC)."""

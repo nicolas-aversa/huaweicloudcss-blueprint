@@ -11,8 +11,6 @@ aparte (`/api/v1/plugins/numeros`), a demanda.
 """
 from __future__ import annotations
 
-from typing import Any
-
 import accesos
 import perfiles
 from plan_de_cluster import _forecast_en_palabras, _nombre_de

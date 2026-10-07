@@ -1849,9 +1849,6 @@
       opacity: 0.7;
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
-    /* Perfil por entidad: tabla que se desplaza en pantallas chicas. */
-    .perfil__caso.is-active, .insights__tipo.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
-    .perfil__tabla { overflow-x: auto; }
     .mapping-marca { text-align: center; }
     .fuentes-tabs { margin-bottom: 12px; }
     /* La tabla de campos se desplaza en pantallas angostas en vez de cortarse. */
@@ -1880,27 +1877,10 @@
     .plan-cluster__switch { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; margin-top: 2px; }
     .plan-cluster__global { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .mapping-marca input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
-    .perfil__tabla table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
-    .perfil__tabla th, .perfil__tabla td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
-    .perfil__tabla th:first-child, .perfil__tabla td:first-child { text-align: left; }
-    .perfil__tabla th { color: var(--text-muted); font-weight: 600; }
-    .perfil__tabla td { font-variant-numeric: tabular-nums; }
     /* Accesos de demo: usuario y contraseña, copiables. */
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
     .acceso__lbl { color: var(--text-muted); }
     .acceso code { user-select: all; }
-    /* Campañas: los pasos en orden, como una línea de tiempo. */
-    .campana__pasos { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--accent-tint); display: grid; gap: 6px; }
-    .campana__paso { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); position: relative; }
-    .campana__paso::before { content: ''; position: absolute; left: -19px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-    .campana__hora { font-variant-numeric: tabular-nums; color: var(--text-muted); }
-    .campana__fuente { font-weight: 600; text-transform: uppercase; font-size: var(--fs-xs); letter-spacing: 0.04em; color: var(--text-secondary); }
-    .campana__explicar { margin-left: auto; }
-    /* Forecasting: los casos como botones; el elegido, marcado. */
-    .pron__casos { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
-    .pron__caso.is-active { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); }
-    .pron__lista { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
-    .pron__grafico { min-height: 200px; width: 100%; }
     .case-tab__icon .icon { width: 18px; height: 18px; }
     .example-card__soon {
       font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
@@ -2410,64 +2390,16 @@
     .case-tab.is-active .infra-tab__cuenta { background: var(--accent); color: #fff; }
 
     /* A todo el ancho, el detalle de cada pestaña va en grilla. */
-    .infra-panel .hallazgos__caso,
-    #infra-anomalias-detalle, #infra-campanas-detalle, #infra-accesos-detalle {
+    .infra-panel .hallazgos__caso, #infra-accesos-detalle {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(min(440px, 100%), 1fr)); gap: 10px; align-items: start;
     }
     .infra-panel .hallazgos__titulo { grid-column: 1 / -1; margin-bottom: 0; }
     .infra-panel .hallazgos__caso > .hallazgos__det + .hallazgos__det,
-    #infra-anomalias-detalle > .hallazgos__det + .hallazgos__det,
-    #infra-campanas-detalle > .hallazgos__det + .hallazgos__det,
     #infra-accesos-detalle > .hallazgos__det + .hallazgos__det { margin-top: 0; }
-    #infra-campanas-detalle:not(:empty), #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
-    /* Un pronóstico por fila: la ficha a la izquierda y el gráfico a lo ancho. */
-    .infra-panel .pron__lista { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-    .pron__fila {
-      display: grid; grid-template-columns: minmax(150px, 190px) minmax(0, 1fr); gap: 16px; align-items: center;
-      padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-primary);
-    }
-    .pron__info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
-    .pron__medida { font-size: var(--fs-base); color: var(--text-primary); overflow-wrap: anywhere; }
-    .pron__cada { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4; }
-    .pron__leyenda { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 2px; }
-    .pron__l { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--text-secondary); }
-    .pron__l + .pron__l, .pron__leyenda .pron__l:not(:first-child) { margin-left: 6px; }
-    .pron__l--pron { border-top: 2px dashed var(--accent); }
-    .pron__fila .pron__grafico { min-height: 170px; }
-    @media (max-width: 760px) { .pron__fila { grid-template-columns: minmax(0, 1fr); } }
-    /* Una fila de hallazgo o de anomalía: severidad · regla con su dato debajo ·
-       Explicar a la derecha. Con todo en una línea, en una tarjeta de la
-       grilla el botón se caía a otra fila. */
-    .infra-panel .hallazgo {
-      display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 1px;
-      grid-template-areas: "sev regla accion" "sev meta accion"; align-items: center;
-    }
-    .infra-panel .hallazgo > .sev { grid-area: sev; align-self: start; justify-self: start; margin-top: 1px; }
-    .infra-panel .hallazgo__regla { grid-area: regla; min-width: 0; }
-    .infra-panel .hallazgo__meta { grid-area: meta; }
-    .infra-panel .hallazgo > .hallazgo__accion { grid-area: accion; }
-    /* La fila es el botón: se marca al pasar y "Explicar" se enciende. */
-    button.hallazgo {
-      width: 100%; margin: 0; padding: 7px 10px; font: inherit; font-size: var(--fs-sm); text-align: left; color: inherit;
-      background: transparent; border: 1px solid transparent; border-radius: var(--radius-md); cursor: pointer;
-      transition: background var(--t-base), border-color var(--t-base);
-    }
+    #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
     .hallazgos__lista { gap: 2px; }
     .hallazgos__lista > li { margin: 0 -10px; }
-    button.hallazgo:hover, button.hallazgo:focus-visible { background: var(--bg-secondary); border-color: var(--border-subtle); outline: none; }
-    .hallazgo__accion {
-      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
-      font: inherit; font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted);
-      background: none; border: none; padding: 2px 4px; border-radius: var(--radius-sm); cursor: pointer;
-      transition: color var(--t-base);
-    }
-    .hallazgo__accion .icon { width: 13px; height: 13px; }
-    button.hallazgo:hover .hallazgo__accion, button.hallazgo:focus-visible .hallazgo__accion,
-    button.hallazgo__accion:hover, button.hallazgo__accion:focus-visible { color: var(--accent-hover); outline: none; }
 
-    /* Forecasting y Perfiles: los casos en una lista a la izquierda, el
-       detalle a la derecha. Con 9 casos, los botones en dos filas se veían
-       desordenados. En pantallas angostas la lista pasa arriba, en una fila. */
     /* ── Plugins: una tarjeta por plugin, con su estado y el link a Dashboards ── */
     .plug-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
     .plug { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3);
@@ -2485,6 +2417,9 @@
     .plug__numero { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
     .plug__numero:empty { display: none; }
     .plug__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
+    /* Plugins: los casos en una lista a la izquierda, el detalle a la derecha.
+       Con 9 casos, los botones en dos filas se veían desordenados. En
+       pantallas angostas la lista pasa arriba, en una fila. */
     .maestro { display: grid; grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 14px; }
     .maestro__lista {
       display: flex; flex-direction: column; gap: 2px; padding-right: 14px;
@@ -2763,13 +2698,11 @@
     .cap-resumen { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .cap-resumen .status-pill { margin: 0; }
     .cap-resumen__lbl { font-size: var(--fs-sm); color: var(--text-muted); }
-    /* Security Analytics: qué quedó y, a demanda, los hallazgos. */
+    /* Encabezado de tarjeta con su botón a la derecha (Accesos, Documentos). */
     .seguridad__head { margin-bottom: 10px; }
     .seguridad__head .btn { margin-left: auto; }
     .seguridad__caso { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
     .seguridad__caso strong { color: var(--text-primary); }
-    #infra-seguridad-detalle:not(:empty),
-    #infra-anomalias-detalle:not(:empty) { margin-top: 12px; }
     .hallazgos__caso + .hallazgos__caso { margin-top: 14px; }
     .hallazgos__titulo { margin-bottom: 6px; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
     .hallazgos__det { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
@@ -2777,7 +2710,6 @@
     .hallazgos__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-secondary); }
     .hallazgos__head strong { margin-right: auto; color: var(--text-primary); }
     .hallazgos__lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-    .hallazgo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); }
     .hallazgo__regla { flex: 1; min-width: 160px; color: var(--text-primary); }
     .hallazgo__meta { font-size: var(--fs-xs); color: var(--text-muted); }
     .hallazgos__vacio { margin-top: 8px; font-size: var(--fs-sm); color: var(--text-muted); }
@@ -6386,9 +6318,6 @@
     // (slug, pregunta, contexto) → true si el asistente la tomó. Lo arma
     // renderCapabilitiesResult; sin asistente, null. Lo usa "Explicar".
     let capChatPreguntar = null;
-    // El motor de gráficos del asistente (Vega-Lite vendorizado + el tema de la
-    // app), para que otras vistas dibujen igual. Lo publica el asistente al armarse.
-    let capVega = null;
     // Cómo estaba la barra izquierda antes de abrir el asistente (null: el
     // asistente no la tocó). Al cerrarlo vuelve a eso.
     let navAntesDelAsistente = null;
@@ -6571,33 +6500,6 @@
       });
     }
 
-    // Security Analytics (SIEM, FortiAnalyzer): qué quedó provisionado (del
-    // registro, sin tocar el cluster). Los hallazgos se piden a demanda.
-    function seguridadHTML(sa) {
-      const casos = Object.entries(sa || {});
-      if (!casos.length) return '';
-      const suma = (f) => casos.reduce((t, [, c]) => t + f(c), 0);
-      const detectores = suma(c => (c.detectores || []).length);
-      const reglas = suma(c => c.reglas || 0);
-      const corr = suma(c => c.correlaciones || 0);
-      const filas = casos.map(([slug, c]) => `<div class="seguridad__caso"><strong>${escapeHtml(SLUG_LABELS[slug] || slug)}</strong>`
-        + `<span>${(c.detectores || []).map(d => escapeHtml(d.descripcion || d.log_type)).join(' · ')}</span></div>`).join('');
-      return `<div class="section-card" id="infra-seguridad">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('shield')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Security Analytics</span>
-              <span class="section-card__hint">${detectores} detector${detectores === 1 ? '' : 'es'} · ${reglas} reglas Sigma · ${corr} correlaci${corr === 1 ? 'ón' : 'ones'} · en Dashboards: Security Analytics → Findings</span>
-            </span>
-            <button type="button" class="btn btn-secondary btn-sm" id="infra-seguridad-ver" title="Volver a leer">${icon('refresh')} Actualizar</button>
-          </div>
-          ${filas}
-          <div id="infra-seguridad-detalle"></div>
-        </div>`;
-    }
-    // Rendimiento (Query Insights): las consultas sobre datos más pesadas de las
-    // últimas 24 h, por latencia, CPU o memoria. Incluye las del asistente.
-    const _TIPOS_INSIGHTS = [['latency', 'Latencia'], ['cpu', 'CPU'], ['memory', 'Memoria']];
     // Base de conocimiento (RAG): los documentos que sube el usuario, partidos e
     // indexados en el cluster del entorno; se les pregunta y responde OpenSearch
     // (pipeline de búsqueda con retrieval_augmented_generation) con MaaS.
@@ -6717,104 +6619,6 @@
         showStatus(destino, `Error: ${err.message}`, 'error');
       }
     }
-    function rendimientoHTML() {
-      return `<div class="section-card" id="infra-rendimiento">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('clock')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Consultas más pesadas</span>
-              <span class="section-card__hint">Query Insights · últimas 24 h, sin las consultas internas del cluster · incluye las del asistente y los dashboards · en Dashboards: Query Insights</span>
-            </span>
-          </div>
-          <div class="pron__casos" role="group" aria-label="Ordenar por">${_TIPOS_INSIGHTS.map(([t, l]) =>
-            `<button type="button" class="btn btn-secondary btn-sm insights__tipo" data-tipo="${t}">${l}</button>`).join('')}</div>
-          <div id="infra-rendimiento-detalle"><div class="hallazgos__vacio">Elegí por qué ordenar.</div></div>
-        </div>`;
-    }
-    const _fmtIns = (v) => Number(v || 0).toLocaleString('es-AR', { maximumFractionDigits: 1 });
-    function rendimientoDetalleHTML(d) {
-      if (d.error) return `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(d.error)}</div>`;
-      if (!(d.consultas || []).length) return '<div class="hallazgos__vacio">Sin consultas sobre datos en las últimas 24 h.</div>';
-      return `<div class="perfil__tabla"><table><thead><tr><th>Hora (UTC)</th><th>Índices</th><th>Qué hace</th>`
-        + `<th>Latencia</th><th>CPU</th><th>Memoria</th></tr></thead><tbody>${d.consultas.map(c =>
-          `<tr><td>${escapeHtml(c.hora)}</td><td>${escapeHtml(c.indices)}</td><td>${escapeHtml(c.forma)}</td>`
-          + `<td>${_fmtIns(c.latencia_ms)} ms</td><td>${_fmtIns(c.cpu_ms)} ms</td><td>${_fmtIns(c.memoria_kb)} KB</td></tr>`).join('')}`
-        + `</tbody></table></div>`;
-    }
-    async function verRendimiento(btn) {
-      const destino = document.getElementById('infra-rendimiento-detalle');
-      if (!destino) return;
-      document.querySelectorAll('.insights__tipo').forEach(b => b.classList.toggle('is-active', b === btn));
-      btn.disabled = true;
-      showStatus(destino, 'Leyendo Query Insights…', 'loading');
-      try {
-        const res = await fetch('/api/v1/insights/consultas?tipo=' + encodeURIComponent(btn.dataset.tipo));
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = rendimientoDetalleHTML(data);
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    }
-    // Perfiles por entidad (Transforms): una fila por IP, cliente o pozo, con sus
-    // medidas. Por caso, a demanda.
-    function perfilesHTML(pipelines) {
-      const conPerfil = (pipelines || []).filter(p => p.perfil);
-      const casos = conPerfil.map(p => p.slug);
-      const etiqueta = Object.fromEntries(conPerfil.map(p => [p.slug, p.perfil]));
-      if (!casos.length) return '';
-      return `<div class="section-card" id="infra-perfiles">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('layers')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Perfil por entidad</span>
-              <span class="section-card__hint">Un índice resumen que arma OpenSearch (Transform): una fila por ${casos.map(s => escapeHtml(etiqueta[s].toLowerCase())).join(', ')} · en Dashboards: Index Management → Transforms</span>
-            </span>
-          </div>
-          <div class="maestro">
-            <div class="maestro__lista" role="group" aria-label="Caso">${casos.map(s =>
-              `<button type="button" class="maestro__item perfil__caso" data-slug="${escapeHtml(s)}">`
-              + `<span>${escapeHtml(SLUG_LABELS[s] || s)}</span><span class="maestro__n">${escapeHtml(etiqueta[s])}</span></button>`).join('')}</div>
-            <div class="maestro__detalle" id="infra-perfiles-detalle"><div class="hallazgos__vacio">Elegí un caso para ver su perfil.</div></div>
-          </div>
-        </div>`;
-    }
-    const _ESTADO_TRANSFORM = { finished: 'Terminado', started: 'Corriendo…', init: 'Arrancando…', failed: 'Falló', stopped: 'Detenido' };
-    function _celdaPerfil(v, esFecha) {
-      if (v === null || v === undefined || v === '-Infinity' || v === 'Infinity') return '—';
-      if (esFecha) return new Date(Number(v)).toISOString().replace('T', ' ').slice(0, 16);
-      return typeof v === 'number' ? v.toLocaleString('es-AR', { maximumFractionDigits: 1 }) : escapeHtml(String(v));
-    }
-    function perfilDetalleHTML(d) {
-      if (d.error) return `<div class="hallazgos__vacio">${escapeHtml(d.error)}</div>`;
-      if (!(d.filas || []).length) return `<div class="hallazgos__vacio">El perfil todavía está vacío${d.estado ? ` (${escapeHtml(_ESTADO_TRANSFORM[d.estado] || d.estado)})` : ''}.</div>`;
-      const fechas = new Set(d.fechas || []);
-      return `<div class="hallazgos__head" style="margin-bottom:6px;"><span class="hallazgos__total">Las ${d.filas.length} de mayor ${escapeHtml((d.columnas[1] || '').toLowerCase())}`
-        + `${d.estado ? ` · Transform: ${escapeHtml(_ESTADO_TRANSFORM[d.estado] || d.estado)}` : ''}</span></div>`
-        + `<div class="perfil__tabla"><table><thead><tr>${d.columnas.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`
-        + `<tbody>${d.filas.map(f => `<tr>${f.map((v, i) => `<td>${_celdaPerfil(v, fechas.has(i))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    }
-    async function verPerfil(btn) {
-      const destino = document.getElementById('infra-perfiles-detalle');
-      if (!destino) return;
-      document.querySelectorAll('.perfil__caso').forEach(b => b.classList.toggle('is-active', b === btn));
-      btn.disabled = true;
-      showStatus(destino, 'Leyendo el perfil…', 'loading');
-      try {
-        const res = await fetch('/api/v1/perfiles/' + encodeURIComponent(btn.dataset.slug));
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = perfilDetalleHTML(data);
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    }
     // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
     // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
     function accesosHTML(pipelines) {
@@ -6860,228 +6664,11 @@
         btn.disabled = false;
       }
     }
-    // Campañas: la línea de tiempo de cada una, desde los datos (event.campaign).
-    // Solo los casos que declaran correlaciones (hoy el SIEM).
-    function campanasHTML(sa) {
-      const casos = Object.entries(sa || {}).filter(([, c]) => (c.correlaciones || 0) > 0);
-      if (!casos.length) return '';
-      return `<div class="section-card" id="infra-campanas">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('layers')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Campañas</span>
-              <span class="section-card__hint">Cada ataque contado en orden: qué pasó en cada fuente y desde qué IP · ${casos.map(([s]) => escapeHtml(SLUG_LABELS[s] || s)).join(' · ')} · en Dashboards: Security Analytics → Correlations</span>
-            </span>
-            <button type="button" class="btn btn-secondary btn-sm" id="infra-campanas-ver" title="Volver a leer">${icon('refresh')} Actualizar</button>
-          </div>
-          <div id="infra-campanas-detalle"></div>
-        </div>`;
-    }
-    // ISO del agregado ("2025-09-16T20:46:10.000Z") → como @timestamp en PPL.
-    const _horaPpl = (iso) => String(iso || '').replace('T', ' ').slice(0, 19);
-    function campanasDetalleHTML(casos) {
-      const bloques = (casos || []).map(c => {
-        if (c.error) return `<div class="hallazgos__det"><div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(c.error)}</div></div>`;
-        return (c.campanas || []).map(k => {
-          const pasos = (k.pasos || []).map(p =>
-            `<li class="campana__paso"><span class="campana__hora">${escapeHtml(_horaPpl(p.inicio))}</span>`
-            + `<span class="campana__fuente">${escapeHtml(p.fuente)}</span><span class="hallazgo__regla">${escapeHtml(p.accion)}</span>`
-            + `<span class="hallazgo__meta">${p.eventos} evento${p.eventos === 1 ? '' : 's'}</span></li>`).join('');
-          return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(k.id)}${k.nombre ? ` · ${escapeHtml(k.nombre)}` : ''}</strong>`
-            + `<span class="hallazgos__total">${k.eventos} evento${k.eventos === 1 ? '' : 's'} en ${(k.fuentes || []).length} fuente${(k.fuentes || []).length === 1 ? '' : 's'}${(k.ips || []).length ? ` · desde ${escapeHtml(k.ips.join(', '))}` : ''}</span>`
-            + `<button type="button" class="hallazgo__accion campana__explicar" data-slug="${escapeHtml(c.slug)}" `
-            + `data-campana="${escapeHtml(k.id)}" data-nombre="${escapeHtml(k.nombre || '')}" data-desde="${escapeHtml(_horaPpl(k.desde))}" `
-            + `data-hasta="${escapeHtml(_horaPpl(k.hasta))}" data-ips="${escapeHtml((k.ips || []).join(', '))}" title="Explicar con el asistente">${icon('spark')} Explicar</button></div>`
-            + `<ol class="campana__pasos">${pasos}</ol></div>`;
-        }).join('') || `<div class="hallazgos__det"><div class="hallazgos__vacio">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}: sin eventos de campaña en los datos.</div></div>`;
-      }).join('');
-      return bloques || '<div class="hallazgos__vacio">No hay casos con campañas.</div>';
-    }
-    // "Explicar" una campaña: el asistente mide qué cambió en esa ventana.
-    function explicarCampana(b) {
-      const { slug, campana, nombre, desde, hasta, ips } = b.dataset;
-      const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
-        `¿Qué pasó en la campaña ${campana}${nombre ? ` (${nombre})` : ''}?`,
-        `Campaña ${campana}${nombre ? ` "${nombre}"` : ''} entre ${desde} y ${hasta} (UTC)${ips ? `, desde ${ips}` : ''}. `
-        + `Contá qué hizo en cada fuente y en qué orden.`,
-        { desde, hasta }));
-      if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
-      return tomada;
-    }
-    async function verCampanas(btn) {
-      const destino = document.getElementById('infra-campanas-detalle');
-      if (!destino) return;
-      btn.disabled = true;
-      showStatus(destino, 'Leyendo las campañas…', 'loading');
-      try {
-        const res = await fetch('/api/v1/security/campanas');
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = campanasDetalleHTML(data.casos || []);
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    }
-    const _NIVEL = { critical: 'Crítica', high: 'Alta', medium: 'Media', low: 'Baja' };
-    function _fechaCorta(v) {
-      if (!v) return '';
-      const d = new Date(/^\d+$/.test(String(v)) ? Number(v) : v);
-      return isNaN(d) ? String(v) : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    }
-    // Lo que devuelve /api/v1/security/resumen: por detector, el total, las
-    // alertas por severidad y los últimos hallazgos, cada uno con "Explicar".
-    function hallazgosHTML(casos) {
-      const bloques = (casos || []).map(c => {
-        const dets = (c.detectores || []).map(d => {
-          const alertas = Object.entries(d.alertas || {}).filter(([, n]) => n)
-            .map(([sev, n]) => `<span class="sev sev--${escapeHtml(sev)}">${n} alerta${n === 1 ? '' : 's'} ${escapeHtml((_NIVEL[sev] || sev).toLowerCase())}${n === 1 ? '' : 's'}</span>`).join('');
-          // La fila entera explica ese hallazgo: un botón "Explicar" por
-          // renglón, todos iguales, era ruido.
-          const recientes = (d.recientes || []).map(h => `<li>`
-            + `<button type="button" class="hallazgo hallazgo__explicar" data-slug="${escapeHtml(c.slug)}" `
-            + `data-regla="${escapeHtml(h.regla || '')}" data-hora="${escapeHtml(h.hora_ppl || '')}" data-ip="${escapeHtml(h.ip || '')}" title="Explicar con el asistente">`
-            + `<span class="sev sev--${escapeHtml(h.nivel || '')}">${escapeHtml(_NIVEL[h.nivel] || h.nivel || '—')}</span>`
-            + `<span class="hallazgo__regla">${escapeHtml(h.regla || '')}</span>`
-            + `<span class="hallazgo__meta">${escapeHtml(_fechaCorta(h.hora))}${h.ip ? ' · ' + escapeHtml(h.ip) : ''}</span>`
-            + `<span class="hallazgo__accion">${icon('spark')} Explicar</span>`
-            + `</button></li>`).join('');
-          const cuerpo = d.error
-            ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(d.error)}</div>`
-            : recientes
-              ? `<ul class="hallazgos__lista">${recientes}</ul>`
-              : `<div class="hallazgos__vacio">Sin hallazgos todavía: aparecen a medida que entran los datos. Si la ingesta corrió antes de crear el detector, tocá "Reiniciar ingesta".</div>`;
-          return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(d.descripcion || d.log_type)}</strong>`
-            + `<span${(d.hallazgos_sa || 0) > (d.total || 0) ? ` title="Security Analytics registró ${Number(d.hallazgos_sa).toLocaleString('es-AR')}: con el cluster saturado cuenta el mismo evento varias veces"` : ''}>${Number(d.total || 0).toLocaleString('es-AR')} eventos detectados</span>${alertas}`
-            + ((d.fallas || []).length ? `<span class="sev" title="${escapeHtml(d.fallas[0])}">el detector falló ${d.fallas.length} ${d.fallas.length === 1 ? 'vez' : 'veces'}</span>` : '')
-            + `</div>${cuerpo}</div>`;
-        }).join('');
-        return `<div class="hallazgos__caso"><div class="hallazgos__titulo">${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}`
-          + `${c.correlaciones ? ` · ${c.correlaciones} correlaciones entre fuentes` : ''}</div>${dets}</div>`;
-      }).join('');
-      return bloques || '<div class="hallazgos__vacio">No hay detectores de Security Analytics en este entorno.</div>';
-    }
-    // "Explicar" un hallazgo: el asistente lo investiga con la regla, la hora
-    // y la IP ya puestas.
-    function explicarHallazgo(b) {
-      const { slug, regla, hora, ip } = b.dataset;
-      const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
-        `¿Por qué se disparó "${regla}"? ¿Qué más pasó alrededor?`,
-        `Hallazgo de Security Analytics: regla "${regla}"${hora ? `, evento del ${hora} (UTC, como @timestamp)` : ''}`
-        + `${ip ? `, IP de origen ${ip}` : ''}. Mirá qué más hizo esa IP en todo el período y en las horas `
-        + `cercanas (no solo ese minuto).`,
-        // La hora del evento: el backend compara esa hora contra el día anterior.
-        hora ? { desde: hora } : null));
-      if (!tomada) toast('Para explicarlo hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
-      return tomada;
-    }
-    // Forecasting: los casos con forecasters (del registro). Los pronósticos se
-    // piden por caso, a demanda: la serie real, el pronóstico con su banda y,
-    // encima, lo que de verdad pasó (el backtest se ancla donde hay datos).
+    // Los forecasters de un caso en el registro (los de antes guardaban uno solo).
     function _forecastersDe(ids) {
       return (ids && (ids.forecaster_ids || (ids.forecaster_id ? [ids.forecaster_id] : []))) || [];
     }
-    function pronosticosHTML(capabilities) {
-      const casos = Object.entries(capabilities || {}).filter(([, ids]) => _forecastersDe(ids).length);
-      if (!casos.length) return '';
-      const total = casos.reduce((n, [, ids]) => n + _forecastersDe(ids).length, 0);
-      return `<div class="section-card" id="infra-pronosticos">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('trending')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Forecasting</span>
-              <span class="section-card__hint">${total} pronóstico${total === 1 ? '' : 's'} en ${casos.length} caso${casos.length === 1 ? '' : 's'}${state.provisionandoPlugins ? ' · provisionando: los demás casos aparecen a medida que terminan' : ''} · cada uno contra lo que pasó de verdad · en Dashboards: Forecasting</span>
-            </span>
-          </div>
-          <div class="maestro">
-            <div class="maestro__lista" role="group" aria-label="Caso">${casos.map(([slug, ids]) =>
-              `<button type="button" class="maestro__item pron__caso" data-slug="${escapeHtml(slug)}">`
-              + `<span>${escapeHtml(SLUG_LABELS[slug] || slug)}</span><span class="maestro__n">${_forecastersDe(ids).length}</span></button>`).join('')}</div>
-            <div class="maestro__detalle" id="infra-pronosticos-detalle"><div class="hallazgos__vacio">Elegí un caso para ver sus pronósticos.</div></div>
-          </div>
-        </div>`;
-    }
     const _fmtPron = (v) => Number(v).toLocaleString('es-AR', { maximumFractionDigits: 1 });
-    function pronosticosDetalleHTML(data) {
-      const lista = (data && data.pronosticos) || [];
-      if (!lista.length) return '<div class="hallazgos__vacio">Este caso no tiene pronósticos.</div>';
-      // Un pronóstico por fila: a la izquierda qué es y cuánto acierta, a la
-      // derecha el gráfico a lo ancho.
-      return `<div class="pron__lista">${lista.map((p, i) => {
-        const cada = p.intervalo_min >= 60 ? `${_fmtPron(p.intervalo_min / 60)} h` : `${p.intervalo_min} min`;
-        const acierto = p.error_pct == null ? ''
-          : `<span class="sev ${p.error_pct <= 20 ? 'sev--ok' : p.error_pct <= 40 ? 'sev--high' : 'sev--critical'}">error medio ${_fmtPron(p.error_pct)} %</span>`;
-        const cuerpo = p.error
-          ? `<div class="hallazgos__vacio">${escapeHtml(p.error)}</div>`
-          : `<div class="pron__grafico" data-i="${i}"></div>`;
-        return `<div class="pron__fila"><div class="pron__info"><strong class="pron__medida">${escapeHtml(p.medida || p.nombre)}</strong>`
-          + `<span class="pron__cada">cada ${escapeHtml(cada)} · ${p.horizonte || 0} pasos hacia adelante</span>${acierto}`
-          + `${p.error ? '' : '<span class="pron__leyenda"><i class="pron__l pron__l--real"></i>Real<i class="pron__l pron__l--pron"></i>Pronóstico</span>'}`
-          + `</div>${cuerpo}</div>`;
-      }).join('')}</div>`;
-    }
-    // Vega-Lite: la serie real (línea), el pronóstico (punteado) con su banda y
-    // una regla donde arranca el pronóstico.
-    // Real en gris oscuro, pronóstico en rojo punteado y su banda en rojo
-    // suave (la leyenda va al lado, en HTML). Antes los colores eran los de la
-    // paleta por defecto y la banda dibujaba una línea azul de más.
-    const _COLORES_PRON = { real: '#334155', pron: '#e50000' };
-    function specPronostico(p, config, colores = _COLORES_PRON) {
-      const filas = [
-        ...(p.real || []).map(r => ({ t: r.t, v: r.v, serie: 'Real' })),
-        ...(p.pronostico || []).map(r => ({ t: r.t, v: r.v, lo: r.lo, hi: r.hi, serie: 'Pronóstico' })),
-      ];
-      const x = { field: 't', type: 'temporal', title: null };
-      return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json', width: 'container', height: 170,
-        autosize: { type: 'fit-x', contains: 'padding' }, config,
-        data: { values: filas },
-        layer: [
-          { transform: [{ filter: "datum.serie === 'Pronóstico'" }], mark: { type: 'area', opacity: 0.12, line: false, color: colores.pron },
-            encoding: { x, y: { field: 'lo', type: 'quantitative', title: null }, y2: { field: 'hi' } } },
-          { mark: { type: 'line', strokeWidth: 2 },
-            encoding: { x, y: { field: 'v', type: 'quantitative', title: p.medida || null },
-                        color: { field: 'serie', type: 'nominal', title: null, legend: null,
-                                 scale: { domain: ['Real', 'Pronóstico'], range: [colores.real, colores.pron] } },
-                        strokeDash: { field: 'serie', type: 'nominal', legend: null,
-                                      scale: { domain: ['Real', 'Pronóstico'], range: [[1, 0], [5, 4]] } },
-                        tooltip: [{ field: 't', type: 'temporal', title: 'Fin del paso (UTC)', format: '%Y-%m-%d %H:%M' },
-                                  { field: 'serie', title: 'Serie' }, { field: 'v', title: 'Valor', format: ',.1f' }] } },
-          { data: { values: [{ t: p.ancla }] }, mark: { type: 'rule', strokeDash: [2, 3], opacity: 0.6 },
-            encoding: { x: { field: 't', type: 'temporal' } } },
-        ],
-      };
-    }
-    async function verPronosticos(btn) {
-      const destino = document.getElementById('infra-pronosticos-detalle');
-      if (!destino) return;
-      document.querySelectorAll('.pron__caso').forEach(b => b.classList.toggle('is-active', b === btn));
-      btn.disabled = true;
-      showStatus(destino, 'Leyendo los pronósticos…', 'loading');
-      try {
-        const res = await fetch('/api/v1/forecast/' + encodeURIComponent(btn.dataset.slug));
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = pronosticosDetalleHTML(data);
-        if (!capVega) return;
-        const embed = await capVega.ensure();
-        const config = capVega.config(capVega.theme());
-        const css = getComputedStyle(document.documentElement);
-        const colores = { real: css.getPropertyValue('--text-secondary').trim() || _COLORES_PRON.real,
-                          pron: css.getPropertyValue('--accent').trim() || _COLORES_PRON.pron };
-        (data.pronosticos || []).forEach((p, i) => {
-          const lugar = destino.querySelector(`.pron__grafico[data-i="${i}"]`);
-          if (lugar) embed(lugar, specPronostico(p, config, colores), { actions: false, renderer: 'svg' }).catch(() => {});
-        });
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    }
     // ── Plugins: lo que quedó en el cluster, por caso ──────────────────────────
     // La plataforma no muestra resultados (eso es OpenSearch Dashboards): guía
     // la demo. Las tarjetas vienen armadas en /terraform/status (plugins_vista.py)
@@ -7099,7 +6686,7 @@
             <span class="section-card__tile">${icon('layers')}</span>
             <span class="section-card__titlewrap">
               <span class="section-card__title">Plugins</span>
-              <span class="section-card__hint">Lo que quedó en el cluster, caso por caso: qué se configuró con sus datos, si quedó bien y el link directo a OpenSearch Dashboards.</span>
+              <span class="section-card__hint">Lo que quedó en el cluster, caso por caso: qué se configuró con sus datos, si quedó bien y el link directo a OpenSearch Dashboards.${state.provisionandoPlugins ? ' Provisionando: los demás casos aparecen a medida que terminan.' : ''}</span>
             </span>
           </div>
           <div class="maestro">
@@ -7197,53 +6784,6 @@
       if (!btn.classList.contains('is-active')) return;
       aplicarNumerosDePlugins(destino, numeros, slug);
     }
-    // Anomaly Detection: qué casos tienen detector (del registro, sin tocar el
-    // cluster). Las anomalías se piden a demanda.
-    function anomaliasHTML(capabilities) {
-      const casos = Object.entries(capabilities || {}).filter(([, ids]) => ids && ids.detector_id);
-      if (!casos.length) return '';
-      const conAlerta = casos.filter(([, ids]) => ids.monitor_id).length;
-      return `<div class="section-card" id="infra-anomalias">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('activity')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Anomaly Detection</span>
-              <span class="section-card__hint">${casos.length} detector${casos.length === 1 ? '' : 'es'} · análisis histórico sobre todo el rango de datos${conAlerta ? ` · ${conAlerta} con alerta (grado ≥ 0,7)` : ''} · en Dashboards: Anomaly Detection</span>
-            </span>
-            <button type="button" class="btn btn-secondary btn-sm" id="infra-anomalias-ver" title="Volver a leer">${icon('refresh')} Actualizar</button>
-          </div>
-          <div class="seguridad__caso"><span>${casos.map(([slug]) => escapeHtml(SLUG_LABELS[slug] || slug)).join(' · ')}</span></div>
-          <div id="infra-anomalias-detalle"></div>
-        </div>`;
-    }
-    const _ESTADO_AD = { FINISHED: 'Análisis terminado', RUNNING: 'Analizando…', INIT: 'Analizando…', CREATED: 'Analizando…',
-                         FAILED: 'El análisis falló', INIT_FAILURE: 'El análisis falló', STOPPED: 'Análisis detenido' };
-    // Lo que devuelve /api/v1/anomalias/resumen: por caso, el estado, cuántas
-    // hay y las de mayor grado, cada una con "Explicar".
-    function anomaliasDetalleHTML(casos) {
-      const bloques = (casos || []).map(c => {
-        const top = (c.top || []).map(a => {
-          const valores = (a.valores || []).map(v => `${v.nombre}: ${typeof v.valor === 'number' ? v.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : v.valor}`).join(' · ');
-          return `<li>`
-            + `<button type="button" class="hallazgo anomalia__explicar" data-slug="${escapeHtml(c.slug)}" `
-            + `data-inicio="${escapeHtml(a.inicio)}" data-fin="${escapeHtml(a.fin)}" data-grado="${Math.round((a.grado || 0) * 100)}" `
-            + `data-valores="${escapeHtml(valores)}" title="Explicar con el asistente">`
-            + `<span class="sev ${a.grado >= 0.7 ? 'sev--critical' : 'sev--high'}">${Math.round((a.grado || 0) * 100)} %</span>`
-            + `<span class="hallazgo__regla">${escapeHtml(a.inicio)} → ${escapeHtml((a.fin || '').slice(11))}</span>`
-            + `<span class="hallazgo__meta">${escapeHtml(valores)}</span>`
-            + `<span class="hallazgo__accion">${icon('spark')} Explicar</span></button></li>`;
-        }).join('');
-        const cuerpo = c.error
-          ? `<div class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(c.error)}</div>`
-          : top
-            ? `<ul class="hallazgos__lista">${top}</ul>`
-            : `<div class="hallazgos__vacio">Sin anomalías todavía${c.estado === 'FINISHED' ? ': el análisis terminó y no encontró ninguna.' : ': el análisis histórico sigue corriendo.'}</div>`;
-        return `<div class="hallazgos__det"><div class="hallazgos__head"><strong>${escapeHtml(SLUG_LABELS[c.slug] || c.slug)}</strong>`
-          + `<span>${escapeHtml(_ESTADO_AD[c.estado] || c.estado || '')}</span>`
-          + `<span>${Number(c.total || 0).toLocaleString('es-AR')} anomalía${c.total === 1 ? '' : 's'}</span></div>${cuerpo}</div>`;
-      }).join('');
-      return bloques || '<div class="hallazgos__vacio">No hay detectores de anomalías en este entorno.</div>';
-    }
     // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
     function explicarAnomalia(b) {
       const { slug, inicio, fin, grado, valores } = b.dataset;
@@ -7255,40 +6795,6 @@
         { desde: inicio, hasta: fin }));
       if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
       return tomada;
-    }
-    async function verAnomalias(btn) {
-      const destino = document.getElementById('infra-anomalias-detalle');
-      if (!destino) return;
-      btn.disabled = true;
-      showStatus(destino, 'Leyendo las anomalías…', 'loading');
-      try {
-        const res = await fetch('/api/v1/anomalias/resumen');
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = anomaliasDetalleHTML(data.casos || []);
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    }
-    async function verHallazgos(btn) {
-      const destino = document.getElementById('infra-seguridad-detalle');
-      if (!destino) return;
-      btn.disabled = true;
-      showStatus(destino, 'Leyendo hallazgos y alertas…', 'loading');
-      try {
-        const res = await fetch('/api/v1/security/resumen');
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = hallazgosHTML(data.casos || []);
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
     }
 
     function renderCapabilitiesResult(capsBySlug, anchor) {
@@ -7686,7 +7192,6 @@
         return null;
       }
       // Renderiza el gráfico dentro de `container` (async para Vega).
-      capVega = { ensure: _ensureVega, theme: _vegaTheme, config: _vegaConfig };
       function _renderCapChartInto(container, result, vega = null) {
         if (vega && Object.keys(vega).length && (result && (result.datarows || []).length)) {
           const holder = document.createElement('div');
@@ -7918,17 +7423,18 @@
     }
 
     // Con "Provisionar plugins" en curso: cada tanto se mira el estado y, si
-    // algún caso sumó pronósticos, detector o monitor, se repinta. Solo si
-    // cambió: repintar siempre borraba el detalle que se estaba mirando.
+    // alguna tarjeta de la vista Plugins cambió (un caso nuevo, un plugin que
+    // quedó listo o falló, un backtest que terminó), se repinta. Solo si
+    // cambió: repintar siempre borraba lo que se estaba mirando.
     const _REFRESCO_PLUGINS_MS = 30000;
-    const firmaDePlugins = (caps) => JSON.stringify(Object.entries(caps || {}).map(([s, ids]) =>
-      [s, _forecastersDe(ids || {}).length, !!(ids || {}).detector_id, !!(ids || {}).monitor_id]).sort());
+    const firmaDePlugins = (plugins) => JSON.stringify(Object.entries(plugins || {}).map(([s, ts]) =>
+      [s, (Array.isArray(ts) ? ts : []).map(t => [t.plugin, t.estado, (t.filas || []).map(f => f.estado)])]).sort());
     async function refrescarPluginsEnCurso() {
       try {
         const res = await fetch('/api/v1/terraform/status');
         if (!res.ok) return;
         const data = await res.json();
-        if (firmaDePlugins(data.capabilities) !== firmaDePlugins((state.lastStatus || {}).capabilities)) {
+        if (firmaDePlugins(data.plugins) !== firmaDePlugins((state.lastStatus || {}).plugins)) {
           renderInfraView(data);
         }
       } catch (_err) { /* el próximo intento */ }
@@ -8590,11 +8096,6 @@
       // El caso que se estaba mirando (un refresco re-pinta la vista) o el primero.
       plugins: [(panel) => (state.pluginsCaso && [...panel.querySelectorAll('.plug__caso')]
         .find(b => b.dataset.slug === state.pluginsCaso)) || panel.querySelector('.plug__caso')],
-      seguridad: ['#infra-seguridad-ver', '#infra-campanas-ver'],
-      anomalias: ['#infra-anomalias-ver'],
-      pronosticos: ['.pron__caso'],
-      perfiles: ['.perfil__caso'],
-      rendimiento: ['.insights__tipo'],
       documentos: ['#infra-documentos-actualizar'],
     };
     function cargarSeccionInfra(raiz, id) {
@@ -8737,21 +8238,22 @@
       const caps = data.capabilities || {};
       const sa = data.security_analytics || {};
       const nombreCaso = (slug) => SLUG_LABELS[slug] || String(slug || '').replace(/-/g, ' ');
-      // Qué tiene cada caso, de un vistazo; los que tienen pestaña llevan a ella.
+      // Qué tiene cada caso, de un vistazo; los plugins llevan a su tarjeta.
       const chipsCaso = (p) => {
         const ids = caps[p.slug] || {};
         const fc = _forecastersDe(ids).length;
         const dets = ((sa[p.slug] || {}).detectores || []).length;
+        const enPlugins = _nPlugins((data.plugins || {})[p.slug]) ? 'plugins' : '';
         return [
-          p.dashboards_imported && ['Dashboards', ''],
+          p.dashboards_imported && ['Dashboards', enPlugins],
           ids.agent_id && ['Asistente', ''],
-          dets && [`Security Analytics · ${dets}`, 'seguridad'],
-          ids.detector_id && ['Anomalías', 'anomalias'],
-          fc && [`Pronósticos · ${fc}`, 'pronosticos'],
-          p.perfil && [`Perfil por ${String(p.perfil).toLowerCase()}`, 'perfiles'],
-          (p.enmascarados || []).length && ['Analista enmascarado', ''],
+          dets && [`Security Analytics · ${dets}`, enPlugins],
+          ids.detector_id && ['Anomalías', enPlugins],
+          fc && [`Pronósticos · ${fc}`, enPlugins],
+          p.perfil && [`Perfil por ${String(p.perfil).toLowerCase()}`, enPlugins],
+          (p.enmascarados || []).length && ['Analista enmascarado', enPlugins],
         ].filter(Boolean).map(([texto, ir]) => ir
-          ? `<button type="button" class="caso-chip" data-ir="${ir}">${escapeHtml(texto)}</button>`
+          ? `<button type="button" class="caso-chip" data-ir="${ir}" data-slug="${escapeHtml(p.slug)}">${escapeHtml(texto)}</button>`
           : `<span class="caso-chip">${escapeHtml(texto)}</span>`).join('');
       };
       const estadoCaso = (p) => `${rota(p)
@@ -8788,12 +8290,10 @@
       const conDocs = pipelines.filter(p => salud[p.slug] && salud[p.slug].docs !== null && salud[p.slug].docs !== undefined);
       const docsTotal = conDocs.reduce((t, p) => t + (salud[p.slug].docs || 0), 0);
       const ingestando = pipelines.filter(p => p.active && !rota(p)).length;
-      const nDetectores = Object.values(sa).reduce((t, c) => t + ((c && c.detectores) || []).length, 0);
-      const nReglas = Object.values(sa).reduce((t, c) => t + ((c && c.reglas) || 0), 0);
-      const nAnomalias = Object.values(caps).filter(ids => ids && ids.detector_id).length;
-      const nPronosticos = Object.values(caps).reduce((t, ids) => t + _forecastersDe(ids).length, 0);
-      const nPerfiles = pipelines.filter(p => p.perfil).length;
       const nPlugins = Object.values(data.plugins || {}).reduce((t, ts) => t + _nPlugins(ts), 0);
+      // Los que no quedaron bien (parcial o falló): lo primero que hay que mirar.
+      const nConProblemas = Object.values(data.plugins || {}).reduce((t, ts) =>
+        t + (Array.isArray(ts) ? ts : []).filter(x => x.estado === 'parcial' || x.estado === 'falla').length, 0);
       const kpi = (ir, etiqueta, valor, sub, extra = '') => `
         <div class="env-kpi${ir ? ' is-link' : ''}"${ir ? ` data-ir="${ir}" role="button" tabindex="0"` : ''}>
           <span class="env-kpi__lbl">${etiqueta}</span>
@@ -8811,9 +8311,8 @@
           ${kpi('', 'Casos', pipelines.length, `${ingestando} ingestando${pipelines.length - ingestando ? ` · ${pipelines.length - ingestando} sin ingestar` : ''}`)}
           ${kpi('', 'Documentos', conDocs.length ? docsTotal.toLocaleString('es-AR') : '—',
                 conDocs.length ? `en ${conDocs.length} índice${conDocs.length === 1 ? '' : 's'}` : 'se cuentan al verificar la ingesta', verificar)}
-          ${nDetectores ? kpi('seguridad', 'Security Analytics', nDetectores, `detector${nDetectores === 1 ? '' : 'es'} · ${nReglas} reglas Sigma`) : ''}
-          ${nAnomalias ? kpi('anomalias', 'Anomaly Detection', nAnomalias, `detector${nAnomalias === 1 ? '' : 'es'} · análisis histórico`) : ''}
-          ${nPronosticos ? kpi('pronosticos', 'Forecasting', nPronosticos, `pronóstico${nPronosticos === 1 ? '' : 's'} con backtest`) : ''}
+          ${nPlugins ? kpi('plugins', 'Plugins', nPlugins, nConProblemas
+            ? `${nConProblemas} con problemas: mirá su motivo` : 'todos listos · cada uno con su link a Dashboards') : ''}
         </div>`;
 
       // Un paso de la secuencia de puesta en marcha: los tres van lado a lado.
@@ -8907,12 +8406,7 @@
             </div>
             ${accesosHTML(pipelines)}` },
           { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: nPlugins, html: pluginsHTML(data.plugins) },
-          { id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) },
-          { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', cuenta: nAnomalias, html: anomaliasHTML(data.capabilities) },
-          { id: 'pronosticos', label: 'Forecasting', icon: 'trending', cuenta: nPronosticos, html: pronosticosHTML(data.capabilities) },
-          { id: 'perfiles', label: 'Perfiles', icon: 'layers', cuenta: nPerfiles, html: perfilesHTML(pipelines) },
           { id: 'documentos', label: 'Documentos', icon: 'file', html: documentosHTML() },
-          { id: 'rendimiento', label: 'Rendimiento', icon: 'clock', html: rendimientoHTML() },
         ], infraSeccionGuardada())}
         </div>`;
       const env = body.querySelector('.env');
@@ -8932,29 +8426,17 @@
       // Los números y los chips de cada caso llevan a su pestaña.
       env?.addEventListener('click', (e) => {
         const k = e.target.closest('[data-ir]');
-        if (k && !e.target.closest('#infra-verify-btn')) irASeccion(k.dataset.ir);
+        if (!k || e.target.closest('#infra-verify-btn')) return;
+        if (k.dataset.slug) state.pluginsCaso = k.dataset.slug;
+        irASeccion(k.dataset.ir);
+        const caso = k.dataset.slug && [...body.querySelectorAll('.plug__caso')].find(b => b.dataset.slug === k.dataset.slug);
+        if (caso && !caso.classList.contains('is-active')) caso.click();
       });
       env?.addEventListener('keydown', (e) => {
         const k = e.target.closest('.env-kpi[data-ir]');
         if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irASeccion(k.dataset.ir); }
       });
 
-      // Security Analytics: los hallazgos a demanda, y "Explicar" cada uno.
-      body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));
-      body.querySelector('#infra-seguridad-detalle')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.hallazgo__explicar');
-        if (b) explicarHallazgo(b);
-      });
-      // Rendimiento: por latencia, CPU o memoria, a demanda.
-      body.querySelector('#infra-rendimiento')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.insights__tipo');
-        if (b) verRendimiento(b);
-      });
-      // Perfiles por entidad: por caso, a demanda.
-      body.querySelector('#infra-perfiles')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.perfil__caso');
-        if (b) verPerfil(b);
-      });
       // Base de conocimiento: subir (click o arrastrar), borrar y preguntar.
       const docSubir = body.querySelector('#infra-documentos-subir');
       body.querySelector('#infra-documentos-actualizar')?.addEventListener('click', cargarDocumentos);
@@ -8978,29 +8460,12 @@
       });
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
       body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
-      // Campañas: a demanda, y "Explicar" cada una.
-      body.querySelector('#infra-campanas-ver')?.addEventListener('click', (e) => verCampanas(e.currentTarget));
-      body.querySelector('#infra-campanas-detalle')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.campana__explicar');
-        if (b) explicarCampana(b);
-      });
-      // Forecasting: por caso, a demanda.
-      body.querySelector('#infra-pronosticos')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.pron__caso');
-        if (b) verPronosticos(b);
-      });
       // Plugins: por caso, las tarjetas y su número; "Explicarla con IA" va al asistente.
       body.querySelector('#infra-plugins')?.addEventListener('click', (e) => {
         const caso = e.target.closest('.plug__caso');
         if (caso) return verPlugins(caso);
         const explicar = e.target.closest('.anomalia__explicar');
         if (explicar) explicarAnomalia(explicar);
-      });
-      // Anomaly Detection: igual, a demanda y con "Explicar".
-      body.querySelector('#infra-anomalias-ver')?.addEventListener('click', (e) => verAnomalias(e.currentTarget));
-      body.querySelector('#infra-anomalias-detalle')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.anomalia__explicar');
-        if (b) explicarAnomalia(b);
       });
 
       // Acciones: reusan las funciones del flujo.
@@ -9147,10 +8612,6 @@
           detectores: [{ nombre: 'fortianalyzer-fortianalyzer', log_type: 'fortianalyzer', descripcion: 'FortiGate vía FortiAnalyzer' }],
           reglas: 5, correlaciones: 0 } } : {}) } : {},
       };
-      // Series de ejemplo para los pronósticos: una onda con ruido y su pronóstico.
-      const serie = (base, n, desde, paso, amp) => Array.from({ length: n }, (_, i) => ({
-        t: new Date(desde + i * paso).toISOString().slice(0, 19).replace('T', ' '),
-        v: Math.round((base + amp * Math.sin(i / 3) + amp * 0.3 * Math.cos(i * 1.7)) * 10) / 10 }));
       const real = window.fetch.bind(window);
       const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { 'Content-Type': 'application/json' } });
       const espera = (ms) => new Promise(r => setTimeout(r, ms));
@@ -9199,41 +8660,6 @@
           return json({ reachable: true, pipelines: estado.pipelines.map((p, i) => ({ slug: p.slug, index: p.index,
                                                                                       docs: completo ? DOCS[p.slug] : [98037, 41250][i] })) });
         }
-        if (u.includes('/api/v1/forecast/')) {
-          await espera(600);
-          const slug = decodeURIComponent(u.split('/api/v1/forecast/')[1] || '');
-          const hora = 3600000, desde = Date.UTC(2026, 5, 24);
-          return json({ slug, pronosticos: ['Eventos', 'Bloqueados', 'IPs únicas'].map((medida, k) => {
-            const real = serie(1500 - k * 400, 39, desde, 4 * hora, 220 - k * 50);
-            const ancla = real[30].t;
-            return { id: `fc-${k}`, nombre: `${slug}-${k}`, medida, intervalo_min: 240, horizonte: 8, error: '', ancla,
-                     real, error_pct: [12.4, 27.9, 46.2][k],
-                     pronostico: serie(1500 - k * 400, 8, desde + 31 * 4 * hora, 4 * hora, 160 - k * 40)
-                       .map(r => ({ ...r, lo: Math.round(r.v * 0.9), hi: Math.round(r.v * 1.1) })) };
-          }) });
-        }
-        if (u.includes('/api/v1/perfiles/')) {
-          await espera(500);
-          const slug = decodeURIComponent(u.split('/api/v1/perfiles/')[1] || '');
-          return json({ slug, etiqueta: PERFIL[slug] || 'Entidad', estado: 'finished', fechas: [3, 4],
-                        columnas: [PERFIL[slug] || 'Entidad', 'Eventos', 'Riesgo máx.', 'Primer evento', 'Último evento'],
-                        filas: Array.from({ length: 12 }, (_, i) => [
-                          slug === 'siem' ? `185.220.101.${40 + i}` : `${(PERFIL[slug] || 'E').slice(0, 1)}-${100 + i}`,
-                          900 - i * 61, [90, 70, 50][i % 3], 1751372608000 + i * 86400000, 1782843939000 - i * 3600000]) });
-        }
-        if (u.includes('/api/v1/security/campanas')) {
-          await espera(600);
-          return json({ casos: [{ slug: 'siem', campanas: [
-            { id: 'CMP-001', nombre: 'Ransomware Precursor', eventos: 14, ips: ['45.155.205.233'], fuentes: ['waf', 'auth', 'cloudaudit'],
-              desde: '2025-09-16T20:46:10.000Z', hasta: '2025-09-16T23:02:44.000Z', pasos: [
-                { fuente: 'waf', accion: 'sqli', eventos: 6, inicio: '2025-09-16T20:46:10.000Z' },
-                { fuente: 'auth', accion: 'ssh_login', eventos: 5, inicio: '2025-09-16T21:30:02.000Z' },
-                { fuente: 'cloudaudit', accion: 'deleteTracker', eventos: 3, inicio: '2025-09-16T22:58:12.000Z' }] },
-            { id: 'CMP-003', nombre: 'Lateral Movement', eventos: 2, ips: ['23.129.64.130'], fuentes: ['fortigate'],
-              desde: '2026-05-20T18:25:57.000Z', hasta: '2026-05-20T18:40:12.000Z', pasos: [
-                { fuente: 'fortigate', accion: 'blocked', eventos: 2, inicio: '2026-05-20T18:25:57.000Z' }] },
-          ] }] });
-        }
         if (u.includes('/api/v1/analistas')) {
           await espera(400);
           return json({ analistas: Object.entries(ENMASCARADOS).map(([slug, enmascarados]) => ({
@@ -9259,13 +8685,6 @@
             return json({ borrados: 1 });
           }
           return json({ documentos: window.__docsPrevia });
-        }
-        if (u.includes('/api/v1/insights/consultas')) {
-          await espera(500);
-          return json({ tipo: 'latency', consultas: [
-            { hora: '2026-10-02 02:40:56', indices: 'fortianalyzer*', latencia_ms: 2166, cpu_ms: 5.3, memoria_kb: 316.5, forma: 'conteo total', shards: 13 },
-            { hora: '2026-10-02 02:45:00', indices: 'siem-2025_07, siem-2025_08, …', latencia_ms: 1410, cpu_ms: 88.1, memoria_kb: 1204.2, forma: 'agregación por source.ip', shards: 13 },
-            { hora: '2026-10-02 03:01:12', indices: 'transacciones-billetera-*', latencia_ms: 640, cpu_ms: 41.7, memoria_kb: 512.9, forma: 'histograma por hora', shards: 12 }] });
         }
         if (u.includes('/api/v1/capabilities/ppl-chat')) {
           await espera(1100);
@@ -9294,41 +8713,6 @@
             result: { schema: [{ name: 'transaction.operation_code', type: 'string' }, { name: 'total', type: 'long' }],
                       datarows: [['LOGIN', 24492], ['BALANCE_INQUIRY', 19990], ['TRANSFER', 19483], ['QR_PAYMENT', 11659], ['BILL_PAYMENT', 9740]] },
           });
-        }
-        if (u.includes('/api/v1/anomalias/resumen')) {
-          await espera(800);
-          return json({ casos: [
-            { slug: 'transacciones-billetera', estado: 'FINISHED', total: 37, error: '', top: [
-              { inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00', grado: 0.93, confianza: 0.88,
-                valores: [{ nombre: 'txn_volume', valor: 1840 }, { nombre: 'failed_txns', valor: 412 }] },
-              { inicio: '2025-03-02 19:40:00', fin: '2025-03-02 19:50:00', grado: 0.61, confianza: 0.8,
-                valores: [{ nombre: 'txn_volume', valor: 95 }, { nombre: 'failed_txns', valor: 3 }] },
-            ] },
-            { slug: 'ventas-ecommerce', estado: completo ? 'FINISHED' : 'RUNNING', total: completo ? 1 : 0, error: '',
-              top: completo ? [{ inicio: '2025-11-28 00:00:00', fin: '2025-11-28 04:00:00', grado: 0.78, confianza: 0.9,
-                                 valores: [{ nombre: 'orders', valor: 912 }] }] : [] },
-            ...(completo ? ['siem', 'fortianalyzer', 'cts', 'produccion-pozos', 'encuentros-clinicos', 'transacciones-alyc', 'streaming-ott']
-              .map((slug, i) => ({ slug, estado: 'FINISHED', total: [2, 3, 1, 6, 3, 0, 1][i], error: '',
-                                   top: [2, 3, 1, 6, 3, 0, 1][i] ? [{ inicio: '2026-01-1' + i + ' 10:00:00', fin: '2026-01-1' + i + ' 14:00:00',
-                                     grado: 0.72 + i * 0.03, confianza: 0.85, valores: [{ nombre: 'eventos', valor: 4100 + i * 300 }] }] : [] })) : []),
-          ] });
-        }
-        if (u.includes('/api/v1/security/resumen')) {
-          await espera(800);
-          return json({ casos: [{ slug: 'siem', correlaciones: 3, detectores: [
-            { nombre: 'siem-siem-fortigate', log_type: 'siem_fortigate', descripcion: 'FortiGate: IPS y threat intel (SIEM)',
-              total: 1842, alertas: { critical: 12, high: 30 }, error: '', recientes: [
-                { regla: 'FortiGate IPS: exploit bloqueado', nivel: 'critical', hora: '2025-10-21T03:14:07.000Z', ip: '45.155.205.233' },
-                { regla: 'Threat intel: IP maliciosa conocida', nivel: 'high', hora: '2025-10-21T03:12:40.000Z', ip: '185.220.101.47' },
-              ] },
-            { nombre: 'siem-siem-auth', log_type: 'siem_auth', descripcion: 'Hosts Linux: SSH y sudo (SIEM)',
-              total: completo ? 1279 : 0, hallazgos_sa: completo ? 4616 : 0, alertas: completo ? { high: 18 } : {}, error: '',
-              recientes: completo ? [{ regla: 'SSH: fuerza bruta sobre root', nivel: 'high', hora: '2025-10-21T03:10:00.000Z', ip: '193.32.162.7' }] : [] },
-          ] }, ...(completo ? [{ slug: 'fortianalyzer', correlaciones: 0, detectores: [
-            { nombre: 'fortianalyzer-fortianalyzer', log_type: 'fortianalyzer', descripcion: 'FortiGate vía FortiAnalyzer',
-              total: 26707, hallazgos_sa: 419876, alertas: { critical: 40, high: 210 }, error: '', recientes: [
-                { regla: 'FortiGate IPS: firma crítica bloqueada', nivel: 'critical', hora: '2026-03-02T11:20:00.000Z', ip: '91.240.118.172' },
-                { regla: 'FortiGate: virus bloqueado', nivel: 'high', hora: '2026-03-02T11:12:00.000Z', ip: '10.0.4.21' }] }] }] : [])] });
         }
         if (metodo !== 'GET' && u.includes('/api/v1/')) return json({ detail: { message: 'Vista previa: esto no se ejecuta.' } }, 400);
         return real(url, opts);

@@ -10,8 +10,6 @@ fuentes, y una tarjeta con los hallazgos.
 import json
 import pathlib
 import re
-import shutil
-import subprocess
 
 import pytest
 
@@ -440,159 +438,13 @@ def test_el_registro_se_expone_y_se_va_con_el_entorno(tmp_path):
     assert "terraform/.security_analytics.json" in gi
 
 
-# ── Los hallazgos ───────────────────────────────────────────────────────────
-def test_un_hallazgo_para_la_vista():
-    regla_por_id = {"R1": {"titulo": "SSH: fuerza bruta sobre root", "nivel": "high"}}
-    f = {"index": "siem-2025.10", "timestamp": 111, "queries": [{"id": "R1", "name": "x"}],
-         "document_list": [{"document": json.dumps({"@timestamp": "2025-10-21T03:14:07Z",
-                                                    "source": {"ip": "1.2.3.4"}})}]}
-    assert main._hallazgo(f, regla_por_id) == {"regla": "SSH: fuerza bruta sobre root", "nivel": "high",
-                                               "hora": "2025-10-21T03:14:07Z",
-                                               "hora_ppl": "2025-10-21 03:14:07", "ip": "1.2.3.4",
-                                               "indice": "siem-2025.10"}
-    # FortiAnalyzer: la IP es `srcip`; sin documento, la hora del hallazgo.
-    forti = {"queries": [{"id": "?", "name": "regla-x"}], "timestamp": 222,
-             "document_list": [{"document": {"srcip": "5.6.7.8"}}]}
-    h = main._hallazgo(forti, {})
-    assert h["ip"] == "5.6.7.8" and h["regla"] == "regla-x" and h["hora"] == 222 and h["nivel"] == ""
-    assert h["hora_ppl"] == "1970-01-01 00:00:00"
-
-
-@pytest.mark.parametrize("valor, esperado", [
-    ("2026-02-28T12:26:30.000Z", "2026-02-28 12:26:30"),       # así llega @timestamp: UTC
-    ("2026-02-28T09:26:30-03:00", "2026-02-28 12:26:30"),      # con zona: se pasa a UTC
-    ("2026-02-28T12:26:30", "2026-02-28 12:26:30"),            # sin zona: se toma UTC
-    (1741918200000, "2025-03-14 02:10:00"),
-    ("1741918200000", "2025-03-14 02:10:00"),
-    ("basura", ""),
-])
-def test_la_hora_para_el_asistente_es_utc_y_con_anio(valor, esperado):
-    """La vista mostraba "28/2, 09:26" (hora local, sin año) y eso iba al
-    asistente: filtró 2025-02-28 09:26 cuando el evento era 2026-02-28 12:26 UTC."""
-    assert main._hora_utc_ppl(valor) == esperado
-
-
-def test_el_resumen_en_vivo(monkeypatch, tmp_path):
-    main._write_security(tmp_path, {"siem": {"detectores": {"siem-siem-auth": {"id": "D1", "log_type": "siem_auth"}},
-                                             "reglas": {"SSH: fuerza bruta sobre root": "R1"}, "correlaciones": {"c": "C"}}})
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
-    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
-    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
-    pedidos = []
-
-    def fake(method, url, user, password, json_body=None, timeout=30):
-        pedidos.append((method, url))
-        if "/findings/_search" in url:
-            return _Resp(200, {"total_findings": 1234, "findings": [
-                {"queries": [{"id": "R1"}], "document_list": [{"document": json.dumps({"source": {"ip": "9.9.9.9"}})}]}] * 7})
-        return _Resp(200, {"alerts": [{"severity": "1"}, {"severity": "2"}, {"severity": "2"},
-                                      {"severity": "", "state": "ERROR",
-                                       "error_message": "IndexNotFoundException[no such index [siem-seguridad]]"}]})
-
-    monkeypatch.setattr(main, "_os_req", fake)
-    from fastapi.testclient import TestClient
-    r = TestClient(main.app).get("/api/v1/security/resumen")
-    assert r.status_code == 200
-    det = r.json()["casos"][0]["detectores"][0]
-    assert det["total"] == 1234 and len(det["recientes"]) == 5 and det["recientes"][0]["ip"] == "9.9.9.9"
-    assert det["recientes"][0]["regla"] == "SSH: fuerza bruta sobre root" and det["recientes"][0]["nivel"] == "high"
-    assert det["alertas"] == {"critical": 1, "high": 2} and det["error"] == ""
-    # Una alerta en ERROR es el detector que no pudo correr: va aparte.
-    assert det["fallas"] == ["IndexNotFoundException[no such index [siem-seguridad]]"]
-    assert det["descripcion"] == "Hosts Linux: SSH y sudo (SIEM)"
-    assert r.json()["casos"][0]["correlaciones"] == 1
-    # Solo lectura: GETs y el conteo de eventos (POST a _count).
-    assert all(m == "GET" or u.endswith("/_count") for m, u in pedidos) and "detector_id=D1" in pedidos[0][1]
-
-
-def test_sin_registro_no_se_toca_el_cluster(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_os_req", lambda *a, **k: pytest.fail("no debería llamar al cluster"))
-    from fastapi.testclient import TestClient
-    assert TestClient(main.app).get("/api/v1/security/resumen").json() == {"casos": []}
-
-
-# ── La vista ────────────────────────────────────────────────────────────────
+# ── El asistente ────────────────────────────────────────────────────────────
 _INDEX = pathlib.Path(main.__file__).parent / "static" / "index.html"
 
 
-def _funciones_de_seguridad(html: str) -> str:
-    i = html.index("    function seguridadHTML(sa) {")
-    return html[i:html.index("    async function verHallazgos(btn) {", i)]
-
-
-_ARNES = r"""
-const icon = (n) => `<i:${n}>`;
-const escapeHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const SLUG_LABELS = { siem: 'SIEM' };
-let capChatPreguntar = null;
-const toasts = [];
-const toast = (m) => toasts.push(m);
-""" + "{FUNCIONES}" + r"""
-const fallos = [];
-const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-check('sin registro, nada', seguridadHTML({}) === '' && seguridadHTML(null) === '');
-const card = seguridadHTML({ siem: { detectores: [{ log_type: 'siem_auth', descripcion: 'Hosts <Linux>' }, { log_type: 'siem_waf', descripcion: '' }], reglas: 8, correlaciones: 3 } });
-check('resumen', card.includes('2 detectores · 8 reglas Sigma · 3 correlaciones'), card);
-check('caso y fuentes', card.includes('<strong>SIEM</strong>') && card.includes('Hosts &lt;Linux&gt; · siem_waf'), card);
-check('botón', card.includes('id="infra-seguridad-ver"') && card.includes('id="infra-seguridad-detalle"'));
-const uno = seguridadHTML({ x: { detectores: [{ log_type: 'a' }], reglas: 1, correlaciones: 1 } });
-check('singular', uno.includes('1 detector · 1 reglas Sigma · 1 correlación'), uno);
-
-const h = hallazgosHTML([{ slug: 'siem', correlaciones: 3, detectores: [
-  { descripcion: 'FortiGate', total: 1842, alertas: { critical: 1, high: 30, low: 0 }, error: '', recientes: [
-    { regla: 'IPS "raro"', nivel: 'critical', hora: '2025-10-21T03:14:07.000Z', hora_ppl: '2026-02-28 12:26:30', ip: '1.2.3.4' }] },
-  { descripcion: 'Auth', total: 0, alertas: {}, error: '', recientes: [] },
-  { descripcion: 'WAF', total: 0, alertas: {}, error: 'status 500: boom', recientes: [] },
-] }]);
-check('total con miles', h.includes('>1.842 eventos detectados<'), h);
-const inflado = hallazgosHTML([{ slug: 'siem', detectores: [{ descripcion: 'F', total: 26707, hallazgos_sa: 251463, alertas: {}, error: '', recientes: [] }] }]);
-check('lo que registró SA, aparte', inflado.includes('title="Security Analytics registró 251.463: con el cluster saturado cuenta el mismo evento varias veces">26.707 eventos detectados<'), inflado);
-check('si coincide, sin aclaración', !h.includes('Security Analytics registró'), h);
-check('alertas por severidad', h.includes('sev--critical">1 alerta crítica<') && h.includes('sev--high">30 alertas altas<'), h);
-check('sin alertas en cero', !h.includes('sev--low'));
-check('el hallazgo', h.includes('IPS &quot;raro&quot;') && h.includes('1.2.3.4') && h.includes('>Crítica<'), h);
-check('explicar con sus datos', h.includes('<button type="button" class="hallazgo hallazgo__explicar" data-slug="siem" data-regla="IPS &quot;raro&quot;"'), h);
-check('la fila entera explica, sin un botón por renglón', !h.includes('btn btn-secondary btn-sm hallazgo__explicar') && h.includes('<span class="hallazgo__accion"><i:spark> Explicar</span></button>'), h);
-check('sin hallazgos todavía', h.includes('Sin hallazgos todavía') && h.includes('Reiniciar ingesta'));
-check('error del detector', h.includes('No se pudieron leer: status 500: boom'));
-check('correlaciones', h.includes('SIEM · 3 correlaciones entre fuentes'));
-check('nada', hallazgosHTML([]).includes('No hay detectores'));
-
-// Explicar: le pregunta al asistente con la regla, la hora y la IP.
-const b = { dataset: { slug: 'siem', regla: 'SSH', hora: '2026-02-28 12:26:30', ip: '1.2.3.4' } };
-check('sin asistente, avisa', explicarHallazgo(b) === false && toasts.length === 1 && toasts[0].includes('Provisionar plugins'));
-let pedido = null;
-capChatPreguntar = (slug, pregunta, contexto, explicar) => { pedido = { slug, pregunta, contexto, explicar }; return true; };
-check('con asistente', explicarHallazgo(b) === true && toasts.length === 1);
-check('la pregunta', pedido.slug === 'siem' && pedido.pregunta === '¿Por qué se disparó "SSH"? ¿Qué más pasó alrededor?', pedido.pregunta);
-check('el contexto', pedido.contexto === 'Hallazgo de Security Analytics: regla "SSH", evento del 2026-02-28 12:26:30 (UTC, como @timestamp), IP de origen 1.2.3.4. Mirá qué más hizo esa IP en todo el período y en las horas cercanas (no solo ese minuto).', pedido.contexto);
-check('la ventana: la hora del evento', JSON.stringify(pedido.explicar) === JSON.stringify({ desde: '2026-02-28 12:26:30' }), JSON.stringify(pedido.explicar));
-check('explicar lleva la hora UTC', h.includes('data-hora="2026-02-28 12:26:30"'), h);
-const conFalla = hallazgosHTML([{ slug: 'siem', detectores: [{ descripcion: 'Auth', total: 0, alertas: {}, fallas: ['no such index <x>'], error: '', recientes: [] }] }]);
-check('la falla del detector, aparte', conFalla.includes('el detector falló 1 vez') && conFalla.includes('title="no such index &lt;x&gt;"'), conFalla);
-capChatPreguntar = () => false;
-check('asistente ocupado, avisa', explicarHallazgo(b) === false && toasts.length === 2);
-console.log(fallos.join('\n'));
-process.exit(fallos.length ? 1 : 0);
-"""
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_tarjeta_y_los_hallazgos_en_node(tmp_path):
+def test_el_asistente_se_deja_preguntar():
+    """"Explicarla con IA" (vista Plugins) le pasa la pregunta al asistente."""
     html = _INDEX.read_text(encoding="utf-8")
-    js = tmp_path / "seg.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", _funciones_de_seguridad(html)), encoding="utf-8")
-    res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
-    assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
-
-
-def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'seguridad', label: 'Security Analytics', icon: 'shield', cuenta: nDetectores, html: seguridadHTML(data.security_analytics) + campanasHTML(data.security_analytics) }," in html
-    assert "body.querySelector('#infra-seguridad-ver')?.addEventListener('click', (e) => verHallazgos(e.currentTarget));" in html
-    assert "const b = e.target.closest('.hallazgo__explicar');\n        if (b) explicarHallazgo(b);" in html
     i = html.index("      capChatPreguntar = (slug, pregunta, contexto, explicar = null) => {")
     fn = html[i:html.index("\n      };\n", i)]
     assert "if (!activeSlugs.includes(slug) || capChatBusy) return false;" in fn
@@ -600,9 +452,6 @@ def test_la_vista_la_pinta_y_el_asistente_se_deja_preguntar():
         < fn.index("sendCapChat(pregunta, { contexto, investigar: true, explicar });")
     j = html.index("function _quitarAsistente() {")
     assert "capChatPreguntar = null;" in html[j:html.index("\n    }\n", j)]
-    k = html.index("async function verHallazgos(btn) {")
-    ver = html[k:html.index("\n    }\n", k)]
-    assert "fetch('/api/v1/security/resumen')" in ver and "destino.innerHTML = hallazgosHTML(data.casos || []);" in ver
 
 
 def test_que_se_va_a_crear_lo_dice():
@@ -797,13 +646,9 @@ def test_los_eventos_detectados_se_cuentan_con_las_reglas():
         {"bool": {"filter": [{"terms": {"action": ["blocked", "dropped"]}}, {"terms": {"dstport": [22, 3389]}}]}}]}}
 
 
-def test_el_total_son_los_eventos_y_lo_de_sa_va_aparte(monkeypatch, tmp_path):
-    main._write_security(tmp_path, {"siem": {"detectores": {"siem-siem-auth": {"id": "D1", "log_type": "siem_auth"}},
-                                             "reglas": {}, "correlaciones": {}}})
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
-    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
-    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
+def test_los_eventos_de_un_detector_se_cuentan_una_vez(monkeypatch):
+    """El número de cada detector en la vista Plugins: los eventos que matchean
+    sus reglas, no los hallazgos de SA (repetidos con el cluster saturado)."""
     contados = []
 
     def fake(method, url, user, password, json_body=None, timeout=30):
@@ -816,10 +661,8 @@ def test_el_total_son_los_eventos_y_lo_de_sa_va_aparte(monkeypatch, tmp_path):
         return _Resp(200, {"alerts": []})
 
     monkeypatch.setattr(main, "_os_req", fake)
-    from fastapi.testclient import TestClient
-    det = TestClient(main.app).get("/api/v1/security/resumen").json()["casos"][0]["detectores"][0]
-    assert det["total"] == 1279 and det["hallazgos_sa"] == 4616
-    assert len(det["recientes"]) == 3, "el mismo evento repetido se muestra una vez"
+    spec = verticals.security_specs()["siem"]
+    assert main._eventos_detectados("http://x:9200", "admin", "pw", "siem*", spec, "siem_auth") == 1279
     (url, cuerpo), = contados
     assert url == "http://x:9200/siem*/_count"
     reglas_auth = next(lt["reglas"] for lt in verticals.security_specs()["siem"]["log_types"] if lt["nombre"] == "siem_auth")

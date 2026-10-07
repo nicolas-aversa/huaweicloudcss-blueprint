@@ -2,8 +2,8 @@
 pronosticos.py
 ==============
 
-Lógica PURA (sin I/O) de la pestaña Forecasting: lo que calculó cada
-forecaster, listo para dibujar.
+Lógica PURA (sin I/O) de lo que calculó cada forecaster y su error contra lo
+que pasó: el número de la tarjeta de Forecasting en la vista Plugins.
 
 El backtest (`_run_once`) recorre el último año hasta HOY en pasos del
 intervalo del forecaster y, en cada paso, guarda el valor real de ese intervalo

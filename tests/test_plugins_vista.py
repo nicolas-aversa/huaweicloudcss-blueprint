@@ -375,6 +375,7 @@ const icon = (n) => `<svg data-i="${n}"></svg>`;
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const SLUG_LABELS = { 'produccion-pozos': 'Producción de pozos' };
 const _fmtPron = (v) => Number(v).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+const state = {};
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
@@ -389,6 +390,10 @@ const card = pluginsHTML(plugins);
 check('el caso con su nombre y cuántos (sin los excluidos)', card.includes('data-slug="produccion-pozos"><span>Producción de pozos</span><span class="maestro__n">2</span>'), card);
 check('un caso con todo excluido no aparece', !card.includes('data-slug="cts"'), card);
 check('todo el cluster, al final', card.includes('data-slug="_cluster"><span>Todo el cluster</span>'), card);
+check('sin provisionar, sin aviso', !card.includes('Provisionando'), card);
+state.provisionandoPlugins = true;
+check('provisionando, lo dice', pluginsHTML(plugins).includes('Provisionando: los demás casos aparecen a medida que terminan.'));
+state.provisionandoPlugins = false;
 const det = pluginsDetalleHTML([
   T('forecasting', 'parcial', { motivo: 'fallaron: A', filas: [{ texto: 'volumen', estado: 'parcial', detalle: 'backtest parcial: 3 de 600 pasos',
     numero: 'forecast:F1', url: 'https://d/app/forecasting#/forecasters/F1' }], links: [{ texto: 'Ver los forecasters', url: 'https://d/x' }] }),
@@ -430,6 +435,32 @@ def test_la_vista_en_node(tmp_path):
     js.write_text(_ARNES.replace("{FUNCIONES}", _funciones(_INDEX.read_text(encoding="utf-8"))), encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
+def test_mientras_se_provisiona_se_repinta_si_cambia_una_tarjeta(tmp_path):
+    """Antes solo miraba forecasters, detector y monitor: un perfil que quedaba
+    listo, o un backtest que terminaba, no se veía hasta recargar."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("    const firmaDePlugins = ")
+    firma = html[i:html.index("    async function refrescarPluginsEnCurso() {", i)]
+    js = tmp_path / "firma.mjs"
+    js.write_text(firma + r"""
+const T = (plugin, estado, filas = []) => ({ plugin, estado, filas: filas.map(e => ({ estado: e })) });
+const base = { a: [T('forecasting', 'en_curso', ['en_curso', 'ok'])] };
+const fallos = [];
+const igual = (x, y) => firmaDePlugins(x) === firmaDePlugins(y);
+if (!igual(base, JSON.parse(JSON.stringify(base)))) fallos.push('igual');
+if (igual(base, { a: [T('forecasting', 'ok', ['ok', 'ok'])] })) fallos.push('backtest que terminó');
+if (igual(base, { a: [T('forecasting', 'en_curso', ['en_curso', 'ok']), T('perfil', 'ok')] })) fallos.push('plugin nuevo');
+if (igual(base, { ...base, b: [T('dashboard', 'ok')] })) fallos.push('caso nuevo');
+if (!igual(null, {}) || firmaDePlugins({ x: 'no es lista' }) !== '[["x",[]]]') fallos.push('sin datos');
+console.log(fallos.join('\n'));
+process.exit(fallos.length ? 1 : 0);
+""", encoding="utf-8")
+    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "if (firmaDePlugins(data.plugins) !== firmaDePlugins((state.lastStatus || {}).plugins)) {" in html
 
 
 def test_la_pestana_esta_conectada():

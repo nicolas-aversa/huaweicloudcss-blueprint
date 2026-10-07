@@ -8,8 +8,6 @@ de las anomalías altas. En la vista, una tarjeta con las más fuertes y un
 """
 import json
 import pathlib
-import shutil
-import subprocess
 
 import pytest
 
@@ -262,12 +260,9 @@ def test_una_anomalia_para_la_vista():
                  "confianza": 0.88, "valores": [{"nombre": "eventos", "valor": 1840.0}]}
 
 
-def test_el_resumen_en_vivo(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"s": {"detector_id": "D1"}, "otro": {"agent_id": "A"}})
-    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
-    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
-    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
+def test_las_mas_fuertes_de_un_detector(monkeypatch):
+    """Lo que muestra la tarjeta de Anomaly Detection (vista Plugins): cuántas
+    hay y la de mayor grado, para "Explicarla con IA"."""
     pedidos = []
     fuente = {"data_start_time": 1741918200000, "data_end_time": 1741918800000, "anomaly_grade": 0.9,
               "confidence": 0.9, "feature_data": []}
@@ -280,103 +275,13 @@ def test_el_resumen_en_vivo(monkeypatch, tmp_path):
 
     monkeypatch.setattr(main, "_os_req", fake)
     monkeypatch.setattr(main.time, "sleep", lambda s: None)
-    from fastapi.testclient import TestClient
-    r = TestClient(main.app).get("/api/v1/anomalias/resumen")
-    caso = r.json()["casos"]
-    assert len(caso) == 1, "solo los casos con detector"
-    c = caso[0]
-    assert c["slug"] == "s" and c["estado"] == "RUNNING" and c["total"] == 37 and len(c["top"]) == 5 and c["error"] == ""
+    total, top, error = main._top_anomalias("http://x:9200", "admin", "pw", "D1", 5)
+    assert total == 37 and len(top) == 5 and error == ""
     busqueda = next(b for m, u, b in pedidos if "results/_search" in u)
     assert {"term": {"detector_id": "D1"}} in busqueda["query"]["bool"]["filter"]
     assert busqueda["sort"] == [{"anomaly_grade": {"order": "desc"}}] and busqueda["size"] == 5
+    assert main._estado_historico("http://x:9200", "admin", "pw", "D1", intentos=1) == "RUNNING"
     assert len([u for m, u, b in pedidos if "?task=true" in u]) == 1, "un solo sondeo del estado"
-
-
-def test_sin_detectores_no_se_toca_el_cluster(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"s": {"agent_id": "A"}})
-    monkeypatch.setattr(main, "_os_req", lambda *a, **k: pytest.fail("no debería llamar al cluster"))
-    from fastapi.testclient import TestClient
-    assert TestClient(main.app).get("/api/v1/anomalias/resumen").json() == {"casos": []}
-
-
-# ── La vista ────────────────────────────────────────────────────────────────
-_INDEX = pathlib.Path(main.__file__).parent / "static" / "index.html"
-
-_ARNES = r"""
-const icon = (n) => `<i:${n}>`;
-const escapeHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const SLUG_LABELS = { s: 'Billetera' };
-let capChatPreguntar = null;
-const toasts = [];
-const toast = (m) => toasts.push(m);
-""" + "{FUNCIONES}" + r"""
-const fallos = [];
-const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-check('sin detectores, nada', anomaliasHTML({ s: { agent_id: 'A' } }) === '' && anomaliasHTML(null) === '');
-const card = anomaliasHTML({ s: { detector_id: 'D', monitor_id: 'M' }, t: { detector_id: 'E' }, u: { agent_id: 'A' } });
-check('cuántos', card.includes('2 detectores') && card.includes('1 con alerta (grado ≥ 0,7)'), card);
-check('los casos', card.includes('Billetera · t') && !card.includes('>u<'));
-check('botón', card.includes('id="infra-anomalias-ver"') && card.includes('id="infra-anomalias-detalle"'));
-const d = anomaliasDetalleHTML([
-  { slug: 's', estado: 'FINISHED', total: 37, error: '', top: [
-    { inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00', grado: 0.93, valores: [{ nombre: 'eventos', valor: 1840.5 }] },
-    { inicio: '2025-03-02 19:40:00', fin: '2025-03-02 19:50:00', grado: 0.61, valores: [] },
-    { inicio: '2025-03-05 10:00:00', fin: '2025-03-05 10:10:00', grado: 0.75, valores: [] }] },
-  { slug: 't', estado: 'RUNNING', total: 0, error: '', top: [] },
-  { slug: 'u', estado: 'FINISHED', total: 0, error: '', top: [] },
-  { slug: 'v', estado: '', total: 0, error: 'status 500: x', top: [] },
-]);
-check('grado en %', d.includes('sev--critical">93 %<') && d.includes('sev--high">61 %<'), d);
-check('desde 70 % es alto', d.includes('sev--critical">75 %<'), d);
-check('el intervalo', d.includes('2025-03-14 02:10:00 → 02:20:00'), d);
-check('valores', d.includes('eventos: 1.840,5'), d);
-check('explicar con sus datos', d.includes('<button type="button" class="hallazgo anomalia__explicar" data-slug="s" data-inicio="2025-03-14 02:10:00" data-fin="2025-03-14 02:20:00" data-grado="93" data-valores="eventos: 1.840,5" title="Explicar con el asistente">'), d);
-check('la fila entera explica, sin un botón por renglón', !d.includes('btn btn-secondary btn-sm anomalia__explicar') && d.includes('<span class="hallazgo__accion"><i:spark> Explicar</span></button>'), d);
-check('estado', d.includes('Análisis terminado') && d.includes('Analizando…'));
-check('total', d.includes('37 anomalías'));
-check('corriendo, sin anomalías', d.includes('el análisis histórico sigue corriendo'));
-check('terminado, sin anomalías', d.includes('el análisis terminó y no encontró ninguna'));
-check('error', d.includes('No se pudieron leer: status 500: x'));
-check('nada', anomaliasDetalleHTML([]).includes('No hay detectores de anomalías'));
-const b = { dataset: { slug: 's', inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00', grado: '93', valores: 'eventos: 1.840' } };
-check('sin asistente, avisa', explicarAnomalia(b) === false && toasts.length === 1 && toasts[0].includes('Provisionar plugins'));
-let pedido = null;
-capChatPreguntar = (slug, pregunta, contexto, explicar) => { pedido = { slug, pregunta, contexto, explicar }; return true; };
-check('con asistente', explicarAnomalia(b) === true && toasts.length === 1);
-check('la pregunta', pedido.pregunta === '¿Qué pasó en ese intervalo? ¿Por qué es una anomalía?');
-check('la ventana: el intervalo', JSON.stringify(pedido.explicar) === JSON.stringify({ desde: '2025-03-14 02:10:00', hasta: '2025-03-14 02:20:00' }), JSON.stringify(pedido.explicar));
-check('el contexto', pedido.contexto === 'Anomalía detectada entre 2025-03-14 02:10:00 y 2025-03-14 02:20:00 (UTC), grado 93 %; valores: eventos: 1.840. Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.', pedido.contexto);
-console.log(fallos.join('\n'));
-process.exit(fallos.length ? 1 : 0);
-"""
-
-
-def _funciones(html: str) -> str:
-    i = html.index("    function anomaliasHTML(capabilities) {")
-    return html[i:html.index("    async function verAnomalias(btn) {", i)]
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_tarjeta_y_las_anomalias_en_node(tmp_path):
-    html = _INDEX.read_text(encoding="utf-8")
-    js = tmp_path / "ad.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", _funciones(html)), encoding="utf-8")
-    res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
-    assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
-
-
-def test_la_vista_la_pinta_con_sus_fichas():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', cuenta: nAnomalias, html: anomaliasHTML(data.capabilities) }," in html
-    assert "body.querySelector('#infra-anomalias-ver')?.addEventListener('click', (e) => verAnomalias(e.currentTarget));" in html
-    assert "const b = e.target.closest('.anomalia__explicar');\n        if (b) explicarAnomalia(b);" in html
-    assert "anomalias: 'Detección de anomalías'," in html and "alertas: 'Alertas'," in html
-    assert "anomalias: ids.detector_id ? {ok: true, detector_id: ids.detector_id} : {ok: false, reason: 'no provisionado'}," in html
-    assert "alertas: ids.monitor_id ? {ok: true, monitor_id: ids.monitor_id} : {ok: false, reason: 'no provisionado'}," in html
-    k = html.index("async function verAnomalias(btn) {")
-    ver = html[k:html.index("\n    }\n", k)]
-    assert "fetch('/api/v1/anomalias/resumen')" in ver and "destino.innerHTML = anomaliasDetalleHTML(data.casos || []);" in ver
 
 
 # ── El rango de fechas, con reintentos ──────────────────────────────────────

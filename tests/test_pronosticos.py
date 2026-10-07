@@ -1,16 +1,11 @@
-"""Pestaña Forecasting: lo que calculó cada forecaster, contra lo que pasó.
+"""Lo que calculó cada forecaster, contra lo que pasó: el error medio que
+muestra la tarjeta de Forecasting en la vista Plugins.
 Formatos de los resultados del backtest como los devolvió el cluster real."""
 import json
-import pathlib
-import shutil
-import subprocess
-
-import pytest
 
 import main
 import pronosticos as pr
 
-_INDEX = pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html"
 _FC = {"name": "pozos-oil", "forecast_interval": {"period": {"interval": 262, "unit": "Minutes"}}, "horizon": 3,
        "indices": ["produccion-pozos*"], "feature_attributes": [{"feature_name": "oil_volume"}]}
 PASO = 262 * 60_000
@@ -66,7 +61,7 @@ def test_sin_valor_real_no_hay_error():
     assert pr.valor_real({"feature_data": []}) is None and pr.valor_real({"feature_data": [{"data": "x"}]}) is None
 
 
-# ── El endpoint ─────────────────────────────────────────────────────────────
+# ── Contra el cluster ───────────────────────────────────────────────────────
 class _R:
     def __init__(self, status, data):
         self.status_code, self._d, self.text = status, data, json.dumps(data)
@@ -112,11 +107,10 @@ def _cluster(monkeypatch, reales, horizonte, task="T1", estado="TEST_COMPLETE", 
     return pedidos
 
 
-def test_el_endpoint_arma_el_pronostico(monkeypatch):
+def test_el_pronostico_contra_lo_que_paso(monkeypatch):
     reales = [_real(i, 100.0) for i in range(12)]
     pedidos = _cluster(monkeypatch, reales, [_pron(1, 110.0, 8), _pron(2, 100.0, 8), _pron(3, 100.0, 8)])
-    r = main.pronosticos_del_caso("produccion-pozos")
-    p = r.pronosticos[0]
+    p = main._pronostico_de("http://x:9200", "admin", "pw", "F1")
     assert p["medida"] == "oil_volume" and p["intervalo_min"] == 262 and p["horizonte"] == 3 and p["error"] == ""
     assert p["ancla"] == pr._iso(T0 + 8 * PASO) and len(p["pronostico"]) == 3
     assert p["error_pct"] == round(10 / 300 * 100, 1)
@@ -129,7 +123,7 @@ def test_el_endpoint_arma_el_pronostico(monkeypatch):
 def test_sin_grafico_dice_lo_que_de_verdad_paso(monkeypatch):
     """Antes decía "todavía no tiene pasos con datos" siempre, y hacía esperar
     resultados que no iban a llegar (el cluster había rechazado el backtest)."""
-    error = lambda: main.pronosticos_del_caso("produccion-pozos").pronosticos[0]["error"]
+    error = lambda: main._pronostico_de("http://x:9200", "admin", "pw", "F1")["error"]
     _cluster(monkeypatch, [], [], task="")
     assert error().startswith("no se lanzó el backtest (el cluster lo rechazó)")
     _cluster(monkeypatch, [], [], estado="INIT_TEST")
@@ -145,85 +139,5 @@ def test_un_backtest_parcial_se_dibuja_con_lo_que_escribio(monkeypatch):
     acá hay datos solo hasta el 10, y antes del 300 vacío): igual se dibuja."""
     lejos = [_real(i - 400, 100.0) for i in range(12)]
     _cluster(monkeypatch, lejos, [_pron(1, 100.0, -392), _pron(2, 100.0, -392), _pron(3, 100.0, -392)])
-    p = main.pronosticos_del_caso("produccion-pozos").pronosticos[0]
+    p = main._pronostico_de("http://x:9200", "admin", "pw", "F1")
     assert p["error"] == "" and p["ancla"] == pr._iso(T0 - 392 * PASO)
-
-
-def test_un_caso_sin_forecasters(monkeypatch):
-    _cluster(monkeypatch, [], [])
-    assert main.pronosticos_del_caso("siem").pronosticos == []
-
-
-# ── La vista ────────────────────────────────────────────────────────────────
-def _funciones(html: str) -> str:
-    i = html.index("    function _forecastersDe(ids) {")
-    return html[i:html.index("    async function verPronosticos(btn) {", i)]
-
-
-_ARNES = r"""
-const icon = (n) => `<svg data-i="${n}"></svg>`;
-const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const SLUG_LABELS = { 'produccion-pozos': 'Producción de pozos' };
-const state = {};
-""" + "{FUNCIONES}" + r"""
-const fallos = [];
-const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-check('sin forecasters, nada', pronosticosHTML({ s: { detector_id: 'D' } }) === '' && pronosticosHTML(null) === '');
-const card = pronosticosHTML({ 'produccion-pozos': { forecaster_ids: ['a', 'b', 'c'] }, cts: { forecaster_id: 'z' } });
-check('cuántos', card.includes('4 pronósticos en 2 casos'), card);
-check('sin provisionar, sin aviso', !card.includes('provisionando'), card);
-state.provisionandoPlugins = true;
-check('provisionando, lo dice', pronosticosHTML({ cts: { forecaster_id: 'z' } }).includes('provisionando: los demás casos aparecen a medida que terminan'));
-state.provisionandoPlugins = false;
-check('los casos, en la lista de la izquierda', card.includes('class="maestro__item pron__caso" data-slug="produccion-pozos"><span>Producción de pozos</span><span class="maestro__n">3</span>')
-  && card.includes('data-slug="cts"><span>cts</span><span class="maestro__n">1</span>'), card);
-const d = pronosticosDetalleHTML({ pronosticos: [
-  { medida: 'oil_volume', intervalo_min: 262, horizonte: 8, error_pct: 4.3, error: '' },
-  { medida: 'revenue', intervalo_min: 30, horizonte: 8, error_pct: 32.3, error: '' },
-  { medida: 'x', intervalo_min: 60, horizonte: 8, error_pct: 93.5, error: '' },
-  { medida: 'y', intervalo_min: 60, horizonte: 8, error_pct: null, error: 'backtest parcial: 12 de 600 pasos' },
-] });
-check('el intervalo en horas', d.includes('cada 4,4 h · 8 pasos hacia adelante'), d);
-check('en minutos', d.includes('cada 30 min'), d);
-check('error bajo en verde', d.includes('sev--ok">error medio 4,3 %'), d);
-check('intermedio en amarillo', d.includes('sev--high">error medio 32,3 %'), d);
-check('alto en rojo', d.includes('sev--critical">error medio 93,5 %'), d);
-check('el lugar del gráfico', d.includes('<div class="pron__grafico" data-i="0"></div>'), d);
-check('el motivo cuando no hay', d.includes('backtest parcial: 12 de 600 pasos') && !d.includes('data-i="3"'), d);
-check('sin pronósticos', pronosticosDetalleHTML({ pronosticos: [] }).includes('no tiene pronósticos'));
-const spec = specPronostico({ medida: 'oil_volume', ancla: '2026-06-29 12:15:44',
-  real: [{ t: 'a', v: 1 }], pronostico: [{ t: 'b', v: 2, lo: 1, hi: 3 }] }, {});
-check('real y pronóstico', spec.data.values.length === 2 && spec.data.values[1].serie === 'Pronóstico' && spec.data.values[1].hi === 3);
-check('banda, líneas y regla', spec.layer.length === 3 && spec.layer[0].mark.type === 'area' && spec.layer[2].mark.type === 'rule'
-  && spec.layer[2].data.values[0].t === '2026-06-29 12:15:44');
-check('la banda sin línea y en el color del pronóstico', spec.layer[0].mark.line === false && spec.layer[0].mark.color === '#e50000');
-check('real gris y pronóstico rojo', JSON.stringify(spec.layer[1].encoding.color.scale) === JSON.stringify({ domain: ['Real', 'Pronóstico'], range: ['#334155', '#e50000'] }));
-const otra = specPronostico({ medida: 'm', ancla: 'x', real: [], pronostico: [] }, {}, { real: '#111', pron: '#222' });
-check('colores del tema', otra.layer[1].encoding.color.scale.range.join() === '#111,#222' && otra.layer[0].mark.color === '#222');
-check('la leyenda al lado, en HTML', d.includes('<span class="pron__leyenda"><i class="pron__l pron__l--real"></i>Real<i class="pron__l pron__l--pron"></i>Pronóstico</span>'), d);
-check('sin gráfico, sin leyenda', d.split('pron__leyenda').length === 4, d);
-console.log(fallos.join('\n'));
-process.exit(fallos.length ? 1 : 0);
-"""
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_tarjeta_y_el_detalle_en_node(tmp_path):
-    js = tmp_path / "pron.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", _funciones(_INDEX.read_text(encoding="utf-8"))), encoding="utf-8")
-    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
-    assert r.returncode == 0, r.stdout + r.stderr
-
-
-def test_la_pestana_y_el_motor_de_graficos():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "{ id: 'pronosticos', label: 'Forecasting', icon: 'trending', cuenta: nPronosticos, html: pronosticosHTML(data.capabilities) }," in html
-    assert '<symbol id="ic-trending"' in html
-    assert "capVega = { ensure: _ensureVega, theme: _vegaTheme, config: _vegaConfig };" in html
-    i = html.index("    async function verPronosticos(btn) {")
-    fn = html[i:html.index("\n    }\n", i)]
-    assert "fetch('/api/v1/forecast/' + encodeURIComponent(btn.dataset.slug))" in fn
-    assert "embed(lugar, specPronostico(p, config, colores), { actions: false, renderer: 'svg' })" in fn
-    # Los colores, los del tema (real en el gris del texto, pronóstico en el acento).
-    assert "css.getPropertyValue('--accent').trim() || _COLORES_PRON.pron" in fn
-    assert "const b = e.target.closest('.pron__caso');\n        if (b) verPronosticos(b);" in html

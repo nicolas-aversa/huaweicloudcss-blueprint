@@ -1,7 +1,7 @@
-""""Entorno desplegado" en secciones (Resumen, Security Analytics, Anomaly
-Detection) en vez de todo apilado: había que bajar mucho para llegar a las
-anomalías. Se prueba en node con el código real de la vista."""
+""""Entorno desplegado" en secciones (Resumen, Plugins, Documentos) en vez de
+todo apilado. Se prueba en node con el código real de la vista."""
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -29,19 +29,19 @@ const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
 const secs = [
   { id: 'resumen', label: 'Resumen', icon: 'database', html: '<p>pipelines</p>' },
-  { id: 'seguridad', label: 'Security Analytics', icon: 'shield', html: '' },
-  { id: 'anomalias', label: 'Anomaly Detection', icon: 'activity', html: '<p>AD</p>' },
+  { id: 'documentos', label: 'Documentos', icon: 'file', html: '' },
+  { id: 'plugins', label: 'Plugins', icon: 'layers', html: '<p>AD</p>' },
 ];
 let h = infraSeccionesHTML(secs, '');
-check('pestañas de las secciones con contenido', h.includes('data-infra-tab="resumen"') && h.includes('data-infra-tab="anomalias"'), h);
-check('sin plugin, sin pestaña', !h.includes('data-infra-tab="seguridad"') && !h.includes('infra-panel-seguridad'), h);
+check('pestañas de las secciones con contenido', h.includes('data-infra-tab="resumen"') && h.includes('data-infra-tab="plugins"'), h);
+check('sin plugin, sin pestaña', !h.includes('data-infra-tab="documentos"') && !h.includes('infra-panel-documentos'), h);
 check('la primera, activa', h.includes('id="infra-tab-resumen" data-infra-tab="resumen" aria-controls="infra-panel-resumen" aria-selected="true"'), h);
-check('las otras, ocultas', h.includes('data-infra-panel="anomalias" role="tabpanel" aria-labelledby="infra-tab-anomalias" hidden>'), h);
+check('las otras, ocultas', h.includes('data-infra-panel="plugins" role="tabpanel" aria-labelledby="infra-tab-plugins" hidden>'), h);
 check('la activa, visible', h.includes('data-infra-panel="resumen" role="tabpanel" aria-labelledby="infra-tab-resumen">'), h);
-h = infraSeccionesHTML(secs, 'anomalias');
-check('la guardada, activa', h.includes('data-infra-tab="anomalias" aria-controls="infra-panel-anomalias" aria-selected="true"')
+h = infraSeccionesHTML(secs, 'plugins');
+check('la guardada, activa', h.includes('data-infra-tab="plugins" aria-controls="infra-panel-plugins" aria-selected="true"')
   && h.includes('aria-labelledby="infra-tab-resumen" hidden>'), h);
-h = infraSeccionesHTML(secs, 'seguridad');
+h = infraSeccionesHTML(secs, 'documentos');
 check('guardada pero sin contenido: la primera', h.includes('data-infra-tab="resumen" aria-controls="infra-panel-resumen" aria-selected="true"'), h);
 h = infraSeccionesHTML([secs[0], { ...secs[1] }], '');
 check('una sola sección: sin pestañas', !h.includes('role="tablist"') && h.includes('<p>pipelines</p>') && !h.includes(' hidden>'), h);
@@ -50,29 +50,38 @@ check('una sola sección: sin pestañas', !h.includes('role="tablist"') && h.inc
 const tab = (id) => ({ dataset: { infraTab: id }, classList: { on: false, toggle(_, v) { this.on = v; } }, attrs: {},
                        setAttribute(k, v) { this.attrs[k] = v; } });
 const panel = (id) => ({ dataset: { infraPanel: id }, hidden: false });
-const tabs = [tab('resumen'), tab('anomalias')];
-const panels = [panel('resumen'), panel('anomalias')];
+const tabs = [tab('resumen'), tab('plugins')];
+const panels = [panel('resumen'), panel('plugins')];
 const raiz = { querySelectorAll: (sel) => sel === '[data-infra-tab]' ? tabs : panels };
-elegirSeccionInfra(raiz, 'anomalias');
+elegirSeccionInfra(raiz, 'plugins');
 check('pestaña marcada', tabs[1].classList.on && tabs[1].attrs['aria-selected'] === 'true' && !tabs[0].classList.on && tabs[0].attrs['aria-selected'] === 'false');
 check('panel visible', panels[1].hidden === false && panels[0].hidden === true);
-check('recordada', guardado['infra-seccion'] === 'anomalias' && infraSeccionGuardada() === 'anomalias');
+check('recordada', guardado['infra-seccion'] === 'plugins' && infraSeccionGuardada() === 'plugins');
 // El contador de cada pestaña (sin contador, nada).
-h = infraSeccionesHTML([{ ...secs[0] }, { id: 'anomalias', label: 'AD', icon: 'activity', cuenta: 9, html: '<p>AD</p>' }], '');
+h = infraSeccionesHTML([{ ...secs[0] }, { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: 9, html: '<p>AD</p>' }], '');
 check('contador', h.includes('<span class="infra-tab__cuenta">9</span>') && h.split('infra-tab__cuenta').length === 2, h);
 
 // Cada pestaña carga lo suyo al abrirla, una sola vez por render.
 const clicks = [];
-const boton = (n) => ({ click: () => clicks.push(n) });
-const panelSeg = { dataset: {}, querySelector: (sel) => ({ '#infra-seguridad-ver': boton('hallazgos'), '#infra-campanas-ver': boton('campañas') })[sel] || null };
-const panelPron = { dataset: {}, querySelector: (sel) => sel === '.pron__caso' ? boton('primer caso') : null };
-const raizC = { querySelector: (sel) => ({ '[data-infra-panel="seguridad"]': panelSeg, '[data-infra-panel="pronosticos"]': panelPron })[sel] || null };
-cargarSeccionInfra(raizC, 'seguridad');
-cargarSeccionInfra(raizC, 'seguridad');
-cargarSeccionInfra(raizC, 'pronosticos');
+const boton = (n, slug) => ({ click: () => clicks.push(n), dataset: { slug } });
+const panelDocs = { dataset: {}, querySelector: (sel) => sel === '#infra-documentos-actualizar' ? boton('documentos') : null };
+const casos = [boton('siem', 'siem'), boton('pozos', 'produccion-pozos')];
+const panelPlug = () => ({ dataset: {}, querySelector: (sel) => sel === '.plug__caso' ? casos[0] : null,
+                           querySelectorAll: (sel) => sel === '.plug__caso' ? casos : [] });
+let pp = panelPlug();
+const raizC = { querySelector: (sel) => ({ '[data-infra-panel="documentos"]': panelDocs, '[data-infra-panel="plugins"]': pp })[sel] || null };
+globalThis.state = {};
+cargarSeccionInfra(raizC, 'documentos');
+cargarSeccionInfra(raizC, 'documentos');
+cargarSeccionInfra(raizC, 'plugins');
 cargarSeccionInfra(raizC, 'resumen');
 cargarSeccionInfra(raizC, undefined);
-check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['hallazgos', 'campañas', 'primer caso']), JSON.stringify(clicks));
+check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['documentos', 'siem']), JSON.stringify(clicks));
+// Plugins: después de un refresco, el caso que se estaba mirando.
+state.pluginsCaso = 'produccion-pozos';
+pp = panelPlug();
+cargarSeccionInfra(raizC, 'plugins');
+check('vuelve al caso que se miraba', clicks[clicks.length - 1] === 'pozos', JSON.stringify(clicks));
 
 romper = true;
 check('sin storage no rompe', infraSeccionGuardada() === '');
@@ -100,8 +109,10 @@ def test_la_vista_arma_sus_secciones_debajo_del_banner():
     assert vista.index('<section class="env-bar">') < vista.index('id="infra-destroy-btn"') \
         < vista.index("${setupPanel}") < vista.index("${infraSeccionesHTML([")
     secciones = vista[vista.index("${infraSeccionesHTML(["):vista.index("], infraSeccionGuardada())}")]
-    assert secciones.index("{ id: 'resumen'") < secciones.index("{ id: 'seguridad'") < secciones.index("{ id: 'anomalias'")
-    resumen = secciones[:secciones.index("{ id: 'seguridad'")]
+    assert secciones.index("{ id: 'resumen'") < secciones.index("{ id: 'plugins'") < secciones.index("{ id: 'documentos'")
+    assert [m for m in re.findall(r"\{ id: '(\w+)'", secciones)] == ["resumen", "plugins", "documentos"], \
+        "las de cada plugin salieron: los resultados se miran en Dashboards"
+    resumen = secciones[:secciones.index("{ id: 'plugins'")]
     for pieza in ("${kpis}", '<div class="pipe-list">${pipeRows}</div>', "${accesosHTML(pipelines)}"):
         assert pieza in resumen, pieza
     # El resultado de "Provisionar plugins", dentro de la puesta en marcha.
@@ -120,18 +131,19 @@ def test_lo_que_se_recuerda_no_es_el_chat():
     assert "_CLAVE_SECCION = 'infra-seccion'" in f
 
 
-def test_los_numeros_y_los_chips_llevan_a_su_pestana():
-    """Los indicadores del Resumen y los chips de cada caso abren la pestaña que
-    corresponde, y esa pestaña carga sola."""
+def test_los_numeros_y_los_chips_llevan_a_plugins():
+    """El indicador de Plugins y los chips de cada caso abren la pestaña
+    Plugins, en la tarjeta de ese caso."""
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    function renderInfraView(data) {")
     vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    for ir in ("kpi('seguridad'", "kpi('anomalias'", "kpi('pronosticos'",
-               "['Anomalías', 'anomalias']", "'pronosticos']", "'seguridad']", "'perfiles']"):
+    for ir in ("kpi('plugins', 'Plugins', nPlugins,", "['Anomalías', enPlugins]", "[`Pronósticos · ${fc}`, enPlugins]",
+               'data-ir="${ir}" data-slug="${escapeHtml(p.slug)}"'):
         assert ir in vista, ir
     irA = vista[vista.index("const irASeccion = (id) => {"):vista.index("body.querySelector('.infra-tabs')?.addEventListener")]
     assert "elegirSeccionInfra(body, id);" in irA and "cargarSeccionInfra(body, id);" in irA
-    assert "if (k && !e.target.closest('#infra-verify-btn')) irASeccion(k.dataset.ir);" in vista
+    assert "if (k.dataset.slug) state.pluginsCaso = k.dataset.slug;" in vista
+    assert "if (caso && !caso.classList.contains('is-active')) caso.click();" in vista
     assert "if (k && (e.key === 'Enter' || e.key === ' '))" in vista, "con teclado también"
     # La pestaña que quedó elegida carga al entrar.
     assert "cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);" in vista
