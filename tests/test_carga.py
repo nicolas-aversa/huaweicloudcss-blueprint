@@ -107,10 +107,15 @@ def test_el_paso_3_espera_y_reintenta():
     j = src.index("def _provisionar_anomalias(")
     ad = src[j:src.index("\ndef ", j + 10)]
     assert ad.index("if not _resp_ok(rd) and _es_saturacion(_resp_motivo(rd)):") < ad.index("detector_id = _resp_id(rd)")
-    k = src.index("estados = _esperar_backtests(base, user, password, lanzados)")
-    bloque = src[k:k + 900]
-    assert "_es_saturacion(estados[x[\"fc_id\"]][1])" in bloque
-    assert bloque.index("_esperar_cluster_libre(base, user, password)") < bloque.index("_lanzar_backtest(base, user, password, x[\"fc_id\"])")
+    # Los backtests: de a uno con la cola casi vacía, reintento si no arranca,
+    # y se juzgan por los pasos escritos (los truncados se relanzan una vez).
+    k = src.index("def _lanzar_backtest_de_a_uno(")
+    uno = src[k:src.index("\n\n\n", k)]
+    assert uno.index("umbral=_COLA_BACKTEST") < uno.index("_lanzar_backtest(base, user, password, fc_id)")
+    assert "for intento in range(2):" in uno
+    k = src.index("estados = _juzgar_backtests(base, user, password, lanzados,")
+    bloque = src[k:k + 1200]
+    assert "x[\"task_id\"] = _lanzar_backtest_de_a_uno(base, user, password, x[\"fc_id\"])" in bloque
 
 
 # ── Reglas del SIEM afinadas ────────────────────────────────────────────────

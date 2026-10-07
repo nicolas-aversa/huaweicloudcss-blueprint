@@ -50,6 +50,25 @@ def valor_real(resultado: dict) -> "float | None":
 # Cuántos pasos hacia atrás se buscan para anclar (el final del dataset puede
 # tener ceros: en el SIEM los últimos pasos valen 0 y el pronóstico no se compara).
 PASOS_DE_BUSQUEDA = 200
+# Si ahí no hay un tramo comparable (un backtest parcial), los últimos que haya.
+PASOS_DE_RESPALDO = 1000
+
+# Estados de la tarea del backtest que todavía no terminó.
+_CORRIENDO = {"CREATED", "INIT", "INIT_TEST", "RUNNING", "TEST"}
+
+
+def motivo_sin_grafico(estado: str, pasos: "int | None", history: int) -> str:
+    """Por qué un forecaster no tiene gráfico, dicho con lo que de verdad pasó:
+    "todavía" solo si el backtest sigue corriendo (antes se decía siempre, y
+    hacía esperar resultados que no iban a llegar)."""
+    if estado.upper() in _CORRIENDO:
+        return "el backtest todavía está corriendo: en unos minutos se ve"
+    if not pasos:
+        return ("el backtest no escribió resultados (el cluster rechazó sus búsquedas): "
+                "«Volver a provisionar plugins» lo relanza")
+    total = f" de {history}" if history else ""
+    return (f"backtest parcial: {pasos}{total} pasos, sin un tramo con datos para comparar el pronóstico "
+            "(el cluster rechazó parte de sus búsquedas)")
 
 
 def elegir_ancla(reales: list[dict], horizonte: int) -> "int | None":

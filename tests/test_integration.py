@@ -4006,6 +4006,8 @@ def test_provision_capabilities_full_sequence(monkeypatch):
             # Solo el índice de fintech existe con su volume_field: los otros
             # verticales quedan fuera del agente en esta corrida.
             return _FakeResp(200, {}, text='{"fields":{"transaction.operation_code":{}}}')
+        if "opensearch-forecast-results" in url and url.endswith("/_count"):
+            return _FakeResp(200, {"count": 100000})   # backtest completo
         if method == "GET" and url.endswith("/_count"):
             return _FakeResp(200, {"count": 100})
         if method == "PUT" and "/_cluster/settings" in url:
@@ -4032,7 +4034,7 @@ def test_provision_capabilities_full_sequence(monkeypatch):
             return _FakeResp(201, {"_id": next(fc_ids)})
         if "/_run_once" in url:
             run_once.append(url)
-            return _FakeResp(200, {})
+            return _FakeResp(200, {"taskId": f"T{len(run_once)}"})
         # Rango de @timestamp para dimensionar el forecaster (min/max/count).
         if method == "POST" and url.endswith("/_search"):
             aggs = (kwargs.get("json") or {}).get("aggs") or {}
@@ -4081,19 +4083,23 @@ def test_provision_capabilities_full_sequence(monkeypatch):
 
 
 def test_forecaster_window_sizes_from_data():
-    """_forecaster_window usa window_delay=1 (fijo) para que el forecast arranque
-    en now y el time picker "Today" del UI muestre los datos sin ajuste manual.
-    history<=10000 y suficientes buckets poblados (≥40) para inicializar."""
+    """La ventana del backtest termina donde terminan los datos (window_delay =
+    de ese fin a ahora) y los cubre con ~600 pasos. Con window_delay=1, unos datos
+    que terminaban 3 meses antes daban 3 meses de pasos vacíos y se perdía el
+    comienzo del dataset."""
     DAY = 86400000
+    MIN = 60000
     # Datos viejos (fraud IEEE-CIS: ~6 meses en 2017-2018), "ahora" 8 años después.
     interval, wd, hist = main._forecaster_window(0, 180 * DAY, 8 * 365 * DAY, 590000)
-    assert wd == 1
-    assert hist <= 10000
-    assert (180 * 24 * 60) // interval >= 40
-    # Datos recientes (1 año), "ahora" 1 día después del fin.
+    assert wd == (8 * 365 - 180) * DAY // MIN, "la ventana termina en el fin de los datos"
+    assert hist * interval >= 180 * 24 * 60, "y los cubre enteros"
+    assert 40 <= hist <= main._FORECAST_PASOS + 1
+    # Datos recientes (1 año), "ahora" 1 día después del fin: ~600 pasos, no 2000.
     interval2, wd2, hist2 = main._forecaster_window(0, 365 * DAY, 366 * DAY, 100000)
-    assert wd2 == 1
-    assert hist2 <= 10000 and (365 * 24 * 60) // interval2 >= 40
+    assert wd2 == DAY // MIN
+    assert hist2 <= main._FORECAST_PASOS + 1 and (365 * 24 * 60) // interval2 >= 40
+    # Datos que llegan a ahora: el mínimo.
+    assert main._forecaster_window(0, 10 * DAY, 10 * DAY, 5000)[1] == 1
 
 
 def test_build_forecaster_omits_low_seasonality_and_takes_window():
@@ -4174,7 +4180,9 @@ def test_forecast_siempre_en_curso_no_es_error(monkeypatch):
 def test_forecast_usa_el_task_id_del_run_once_y_arma_el_mensaje():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def _lanzar_backtest(")
-    assert 'return str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""' in src[i:i + 600]
+    lanzar = src[i:src.index("\n\n\n", i)]
+    assert 'tarea = str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""' in lanzar
+    assert 'print(f"[capabilities] el backtest de {fc_id} no arrancó: {_resp_motivo(r1)}")' in lanzar
     j = src.index("def _esperar_backtests(")
     assert "_forecast_test_state(base, user, password, fc_id, task_id, tries=1)" in src[j:j + 1200]
     assert "los forecasters quedaron en INIT / sin datos" not in src
@@ -4413,9 +4421,14 @@ def test_provision_capabilities_skips_conversational_without_mlcommons(monkeypat
             return _FakeResp(200, {"aggregations": {}})
         if "/_plugins/_forecast/forecasters/" in url and url.endswith("/_profile"):
             return _FakeResp(200, {"forecaster_state": "TEST_COMPLETE"})
+        if url.endswith("/_run_once"):
+            return _FakeResp(200, {"taskId": "T"})
+        if "/_plugins/_forecast/forecasters/" in url and url.endswith("?task=true"):
+            return _FakeResp(200, {"run_once_task": {"task_id": "T", "state": "TEST_COMPLETE"}})
         return _FakeResp(200, {})
 
     monkeypatch.setattr("requests.request", fake_request)
+    monkeypatch.setattr(main, "_pasos_del_backtest", lambda *a: 100000)
     result = main._provision_capabilities({"public_endpoint": "1.2.3.4:9200"},
                                           "transacciones-billetera", "admin", "pw", https_enabled=False)
     assert result["conversational"]["ok"] is False
@@ -4499,7 +4512,8 @@ def test_provision_capabilities_endpoint(monkeypatch):
     monkeypatch.setattr(main, "_cluster_with_public_access",
                         lambda td: {"public_endpoint": "1.2.3.4:9200"})
     monkeypatch.setattr(main, "_provision_capabilities",
-                        lambda cluster, slug, user, pw, https, force=False: {slug: {"anomaly": {"ok": True}}})
+                        lambda cluster, slug, user, pw, https, force=False, registrar_agente=True:
+                        {slug: {"anomaly": {"ok": True}}})
     # El analista de demo: sin esto, PUTs reales contra la IP de prueba (timeouts).
     analistas = []
     monkeypatch.setattr(main, "_provisionar_analista",

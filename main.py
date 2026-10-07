@@ -5844,6 +5844,13 @@ def _index_time_bounds(base: str, user: str, password: str, index_pattern: str,
     return (float(min_ms), float(max_ms), int(count or 0))
 
 
+# Pasos del backtest. Con 2000, cada backtest lanzaba miles de búsquedas y en un
+# cluster de un nodo (13 hilos, cola de 1000) se rechazaban de a cientos de
+# miles: los backtests quedaban truncados o sin arrancar. 600 alcanza para
+# entrenar (OpenSearch pide 40) y para comparar el pronóstico con lo que pasó.
+_FORECAST_PASOS = 600
+
+
 def _forecaster_window(min_ms: float, max_ms: float, now_ms: float,
                        doc_count: int) -> "tuple[int, int, int]":
     """Deriva ``(interval_minutes, window_delay_minutes, history)`` del rango real
@@ -5852,16 +5859,17 @@ def _forecaster_window(min_ms: float, max_ms: float, now_ms: float,
     serie (≥40 puntos poblados; requisito de OpenSearch Forecasting).
 
     - ``window_delay``: minutos desde el FIN de los datos hasta ahora → la ventana
-      termina donde terminan los datos (por eso no es fijo: fraud 2017 necesita
-      años de delay; un log reciente, minutos).
-    - ``interval``: apunta a un nº de buckets ligado al volumen (~1 cada 10
-      eventos), acotado [40, 2000] y sin superar el span → buckets poblados, no
-      vacíos.
+      termina donde terminan los datos. Estuvo fijo en 1: con datos que terminan
+      meses antes, el backtest consultaba esos meses vacíos (ceros que entrenaban
+      el modelo) y dejaba afuera el comienzo del dataset (medido: 6 de 8 casos).
+    - ``interval``: apunta a un nº de pasos ligado al volumen (~1 cada 10
+      eventos), acotado [40, `_FORECAST_PASOS`] y sin superar el span → pasos
+      poblados, no vacíos.
     - ``history``: intervalos que cubren el span, tope 10000.
     """
     span_min = max(1, int((max_ms - min_ms) // 60000))
-    window_delay = 1
-    buckets = min(2000, max(40, int(doc_count) // 10))
+    window_delay = max(1, int((now_ms - max_ms) // 60000))
+    buckets = min(_FORECAST_PASOS, max(40, int(doc_count) // 10))
     buckets = max(1, min(buckets, span_min))
     interval = max(1, span_min // buckets)
     history = min(10000, max(1, span_min // interval + 1))
@@ -5910,6 +5918,10 @@ def _estado_historico(base: str, user: str, password: str, detector_id: str,
 _COLA_LIBRE = 200            # búsquedas en cola por debajo de las que se sigue
 _ESPERA_CLUSTER_S = 15.0     # entre una mirada y otra
 _ESPERA_CLUSTER_MAX_S = 300.0
+# Para lanzar un backtest: con la cola casi vacía. Cada backtest llena la cola
+# él solo; lanzados juntos se rechazaban sus búsquedas (y el `_run_once` mismo).
+_COLA_BACKTEST = 20
+_ESPERA_BACKTEST_MAX_S = 90.0   # por backtest: con 24, 300 s cada uno sería media hora
 
 
 def _cola_de_busquedas(base: str, user: str, password: str) -> "int | None":
@@ -5920,15 +5932,19 @@ def _cola_de_busquedas(base: str, user: str, password: str) -> "int | None":
         return None
 
 
-def _esperar_cluster_libre(base: str, user: str, password: str) -> bool:
-    """Espera (hasta `_ESPERA_CLUSTER_MAX_S`) a que la cola de búsquedas baje de
-    `_COLA_LIBRE`. True si hay lugar (o no se pudo medir: no se frena por eso)."""
+def _esperar_cluster_libre(base: str, user: str, password: str, umbral: "int | None" = None,
+                           max_s: "float | None" = None) -> bool:
+    """Espera (hasta `max_s`, por defecto `_ESPERA_CLUSTER_MAX_S`) a que la cola
+    de búsquedas baje de `umbral` (por defecto `_COLA_LIBRE`). True si hay lugar
+    (o no se pudo medir: no se frena por eso)."""
+    umbral = _COLA_LIBRE if umbral is None else umbral
+    max_s = _ESPERA_CLUSTER_MAX_S if max_s is None else max_s
     esperado = 0.0
     while True:
         cola = _cola_de_busquedas(base, user, password)
-        if cola is None or cola < _COLA_LIBRE:
+        if cola is None or cola < umbral:
             return True
-        if esperado >= _ESPERA_CLUSTER_MAX_S:
+        if esperado >= max_s:
             print(f"[capabilities] el cluster sigue saturado (cola de búsquedas: {cola}); se sigue igual")
             return False
         print(f"[capabilities] cluster saturado (cola de búsquedas: {cola}): espero {_ESPERA_CLUSTER_S:.0f}s")
@@ -6044,12 +6060,71 @@ def _forecast_test_state(base: str, user: str, password: str, fc_id: str, task_i
 
 
 def _lanzar_backtest(base: str, user: str, password: str, fc_id: str) -> str:
-    """`_run_once` del forecaster: el `taskId` de su backtest ("" si no se pudo)."""
+    """`_run_once` del forecaster: el `taskId` de su backtest ("" si no se pudo,
+    con el motivo en el log: antes se perdía y el forecaster quedaba sin backtest
+    informado como "en curso")."""
     r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once", user, password, timeout=30)
     try:
-        return str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""
+        tarea = str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""
     except (ValueError, AttributeError):
-        return ""
+        tarea = ""
+    if not tarea:
+        print(f"[capabilities] el backtest de {fc_id} no arrancó: {_resp_motivo(r1)}")
+    return tarea
+
+
+def _lanzar_backtest_de_a_uno(base: str, user: str, password: str, fc_id: str) -> str:
+    """Lanza el backtest con la cola de búsquedas casi vacía (cada backtest la
+    llena solo) y, si no arranca, espera y lo reintenta una vez."""
+    for intento in range(2):
+        _esperar_cluster_libre(base, user, password, umbral=_COLA_BACKTEST, max_s=_ESPERA_BACKTEST_MAX_S)
+        tarea = _lanzar_backtest(base, user, password, fc_id)
+        if tarea:
+            return tarea
+    return ""
+
+
+# Un backtest con menos de esta parte de sus pasos con resultado está truncado
+# (el cluster rechazó búsquedas): se relanza una vez.
+_COBERTURA_MINIMA = 0.8
+
+
+def _pasos_del_backtest(base: str, user: str, password: str, task_id: str) -> "int | None":
+    """Cuántos pasos REALES escribió el backtest (los resultados sin
+    `horizon_index`). El estado de la tarea no alcanza: vimos TEST_COMPLETE con
+    el 18 % de los pasos e INIT_TEST_FAILED con todos. None si no se pudo medir."""
+    if not task_id:
+        return 0
+    r = _os_req("POST", f"{base}/opensearch-forecast-results*/_count", user, password, timeout=20,
+                json_body={"query": {"bool": {"filter": [{"term": {"task_id": task_id}}],
+                                              "must_not": [{"exists": {"field": "horizon_index"}}]}}})
+    try:
+        return int((r.json() or {}).get("count", 0)) if _resp_ok(r) else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _juzgar_backtests(base: str, user: str, password: str, lanzados: list[dict],
+                      estados: "dict[str, tuple[bool, str]]", history: int) -> "dict[str, tuple[bool, str]]":
+    """`{fc_id: (ok, estado)}` por los pasos que de verdad escribió cada
+    backtest. El que sigue corriendo queda en curso; sin tarea es que no arrancó."""
+    fuera: dict[str, tuple[bool, str]] = {}
+    for x in lanzados:
+        ok, estado = estados.get(x["fc_id"], (False, ""))
+        if not x.get("task_id"):
+            fuera[x["fc_id"]] = (False, "no arrancó (el cluster rechazó el pedido)")
+            continue
+        if estado.startswith(FORECAST_EN_CURSO):
+            fuera[x["fc_id"]] = (False, estado)
+            continue
+        pasos = _pasos_del_backtest(base, user, password, x["task_id"])
+        if pasos is None:
+            fuera[x["fc_id"]] = (ok, estado)          # no se pudo medir: lo que diga la tarea
+        elif pasos >= _COBERTURA_MINIMA * max(1, history):
+            fuera[x["fc_id"]] = (True, "TEST_COMPLETE")
+        else:
+            fuera[x["fc_id"]] = (False, f"parcial: {pasos} de {history} pasos")
+    return fuera
 
 
 def _esperar_backtests(base: str, user: str, password: str, lanzados: list[dict],
@@ -6353,9 +6428,129 @@ def _resolve_capability_spec(slug: str, base: str = "", user: str = "",
     return spec
 
 
+def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path,
+                        slug_actual: str = "") -> list[dict]:
+    """Un PPLTool por caso con datos: los specs curados y los casos del
+    registro (con sus campos). `slug_actual` entra siempre (recién ingerido)."""
+    import capabilities as caps
+    from index_template import index_pattern_from_name
+
+    agent_verticals = []
+    pipe_reg = _read_pipelines_registry(terraform_dir)
+    seen_slugs: set[str] = set()
+    for slug2 in caps.get_capability_slugs():
+        seen_slugs.add(slug2)
+        spec2 = caps.get_capability_spec(slug2) or {}
+        if not spec2.get("fields"):
+            continue   # spec placeholder sin schema aún
+        ip2 = spec2["index_pattern"]
+        if slug2 != slug_actual:
+            ok2, _ = _index_ready_for_capabilities(base, user, password, ip2,
+                                                   spec2.get("volume_field", ""), need_docs=True)
+            if not ok2:
+                continue
+        agent_verticals.append({
+            "tool_name": f"PPLTool-{slug2}", "label": spec2.get("label", slug2), "index_pattern": ip2,
+            "operations": spec2["operations"], "fields": spec2["fields"],
+            "success_code": spec2.get("success_code", ""),
+            "ppl_system_prompt": caps.build_ppl_system_prompt(
+                ip2, spec2["operations"], spec2["fields"], spec2.get("success_code", ""), spec2.get("label", slug2)),
+        })
+    for slug2, entry2 in pipe_reg.items():
+        if slug2 in seen_slugs:
+            continue
+        prod_fields2 = entry2.get("fields") or []
+        if not prod_fields2:
+            continue
+        prod_index2 = entry2.get("index", "")
+        ip2 = index_pattern_from_name(prod_index2) if prod_index2 else f"{slug2}*"
+        if slug2 != slug_actual:
+            ok2, _ = _index_ready_for_capabilities(base, user, password, ip2,
+                                                   prod_fields2[0].get("field_path", ""), need_docs=True)
+            if not ok2:
+                continue
+        prod_enums2 = _discover_enums(base, user, password, ip2, prod_fields2)
+        spec2 = caps.build_spec_from_fields(slug2, ip2, prod_fields2, entry2.get("label") or "Tus logs", prod_enums2)
+        if not spec2.get("fields"):
+            continue
+        agent_verticals.append({
+            "tool_name": f"PPLTool-{slug2}", "label": spec2.get("label", slug2), "index_pattern": ip2,
+            "operations": spec2["operations"], "fields": spec2["fields"],
+            "success_code": spec2.get("success_code", ""),
+            "ppl_system_prompt": caps.build_ppl_system_prompt(
+                ip2, spec2["operations"], spec2["fields"], spec2.get("success_code", ""), spec2.get("label", slug2)),
+        })
+    return agent_verticals
+
+
+def _registrar_agente(base: str, user: str, password: str, api_key: str, terraform_dir: Path,
+                      registry: dict, ppl_model: str, llm_model: str,
+                      slug_actual: str = "") -> "tuple[str | None, dict]":
+    """El agente conversacional de TODAS las fuentes (uno solo, multi-PPLTool),
+    apuntado al Assistant, más text to visualization. `(agent_id, text2viz)`.
+    Deja el id en cada caso del registro que tenga los modelos."""
+    import capabilities as caps
+
+    agent_verticals = _fuentes_del_agente(base, user, password, terraform_dir, slug_actual)
+    instr = caps.build_agent_system_instruction(agent_verticals)
+    _asegurar_indice_de_documentos(base, user, password)
+    # ml-commons NO exige nombres únicos de agente: sin borrar el anterior
+    # quedarían duplicados.
+    for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search", "Platform Conversational Root"):
+        _os_req("DELETE", f"{base}/_plugins/_ml/agents/{aid}", user, password, timeout=20)
+    agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register",
+                          caps.build_conversational_agent(llm_model, ppl_model, instr, agent_verticals), "agent_id")
+    if not agent_id:
+        return None, {}
+    # El Assistant de Dashboards apuntado a este agente (best-effort).
+    _set_os_chat_root_agent(base, user, password, agent_id)
+    t2v = _provisionar_text2viz(base, user, password, api_key)
+    for otros in registry.values():
+        if otros.get("llm_model_id") or otros.get("agent_id"):
+            otros["agent_id"] = agent_id
+    _write_capabilities(terraform_dir, registry)
+    print(f"[capabilities] agente registrado con {len(agent_verticals)} fuentes")
+    return agent_id, t2v
+
+
+def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_enabled: bool,
+                              terraform_dir: Path, caps_result: dict, run: dict) -> None:
+    """Al final de "Provisionar plugins": el agente con todas las fuentes, si
+    algún caso dejó los modelos listos y el agente pendiente."""
+    pendientes = [s for s, r in caps_result.items()
+                  if ((r or {}).get("conversational") or {}).get("agente_pendiente")]
+    if not pendientes:
+        return
+    from maas_integrator import get_maas_api_key
+    registry = _read_capabilities(terraform_dir)
+    modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
+                    if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
+    if not modelos:
+        runs.step(run, "Asistente", False, "no hay modelos listos para armar el agente")
+        return
+    base = _os_base(cluster, https_enabled)
+    try:
+        agent_id, t2v = _registrar_agente(base, user, password, get_maas_api_key(), terraform_dir,
+                                          registry, modelos[0], modelos[1])
+    except Exception as exc:  # noqa: BLE001
+        runs.step(run, "Asistente", False, repr(exc)[:300])
+        return
+    if not agent_id:
+        runs.step(run, "Asistente", False, "los modelos quedaron listos pero no se pudo registrar el agente")
+        return
+    fuentes = sum(1 for ids in registry.values() if ids.get("agent_id") == agent_id)
+    runs.step(run, "Asistente", True, f"un agente para {fuentes} caso{'s' if fuentes != 1 else ''}")
+    if t2v:
+        runs.step(run, "text2viz", bool(t2v.get("ok")), str(t2v.get("reason") or t2v.get("note") or "")[:300])
+    for s in pendientes:
+        conv = caps_result[s]["conversational"]
+        conv.pop("agente_pendiente", None)
+        conv.update({"agent_id": agent_id, "note": ""})
+
+
 def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             password: str, https_enabled: bool,
-                            force: bool = False) -> dict:
+                            force: bool = False, registrar_agente: bool = True) -> dict:
     """Provisiona el bundle de capabilities del `slug` (si tiene spec) y persiste
     los IDs en `.capabilities.json`. Devuelve un dict de estado por capability.
 
@@ -6490,98 +6685,24 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             "ppl_model_id": ppl_model, "llm_model_id": llm_model})
                 registry[slug] = ids
                 _write_capabilities(terraform_dir, registry)
-                # UN solo agente para TODAS las fuentes: un PPLTool por vertical con
-                # datos. El vertical actual entra siempre (recién ingerido); los demás
-                # si su índice ya tiene docs (provisionings previos). Cada PPLTool lleva
-                # el system prompt de SU vertical (el connector lo recibe por
-                # ${parameters.system_prompt}); el LLM elige la fuente según la pregunta.
-                agent_verticals = []
-                # Fuentes curadas (demo) + productivas (registry con fields).
-                pipe_reg = _read_pipelines_registry(terraform_dir)
-                seen_slugs: set[str] = set()
-                # 1) Specs curados.
-                for slug2 in caps.get_capability_slugs():
-                    seen_slugs.add(slug2)
-                    spec2 = caps.get_capability_spec(slug2) or {}
-                    if not spec2.get("fields"):
-                        continue   # spec placeholder sin schema aún
-                    ip2 = spec2["index_pattern"]
-                    if slug2 != slug:
-                        ok2, _ = _index_ready_for_capabilities(base, user, password, ip2,
-                                                               spec2.get("volume_field", ""), need_docs=True)
-                        if not ok2:
-                            continue
-                    agent_verticals.append({
-                        "tool_name": f"PPLTool-{slug2}",
-                        "label": spec2.get("label", slug2),
-                        "index_pattern": ip2,
-                        "operations": spec2["operations"],
-                        "fields": spec2["fields"],
-                        "success_code": spec2.get("success_code", ""),
-                        "ppl_system_prompt": caps.build_ppl_system_prompt(
-                            ip2, spec2["operations"], spec2["fields"],
-                            spec2.get("success_code", ""), spec2.get("label", slug2)),
-                    })
-                # 2) Slugs productivos del registry (fields persistidos, sin spec curado).
-                for slug2, entry2 in pipe_reg.items():
-                    if slug2 in seen_slugs:
-                        continue
-                    prod_fields2 = entry2.get("fields") or []
-                    if not prod_fields2:
-                        continue
-                    from index_template import index_pattern_from_name
-                    prod_index2 = entry2.get("index", "")
-                    ip2 = index_pattern_from_name(prod_index2) if prod_index2 else f"{slug2}*"
-                    if slug2 != slug:
-                        ok2, _ = _index_ready_for_capabilities(base, user, password, ip2,
-                                                               prod_fields2[0].get("field_path", ""), need_docs=True)
-                        if not ok2:
-                            continue
-                    prod_label2 = entry2.get("label") or "Tus logs"
-                    prod_enums2 = _discover_enums(base, user, password, ip2, prod_fields2)
-                    spec2 = caps.build_spec_from_fields(slug2, ip2, prod_fields2, prod_label2, prod_enums2)
-                    if not spec2.get("fields"):
-                        continue
-                    agent_verticals.append({
-                        "tool_name": f"PPLTool-{slug2}",
-                        "label": spec2.get("label", slug2),
-                        "index_pattern": ip2,
-                        "operations": spec2["operations"],
-                        "fields": spec2["fields"],
-                        "success_code": spec2.get("success_code", ""),
-                        "ppl_system_prompt": caps.build_ppl_system_prompt(
-                            ip2, spec2["operations"], spec2["fields"],
-                            spec2.get("success_code", ""), spec2.get("label", slug2)),
-                    })
-                instr = caps.build_agent_system_instruction(agent_verticals)
-                _asegurar_indice_de_documentos(base, user, password)
-                # ml-commons NO exige nombres únicos de agente: sin borrar el anterior
-                # quedarían duplicados. Se borra por nombre y se re-registra con la
-                # lista completa de fuentes.
-                for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search",
-                                       "Platform Conversational Root"):
-                    _os_req("DELETE", f"{base}/_plugins/_ml/agents/{aid}", user, password, timeout=20)
-                agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register",
-                                      caps.build_conversational_agent(llm_model, ppl_model, instr, agent_verticals), "agent_id")
-                if agent_id:
-                    ids["agent_id"] = agent_id
-                    # Apuntar el OpenSearch Assistant (chat de Dashboards) a este
-                    # agente root, sin pasos manuales. Best-effort: si el Assistant
-                    # todavía no está habilitado, el config queda igual y toma efecto
-                    # cuando lo prendan + reinicien Dashboards.
-                    _set_os_chat_root_agent(base, user, password, agent_id)
-                    result["text2viz"] = _provisionar_text2viz(base, user, password, api_key)
-                    # El agente es GLOBAL (multi-fuente): el re-register borró el
-                    # anterior, así que actualizar el id guardado por los otros slugs
-                    # para que sus chips/teardown no apunten a un agente inexistente.
-                    for other_ids in registry.values():
-                        if other_ids is not ids and other_ids.get("agent_id"):
-                            other_ids["agent_id"] = agent_id
-                    result["conversational"] = {"ok": True, "agent_id": agent_id,
-                                                "ppl_model_id": ppl_model, "llm_model_id": llm_model}
+                if not registrar_agente:
+                    # El agente se arma una vez, al final del run, con todas las
+                    # fuentes (`_registrar_agente`). Rearmarlo en cada caso
+                    # recorría todos los índices del entorno cada vez.
+                    result["conversational"] = {"ok": True, "ppl_model_id": ppl_model, "llm_model_id": llm_model,
+                                                "agente_pendiente": True,
+                                                "note": "modelos listos; el agente se arma al final, con todas las fuentes"}
                 else:
-                    result["conversational"] = {"ok": False,
-                                                "reason": "los modelos quedaron listos pero no se pudo registrar el agente"}
+                    agent_id, t2v = _registrar_agente(base, user, password, api_key, terraform_dir, registry,
+                                                      ppl_model, llm_model, slug_actual=slug)
+                    if agent_id:
+                        ids["agent_id"] = agent_id
+                        result["text2viz"] = t2v
+                        result["conversational"] = {"ok": True, "agent_id": agent_id,
+                                                    "ppl_model_id": ppl_model, "llm_model_id": llm_model}
+                    else:
+                        result["conversational"] = {"ok": False,
+                                                    "reason": "los modelos quedaron listos pero no se pudo registrar el agente"}
             else:
                 result["conversational"] = {"ok": False,
                                             "reason": deploy_err or "no se pudieron provisionar los modelos (ver logs)"}
@@ -6632,23 +6753,31 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                                                             history=fc_history,
                                                             window_delay_minutes=window_delay_m), "_id")
                     if fc_id:
+                        # De a uno, con la cola casi vacía: lanzados juntos, el
+                        # cluster rechazaba sus búsquedas y los backtests quedaban
+                        # truncados, o el `_run_once` del tercero ni arrancaba.
                         lanzados.append({"nombre": fc_spec["name"], "fc_id": fc_id,
-                                         "task_id": _lanzar_backtest(base, user, password, fc_id)})
+                                         "task_id": _lanzar_backtest_de_a_uno(base, user, password, fc_id)})
                         forecaster_ids.append(fc_id)
-                # Los backtests corren juntos y se esperan juntos: antes se esperaba
-                # cada uno antes de lanzar el siguiente (3 en fila, ~45 s por caso).
-                estados = _esperar_backtests(base, user, password, lanzados)
-                saturados = [x for x in lanzados if not estados[x["fc_id"]][0] and _es_saturacion(estados[x["fc_id"]][1])]
-                if saturados:
-                    # Rechazados por el cluster saturado: se espera y se relanzan una vez.
-                    _esperar_cluster_libre(base, user, password)
-                    for x in saturados:
-                        x["task_id"] = _lanzar_backtest(base, user, password, x["fc_id"])
-                    estados.update(_esperar_backtests(base, user, password, saturados))
+                # Se juzgan por los pasos que escribieron, no por el estado de la
+                # tarea; los truncados (o que no arrancaron) se relanzan una vez.
+                estados = _juzgar_backtests(base, user, password, lanzados,
+                                            _esperar_backtests(base, user, password, lanzados), hist)
+                relanzar = [x for x in lanzados if not estados[x["fc_id"]][0]
+                            and not estados[x["fc_id"]][1].startswith(FORECAST_EN_CURSO)]
+                for x in relanzar:
+                    x["task_id"] = _lanzar_backtest_de_a_uno(base, user, password, x["fc_id"])
+                if relanzar:
+                    estados.update(_juzgar_backtests(base, user, password, relanzar,
+                                                     _esperar_backtests(base, user, password, relanzar), hist))
                 states = [f"{x['nombre']}={estados[x['fc_id']][1]}" for x in lanzados]
                 ids["forecaster_ids"] = forecaster_ids
                 ids["forecaster_id"] = forecaster_ids[0] if forecaster_ids else None
-                n_ok = sum(1 for s in states if s.endswith("=TEST_COMPLETE"))
+                # El registro, ya: así el caso aparece en la vista sin esperar
+                # a que terminen anomalías y alertas.
+                registry[slug] = ids
+                _write_capabilities(terraform_dir, registry)
+                n_ok = sum(1 for x in lanzados if estados[x["fc_id"]][0])
                 en_curso = [s for s in states if f"={FORECAST_EN_CURSO}" in s]
                 fallidos = [s for s in states if not s.endswith("=TEST_COMPLETE") and s not in en_curso]
                 if not forecaster_ids:
@@ -7044,11 +7173,13 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
     cuerpo = r.json() or {}
     fc = cuerpo.get("forecaster") or {}
     medida = ((fc.get("feature_attributes") or [{}])[0]).get("feature_name", "")
-    tarea = (cuerpo.get("run_once_task") or {}).get("task_id", "")
+    run_once = cuerpo.get("run_once_task") or {}
+    tarea = run_once.get("task_id", "")
     fuera = {"id": forecaster_id, "nombre": fc.get("name", ""), "medida": medida,
              "intervalo_min": pr.intervalo_ms(fc) // 60_000, "horizonte": fc.get("horizon"), "error": ""}
     if not tarea:
-        return {**fuera, "error": "el forecaster no tiene backtest"}
+        return {**fuera, "error": "no se lanzó el backtest (el cluster lo rechazó): «Volver a provisionar "
+                                  "plugins» lo relanza"}
     limites = _index_time_bounds(base, user, password, (fc.get("indices") or [""])[0])
     if not limites:
         return {**fuera, "error": "no se pudo leer el rango de fechas del índice"}
@@ -7073,7 +7204,15 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
                        "asc", pr.PASOS_DE_BUSQUEDA + n + 5)
     ancla = pr.elegir_ancla(recientes, n)
     if ancla is None:
-        return {**fuera, "error": "el backtest todavía no tiene pasos con datos"}
+        # Un backtest parcial puede tener sus pasos lejos del fin de los datos:
+        # se busca un tramo comparable entre los últimos que sí escribió.
+        anteriores = buscar(real + [{"range": {"data_end_time": {"lte": fin}}}], "desc", pr.PASOS_DE_RESPALDO)
+        recientes = list(reversed(anteriores))
+        ancla = pr.elegir_ancla(recientes, n)
+    if ancla is None:
+        return {**fuera, "error": pr.motivo_sin_grafico(str(run_once.get("state") or ""),
+                                                         _pasos_del_backtest(base, user, password, tarea),
+                                                         int(fc.get("history") or 0))}
     reales = [r for r in recientes
               if ancla - paso * pr.PASOS_DE_CONTEXTO <= int(r.get("data_end_time") or 0) <= ancla + paso * n]
     horizonte = buscar([{"term": {"data_end_time": ancla}}, {"exists": {"field": "horizon_index"}}], "asc", 50)
@@ -8012,7 +8151,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         try:
             caps_result[slug] = _provision_capabilities(
                 cluster, slug, user, password, request.https_enabled,
-                force=request.force,
+                force=request.force, registrar_agente=False,
             )
             if caps_result[slug]:
                 any_ok = True
@@ -8024,6 +8163,11 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
+    # El agente, una sola vez y con todas las fuentes: antes se rearmaba en cada
+    # caso, recorriendo todos los índices del entorno cada vez (y text to
+    # visualization también).
+    _registrar_agente_del_run(cluster, user, password, request.https_enabled, terraform_dir,
+                              caps_result, run)
     _base_analistas = _os_base(cluster, request.https_enabled)
     for slug in slugs:
         perfil = _perfil_de(slug, pipe_reg.get(slug) or {})

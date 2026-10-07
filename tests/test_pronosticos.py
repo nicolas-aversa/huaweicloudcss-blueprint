@@ -75,19 +75,32 @@ class _R:
         return self._d
 
 
-def _cluster(monkeypatch, reales, horizonte, task="T1"):
+def _cluster(monkeypatch, reales, horizonte, task="T1", estado="TEST_COMPLETE", history=0):
     pedidos = []
 
     def req(method, url, user, password, json_body=None, timeout=30):
         pedidos.append((url, json_body))
         if "/_plugins/_forecast/forecasters/" in url:
-            return _R(200, {"forecaster": _FC, "run_once_task": {"task_id": task} if task else {}})
+            fc = {**_FC, **({"history": history} if history else {})}
+            return _R(200, {"forecaster": fc,
+                            "run_once_task": {"task_id": task, "state": estado} if task else {}})
+        if "opensearch-forecast-results" in url and url.endswith("/_count"):
+            return _R(200, {"count": len(reales)})
         if url.endswith("/produccion-pozos*/_search"):
             return _R(200, {"hits": {"total": {"value": 9}}, "aggregations": {
                 "tmin": {"value": T0}, "tmax": {"value": T0 + 20 * PASO}}})
         if "opensearch-forecast-results" in url:
             filtros = json.dumps(json_body)
-            fuente = horizonte if "horizon_index" in filtros and "must_not" not in filtros else reales
+            if "horizon_index" in filtros and "must_not" not in filtros:
+                fuente = [h for h in horizonte if str(h["data_end_time"]) in filtros]
+            else:
+                # Como OpenSearch: el rango de fechas y el orden pedido.
+                rango = next((f["range"]["data_end_time"] for f in json_body["query"]["bool"]["filter"]
+                              if "range" in f), {})
+                fuente = [r for r in reales if rango.get("gte", -1) <= r["data_end_time"] <= rango.get("lte", 10**15)]
+                if json_body.get("sort", [{}])[0].get("data_end_time", {}).get("order") == "desc":
+                    fuente = sorted(fuente, key=lambda r: -r["data_end_time"])
+                fuente = fuente[:json_body.get("size", 10)]
             return _R(200, {"hits": {"hits": [{"_source": x} for x in fuente]}})
         return _R(404, {})
 
@@ -113,12 +126,27 @@ def test_el_endpoint_arma_el_pronostico(monkeypatch):
     assert {"term": {"task_id": "T1"}} in consulta["query"]["bool"]["filter"]
 
 
-def test_sin_backtest_o_sin_datos_lo_dice(monkeypatch):
+def test_sin_grafico_dice_lo_que_de_verdad_paso(monkeypatch):
+    """Antes decía "todavía no tiene pasos con datos" siempre, y hacía esperar
+    resultados que no iban a llegar (el cluster había rechazado el backtest)."""
+    error = lambda: main.pronosticos_del_caso("produccion-pozos").pronosticos[0]["error"]
     _cluster(monkeypatch, [], [], task="")
-    assert main.pronosticos_del_caso("produccion-pozos").pronosticos[0]["error"] == "el forecaster no tiene backtest"
-    _cluster(monkeypatch, [_real(i, 0) for i in range(12)], [])
-    assert main.pronosticos_del_caso("produccion-pozos").pronosticos[0]["error"] == \
-        "el backtest todavía no tiene pasos con datos"
+    assert error().startswith("no se lanzó el backtest (el cluster lo rechazó)")
+    _cluster(monkeypatch, [], [], estado="INIT_TEST")
+    assert error() == "el backtest todavía está corriendo: en unos minutos se ve"
+    _cluster(monkeypatch, [], [])
+    assert error().startswith("el backtest no escribió resultados")
+    _cluster(monkeypatch, [_real(i, 0) for i in range(12)], [], history=600)
+    assert error().startswith("backtest parcial: 12 de 600 pasos")
+
+
+def test_un_backtest_parcial_se_dibuja_con_lo_que_escribio(monkeypatch):
+    """Sus pasos quedaron lejos del fin de los datos (el fin está a 20 pasos;
+    acá hay datos solo hasta el 10, y antes del 300 vacío): igual se dibuja."""
+    lejos = [_real(i - 400, 100.0) for i in range(12)]
+    _cluster(monkeypatch, lejos, [_pron(1, 100.0, -392), _pron(2, 100.0, -392), _pron(3, 100.0, -392)])
+    p = main.pronosticos_del_caso("produccion-pozos").pronosticos[0]
+    assert p["error"] == "" and p["ancla"] == pr._iso(T0 - 392 * PASO)
 
 
 def test_un_caso_sin_forecasters(monkeypatch):
@@ -136,19 +164,24 @@ _ARNES = r"""
 const icon = (n) => `<svg data-i="${n}"></svg>`;
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const SLUG_LABELS = { 'produccion-pozos': 'Producción de pozos' };
+const state = {};
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
 check('sin forecasters, nada', pronosticosHTML({ s: { detector_id: 'D' } }) === '' && pronosticosHTML(null) === '');
 const card = pronosticosHTML({ 'produccion-pozos': { forecaster_ids: ['a', 'b', 'c'] }, cts: { forecaster_id: 'z' } });
 check('cuántos', card.includes('4 pronósticos en 2 casos'), card);
+check('sin provisionar, sin aviso', !card.includes('provisionando'), card);
+state.provisionandoPlugins = true;
+check('provisionando, lo dice', pronosticosHTML({ cts: { forecaster_id: 'z' } }).includes('provisionando: los demás casos aparecen a medida que terminan'));
+state.provisionandoPlugins = false;
 check('los casos, en la lista de la izquierda', card.includes('class="maestro__item pron__caso" data-slug="produccion-pozos"><span>Producción de pozos</span><span class="maestro__n">3</span>')
   && card.includes('data-slug="cts"><span>cts</span><span class="maestro__n">1</span>'), card);
 const d = pronosticosDetalleHTML({ pronosticos: [
   { medida: 'oil_volume', intervalo_min: 262, horizonte: 8, error_pct: 4.3, error: '' },
   { medida: 'revenue', intervalo_min: 30, horizonte: 8, error_pct: 32.3, error: '' },
   { medida: 'x', intervalo_min: 60, horizonte: 8, error_pct: 93.5, error: '' },
-  { medida: 'y', intervalo_min: 60, horizonte: 8, error_pct: null, error: 'el backtest todavía no tiene pasos con datos' },
+  { medida: 'y', intervalo_min: 60, horizonte: 8, error_pct: null, error: 'backtest parcial: 12 de 600 pasos' },
 ] });
 check('el intervalo en horas', d.includes('cada 4,4 h · 8 pasos hacia adelante'), d);
 check('en minutos', d.includes('cada 30 min'), d);
@@ -156,7 +189,7 @@ check('error bajo en verde', d.includes('sev--ok">error medio 4,3 %'), d);
 check('intermedio en amarillo', d.includes('sev--high">error medio 32,3 %'), d);
 check('alto en rojo', d.includes('sev--critical">error medio 93,5 %'), d);
 check('el lugar del gráfico', d.includes('<div class="pron__grafico" data-i="0"></div>'), d);
-check('el motivo cuando no hay', d.includes('el backtest todavía no tiene pasos con datos') && !d.includes('data-i="3"'), d);
+check('el motivo cuando no hay', d.includes('backtest parcial: 12 de 600 pasos') && !d.includes('data-i="3"'), d);
 check('sin pronósticos', pronosticosDetalleHTML({ pronosticos: [] }).includes('no tiene pronósticos'));
 const spec = specPronostico({ medida: 'oil_volume', ancla: '2026-06-29 12:15:44',
   real: [{ t: 'a', v: 1 }], pronostico: [{ t: 'b', v: 2, lo: 1, hi: 3 }] }, {});

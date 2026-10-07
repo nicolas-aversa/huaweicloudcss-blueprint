@@ -6975,7 +6975,7 @@
             <span class="section-card__tile">${icon('trending')}</span>
             <span class="section-card__titlewrap">
               <span class="section-card__title">Forecasting</span>
-              <span class="section-card__hint">${total} pronóstico${total === 1 ? '' : 's'} en ${casos.length} caso${casos.length === 1 ? '' : 's'} · cada uno contra lo que pasó de verdad · en Dashboards: Forecasting</span>
+              <span class="section-card__hint">${total} pronóstico${total === 1 ? '' : 's'} en ${casos.length} caso${casos.length === 1 ? '' : 's'}${state.provisionandoPlugins ? ' · provisionando: los demás casos aparecen a medida que terminan' : ''} · cada uno contra lo que pasó de verdad · en Dashboards: Forecasting</span>
             </span>
           </div>
           <div class="maestro">
@@ -7740,6 +7740,10 @@
       btn.disabled = true;
       const original = btn.innerHTML;
       btn.innerHTML = 'Provisionando…';
+      // Mientras tanto, los casos aparecen a medida que terminan (ver
+      // refrescarPluginsEnCurso): sin esto la vista era una foto a mitad de camino.
+      state.provisionandoPlugins = true;
+      const refresco = setInterval(refrescarPluginsEnCurso, _REFRESCO_PLUGINS_MS);
       try {
         const res = await fetch('/api/v1/onboarding/provision-capabilities', {
           method: 'POST',
@@ -7774,9 +7778,28 @@
         if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
         else if (mount) mount.innerHTML = `<div class="status status-error">Error: ${escapeHtml(err.message)}</div>`;
       } finally {
+        clearInterval(refresco);
+        state.provisionandoPlugins = false;
         btn.disabled = false;
         btn.innerHTML = original;
       }
+    }
+
+    // Con "Provisionar plugins" en curso: cada tanto se mira el estado y, si
+    // algún caso sumó pronósticos, detector o monitor, se repinta. Solo si
+    // cambió: repintar siempre borraba el detalle que se estaba mirando.
+    const _REFRESCO_PLUGINS_MS = 30000;
+    const firmaDePlugins = (caps) => JSON.stringify(Object.entries(caps || {}).map(([s, ids]) =>
+      [s, _forecastersDe(ids || {}).length, !!(ids || {}).detector_id, !!(ids || {}).monitor_id]).sort());
+    async function refrescarPluginsEnCurso() {
+      try {
+        const res = await fetch('/api/v1/terraform/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (firmaDePlugins(data.capabilities) !== firmaDePlugins((state.lastStatus || {}).capabilities)) {
+          renderInfraView(data);
+        }
+      } catch (_err) { /* el próximo intento */ }
     }
 
     // Paso 4 del wizard (post-ingesta): provisiona las capabilities del tipo sobre
