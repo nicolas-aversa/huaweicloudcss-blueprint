@@ -261,9 +261,8 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str) -> list[dic
     fuera = []
     if agente:
         fuera.append(_tarjeta("agente", "Asistente (ml-commons)",
-                              "Un agente conversacional con una herramienta de consulta (PPL) por caso y la base "
-                              "de conocimiento. En el CSS se usa desde la plataforma: el Assistant de Dashboards "
-                              "se habilita por ticket.", OK))
+                              "Un agente conversacional con una herramienta de consulta (PPL) por caso. En el CSS "
+                              "se usa desde la plataforma: el Assistant de Dashboards se habilita por ticket.", OK))
     if text2viz:
         ok = bool(text2viz.get("ok"))
         fuera.append(_tarjeta("text2viz", "Text to visualization",

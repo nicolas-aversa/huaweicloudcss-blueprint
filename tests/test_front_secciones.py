@@ -1,5 +1,5 @@
-""""Entorno desplegado" en secciones (Resumen, Plugins, Documentos) en vez de
-todo apilado. Se prueba en node con el código real de la vista."""
+""""Entorno desplegado" en secciones (Resumen, Plugins) en vez de todo
+apilado. Se prueba en node con el código real de la vista."""
 import pathlib
 import re
 import shutil
@@ -64,19 +64,17 @@ check('contador', h.includes('<span class="infra-tab__cuenta">9</span>') && h.sp
 // Cada pestaña carga lo suyo al abrirla, una sola vez por render.
 const clicks = [];
 const boton = (n, slug) => ({ click: () => clicks.push(n), dataset: { slug } });
-const panelDocs = { dataset: {}, querySelector: (sel) => sel === '#infra-documentos-actualizar' ? boton('documentos') : null };
 const casos = [boton('siem', 'siem'), boton('pozos', 'produccion-pozos')];
 const panelPlug = () => ({ dataset: {}, querySelector: (sel) => sel === '.plug__caso' ? casos[0] : null,
                            querySelectorAll: (sel) => sel === '.plug__caso' ? casos : [] });
 let pp = panelPlug();
-const raizC = { querySelector: (sel) => ({ '[data-infra-panel="documentos"]': panelDocs, '[data-infra-panel="plugins"]': pp })[sel] || null };
+const raizC = { querySelector: (sel) => ({ '[data-infra-panel="plugins"]': pp })[sel] || null };
 globalThis.state = {};
-cargarSeccionInfra(raizC, 'documentos');
-cargarSeccionInfra(raizC, 'documentos');
+cargarSeccionInfra(raizC, 'plugins');
 cargarSeccionInfra(raizC, 'plugins');
 cargarSeccionInfra(raizC, 'resumen');
 cargarSeccionInfra(raizC, undefined);
-check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['documentos', 'siem']), JSON.stringify(clicks));
+check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['siem']), JSON.stringify(clicks));
 // Plugins: después de un refresco, el caso que se estaba mirando.
 state.pluginsCaso = 'produccion-pozos';
 pp = panelPlug();
@@ -109,9 +107,8 @@ def test_la_vista_arma_sus_secciones_debajo_del_banner():
     assert vista.index('<section class="env-bar">') < vista.index('id="infra-destroy-btn"') \
         < vista.index("${setupPanel}") < vista.index("${infraSeccionesHTML([")
     secciones = vista[vista.index("${infraSeccionesHTML(["):vista.index("], infraSeccionGuardada())}")]
-    assert secciones.index("{ id: 'resumen'") < secciones.index("{ id: 'plugins'") < secciones.index("{ id: 'documentos'")
-    assert [m for m in re.findall(r"\{ id: '(\w+)'", secciones)] == ["resumen", "plugins", "documentos"], \
-        "las de cada plugin salieron: los resultados se miran en Dashboards"
+    assert [m for m in re.findall(r"\{ id: '(\w+)'", secciones)] == ["resumen", "plugins"], \
+        "las de cada plugin salieron (los resultados se miran en Dashboards), y la base de conocimiento también"
     resumen = secciones[:secciones.index("{ id: 'plugins'")]
     for pieza in ("${kpis}", '<div class="pipe-list">${pipeRows}</div>', "${accesosHTML(pipelines)}"):
         assert pieza in resumen, pieza

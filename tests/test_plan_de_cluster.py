@@ -32,7 +32,7 @@ def _plan(fields):
 def test_un_dataset_nuevo_tiene_todos_los_plugins_que_justifican_sus_datos():
     p = _plan(HOTEL)
     for plugin in ("agente", "forecasting", "anomalias", "alertas", "perfil", "analista", "mapa",
-                   "explicar", "text2viz", "documentos", "query_insights"):
+                   "explicar", "text2viz", "query_insights"):
         assert p[plugin]["aplica"], (plugin, p[plugin]["motivo"])
         assert p[plugin]["motivo"] and p[plugin]["titulo"]
     assert "Fecha de reserva" in p["forecasting"]["motivo"] and "total de Importe" in p["forecasting"]["motivo"]

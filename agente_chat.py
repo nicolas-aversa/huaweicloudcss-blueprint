@@ -1,24 +1,21 @@
 """El chat de la plataforma conversando con el agente de OpenSearch (ml-commons):
-la pregunta va al agente, que decide qué herramientas usar (PPLTool por
-fuente de datos, SearchIndexTool sobre la base de conocimiento), y la memoria de
-la conversación la guarda OpenSearch (`memory_id`).
+la pregunta va al agente, que decide qué herramienta usar (un PPLTool por
+fuente de datos), y la memoria de la conversación la guarda OpenSearch
+(`memory_id`).
 
 Lógica pura: armar la pregunta, leer la respuesta del `_execute` y las trazas
 (`_plugins/_ml/memory/message/<id>/traces`), de donde salen las consultas PPL
-que corrió con su resultado (para la tabla y el gráfico) y los documentos que
-consultó. Formatos medidos en CSS 3.4:
+que corrió con su resultado (para la tabla y el gráfico). Formatos medidos en
+CSS 3.4:
 
 - traza de un PPLTool: `{"ppl": "...", "executionResult": "<json con schema y
-  datarows>"}`, o un texto "Failed to run the tool … with the error message …";
-- traza de SearchIndexTool: un hit JSON por línea (`_source` con titulo y
-  fragmentos).
+  datarows>"}`, o un texto "Failed to run the tool … with the error message …".
 """
 from __future__ import annotations
 
 import json
 from typing import Any
 
-HERRAMIENTA_DE_DOCUMENTOS = "Documentos"
 _FALLO = "Failed to run the tool"
 
 
@@ -47,26 +44,13 @@ def respuesta(resp: dict[str, Any]) -> dict[str, str]:
 
 
 def de_las_trazas(trazas: list[dict[str, Any]]) -> dict[str, Any]:
-    """Las consultas PPL (con resultado o error) y los documentos consultados."""
+    """Las consultas PPL que corrió el agente, con su resultado o su error."""
     consultas: list[dict[str, Any]] = []
-    documentos: list[dict[str, Any]] = []
-    vistos: set = set()
     for t in sorted(trazas or [], key=lambda x: int(x.get("trace_number") or 0)):
         origen = t.get("origin") or ""
-        salida = t.get("response") or ""
         if origen.startswith("PPLTool"):
-            consultas.append(_consulta(origen, t.get("input") or "", salida))
-        elif origen == HERRAMIENTA_DE_DOCUMENTOS:
-            for linea in salida.splitlines():
-                try:
-                    hit = json.loads(linea)
-                except ValueError:
-                    continue
-                s = hit.get("_source") or {}
-                if s.get("titulo") and s["titulo"] not in vistos:
-                    vistos.add(s["titulo"])
-                    documentos.append({"titulo": s["titulo"], "extracto": " ".join(s.get("fragmentos") or [])[:280]})
-    return {"consultas": consultas, "fuentes": documentos}
+            consultas.append(_consulta(origen, t.get("input") or "", t.get("response") or ""))
+    return {"consultas": consultas}
 
 
 def _consulta(origen: str, entrada: str, salida: str) -> dict[str, Any]:

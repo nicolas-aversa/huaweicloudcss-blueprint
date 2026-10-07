@@ -94,7 +94,7 @@ _FIELD_TYPE_TO_OS: dict[str, dict[str, Any]] = {
                    "||dd/MM/yyyy HH:mm:ss||dd/MM/yyyy HH:mm||dd/MM/yyyy||epoch_millis"),
     },
     # Sub-campo keyword: full-text searchable (text) Y aggregatable (.keyword).
-    # Y por idioma (`.es`, `.en`), como la base de conocimiento: buscar
+    # Y por idioma (`.es`, `.en`): buscar
     # "devolución" encuentra "devoluciones" y "devolvieron".
     "text": {
         "type": "text",

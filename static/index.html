@@ -2348,40 +2348,8 @@
     /* El clic no deja el recuadro de foco; con teclado, sí se ve. */
     .infra-tabs .case-tab:focus { outline: none; }
     .infra-tabs .case-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-    /* Base de conocimiento: documentos a la izquierda, preguntar a la derecha. */
-    .docs { display: grid; grid-template-columns: minmax(240px, 380px) minmax(0, 1fr); gap: 18px; margin-top: 14px; align-items: start; }
-    @media (max-width: 760px) { .docs { grid-template-columns: minmax(0, 1fr); } }
-    .docs__col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-    .docs__subir {
-      display: flex; align-items: center; gap: 12px; padding: 14px; cursor: pointer;
-      border: 1.5px dashed var(--border-default); border-radius: var(--radius-md); background: var(--bg-secondary);
-      transition: border-color var(--t-base), background var(--t-base);
-    }
-    .docs__subir:hover, .docs__subir.is-dragover, .docs__subir:focus-visible { border-color: var(--accent); background: var(--accent-tint); outline: none; }
-    .docs__subir-tile { flex: none; width: 34px; height: 34px; border-radius: var(--radius-md); background: var(--accent-tint); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
-    .docs__subir strong { display: block; font-size: var(--fs-sm); color: var(--text-primary); }
-    .docs__subir-hint { display: block; font-size: var(--fs-xs); color: var(--text-muted); }
-    .docs__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-    .docs__doc { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-md); font-size: var(--fs-sm); }
-    .docs__doc:hover { background: var(--bg-secondary); }
-    .docs__doc > .icon { width: 15px; height: 15px; flex: none; color: var(--text-muted); }
-    .docs__titulo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-    .docs__borrar { flex: none; display: inline-flex; padding: 4px; border: none; background: none; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer; }
-    .docs__borrar:hover, .docs__borrar:focus-visible { color: var(--accent-red); background: var(--accent-tint); outline: none; }
-    .docs__borrar .icon { width: 14px; height: 14px; }
-    .docs__preguntar { display: flex; gap: 8px; }
-    .docs__preguntar .form-input { flex: 1; min-width: 0; }
-    .docs__respuesta { padding: 12px 14px; border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-primary); font-size: var(--fs-base); line-height: 1.55; white-space: pre-wrap; }
-    .docs__fuentes-lbl { margin: 12px 0 6px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-    .docs__fuentes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
-    .docs__extracto { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
     .cap-chart__armando { display: flex; align-items: center; gap: 6px; padding: 8px 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .cap-chart__armando .icon { width: 13px; height: 13px; animation: pulse 1.6s var(--ease) infinite; }
-    /* Los documentos que consultó el agente, debajo de la respuesta. */
-    .cap-chat__fuentes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: var(--fs-xs); }
-    .cap-chat__fuentes-lbl { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-weight: 600; }
-    .cap-chat__fuentes-lbl .icon { width: 12px; height: 12px; }
-    .cap-chat__fuente { padding: 2px 8px; border-radius: var(--radius-pill); background: var(--bg-secondary); border: 1px solid var(--border-subtle); color: var(--text-secondary); }
     /* El contador de cada pestaña. */
     .infra-tab__cuenta {
       font-size: var(--fs-xs); font-weight: 700; padding: 1px 7px; border-radius: var(--radius-pill);
@@ -2698,7 +2666,7 @@
     .cap-resumen { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .cap-resumen .status-pill { margin: 0; }
     .cap-resumen__lbl { font-size: var(--fs-sm); color: var(--text-muted); }
-    /* Encabezado de tarjeta con su botón a la derecha (Accesos, Documentos). */
+    /* Encabezado de tarjeta con su botón a la derecha (Accesos de demo). */
     .seguridad__head { margin-bottom: 10px; }
     .seguridad__head .btn { margin-left: auto; }
     .seguridad__caso { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
@@ -6375,13 +6343,6 @@
     }
     // "ver PPL / datos": la consulta y su tabla; en una investigación, cada
     // consulta con la suya (o con su error).
-    function capChatFuentesHTML(data) {
-      const fuentes = (data && data.fuentes) || [];
-      if (!fuentes.length) return '';
-      return `<div class="cap-chat__fuentes"><span class="cap-chat__fuentes-lbl">${icon('file')} Documentos consultados</span>`
-        + fuentes.map(f => `<span class="cap-chat__fuente" title="${escapeHtml(f.extracto || '')}">${escapeHtml(f.titulo)}</span>`).join('')
-        + `</div>`;
-    }
     // El Vega-Lite que armó el agente de text to visualization, con los datos de
     // la consulta. Vega-Lite lee "a.b" como un campo anidado: los nombres de las
     // columnas con punto se escapan en la especificación.
@@ -6500,125 +6461,6 @@
       });
     }
 
-    // Base de conocimiento (RAG): los documentos que sube el usuario, partidos e
-    // indexados en el cluster del entorno; se les pregunta y responde OpenSearch
-    // (pipeline de búsqueda con retrieval_augmented_generation) con MaaS.
-    const _EXT_DOCUMENTOS = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.rtf,.txt,.md,.markdown,.csv,.json,.log,.html,.htm';
-    function documentosHTML() {
-      return `<div class="section-card" id="infra-documentos">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('file')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Base de conocimiento</span>
-              <span class="section-card__hint">Subí manuales, políticas o runbooks y preguntales. Todo lo hace OpenSearch: un pipeline de ingesta saca el texto (attachment) y lo parte en fragmentos (text_chunking), y un pipeline de búsqueda responde con ellos (RAG). La plataforma no guarda copia.</span>
-            </span>
-            <button type="button" class="btn btn-secondary btn-sm" id="infra-documentos-actualizar" title="Volver a leer">${icon('refresh')} Actualizar</button>
-          </div>
-          <div class="docs">
-            <div class="docs__col">
-              <label class="docs__subir" id="infra-documentos-subir" tabindex="0">
-                <input type="file" id="infra-documentos-archivo" accept="${_EXT_DOCUMENTOS}" multiple hidden>
-                <span class="docs__subir-tile">${icon('upload')}</span>
-                <span><strong>Subir documentos</strong><span class="docs__subir-hint">PDF, Word, PowerPoint, Excel, texto, Markdown o HTML · hasta 10 MB cada uno</span></span>
-              </label>
-              <div id="infra-documentos-estado" class="hidden"></div>
-              <ul class="docs__lista" id="infra-documentos-lista"></ul>
-            </div>
-            <div class="docs__col">
-              <form class="docs__preguntar" id="infra-documentos-form" autocomplete="off">
-                <input class="form-input" id="infra-documentos-pregunta" type="text" placeholder="Preguntale a tus documentos…" aria-label="Pregunta a los documentos">
-                <button class="btn btn-primary btn-sm" type="submit">Preguntar</button>
-              </form>
-              <div id="infra-documentos-respuesta"><div class="hallazgos__vacio">La respuesta sale solo de los documentos cargados; si no está ahí, lo dice.</div></div>
-            </div>
-          </div>
-        </div>`;
-    }
-    const _TIPO_DOC = { 'application/pdf': 'PDF', 'text/plain': 'texto', 'text/html': 'HTML', 'text/csv': 'CSV',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word', 'application/msword': 'Word',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel', 'application/rtf': 'RTF' };
-    function documentosListaHTML(docs) {
-      if (!(docs || []).length) return '<li class="hallazgos__vacio">Todavía no hay documentos.</li>';
-      return docs.map(d => `<li class="docs__doc">${icon('file')}<span class="docs__titulo" title="${escapeHtml(d.titulo)}">${escapeHtml(d.titulo)}</span>`
-        + `${d.tipo ? `<span class="hallazgo__meta">${escapeHtml(_TIPO_DOC[d.tipo] || d.tipo)}</span>` : ''}`
-        + `<button type="button" class="docs__borrar" data-titulo="${escapeHtml(d.titulo)}" title="Borrar" aria-label="Borrar ${escapeHtml(d.titulo)}">${icon('trash')}</button></li>`).join('');
-    }
-    function documentosRespuestaHTML(d) {
-      if (d.aviso && !d.respuesta) return `<div class="hallazgos__vacio">${escapeHtml(d.aviso)}</div>`;
-      const fuentes = (d.fuentes || []).map(f => `<li><strong>${escapeHtml(f.titulo)}</strong>`
-        + `<div class="docs__extracto">…${escapeHtml(f.extracto || '')}…</div></li>`).join('');
-      return `<div class="docs__respuesta">${escapeHtml(d.respuesta || '')}</div>`
-        + (fuentes ? `<div class="docs__fuentes-lbl">Documentos consultados</div><ul class="docs__fuentes">${fuentes}</ul>` : '');
-    }
-    async function cargarDocumentos() {
-      const lista = document.getElementById('infra-documentos-lista');
-      if (!lista) return;
-      try {
-        const res = await fetch('/api/v1/conocimiento/documentos');
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        lista.innerHTML = documentosListaHTML(data.documentos || []);
-      } catch (err) {
-        lista.innerHTML = `<li class="hallazgos__vacio">No se pudieron leer: ${escapeHtml(err.message)}</li>`;
-      }
-    }
-    const _leerBase64 = (archivo) => new Promise((ok, mal) => {
-      const r = new FileReader();
-      r.onload = () => ok(String(r.result).split(',', 2)[1] || '');
-      r.onerror = () => mal(new Error('no se pudo leer el archivo'));
-      r.readAsDataURL(archivo);
-    });
-    async function subirDocumentos(archivos) {
-      const estado = document.getElementById('infra-documentos-estado');
-      const lista = [...(archivos || [])];
-      if (!estado || !lista.length) return;
-      const errores = [];
-      for (const [i, a] of lista.entries()) {
-        showStatus(estado, `Subiendo ${a.name} (${i + 1} de ${lista.length})…`, 'loading');
-        try {
-          const res = await fetch('/api/v1/conocimiento/documentos', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre: a.name, contenido_b64: await _leerBase64(a) }),
-          });
-          const data = await res.json();
-          if (!res.ok) throw detailError(data);
-        } catch (err) {
-          errores.push(err.message);
-        }
-      }
-      if (errores.length) showStatus(estado, errores.join(' · '), 'error');
-      else { estado.className = 'hidden'; toast(`${lista.length === 1 ? 'Documento cargado' : `${lista.length} documentos cargados`}.`, 'success'); }
-      cargarDocumentos();
-    }
-    async function borrarDocumento(titulo) {
-      const ok = await confirmModal({ title: '¿Borrar el documento?', message: `Se borra "${titulo}" de la base de conocimiento.`, confirmLabel: 'Borrar' });
-      if (!ok) return;
-      try {
-        const res = await fetch('/api/v1/conocimiento/documentos/' + encodeURIComponent(titulo), { method: 'DELETE' });
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-      } catch (err) {
-        toast(`No se pudo borrar: ${err.message}`, 'error');
-      }
-      cargarDocumentos();
-    }
-    async function preguntarDocumentos(pregunta) {
-      const destino = document.getElementById('infra-documentos-respuesta');
-      if (!destino || !pregunta.trim()) return;
-      showStatus(destino, 'Buscando en los documentos…', 'loading');
-      try {
-        const res = await fetch('/api/v1/conocimiento/preguntar', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pregunta }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = documentosRespuestaHTML(data);
-      } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      }
-    }
     // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
     // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
     function accesosHTML(pipelines) {
@@ -6941,7 +6783,7 @@
             <input class="cap-chat__input" id="cap-chat-input" type="text" placeholder="Preguntá sobre tus datos…" aria-label="Tu pregunta">
             <button class="cap-chat__send" id="cap-chat-send" type="submit" aria-label="Enviar">${icon('arrow-right')}</button>
           </form>
-          <div class="cap-chat__pie">Responde el agente de OpenSearch con tus datos y tus documentos. Puede equivocarse.</div>
+          <div class="cap-chat__pie">Responde el agente de OpenSearch con tus datos. Puede equivocarse.</div>
         </div>`;
       const lanzador = document.createElement('button');
       lanzador.id = 'cap-lanzador';
@@ -7292,7 +7134,7 @@
             return;
           }
           if (data.memory_id) capChatMemoria[slug] = data.memory_id;
-          const details = capChatFuentesHTML(data) + capChatDetallesHTML(data);
+          const details = capChatDetallesHTML(data);
           const cabecera = capChatCabeceraHTML(data);
           // Lo que queda guardado es la respuesta entera: el typewriter es solo
           // la primera vez; un re-render la muestra completa, con su gráfico.
@@ -8096,7 +7938,6 @@
       // El caso que se estaba mirando (un refresco re-pinta la vista) o el primero.
       plugins: [(panel) => (state.pluginsCaso && [...panel.querySelectorAll('.plug__caso')]
         .find(b => b.dataset.slug === state.pluginsCaso)) || panel.querySelector('.plug__caso')],
-      documentos: ['#infra-documentos-actualizar'],
     };
     function cargarSeccionInfra(raiz, id) {
       const panel = id && raiz.querySelector(`[data-infra-panel="${id}"]`);
@@ -8406,7 +8247,6 @@
             </div>
             ${accesosHTML(pipelines)}` },
           { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: nPlugins, html: pluginsHTML(data.plugins) },
-          { id: 'documentos', label: 'Documentos', icon: 'file', html: documentosHTML() },
         ], infraSeccionGuardada())}
         </div>`;
       const env = body.querySelector('.env');
@@ -8437,27 +8277,6 @@
         if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irASeccion(k.dataset.ir); }
       });
 
-      // Base de conocimiento: subir (click o arrastrar), borrar y preguntar.
-      const docSubir = body.querySelector('#infra-documentos-subir');
-      body.querySelector('#infra-documentos-actualizar')?.addEventListener('click', cargarDocumentos);
-      body.querySelector('#infra-documentos-archivo')?.addEventListener('change', (e) => {
-        subirDocumentos(e.target.files); e.target.value = '';
-      });
-      docSubir?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); body.querySelector('#infra-documentos-archivo')?.click(); }
-      });
-      docSubir?.addEventListener('dragover', (e) => { e.preventDefault(); docSubir.classList.add('is-dragover'); });
-      docSubir?.addEventListener('dragleave', () => docSubir.classList.remove('is-dragover'));
-      docSubir?.addEventListener('drop', (e) => {
-        e.preventDefault(); docSubir.classList.remove('is-dragover'); subirDocumentos(e.dataTransfer.files);
-      });
-      body.querySelector('#infra-documentos-lista')?.addEventListener('click', (e) => {
-        const b = e.target.closest('.docs__borrar');
-        if (b) borrarDocumento(b.dataset.titulo);
-      });
-      body.querySelector('#infra-documentos-form')?.addEventListener('submit', (e) => {
-        e.preventDefault(); preguntarDocumentos(body.querySelector('#infra-documentos-pregunta')?.value || '');
-      });
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
       body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
       // Plugins: por caso, las tarjetas y su número; "Explicarla con IA" va al asistente.
@@ -8664,27 +8483,6 @@
           await espera(400);
           return json({ analistas: Object.entries(ENMASCARADOS).map(([slug, enmascarados]) => ({
             slug, usuario: `analista-${slug}`, password: 'Vista-Previa#1', enmascarados })) });
-        }
-        // Base de conocimiento de ejemplo: lo que se sube queda en la lista.
-        if (u.includes('/api/v1/conocimiento/preguntar')) {
-          await espera(900);
-          return json({ respuesta: 'Vista previa, con documentos de ejemplo: ante un acceso sospechoso hay que aislar el equipo, revocar las credenciales y las access keys, preservar los logs de los últimos 7 días y abrir un ticket de severidad alta. Si vino de una IP extranjera, avisar al CISO dentro de la hora.',
-                        fuentes: [{ titulo: 'Runbook de incidentes.pdf', extracto: 'Ante un acceso sospechoso a una cuenta administrativa: aislar el equipo de la red, revocar las credenciales y las access keys del usuario, preservar los logs' }] });
-        }
-        if (u.includes('/api/v1/conocimiento/documentos')) {
-          await espera(400);
-          window.__docsPrevia = window.__docsPrevia || [{ titulo: 'Runbook de incidentes.pdf', tipo: 'application/pdf' }, { titulo: 'Política de mantenimiento.docx', tipo: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }];
-          if (metodo === 'POST') {
-            const { nombre } = JSON.parse(opts.body || '{}');
-            window.__docsPrevia = [...window.__docsPrevia.filter(d => d.titulo !== nombre), { titulo: nombre, tipo: '' }];
-            return json({ titulo: nombre });
-          }
-          if (metodo === 'DELETE') {
-            const t = decodeURIComponent(u.split('/documentos/')[1] || '');
-            window.__docsPrevia = window.__docsPrevia.filter(d => d.titulo !== t);
-            return json({ borrados: 1 });
-          }
-          return json({ documentos: window.__docsPrevia });
         }
         if (u.includes('/api/v1/capabilities/ppl-chat')) {
           await espera(1100);

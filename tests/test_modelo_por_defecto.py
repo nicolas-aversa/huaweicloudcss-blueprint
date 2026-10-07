@@ -39,15 +39,15 @@ def _agente():
 
 def test_el_agente_le_pasa_al_ppltool_solo_su_parte():
     """Sin el JSON el PPLTool toma la pregunta original entera: con una que
-    mezclaba datos y documentos, el modelo de PPL contestaba con texto."""
+    mezclaba varias cosas, el modelo de PPL contestaba con texto."""
     ppl = next(t for t in _agente()["tools"] if t["type"] == "PPLTool")
     assert 'El input es un JSON con SOLO la parte de la pregunta que se responde con estos datos: {"question": "<esa pregunta>"}.' in ppl["description"]
 
 
-def test_el_agente_busca_en_los_documentos():
+def test_el_agente_solo_consulta_datos():
+    """La base de conocimiento (Documentos) salió: el agente tiene un PPLTool
+    por caso y nada más."""
     a = _agente()
-    doc = next(t for t in a["tools"] if t["name"] == "Documentos")
-    assert doc["type"] == "SearchIndexTool" and '"index": "conocimiento-plataforma"' in doc["description"]
-    assert '"fields": ["fragmentos", "fragmentos.es", "fragmentos.en", "titulo"]' in doc["description"]
-    assert "use both tools" in a["llm"]["parameters"]["system_instruction"]
-    assert a["llm"]["parameters"]["max_iteration"] == "10", "con 5 no llegaba a consultar datos, corregir y buscar en documentos"
+    assert {t["type"] for t in a["tools"]} == {"PPLTool"}
+    assert "Documentos" not in a["llm"]["parameters"]["system_instruction"]
+    assert a["llm"]["parameters"]["max_iteration"] == "10", "con 5 no llegaba a consultar, corregir y volver a consultar"

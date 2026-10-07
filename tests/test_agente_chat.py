@@ -1,6 +1,5 @@
-"""El chat de la plataforma conversa con el agente de OpenSearch (datos y
-documentos, con la memoria en ml-commons) y el gráfico lo arma text to
-visualization. Formatos medidos en CSS 3.4 (ver agente_chat.py y text2viz.py)."""
+"""El chat de la plataforma conversa con el agente de OpenSearch (con la
+memoria en ml-commons) y el gráfico lo arma text to visualization. Formatos medidos en CSS 3.4 (ver agente_chat.py y text2viz.py)."""
 import json
 import pathlib
 import shutil
@@ -37,19 +36,16 @@ TRAZAS = [
     {"origin": "PPLTool-siem", "trace_number": 3, "input": "top IP sin nulos",
      "response": "Failed to run the tool PPLTool-siem with the error message execute ppl: boom"},
     {"origin": "PPLTool-siem", "trace_number": 4, "input": '{"question": "top IP sin nulos"}', "response": _ppl("source=siem* | where isnotnull(source.ip)", [[571]])},
-    {"origin": "Documentos", "trace_number": 5, "input": "{}", "response":
-        json.dumps({"_source": {"titulo": "Runbook.md", "fragmentos": ["bloquear la IP"]}}) + "\n"
-        + json.dumps({"_source": {"titulo": "Runbook.md", "fragmentos": ["otra"]}}) + "\nno es json\n"},
 ]
 
 
-def test_las_consultas_y_los_documentos_salen_de_las_trazas():
+def test_las_consultas_salen_de_las_trazas():
     r = ac.de_las_trazas(list(reversed(TRAZAS)))   # el orden lo da trace_number
     assert [c["pregunta"] for c in r["consultas"]] == ["top IP", "top IP sin nulos", "top IP sin nulos"]
     assert [c["ok"] for c in r["consultas"]] == [True, False, True]
     assert r["consultas"][1]["error"] == "execute ppl: boom"
     assert r["consultas"][2]["result"] == {"schema": [{"name": "total", "type": "bigint"}], "datarows": [[571]]}
-    assert r["fuentes"] == [{"titulo": "Runbook.md", "extracto": "bloquear la IP"}], "un documento una vez"
+    assert list(r) == ["consultas"]
 
 
 def test_la_que_respondio_es_la_ultima_que_corrio():
@@ -134,7 +130,7 @@ def test_conversar_con_el_agente(monkeypatch):
     r = main._conversar_con_el_agente("http://x:9200", "a", "p", "AG", pedido, "SIEM", "siem*")
     assert r.answer == "La IP es 5.188.206.18." and r.memory_id == "MEM"
     assert r.ppl == "source=siem* | where isnotnull(source.ip)" and r.result["datarows"] == [[571]]
-    assert len(r.consultas) == 3 and r.fuentes == [{"titulo": "Runbook.md", "extracto": "bloquear la IP"}]
+    assert len(r.consultas) == 3
     assert r.vega == {}, "el gráfico se pide aparte"
     ejecucion = next(b for m, ruta, b in pedidos if ruta.endswith("/_execute"))
     assert ejecucion["parameters"]["memory_id"] == "MEM0", "sigue la conversación"
@@ -190,9 +186,9 @@ _INDEX = pathlib.Path(main.__file__).parent / "static" / "index.html"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_el_grafico_y_los_documentos_en_node(tmp_path):
+def test_el_grafico_en_node(tmp_path):
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("    function capChatFuentesHTML(data) {")
+    i = html.index("    // El Vega-Lite que armó el agente de text to visualization")
     fns = html[i:html.index("    function capChatDetallesHTML(data) {", i)]
     js = tmp_path / "chat.mjs"
     js.write_text(r"""
@@ -207,9 +203,6 @@ const spec = capChatVegaConDatos({ mark: 'bar', data: { url: 'x' }, encoding: { 
 check('datos de la consulta', JSON.stringify(spec.data) === JSON.stringify({ values: [{ 'event.dataset': 'waf', total: 3 }, { 'event.dataset': 'auth', total: 5 }] }), JSON.stringify(spec.data));
 check('el punto escapado', spec.encoding.y.field === 'event\\.dataset' && spec.layer[0].encoding.color.field === 'event\\.dataset', spec.encoding.y.field);
 check('lo demás igual', spec.encoding.x.field === 'total' && spec.width === 'container' && spec.config.c === 1);
-const d = capChatFuentesHTML({ fuentes: [{ titulo: 'Run<book>.md', extracto: 'bloquear' }] });
-check('documentos', d.includes('Documentos consultados') && d.includes('>Run&lt;book&gt;.md<') && d.includes('title="bloquear"'), d);
-check('sin documentos, nada', capChatFuentesHTML({ fuentes: [] }) === '' && capChatFuentesHTML(null) === '');
 console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")

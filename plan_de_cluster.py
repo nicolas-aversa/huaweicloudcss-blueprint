@@ -141,7 +141,6 @@ def plan(slug: str, fields: list[dict], label: str = "",
     # Para todo el cluster, no por dataset.
     for plugin, titulo, motivo in (
             ("text2viz", "Gráficos desde una pregunta (text to visualization)", "arma el gráfico de cada respuesta del asistente"),
-            ("documentos", "Base de conocimiento (RAG)", "contesta con los documentos que se suban: manuales, procedimientos"),
             ("query_insights", "Query Insights", "muestra las consultas más pesadas del cluster")):
         items.append(_item(plugin, titulo, True, motivo, {"alcance": "cluster"}))
     return items

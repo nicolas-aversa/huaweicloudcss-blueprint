@@ -6581,7 +6581,6 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
 
     agent_verticals = _fuentes_del_agente(base, user, password, terraform_dir, slug_actual)
     instr = caps.build_agent_system_instruction(agent_verticals)
-    _asegurar_indice_de_documentos(base, user, password)
     # ml-commons NO exige nombres únicos de agente: sin borrar el anterior
     # quedarían duplicados.
     for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search", "Platform Conversational Root"):
@@ -7335,16 +7334,6 @@ def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int
             "" if _resp_ok(r) else _resp_motivo(r))
 
 
-# ── Base de conocimiento (RAG sobre los documentos del usuario) ─────────────
-class DocumentoRequest(BaseModel):
-    nombre: str = Field(..., min_length=1, max_length=200)
-    contenido_b64: str = Field(..., min_length=1)
-
-
-class PreguntaConocimientoRequest(BaseModel):
-    pregunta: str = Field(..., min_length=1, max_length=1000)
-
-
 def _cluster_del_entorno(stage: str) -> "tuple[str, str, str]":
     """(base, user, password) del cluster del entorno, o 503 si no hay."""
     terraform_dir = _active_terraform_dir()
@@ -7354,148 +7343,6 @@ def _cluster_del_entorno(stage: str) -> "tuple[str, str, str]":
                             detail={"stage": stage, "message": "No hay un cluster alcanzable."})
     return (_os_base(cluster, _read_https_enabled_from_state(terraform_dir)),
             "admin", _cluster_admin_password(terraform_dir))
-
-
-def _asegurar_indice_de_documentos(base: str, user: str, password: str) -> bool:
-    """El pipeline de ingesta y el índice de la base de conocimiento (vacío si
-    no hay documentos): idempotente."""
-    import conocimiento
-    rp = _os_req("PUT", f"{base}/_ingest/pipeline/{conocimiento.PIPELINE_DE_INGESTA}", user, password, timeout=30,
-                 json_body=conocimiento.build_pipeline_de_ingesta())
-    ri = _os_req("PUT", f"{base}/{conocimiento.INDICE}", user, password, json_body=conocimiento.mapping(), timeout=30)
-    return _resp_ok(rp) and (_resp_ok(ri) or "already_exists" in (getattr(ri, "text", "") or ""))
-
-
-def _asegurar_rag(base: str, user: str, password: str) -> "tuple[str | None, str]":
-    """El modelo y el pipeline del RAG, creados la primera vez que se pregunta
-    (cualquier entorno, sin paso extra). Devuelve (model_id, motivo si falló)."""
-    import capabilities as caps
-    import conocimiento
-    from maas_integrator import get_maas_api_key
-
-    modelos = _search_ids(base, user, password, "/_plugins/_ml/models/_search", conocimiento.NOMBRE_DEL_MODELO)
-    model_id = modelos[0] if modelos else None
-    if not model_id:
-        clave = get_maas_api_key()
-        if not clave:
-            return None, "falta la API Key de MaaS (⚙ Configuración)"
-        _os_req("PUT", f"{base}/_cluster/settings", user, password, json_body=caps.build_cluster_settings(), timeout=30)
-        cid = _ml_create(base, user, password, "/_plugins/_ml/connectors/_create",
-                         conocimiento.build_connector(clave, caps.maas_connector_endpoint(), caps.maas_llm_model()),
-                         "connector_id")
-        if not cid:
-            return None, "no se pudo crear el connector a MaaS"
-        r = _os_req("POST", f"{base}/_plugins/_ml/models/_register", user, password, timeout=60, json_body={
-            "name": conocimiento.NOMBRE_DEL_MODELO, "function_name": "remote", "connector_id": cid,
-            "description": "LLM del RAG de la base de conocimiento"})
-        try:
-            datos = r.json() if _resp_ok(r) else {}
-        except ValueError:
-            datos = {}
-        model_id = datos.get("model_id") or (_ml_wait_model(base, user, password, datos["task_id"])
-                                             if datos.get("task_id") else None)
-        if not model_id:
-            return None, f"no se pudo registrar el modelo: {_resp_motivo(r)}"
-    estado = _os_req("GET", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=20)
-    try:
-        desplegado = (estado.json() or {}).get("model_state") == "DEPLOYED" if _resp_ok(estado) else False
-    except ValueError:
-        desplegado = False
-    if not desplegado:
-        _os_req("POST", f"{base}/_plugins/_ml/models/{model_id}/_deploy", user, password, timeout=60)
-        ok, st = _ml_wait_deployed(base, user, password, model_id)
-        if not ok:
-            return None, f"el modelo quedó {st}"
-    # Siempre se pone (PUT es idempotente): uno que quedó de una versión
-    # anterior pedía otro campo de contexto y la búsqueda daba 500.
-    rp = _os_req("PUT", f"{base}/_search/pipeline/{conocimiento.PIPELINE}", user, password, timeout=20,
-                 json_body=conocimiento.build_pipeline(model_id))
-    if not _resp_ok(rp):
-        return None, f"no se pudo crear el pipeline: {_resp_motivo(rp)}"
-    return model_id, ""
-
-
-@app.get("/api/v1/conocimiento/documentos", tags=["conocimiento"])
-def listar_documentos() -> dict:
-    """Los documentos cargados en la base de conocimiento del entorno."""
-    import conocimiento
-    base, user, password = _cluster_del_entorno("conocimiento")
-    r = _os_req("POST", f"{base}/{conocimiento.INDICE}/_search", user, password, timeout=20, json_body=conocimiento.LISTAR)
-    if getattr(r, "status_code", 0) == 404:
-        return {"documentos": []}
-    if not _resp_ok(r):
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento", "message": _resp_motivo(r)})
-    return {"documentos": conocimiento.listado(r.json())}
-
-
-@app.post("/api/v1/conocimiento/documentos", tags=["conocimiento"])
-def subir_documento(request: DocumentoRequest) -> dict:
-    """Manda el archivo al cluster del entorno, que lo procesa con su pipeline de
-    ingesta (attachment → text_chunking): la plataforma no extrae ni parte nada,
-    ni guarda copia. Si ya había un documento con ese nombre, lo reemplaza."""
-    import base64
-    import conocimiento
-
-    try:
-        tamano = len(base64.b64decode(request.contenido_b64, validate=True))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"stage": "conocimiento",
-                                                     "message": f"{request.nombre}: no es base64"}) from exc
-    motivo = conocimiento.validar(request.nombre, tamano)
-    if motivo:
-        raise HTTPException(status_code=400, detail={"stage": "conocimiento", "message": f"{request.nombre}: {motivo}"})
-    audit.record("conocimiento_subir", f"{request.nombre} ({tamano} bytes)")
-    base, user, password = _cluster_del_entorno("conocimiento")
-    if not _asegurar_indice_de_documentos(base, user, password):
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento",
-                                                     "message": "no se pudo crear el índice o el pipeline de ingesta"})
-    _os_req("POST", f"{base}/{conocimiento.INDICE}/_delete_by_query?refresh=true", user, password, timeout=60,
-            json_body={"query": {"term": {"titulo.k": request.nombre}}})
-    rd = _os_req("POST", f"{base}/{conocimiento.INDICE}/_doc?pipeline={conocimiento.PIPELINE_DE_INGESTA}&refresh=true",
-                 user, password, timeout=120, json_body=conocimiento.documento(request.nombre, request.contenido_b64))
-    if not _resp_ok(rd):
-        # Lo que rechaza el pipeline de ingesta (sin texto, archivo corrupto) es
-        # un problema del archivo: 400, aunque OpenSearch conteste 500.
-        texto_err = getattr(rd, "text", "") or ""
-        del_archivo = getattr(rd, "status_code", 0) == 400 or conocimiento.SIN_TEXTO in texto_err             or "attachment" in texto_err or "TikaException" in texto_err
-        raise HTTPException(status_code=400 if del_archivo else 502, detail={
-            "stage": "conocimiento", "message": f"{request.nombre}: {conocimiento.motivo_de_ingesta(texto_err)}"})
-    return {"titulo": request.nombre}
-
-
-@app.delete("/api/v1/conocimiento/documentos/{titulo}", tags=["conocimiento"])
-def borrar_documento(titulo: str) -> dict:
-    import conocimiento
-    base, user, password = _cluster_del_entorno("conocimiento")
-    r = _os_req("POST", f"{base}/{conocimiento.INDICE}/_delete_by_query?refresh=true", user, password, timeout=60,
-                json_body={"query": {"term": {"titulo.k": titulo}}})
-    if not _resp_ok(r):
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento", "message": _resp_motivo(r)})
-    audit.record("conocimiento_borrar", titulo)
-    return {"borrados": int((r.json() or {}).get("deleted") or 0)}
-
-
-@app.post("/api/v1/conocimiento/preguntar", tags=["conocimiento"])
-def preguntar_a_los_documentos(request: PreguntaConocimientoRequest) -> dict:
-    """Busca en los documentos y el LLM responde con lo que encontró (RAG en
-    OpenSearch: pipeline de búsqueda con `retrieval_augmented_generation`)."""
-    import capabilities as caps
-    import conocimiento
-
-    base, user, password = _cluster_del_entorno("conocimiento")
-    model_id, motivo = _asegurar_rag(base, user, password)
-    if not model_id:
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento", "message": motivo})
-    r = _os_req("POST", f"{base}/{conocimiento.INDICE}/_search?search_pipeline={conocimiento.PIPELINE}",
-                user, password, timeout=120, json_body=conocimiento.busqueda(request.pregunta, caps.maas_llm_model()))
-    if getattr(r, "status_code", 0) == 404:
-        return {"respuesta": "", "fuentes": [], "aviso": "Todavía no hay documentos: subí alguno primero."}
-    if not _resp_ok(r):
-        raise HTTPException(status_code=502, detail={"stage": "conocimiento", "message": _resp_motivo(r)})
-    salida = conocimiento.respuesta(r.json())
-    if not salida["fuentes"]:
-        salida["aviso"] = "Ningún documento habla de eso."
-    return salida
 
 
 class AnalistasResponse(BaseModel):
@@ -8111,9 +7958,8 @@ class PplChatResponse(BaseModel):
     result: dict = Field(default_factory=dict)
     # En una investigación, cada consulta con su resultado o su error.
     consultas: list[dict] = Field(default_factory=list)
-    # Con el agente de OpenSearch: los documentos que consultó, el gráfico que
-    # armó text to visualization y la memoria de la conversación.
-    fuentes: list[dict] = Field(default_factory=list)
+    # Con el agente de OpenSearch: el gráfico que armó text to visualization y
+    # la memoria de la conversación.
     vega: dict = Field(default_factory=dict)
     memory_id: str = ""
 
@@ -8675,7 +8521,7 @@ def _conversar_con_el_agente(base: str, user: str, password: str, agente: str, r
     # pide aparte (/capabilities/visualizar), así la respuesta no lo espera.
     return PplChatResponse(answer=salida["respuesta"], ppl=(buena or {}).get("ppl", ""), result=resultado,
                            consultas=leido["consultas"] if len(leido["consultas"]) > 1 else [],
-                           fuentes=leido["fuentes"], memory_id=salida["memory_id"])
+                           memory_id=salida["memory_id"])
 
 
 class VisualizarRequest(BaseModel):
