@@ -628,10 +628,47 @@ def build_ad_detector(slug: str, index_pattern: str, features: list[dict[str, An
     }
 
 
-def build_monitor_de_anomalias(slug: str, detector_id: str, umbral: float = 0.7) -> dict[str, Any]:
+CANAL_DE_ALERTAS = "platform-alertas"
+_NOMBRE_DEL_TIPO = {"slack": "Slack", "microsoft_teams": "Microsoft Teams", "webhook": "webhook"}
+
+
+def nombre_del_tipo_de_canal(tipo: str) -> str:
+    return _NOMBRE_DEL_TIPO.get(tipo, tipo)
+
+
+def build_canal_de_alertas(tipo: str, url: str) -> dict[str, Any]:
+    """`POST _plugins/_notifications/configs`: el canal adonde avisan los
+    monitores de la plataforma."""
+    destino: dict[str, Any] = {"url": url}
+    if tipo == "webhook":
+        destino.update({"method": "POST", "header_params": {"Content-Type": "application/json"}})
+    return {"config_id": CANAL_DE_ALERTAS, "config": {
+        "name": "Avisos de la plataforma",
+        "description": f"Alertas de anomalías por {nombre_del_tipo_de_canal(tipo)} (plataforma)",
+        "config_type": tipo, "is_enabled": True, tipo: destino}}
+
+
+def accion_de_aviso(slug: str, canal_id: str) -> dict[str, Any]:
+    """La acción del monitor que avisa por el canal (una vez por hora como
+    mucho: el análisis histórico encuentra muchas de golpe)."""
+    return {
+        "name": f"Avisar · {slug}",
+        "destination_id": canal_id,
+        "subject_template": {"source": f"Anomalías en {slug}", "lang": "mustache"},
+        "message_template": {"lang": "mustache", "source": (
+            f"Anomalías de grado alto en {slug}: {{{{ctx.results.0.hits.total.value}}}} resultado(s) "
+            "con grado >= 0,7. Miralas en OpenSearch Dashboards → Anomaly Detection.")},
+        "throttle_enabled": True,
+        "throttle": {"value": 60, "unit": "MINUTES"},
+    }
+
+
+def build_monitor_de_anomalias(slug: str, detector_id: str, umbral: float = 0.7,
+                               canal_id: str = "") -> dict[str, Any]:
     """Un monitor de Alerting sobre los resultados del detector: alerta si hay
     anomalías de grado >= `umbral`. Sin ventana de tiempo: en las demos los
-    resultados son del análisis histórico, y así la alerta aparece."""
+    resultados son del análisis histórico, y así la alerta aparece. Con
+    `canal_id`, además avisa por ese canal de Notifications."""
     condicion = (
         "return ctx.results != null && ctx.results.length > 0 "
         "&& ctx.results[0].hits.total.value > 0"
@@ -653,7 +690,7 @@ def build_monitor_de_anomalias(slug: str, detector_id: str, umbral: float = 0.7)
             "name": f"Anomalias en {slug}",
             "severity": "2",
             "condition": {"script": {"source": condicion, "lang": "painless"}},
-            "actions": [],
+            "actions": [accion_de_aviso(slug, canal_id)] if canal_id else [],
         }}],
     }
 

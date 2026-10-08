@@ -142,13 +142,17 @@ def _anomalias(spec: dict, ids: dict, estado: dict, fields: list[dict], base: st
                     numero="anomalias")
 
 
-def _alertas(ids: dict, estado: dict, base: str) -> dict:
+def _alertas(ids: dict, estado: dict, base: str, canal: "dict | None" = None) -> dict:
+    import capabilities as caps
+
     mid = ids.get("monitor_id")
     if not mid:
         return _tarjeta("alertas", "Alerting", "Avisa cuando aparece una anomalía de grado alto.", FALLA,
                         estado.get("motivo") or "no se creó el monitor")
+    por = f" por {caps.nombre_del_tipo_de_canal(canal['tipo'])}" if (canal or {}).get("ok") and canal.get("tipo") else ""
+    sin = "" if por else " Sin un canal configurado (⚙ Configuración), la alerta queda en Alerting y no le llega a nadie."
     return _tarjeta("alertas", "Alerting",
-                    "Avisa cuando el detector encuentra una anomalía de grado alto (≥ 0,7).", OK,
+                    f"Avisa{por} cuando el detector encuentra una anomalía de grado alto (≥ 0,7).{sin}", OK,
                     links=[{"texto": "Ver el monitor", "url": link(base, APP_ALERTING, f"/monitors/{mid}?type=monitor")}])
 
 
@@ -244,7 +248,7 @@ def _dashboard(entry: dict, base: str) -> dict:
 def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: "dict | None",
                       enmascarados: list[str], seguridad_reg: dict, seguridad_spec: dict,
                       estados: dict, analista_creado: bool, base: str,
-                      fields: "list[dict] | None" = None) -> list[dict]:
+                      fields: "list[dict] | None" = None, canal: "dict | None" = None) -> list[dict]:
     """Las tarjetas de un caso, en el orden en que conviene mostrarlas en una
     demo. Lo que se apagó en el paso 2 aparece como excluido (no como falla).
     Antes de la primera provisión (sin IDs ni estados) no hay nada que mostrar
@@ -264,7 +268,7 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
         fuera.append(_seguridad(seguridad_reg, seguridad_spec, base))
     for plugin, armar in (("forecasting", lambda: _forecasting(spec, ids, estados.get("forecasting") or {}, fields, base)),
                           ("anomalias", lambda: _anomalias(spec, ids, estados.get("anomalias") or {}, fields, base)),
-                          ("alertas", lambda: _alertas(ids, estados.get("alertas") or {}, base))):
+                          ("alertas", lambda: _alertas(ids, estados.get("alertas") or {}, base, canal))):
         titulo = {"forecasting": "Forecasting", "anomalias": "Anomaly Detection", "alertas": "Alerting"}[plugin]
         if plugin in excluidos or (plugin == "alertas" and "anomalias" in excluidos):
             fuera.append(_tarjeta(plugin, titulo, "", EXCLUIDO, "excluido en el paso 2"))
@@ -289,9 +293,21 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
     return fuera
 
 
-def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str) -> list[dict]:
+def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dict | None" = None) -> list[dict]:
     """Lo que es de todo el cluster, no de un caso."""
+    import capabilities as caps
+
     fuera = []
+    if canal:
+        ok = bool(canal.get("ok"))
+        nombre = caps.nombre_del_tipo_de_canal(canal.get("tipo", ""))
+        fuera.append(_tarjeta("canal", f"Avisos por {nombre} (Notifications)",
+                              f"Las alertas de anomalías avisan por {nombre}"
+                              + (f" ({canal['host']})" if canal.get("host") else "") + ".",
+                              OK if ok else FALLA, canal.get("motivo", "") if not ok else "",
+                              filas=[{"texto": "Mensaje de prueba", "estado": OK if ok else FALLA,
+                                      "detalle": "llegó" if ok else "no llegó", "numero": "", "url": ""}],
+                              links=[{"texto": "Ver los canales", "url": link(base, "notifications-dashboards", "/channels")}]))
     if agente:
         fuera.append(_tarjeta("agente", "Asistente (ml-commons)",
                               "Un agente conversacional con una herramienta de consulta (PPL) por caso. En el CSS "

@@ -3213,6 +3213,32 @@
               </div>
             </div>
 
+            <!-- Card 3: adónde avisan las alertas (Notifications). Se aplica al
+                 provisionar los plugins; la URL lleva el token: no vuelve al navegador. -->
+            <div class="settings-card">
+              <div class="settings-card__head">
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-alert-triangle"/></svg></span>
+                <div>
+                  <div class="settings-card__title">Avisos de alertas</div>
+                  <div class="settings-card__hint">Adónde avisan las alertas de anomalías. Se aplica en "Provisionar plugins", que manda un mensaje de prueba. El cluster tiene que poder salir a ese host: la plataforma le agrega la ruta.</div>
+                </div>
+              </div>
+              <div class="settings-fields" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,3fr); gap:14px;">
+                <div class="form-group settings-field"><label class="form-label" for="settings-canal-tipo">Canal</label>
+                  <select class="form-input" id="settings-canal-tipo">
+                    <option value="slack">Slack</option>
+                    <option value="microsoft_teams">Microsoft Teams</option>
+                    <option value="webhook">Webhook</option>
+                  </select></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-canal-url">URL del webhook</label>
+                  <input type="password" class="form-input" id="settings-canal-url" autocomplete="off" placeholder="https://hooks.slack.com/services/…"></div>
+              </div>
+              <div class="settings-actions">
+                <button class="btn btn-primary" id="settings-canal-save">Guardar</button>
+                <span id="settings-canal-status" class="settings-status"></span>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -9904,6 +9930,32 @@
       }
     }
 
+    // Avisos de alertas: la URL no vuelve (lleva el token); se muestra el host.
+    async function cargarCanalDeAlertas() {
+      const estado = document.getElementById('settings-canal-status');
+      try {
+        const c = await (await fetch('/api/v1/settings/alertas')).json();
+        if (c.tipo) document.getElementById('settings-canal-tipo').value = c.tipo;
+        if (estado) estado.textContent = c.configurado ? `Configurado: ${c.host}` : 'Sin canal: las alertas quedan en Alerting.';
+      } catch (_err) { /* sin datos, la tarjeta queda vacía */ }
+    }
+    document.getElementById('settings-canal-save')?.addEventListener('click', async () => {
+      const estado = document.getElementById('settings-canal-status');
+      const url = document.getElementById('settings-canal-url').value.trim();
+      try {
+        const res = await fetch('/api/v1/settings/alertas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tipo: document.getElementById('settings-canal-tipo').value, url }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        document.getElementById('settings-canal-url').value = '';
+        estado.textContent = d.configurado ? `Guardado: ${d.host}. Se aplica en "Provisionar plugins".` : 'Canal borrado.';
+      } catch (err) {
+        estado.textContent = `Error: ${err.message}`;
+      }
+    });
+    cargarCanalDeAlertas();
     document.getElementById('settings-hw-save')?.addEventListener('click', async () => {
       const st = document.getElementById('settings-hw-status');
       // Todos los campos de infra son obligatorios para desplegar.

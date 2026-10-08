@@ -115,8 +115,14 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
                     _req("POST", "_plugins/_anomaly_detection/detectors/<DETECTOR_ID>/_start")]
         if aplica.get("alertas"):
             seccion("Alerta de anomalías (Alerting)", plan["alertas"]["motivo"])
+            bloques.append(_comentario("Para que la alerta le llegue a alguien, el canal (Slack; para Teams o un\n"
+                                       "webhook cambiá `config_type` y su clave). El cluster tiene que poder salir\n"
+                                       "a ese host: en CSS, una Cluster Route a su IP."))
+            bloques.append(_req("POST", "_plugins/_notifications/configs",
+                                caps.build_canal_de_alertas("slack", "<URL_DEL_WEBHOOK>")))
+            bloques.append(_req("POST", f"_plugins/_notifications/feature/test/{caps.CANAL_DE_ALERTAS}"))
             bloques.append(_req("POST", "_plugins/_alerting/monitors",
-                                caps.build_monitor_de_anomalias(slug, "<DETECTOR_ID>")))
+                                caps.build_monitor_de_anomalias(slug, "<DETECTOR_ID>", canal_id=caps.CANAL_DE_ALERTAS)))
 
     if aplica.get("perfil"):
         seccion("Perfil por entidad (Transform)", plan["perfil"]["motivo"])

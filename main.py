@@ -2016,6 +2016,36 @@ def set_huawei_settings_endpoint(request: dict) -> dict:
     return get_huawei_settings_endpoint()
 
 
+class CanalDeAlertasRequest(BaseModel):
+    tipo: str = Field(default="slack", max_length=40)
+    url: str = Field(default="", max_length=2000)
+
+
+@app.get("/api/v1/settings/alertas", tags=["settings"],
+         summary="Adónde avisan las alertas (Slack, Teams o webhook)")
+def get_canal_de_alertas_endpoint() -> dict:
+    """Sin la URL (lleva el token del webhook): solo el tipo y el host."""
+    import maas_integrator as _mi
+    from urllib.parse import urlparse
+
+    c = _mi.get_canal_de_alertas()
+    return {"configurado": bool(c), "tipo": c.get("tipo", ""), "host": urlparse(c.get("url", "")).hostname or ""}
+
+
+@app.post("/api/v1/settings/alertas", tags=["settings"],
+          summary="Configura adónde avisan las alertas (URL vacía: lo borra)")
+def set_canal_de_alertas_endpoint(request: CanalDeAlertasRequest) -> dict:
+    import maas_integrator as _mi
+
+    try:
+        _mi.set_canal_de_alertas(request.tipo, request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "settings", "message": str(exc)}) from exc
+    audit.record("settings_alertas", "Canal de alertas actualizado" if request.url else "Canal de alertas borrado")
+    return get_canal_de_alertas_endpoint()
+
+
 @app.get(
     "/api/v1/settings/obs",
     tags=["settings"],
@@ -6944,14 +6974,21 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     elif feats and not feats.get("alerting"):
         result["alertas"] = {"ok": False, "reason": "Alerting no está en este cluster"}
     elif ids.get("monitor_id"):
-        result["alertas"] = {"ok": True, "monitor_id": ids["monitor_id"], "reason": "ya provisionado"}
+        canal = _canal_listo(terraform_dir)
+        if canal and _asegurar_aviso(base, user, password, slug, ids["monitor_id"], ids["detector_id"], canal):
+            result["alertas"] = {"ok": True, "monitor_id": ids["monitor_id"],
+                                 "note": "alerta cuando hay anomalías de grado alto (≥ 0,7) y avisa por el canal"}
+        else:
+            result["alertas"] = {"ok": True, "monitor_id": ids["monitor_id"], "reason": "ya provisionado"}
     else:
+        canal = _canal_listo(terraform_dir)
         rm = _os_req("POST", f"{base}/_plugins/_alerting/monitors", user, password, timeout=30,
-                     json_body=caps.build_monitor_de_anomalias(slug, ids["detector_id"]))
+                     json_body=caps.build_monitor_de_anomalias(slug, ids["detector_id"], canal_id=canal))
         if _resp_id(rm) and _resp_ok(rm):
             ids["monitor_id"] = _resp_id(rm)
             result["alertas"] = {"ok": True, "monitor_id": ids["monitor_id"],
-                                 "note": "alerta cuando hay anomalías de grado alto (≥ 0,7)"}
+                                 "note": "alerta cuando hay anomalías de grado alto (≥ 0,7)"
+                                         + (" y avisa por el canal" if canal else "")}
         else:
             result["alertas"] = {"ok": False, "reason": f"no se pudo crear el monitor: {_resp_motivo(rm)}"}
 
@@ -7103,6 +7140,95 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
 
 
 # ── El paso del tiempo: ciclo de vida (ISM) y rollup ─────────────────────────
+# ── Adónde avisan las alertas ───────────────────────────────────────────────
+def _canal_listo(terraform_dir: Path) -> str:
+    """El id del canal de Notifications si quedó andando, o ""."""
+    import capabilities as caps
+
+    canal = (_read_estados(terraform_dir).get("_cluster") or {}).get("canal") or {}
+    return caps.CANAL_DE_ALERTAS if canal.get("ok") else ""
+
+
+def _provisionar_canal(cluster: dict, user: str, password: str, https_enabled: bool,
+                       terraform_dir: Path, run: dict) -> None:
+    """El canal de Notifications, si hay uno configurado en ⚙: las rutas del
+    cluster hacia el host del webhook (sin ellas el CSS no sale, como con
+    MaaS), el canal, y un mensaje de prueba que dice si de verdad llega."""
+    import socket
+    from urllib.parse import urlparse
+
+    import capabilities as caps
+    import maas_integrator as _mi
+
+    c = _mi.get_canal_de_alertas()
+    if not c:
+        return
+    base = _os_base(cluster, https_enabled)
+    host = urlparse(c["url"]).hostname or ""
+    try:
+        ak, sk = _cluster_hwc_creds(terraform_dir)
+        ips = sorted({socket.gethostbyname(host)}) if host else []
+        if ips and cluster.get("id"):
+            print(f"[css-routes] (canal) {_add_css_cluster_routes(cluster['id'], ak, sk, get_huawei_project_id(), ips)}")
+    except Exception as exc:  # noqa: BLE001 — la prueba dice si llega igual
+        print(f"[css-routes] (canal) {host}: {exc!r}")
+    cuerpo = caps.build_canal_de_alertas(c["tipo"], c["url"])
+    ruta = f"{base}/_plugins/_notifications/configs/{caps.CANAL_DE_ALERTAS}"
+    if _resp_ok(_os_req("GET", ruta, user, password, timeout=20)):
+        r = _os_req("PUT", ruta, user, password, json_body={"config": cuerpo["config"]}, timeout=30)
+    else:
+        r = _os_req("POST", f"{base}/_plugins/_notifications/configs", user, password, json_body=cuerpo, timeout=30)
+    nombre = caps.nombre_del_tipo_de_canal(c["tipo"])
+    if not _resp_ok(r):
+        res = {"ok": False, "reason": f"no se pudo crear el canal: {_resp_motivo(r)}"}
+    else:
+        res = _probar_canal(base, user, password, nombre)
+    runs.step(run, "Canal de alertas", res["ok"], res["reason"][:300])
+    e = plugins_vista.estado_simple(res)
+    _guardar_estados(terraform_dir, "_cluster", {"canal": e and {**e, "tipo": c["tipo"], "host": host}})
+
+
+def _probar_canal(base: str, user: str, password: str, nombre: str) -> dict:
+    """El mensaje de prueba de Notifications: si llega, el canal anda."""
+    import capabilities as caps
+
+    ruta = f"{base}/_plugins/_notifications/feature/test/{caps.CANAL_DE_ALERTAS}"
+    r = _os_req("POST", ruta, user, password, timeout=60)
+    if r is not None and r.status_code == 405:      # versiones que lo exponen por GET
+        r = _os_req("GET", ruta, user, password, timeout=60)
+    try:
+        estados = ((r.json() or {}).get("status_list") or []) if _resp_ok(r) else []
+    except ValueError:
+        estados = []
+    entrega = ((estados[0] if estados else {}) or {}).get("delivery_status") or {}
+    if _resp_ok(r) and str(entrega.get("status_code", "")) == "200":
+        return {"ok": True, "reason": f"se mandó un mensaje de prueba por {nombre}"}
+    motivo = entrega.get("status_text") or _resp_motivo(r)
+    return {"ok": False, "reason": f"el canal se creó pero la prueba no llegó: {str(motivo)[:200]}"}
+
+
+def _asegurar_aviso(base: str, user: str, password: str, slug: str, monitor_id: str, detector_id: str,
+                    canal_id: str) -> bool:
+    """Un monitor de antes (sin canal) pasa a avisar: se reescribe con la
+    acción. True si ya avisaba o se pudo agregar."""
+    import capabilities as caps
+
+    r = _os_req("GET", f"{base}/_plugins/_alerting/monitors/{monitor_id}", user, password, timeout=20)
+    try:
+        cuerpo = r.json() or {} if _resp_ok(r) else {}
+    except ValueError:
+        cuerpo = {}
+    acciones = [a for t in ((cuerpo.get("monitor") or {}).get("triggers") or [])
+                for a in ((t.get("query_level_trigger") or t).get("actions") or [])]
+    if any(a.get("destination_id") == canal_id for a in acciones):
+        return True
+    ru = _os_req("PUT", f"{base}/_plugins/_alerting/monitors/{monitor_id}"
+                        f"?if_seq_no={cuerpo.get('_seq_no', 0)}&if_primary_term={cuerpo.get('_primary_term', 1)}",
+                 user, password, json_body=caps.build_monitor_de_anomalias(slug, detector_id, canal_id=canal_id),
+                 timeout=30)
+    return _resp_ok(ru)
+
+
 def _provisionar_el_paso_del_tiempo(base: str, user: str, password: str, slug: str, index_pattern: str,
                                     entry: dict, force: bool, terraform_dir: Path, run: dict) -> None:
     """La política de ciclo de vida y el rollup de un caso (lo que no esté
@@ -8105,6 +8231,10 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     _asegurar_ppl_v3(cluster, user, password, request.https_enabled, terraform_dir, run,
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
+    try:
+        _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)
+    except Exception as exc:  # noqa: BLE001 — sin canal, las alertas igual quedan en Alerting
+        runs.step(run, "Canal de alertas", False, repr(exc)[:300])
     for slug in slugs:
         has_spec = _caps.get_capability_spec(slug) is not None
         has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
@@ -9258,6 +9388,7 @@ def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: st
             spec = _resolve_capability_spec(slug, terraform_dir=terraform_dir) if (ids or estados.get(slug)) else {}
             tarjetas = plugins_vista.tarjetas_del_caso(
                 slug, entry=entry or {}, ids=ids, spec=spec, perfil=_perfil_de(slug, entry or {}),
+                canal=(estados.get("_cluster") or {}).get("canal") or {},
                 enmascarados=_enmascarados_de(slug, entry or {}), seguridad_reg=seguridad_reg.get(slug) or {},
                 seguridad_spec=seguridad_specs.get(slug) or {}, estados=estados.get(slug) or {},
                 analista_creado=slug in analistas, base=base,
@@ -9267,7 +9398,8 @@ def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: st
         if fuera:
             fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(
                 agente=any((ids or {}).get("agent_id") for ids in caps_reg.values()),
-                text2viz=(estados.get("_cluster") or {}).get("text2viz") or {}, base=base)
+                text2viz=(estados.get("_cluster") or {}).get("text2viz") or {}, base=base,
+                canal=(estados.get("_cluster") or {}).get("canal") or {})
         return fuera
     except Exception as exc:  # noqa: BLE001
         print(f"[plugins] la vista no se pudo armar: {exc!r}")

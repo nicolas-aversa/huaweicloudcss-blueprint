@@ -585,6 +585,33 @@ def set_huawei_settings(values: dict) -> None:
     _write_settings(data)
 
 
+# Adónde avisan las alertas (Notifications de OpenSearch). La URL lleva el
+# token del webhook: es un secreto, va cifrada con el resto del settings file.
+TIPOS_DE_CANAL = ("slack", "microsoft_teams", "webhook")
+
+
+def get_canal_de_alertas() -> dict:
+    """`{tipo, url}` guardados, o vacío."""
+    data = _read_settings().get("canal_alertas") or {}
+    tipo, url = str(data.get("tipo") or ""), str(data.get("url") or "").strip()
+    return {"tipo": tipo, "url": url} if tipo in TIPOS_DE_CANAL and url else {}
+
+
+def set_canal_de_alertas(tipo: str, url: str) -> None:
+    """Guarda el canal (URL vacía: lo borra). Solo https."""
+    data = _read_settings()
+    url = (url or "").strip()
+    if not url:
+        data.pop("canal_alertas", None)
+    else:
+        if tipo not in TIPOS_DE_CANAL:
+            raise ValueError(f"tipo de canal: {', '.join(TIPOS_DE_CANAL)}")
+        if not url.startswith("https://") or " " in url:
+            raise ValueError("la URL del webhook tiene que empezar con https://")
+        data["canal_alertas"] = {"tipo": tipo, "url": url}
+    _write_settings(data)
+
+
 def get_obs_creds() -> dict:
     """OBS AK/SK guardadas por-usuario en el settings file → {'ak','sk'} ('' si falta).
     Son secretos: se guardan CIFRADAS en reposo (Fernet) cuando hay APP_SECRET_KEY."""
