@@ -529,8 +529,9 @@ check('entidades del perfil', numeroDePlugin('perfil', { entidades: 1 }, 's').in
 check('la consulta más lenta', numeroDePlugin('insights', { latencia_ms: 1840 }, '').includes('<strong>1.840 ms</strong>'));
 check('sin número, nada', numeroDePlugin('forecast:F', undefined, 's') === '');
 // Lo comprobado en el cluster.
-check('cada tarjeta, su lugar para la verificación', det.includes('<div class="plug__verif" data-verif="forecasting"></div>')
+check('cada tarjeta, su línea de verificación reservada', det.includes('<div class="plug__verif" data-verif="forecasting"><span class="plug__verif-espera">Comprobando en el cluster…</span></div>')
   && !det.includes('data-verif="perfil"'), det);
+check('todo el cluster no se verifica: sin la línea', !pluginsDetalleHTML([T('query_insights', 'ok')], { verificar: false }).includes('data-verif'));
 check('comprobado', verificacionHTML({ ok: true, detalle: 'monitor prendido' }) === '<svg data-i="check"></svg> Comprobado en el cluster: monitor prendido');
 check('lo que falla', verificacionHTML({ ok: false, detalle: 'el <monitor> está apagado' }).includes('<svg data-i="alert-triangle"></svg> En el cluster: el &lt;monitor&gt; está apagado'));
 check('sin verificar, nada', verificacionHTML(undefined) === '');

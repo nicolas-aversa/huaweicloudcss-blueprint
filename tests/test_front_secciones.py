@@ -127,3 +127,64 @@ def test_el_numero_de_plugins_lleva_a_la_matriz():
     assert "kpi('plugins', 'Plugins', nPlugins," in vista
     assert "const irALaMatriz = () => body.querySelector('#infra-plugins')?.scrollIntoView({ block: 'start', behavior: 'smooth' });" in vista
     assert "if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irALaMatriz(); }" in vista, "con teclado también"
+
+
+_ARNES_REPARTO = r"""
+const fallos = [];
+const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
+globalThis.document = { createElement: () => {
+  const el = { className: '', hijos: [], appendChild(h) { this.hijos.push(h); } };
+  return el; } };
+const tarjeta = (alto, nombre) => ({ offsetHeight: alto, dataset: {}, nombre });
+const grid = (ancho, tarjetas) => ({
+  clientWidth: ancho, dataset: {}, clases: new Set(), props: {}, hijos: tarjetas,
+  classList: { add(c) { grid.ultimo.clases.add(c); } },
+  style: { setProperty(k, v) { grid.ultimo.props[k] = v; } },
+  querySelectorAll(sel) { return sel === '.plug' ? this.hijos.flatMap(h => h.hijos ? h.hijos : [h]) : []; },
+  replaceChildren(...h) { this.hijos = h; },
+});
+""" + "{FUNCION}" + r"""
+const ts = [tarjeta(300, 'a'), tarjeta(100, 'b'), tarjeta(100, 'c'), tarjeta(100, 'd'), tarjeta(100, 'e')];
+const g = grid(920, ts); grid.ultimo = g;
+repartirTarjetas(g);
+const cols = g.hijos.map(c => c.hijos.map(t => t.nombre).join(''));
+check('tres columnas al ancho de 920', g.dataset.cols === '3' && g.props['--cols'] === '3' && g.clases.has('plug-grid--cols'), JSON.stringify(g.dataset));
+check('a la columna más corta, en orden', JSON.stringify(cols) === JSON.stringify(['a', 'bd', 'ce']), JSON.stringify(cols));
+// Que crezcan después no las mueve: con el mismo ancho no se reparte de nuevo.
+ts[1].offsetHeight = 900;
+repartirTarjetas(g);
+check('crecer no las cambia de columna', JSON.stringify(g.hijos.map(c => c.hijos.map(t => t.nombre).join(''))) === JSON.stringify(cols));
+check('el orden original queda guardado', ts.map(t => t.dataset.orden).join('') === '01234');
+const uno = grid(300, [tarjeta(50, 'x')]); grid.ultimo = uno;
+repartirTarjetas(uno);
+check('angosto: una columna', uno.dataset.cols === '1');
+repartirTarjetas(null);
+console.log(fallos.join('\n'));
+process.exit(fallos.length ? 1 : 0);
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
+def test_las_tarjetas_se_reparten_una_vez_y_no_saltan(tmp_path):
+    """En columnas CSS el navegador las rebalanceaba al llegar los números y la
+    verificación: "se mueven los cuadrantes de lugar"."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("    const _ANCHO_TARJETA = 290")
+    fn = html[i:html.index("    let _repartoPendiente = null;", i)]
+    js = tmp_path / "reparto.mjs"
+    js.write_text(_ARNES_REPARTO.replace("{FUNCION}", fn), encoding="utf-8")
+    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "column-width" not in html[html.index("    .plug-grid {"):html.index("    .plug-col {")]
+
+
+def test_el_conteo_y_un_backtest_que_termino_no_repintan_la_vista():
+    """Repintar toda la vista cerraba y reabría el caso abierto: sus tarjetas
+    se acomodaban de nuevo."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("async function contarDocumentos(")
+    fn = html[i:html.index("function buildDeployBodyFromStatus(", i)]
+    assert "renderInfraView" not in fn and "if (state.envActive) pintarConteoDeDocumentos();" in fn
+    j = html.index("    async function verPlugins(btn, plugin = '') {")
+    ver = html[j:html.index('    // "Explicar" una anomalía', j)]
+    assert "hydrateActiveEnv" not in ver and "actualizarCeldasDelCaso(slug, tarjetas);" in ver

@@ -5894,14 +5894,15 @@ def _add_css_cluster_routes(cluster_id: str, ak: str, sk: str, project_id: str,
 
 
 def _os_req(method: str, url: str, user: str, password: str,
-            json_body: "dict | None" = None, timeout: int = 30) -> "Any":
+            json_body: "dict | None" = None, timeout: int = 30, headers: "dict | None" = None) -> "Any":
     """Request REST al cluster con el idiom de la plataforma (auth admin,
-    verify=False). Devuelve el `requests.Response` o None si hubo excepción."""
+    verify=False). Devuelve el `requests.Response` o None si hubo excepción.
+    `headers`: los que se suman (p. ej. el tenant de Reporting)."""
     import requests
     try:
         return requests.request(
             method, url, auth=(user, password), json=json_body,
-            headers={"Content-Type": "application/json"}, timeout=timeout, verify=False,
+            headers={"Content-Type": "application/json", **(headers or {})}, timeout=timeout, verify=False,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort
         print(f"[capabilities] {method} {url} error: {exc!r}")
@@ -7450,6 +7451,13 @@ def _asegurar_aviso(base: str, user: str, password: str, slug: str, monitor_id: 
     return _resp_ok(ru)
 
 
+# El tenant en el que Reporting guarda (y lista) las definiciones: el Global,
+# el mismo donde la plataforma deja los dashboards (`.kibana`). Creadas sin el
+# header quedaban con tenant "null": existían (la API las devolvía) pero
+# Dashboards → Reporting, que pide en el Global, no mostraba ninguna.
+_TENANT_DE_REPORTING = {"securitytenant": "global"}
+
+
 def _provisionar_reporte(base: str, user: str, password: str, slug: str, dashboard_id: str,
                          origen: str, force: bool) -> dict:
     """Una definición de Reporting sobre el dashboard del caso, a demanda: en
@@ -7457,7 +7465,18 @@ def _provisionar_reporte(base: str, user: str, password: str, slug: str, dashboa
     import plugins_vista as pv
 
     nombre = pv.nombre_del_reporte(slug)
-    r = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20)
+    # Las que quedaron sin tenant (antes de mandar el header) no se ven en
+    # Dashboards: se borran, y se crea la del Global.
+    rv = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20)
+    try:
+        sin_tenant = ((rv.json() or {}).get("reportDefinitionDetailsList") or []) if _resp_ok(rv) else []
+    except ValueError:
+        sin_tenant = []
+    for d in sin_tenant:
+        if (d.get("reportDefinition") or {}).get("name") == nombre and d.get("tenant") in (None, "", "null"):
+            _os_req("DELETE", f"{base}/_plugins/_reports/definition/{d.get('id', '')}", user, password, timeout=20)
+    r = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20,
+                headers=_TENANT_DE_REPORTING)
     if r is not None and r.status_code in (400, 404) and "no handler" in (getattr(r, "text", "") or "").lower():
         return {"ok": False, "reason": "Reporting no está en este cluster"}
     try:
@@ -7468,9 +7487,10 @@ def _provisionar_reporte(base: str, user: str, password: str, slug: str, dashboa
     if ya and not force:
         return {"ok": True, "reason": "ya estaba", "id": ya.get("id", "")}
     if ya:
-        _os_req("DELETE", f"{base}/_plugins/_reports/definition/{ya.get('id', '')}", user, password, timeout=20)
+        _os_req("DELETE", f"{base}/_plugins/_reports/definition/{ya.get('id', '')}", user, password, timeout=20,
+                headers=_TENANT_DE_REPORTING)
     rc = _os_req("POST", f"{base}/_plugins/_reports/definition", user, password, timeout=30,
-                 json_body=pv.definicion_de_reporte(slug, dashboard_id, origen))
+                 json_body=pv.definicion_de_reporte(slug, dashboard_id, origen), headers=_TENANT_DE_REPORTING)
     if not _resp_ok(rc):
         motivo = _resp_motivo(rc)
         return {"ok": False, "reason": "Reporting no está en este cluster" if "no handler" in motivo.lower()
@@ -8054,9 +8074,10 @@ def numeros_de_plugins(slug: str = "") -> dict:
     return fuera
 
 
-def _leer(base: str, user: str, password: str, ruta: str) -> "tuple[dict | None, str]":
+def _leer(base: str, user: str, password: str, ruta: str,
+          headers: "dict | None" = None) -> "tuple[dict | None, str]":
     """(cuerpo, "") si el objeto existe; (None, motivo) si no."""
-    r = _os_req("GET", f"{base}/{ruta}", user, password, timeout=20)
+    r = _os_req("GET", f"{base}/{ruta}", user, password, timeout=20, headers=headers)
     if r is not None and r.status_code == 404:
         return None, "no está en el cluster"
     if not _resp_ok(r):
@@ -8168,7 +8189,8 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
         # El reporte en PDF va en la misma tarjeta.
         reporte_ok = True
         if encontrado and (estados.get("reporte") or {}).get("id"):
-            rep, motivo_rep = _leer(base, user, password, f"_plugins/_reports/definition/{estados['reporte']['id']}")
+            rep, motivo_rep = _leer(base, user, password, f"_plugins/_reports/definition/{estados['reporte']['id']}",
+                                    headers=_TENANT_DE_REPORTING)
             reporte_ok = rep is not None
             detalle += ", con su reporte en Reporting" if reporte_ok else f"; el reporte {motivo_rep}"
         marcar("dashboard", bool(encontrado) and reporte_ok, detalle)

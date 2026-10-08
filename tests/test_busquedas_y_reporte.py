@@ -92,10 +92,18 @@ class _R:
 
 
 def test_el_reporte_se_crea_y_si_ya_estaba_se_deja(monkeypatch):
+    """En el tenant Global, el de los dashboards: creadas sin el header quedaban
+    con tenant "null" y Dashboards → Reporting no mostraba ninguna (visto en
+    CSS 3.4: la API devolvía las 9, la pantalla 0)."""
     pedidos = []
+    nombre = "[pozos] Dashboard en PDF (plataforma)"
 
-    def req(m, url, user, password, json_body=None, timeout=30):
-        pedidos.append((m, url, json_body))
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        pedidos.append((m, url, json_body, headers))
+        if m == "GET" and headers is None:   # sin tenant: las de antes
+            return _R(200, {"reportDefinitionDetailsList": [
+                {"id": "VIEJA", "tenant": "null", "reportDefinition": {"name": nombre}},
+                {"id": "OTRA", "tenant": "null", "reportDefinition": {"name": "[ventas] otra"}}]})
         if m == "GET":
             return _R(200, {"reportDefinitionDetailsList": []})
         return _R(200, {"reportDefinitionId": "R1"})
@@ -103,11 +111,15 @@ def test_el_reporte_se_crea_y_si_ya_estaba_se_deja(monkeypatch):
     monkeypatch.setattr(main, "_os_req", req)
     r = main._provisionar_reporte("http://x", "a", "p", "pozos", "DASH", "https://consola/x", force=False)
     assert r["ok"] and r["id"] == "R1"
-    assert ("POST", "http://x/_plugins/_reports/definition", pv.definicion_de_reporte("pozos", "DASH", "https://consola/x")) in pedidos
-    ya = {"reportDefinitionDetailsList": [{"id": "R0", "reportDefinition": {"name": "[pozos] Dashboard en PDF (plataforma)"}}]}
-    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, **k: _R(200, ya))
-    assert main._provisionar_reporte("http://x", "a", "p", "pozos", "DASH", "", force=False) == \
-        {"ok": True, "reason": "ya estaba", "id": "R0"}
+    global_ = {"securitytenant": "global"}
+    assert ("POST", "http://x/_plugins/_reports/definition",
+            pv.definicion_de_reporte("pozos", "DASH", "https://consola/x"), global_) in pedidos
+    borradas = [u for m, u, _, _ in pedidos if m == "DELETE"]
+    assert borradas == ["http://x/_plugins/_reports/definition/VIEJA"], "solo la suya, sin tenant"
+    # Ya estaba en el Global: se deja.
+    ya = {"reportDefinitionDetailsList": [{"id": "R0", "tenant": "global", "reportDefinition": {"name": nombre}}]}
+    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, headers=None, **k: _R(200, ya if headers else {}))
+    assert main._provisionar_reporte("http://x", "a", "p", "pozos", "DASH", "", force=False) ==         {"ok": True, "reason": "ya estaba", "id": "R0"}
 
 
 def test_sin_el_plugin_se_dice(monkeypatch):

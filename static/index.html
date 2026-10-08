@@ -2380,9 +2380,12 @@
     /* En columnas (mampostería) y no en grilla: en una grilla cada fila toma la
        altura de la tarjeta más alta (Forecasting, con sus pronósticos) y las
        demás quedaban con un hueco grande abajo. */
-    .plug-grid { column-width: 290px; column-gap: var(--sp-3); }
+    /* Al pintarse, una lista al ancho de una columna (para medir); después,
+       repartidas en columnas fijas (repartirTarjetas). */
+    .plug-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr)); gap: var(--sp-3); align-items: start; }
+    .plug-grid--cols { grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); }
+    .plug-col { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
     .plug { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3);
-            break-inside: avoid; margin-bottom: var(--sp-3);
             border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-primary); }
     .plug--excluido { opacity: .6; }
     .plug__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-md); }
@@ -2407,6 +2410,7 @@
     /* Comprobado en el cluster: lo que la provisión dijo, mirado de verdad. */
     .plug__verif { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); color: var(--text-muted); }
     .plug__verif:empty { display: none; }
+    .plug__verif-espera { color: var(--text-muted); }
     .plug__verif .icon { width: 13px; height: 13px; flex: none; }
     .plug__verif--ok .icon { color: var(--accent-green); }
     .plug__verif--mal { color: var(--accent-hover); }
@@ -6800,7 +6804,10 @@
           </table></div>${sinPlugins}
         </div>`;
     }
-    function pluginsDetalleHTML(tarjetas) {
+    // `verificar`: cada tarjeta reserva desde el principio la línea de
+    // "Comprobado en el cluster" (llega después, con los números): aparecer
+    // de golpe agrandaba la tarjeta y corría a las de abajo.
+    function pluginsDetalleHTML(tarjetas, { verificar = true } = {}) {
       if (!(tarjetas || []).length) return '<div class="hallazgos__vacio">Este caso no tiene plugins provisionados.</div>';
       const ir = (url) => url
         ? `<a class="plug__ir" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Ver en Dashboards" aria-label="Ver en Dashboards">${icon('arrow-right')}</a>` : '';
@@ -6823,7 +6830,8 @@
           + (t.motivo ? `<p class="plug__motivo">${corto(t.motivo, 240)}</p>` : '')
           + (filas ? `<ul class="plug__filas">${filas}</ul>` : '')
           + (t.numero ? `<div class="plug__numero" data-numero="${escapeHtml(t.numero)}"></div>` : '')
-          + (t.estado !== 'excluido' ? `<div class="plug__verif" data-verif="${escapeHtml(t.plugin)}"></div>` : '')
+          + (verificar && t.estado !== 'excluido'
+            ? `<div class="plug__verif" data-verif="${escapeHtml(t.plugin)}"><span class="plug__verif-espera">Comprobando en el cluster…</span></div>` : '')
           + (links || t.accion ? `<div class="plug__links">${links}${t.accion
             ? `<button type="button" class="btn btn-secondary btn-sm plug__accion" data-accion="${escapeHtml(t.accion.id)}">${icon('play')} ${escapeHtml(t.accion.texto)}</button>` : ''}</div>` : '')
           + `</article>`;
@@ -6914,6 +6922,66 @@
         btn.innerHTML = original;
       }
     }
+    // Las tarjetas de un caso, en columnas FIJAS: se reparten una vez, por la
+    // altura que tienen al pintarse, y después cada una crece en su columna.
+    // En columnas CSS (mampostería) el navegador las rebalanceaba cuando
+    // llegaban los números y la verificación, y saltaban de una columna a
+    // otra. Al cambiar el ancho de la ventana se reparten de nuevo, en el
+    // orden original.
+    const _ANCHO_TARJETA = 290, _ESPACIO_TARJETAS = 12;
+    function repartirTarjetas(grid) {
+      if (!grid || !grid.querySelectorAll) return;
+      const n = Math.max(1, Math.floor(((grid.clientWidth || 0) + _ESPACIO_TARJETAS) / (_ANCHO_TARJETA + _ESPACIO_TARJETAS)) || 1);
+      if (Number(grid.dataset.cols) === n) return;
+      const tarjetas = [...grid.querySelectorAll('.plug')];
+      if (!tarjetas.length) return;
+      tarjetas.forEach((t, i) => { if (t.dataset.orden === undefined) t.dataset.orden = String(i); });
+      tarjetas.sort((a, b) => Number(a.dataset.orden) - Number(b.dataset.orden));
+      const cols = Array.from({ length: n }, () => {
+        const el = document.createElement('div');
+        el.className = 'plug-col';
+        return { el, alto: 0 };
+      });
+      for (const t of tarjetas) {
+        const c = cols.reduce((a, b) => (b.alto < a.alto ? b : a));
+        c.el.appendChild(t);
+        c.alto += (t.offsetHeight || 0) + _ESPACIO_TARJETAS;
+      }
+      grid.replaceChildren(...cols.map(c => c.el));
+      grid.classList.add('plug-grid--cols');
+      grid.style.setProperty('--cols', String(n));
+      grid.dataset.cols = String(n);
+    }
+    let _repartoPendiente = null;
+    if (typeof window !== 'undefined') window.addEventListener('resize', () => {
+      clearTimeout(_repartoPendiente);
+      _repartoPendiente = setTimeout(() => document.querySelectorAll('.plug-grid--cols').forEach(g => {
+        const n = Math.max(1, Math.floor((g.clientWidth + _ESPACIO_TARJETAS) / (_ANCHO_TARJETA + _ESPACIO_TARJETAS)) || 1);
+        if (Number(g.dataset.cols) === n) return;
+        // De vuelta a una sola lista (para medir al ancho nuevo) y a repartir.
+        const tarjetas = [...g.querySelectorAll('.plug')].sort((a, b) => Number(a.dataset.orden) - Number(b.dataset.orden));
+        g.classList.remove('plug-grid--cols');
+        g.replaceChildren(...tarjetas);
+        delete g.dataset.cols;
+        repartirTarjetas(g);
+      }), 200);
+    });
+    // Una celda de la matriz, con el estado nuevo de su tarjeta.
+    function actualizarCeldasDelCaso(slug, tarjetas) {
+      for (const t of (Array.isArray(tarjetas) ? tarjetas : [])) {
+        const [texto] = _ESTADO_PLUGIN[t.estado] || [t.estado];
+        document.querySelectorAll('.mtx__estado, .mtx__global').forEach(b => {
+          if (b.dataset.slug !== slug || b.dataset.plugin !== t.plugin) return;
+          const global = b.classList.contains('mtx__global');
+          b.className = `${global ? 'mtx__global' : 'mtx__estado'} mtx__estado--${t.estado}`;
+          const ayuda = `${t.titulo}: ${texto}${!global && t.motivo ? ` (${t.motivo})` : ''}`;
+          b.title = ayuda;
+          if (!global) b.setAttribute('aria-label', ayuda);
+          b.innerHTML = icon(_ICONO_ESTADO[t.estado] || 'info') + (global ? `<span>${escapeHtml(t.titulo)}</span>` : '');
+        });
+      }
+    }
+
     // Abre (o cierra) el detalle de un caso en la matriz. Uno abierto a la vez;
     // con `plugin` (la celda tocada) abre y lleva a esa tarjeta.
     async function verPlugins(btn, plugin = '') {
@@ -6940,7 +7008,8 @@
       };
       if (destino.dataset.lleno) { irALaTarjeta(); return; }
       destino.dataset.lleno = '1';
-      destino.innerHTML = pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug]);
+      destino.innerHTML = pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug], { verificar: slug !== '_cluster' });
+      repartirTarjetas(destino.querySelector('.plug-grid'));
       irALaTarjeta();
       if (!destino.querySelector('[data-numero], [data-verif]')) return;
       destino.querySelectorAll('[data-numero]').forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
@@ -6950,8 +7019,23 @@
         if (res.ok) numeros = await res.json();
       } catch (_err) { /* sin números: las tarjetas igual sirven */ }
       aplicarNumerosDePlugins(destino, numeros, slug);
-      // Un backtest que estaba "en curso" terminó: el estado se guardó, se repinta.
-      if (numeros.actualizado && typeof hydrateActiveEnv === 'function') hydrateActiveEnv();
+      // Un backtest que estaba "en curso" terminó y el estado se guardó: se
+      // pintan su tarjeta y su celda, en su lugar. Repintar toda la vista
+      // cerraba y reabría el caso, y las tarjetas se acomodaban de nuevo.
+      if (numeros.actualizado) {
+        try {
+          const r = await fetch('/api/v1/terraform/status');
+          if (!r.ok) return;
+          const data = await r.json();
+          state.lastStatus = data;
+          const tarjetas = (data.plugins || {})[slug];
+          actualizarCeldasDelCaso(slug, tarjetas);
+          if (state.pluginsCaso !== slug) return;
+          destino.innerHTML = pluginsDetalleHTML(tarjetas, { verificar: slug !== '_cluster' });
+          repartirTarjetas(destino.querySelector('.plug-grid'));
+          aplicarNumerosDePlugins(destino, numeros, slug);
+        } catch (_err) { /* queda lo que había: igual sirve */ }
+      }
     }
     // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
     function explicarAnomalia(b) {
@@ -7642,6 +7726,7 @@
       if (state.contandoDocs) return;
       if (!forzar && state.pipelineHealthAt && Date.now() - state.pipelineHealthAt < _DOCS_VIGENTE_MS) return;
       state.contandoDocs = true;
+      pintarConteoDeDocumentos();
       try {
         const res = await fetch('/api/v1/pipelines/health');
         const data = await res.json();
@@ -7654,7 +7739,7 @@
         state.contandoDocs = false;
         state.pipelineHealthAt = Date.now();
       }
-      if (state.envActive && state.lastStatus) renderInfraView(state.lastStatus);
+      if (state.envActive) pintarConteoDeDocumentos();
     }
 
     function buildDeployBodyFromStatus(data) {
@@ -8225,6 +8310,54 @@
     // del payload de /terraform/status. Reusa formatAge/ticker para el
     // contador en vivo y destroyEnvironment para las
     // acciones (mismas funciones que usaba el wizard del step 5).
+    // Los documentos de cada caso y su total. Afuera de renderInfraView: el
+    // conteo llega después y se pinta en su lugar (repintar la vista cerraba
+    // y reabría el caso abierto, y sus tarjetas se acomodaban de nuevo).
+    function chipDocsHTML(p, salud) {
+      const h = (salud || {})[p.slug];
+      if (!h || h.docs === null || h.docs === undefined) return '';
+      if (h.docs > 0) {
+        return `<span class="pipe-row__prefix" title="documentos en ${escapeHtml(h.index || '')}">${icon('database')} ${h.docs.toLocaleString('es')} docs</span>`;
+      }
+      // En pausa, sin documentos es lo esperable: gris, no rojo de error.
+      return p.active
+        ? `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="Ingestando pero todavía sin documentos en ${escapeHtml(h.index || '')}. Logstash lee el bucket cada 60 s: si en unos minutos sigue igual, revisá que el prefijo tenga objetos.">${icon('database')} sin documentos</span>`
+        : `<span class="pipe-row__prefix" title="La ingesta de esta pipeline todavía no arrancó: «Iniciar ingesta con Logstash» en Puesta en marcha.">${icon('database')} sin documentos (en pausa)</span>`;
+    }
+    function resumenDeDocumentos(pipelines) {
+      const salud = state.pipelineHealth || {};
+      const conDocs = pipelines.filter(p => salud[p.slug] && salud[p.slug].docs !== null && salud[p.slug].docs !== undefined);
+      const total = conDocs.reduce((t, p) => t + (salud[p.slug].docs || 0), 0);
+      // Contar recién tiene sentido con algo ingestando: con todo en pausa,
+      // "sin documentos" de pipelines que ni habían arrancado confundía.
+      const arrancada = pipelines.some(p => p.active);
+      return {
+        arrancada,
+        valor: conDocs.length ? total.toLocaleString('es-AR') : '—',
+        sub: !arrancada ? 'la ingesta todavía no arrancó'
+          : state.pipelineHealthError ? state.pipelineHealthError
+          : conDocs.length ? `en ${conDocs.length} índice${conDocs.length === 1 ? '' : 's'}` : 'contando…',
+      };
+    }
+    function pintarConteoDeDocumentos() {
+      const pipelines = ((state.lastStatus || {}).pipelines) || [];
+      const r = resumenDeDocumentos(pipelines);
+      const boton = document.getElementById('infra-docs-refresh');
+      const kpi = boton && boton.closest('.env-kpi');
+      if (kpi) {
+        kpi.querySelector('.env-kpi__valor').textContent = r.valor;
+        kpi.querySelector('.env-kpi__sub').textContent = r.sub;
+      }
+      if (boton) {
+        boton.disabled = !!state.contandoDocs;
+        boton.classList.toggle('is-girando', !!state.contandoDocs);
+      }
+      const salud = state.pipelineHealth || {};
+      document.querySelectorAll('[data-docs]').forEach(el => {
+        const p = pipelines.find(x => x.slug === el.dataset.docs);
+        if (p) el.innerHTML = chipDocsHTML(p, salud);
+      });
+    }
     function renderInfraView(data) {
       const body = document.getElementById('infra-body');
       if (!body) return;
@@ -8329,19 +8462,9 @@
       // Documentos por pipeline: lo único que prueba que la ingesta funciona.
       // Terraform "success" solo dice que la configuración se creó; una pipeline
       // puede arrancar y quedarse poleando un prefijo vacío sin un solo error.
-      // Se piden a demanda (botón Verificar), no en cada refresco del estado.
+      // Se cuentan solos (contarDocumentos), no en cada refresco del estado.
       const salud = state.pipelineHealth || {};
-      const chipDocs = (p) => {
-        const h = salud[p.slug];
-        if (!h || h.docs === null || h.docs === undefined) return '';
-        if (h.docs > 0) {
-          return `<span class="pipe-row__prefix" title="documentos en ${escapeHtml(h.index || '')}">${icon('database')} ${h.docs.toLocaleString('es')} docs</span>`;
-        }
-        // En pausa, sin documentos es lo esperable: gris, no rojo de error.
-        return p.active
-          ? `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="Ingestando pero todavía sin documentos en ${escapeHtml(h.index || '')}. Logstash lee el bucket cada 60 s: si en unos minutos sigue igual, revisá que el prefijo tenga objetos.">${icon('database')} sin documentos</span>`
-          : `<span class="pipe-row__prefix" title="La ingesta de esta pipeline todavía no arrancó: «Iniciar ingesta con Logstash» en Puesta en marcha.">${icon('database')} sin documentos (en pausa)</span>`;
-      };
+      const chipDocs = (p) => chipDocsHTML(p, salud);
       // CSS valida el .conf al crear la configuración y la deja `available` o
       // `unavailable`. Una que no compila no ingiere NADA, y hasta ahora se veía
       // igual que una en pausa: es lo primero que hay que poder distinguir.
@@ -8362,13 +8485,12 @@
           slug: p.slug, nombre: nombreCaso(p.slug), indice: p.index || p.slug || '—', prefijo: p.obs_prefix || '',
           punto: `<span class="pipe-row__dot ${ingestando ? 'is-active' : ''}" title="${ingestando ? 'Ingestando' : 'Sin ingestar'}"></span>`,
           aviso: ingestando ? '' : estadoCaso(p),
-          docs: chipDocs(p),
+          docs: `<span data-docs="${escapeHtml(p.slug)}">${chipDocs(p)}</span>`,
         };
       });
 
       // Los números del entorno, arriba de todo; el de Plugins lleva a la matriz.
-      const conDocs = pipelines.filter(p => salud[p.slug] && salud[p.slug].docs !== null && salud[p.slug].docs !== undefined);
-      const docsTotal = conDocs.reduce((t, p) => t + (salud[p.slug].docs || 0), 0);
+      const docs = resumenDeDocumentos(pipelines);
       const ingestando = pipelines.filter(p => p.active && !rota(p)).length;
       const nPlugins = Object.values(data.plugins || {}).reduce((t, ts) => t + _nPlugins(ts), 0);
       // Los que no quedaron bien (parcial o falló): lo primero que hay que mirar.
@@ -8380,20 +8502,15 @@
           <span class="env-kpi__valor">${valor}</span>
           <span class="env-kpi__sub">${sub}</span>${extra}
         </div>`;
-      // Contar recién tiene sentido con algo ingestando: con todo en pausa,
-      // "sin documentos" de pipelines que ni habían arrancado confundía.
-      const ingestaArrancada = pipelines.some(p => p.active);
+      const ingestaArrancada = docs.arrancada;
       const actualizarDocs = ingestaArrancada
         ? `<button type="button" class="btn btn-ghost btn-sm env-kpi__accion env-kpi__refrescar${state.contandoDocs ? ' is-girando' : ''}" `
           + `id="infra-docs-refresh" title="Contar de nuevo" aria-label="Contar los documentos de nuevo"${state.contandoDocs ? ' disabled' : ''}>${icon('refresh')}</button>`
         : '';
-      const subDocs = !ingestaArrancada ? 'la ingesta todavía no arrancó'
-        : state.pipelineHealthError ? state.pipelineHealthError
-        : conDocs.length ? `en ${conDocs.length} índice${conDocs.length === 1 ? '' : 's'}` : 'contando…';
       const kpis = `
         <div class="env-kpis">
           ${kpi('', 'Casos', pipelines.length, `${ingestando} ingestando${pipelines.length - ingestando ? ` · ${pipelines.length - ingestando} sin ingestar` : ''}`)}
-          ${kpi('', 'Documentos', conDocs.length ? docsTotal.toLocaleString('es-AR') : '—', subDocs, actualizarDocs)}
+          ${kpi('', 'Documentos', docs.valor, docs.sub, actualizarDocs)}
           ${nPlugins ? kpi('plugins', 'Plugins', nPlugins, nConProblemas
             ? `${nConProblemas} con problemas: mirá su motivo` : 'todos listos · cada uno con su link a Dashboards') : ''}
         </div>`;

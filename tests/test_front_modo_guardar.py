@@ -158,8 +158,8 @@ def test_sin_documentos_distingue_en_pausa_de_sin_datos():
     filtro" mandaba a buscar el problema donde no estaba: no habían arrancado.
     Lo que decía el aviso de "Verificar ingesta" está en el title del chip."""
     html = _INDEX.read_text(encoding="utf-8")
-    j = html.index("const chipDocs = (p) => {")
-    chip = html[j:html.index("};", j)]
+    j = html.index("function chipDocsHTML(p, salud) {")
+    chip = html[j:html.index("function resumenDeDocumentos(", j)]
     assert "sin documentos (en pausa)" in chip, "en pausa, sin documentos no es un error"
     assert "«Iniciar ingesta con Logstash» en Puesta en marcha" in chip
     assert "Logstash lee el bucket cada 60 s" in chip
@@ -170,11 +170,14 @@ def test_los_documentos_se_cuentan_recien_con_algo_ingestando():
     """Con todo en pausa, contar decía "sin documentos" de pipelines que ni
     habían arrancado."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("const ingestaArrancada = ")
+    j = html.index("function resumenDeDocumentos(")
+    resumen = html[j:html.index("function pintarConteoDeDocumentos(", j)]
+    assert "const arrancada = pipelines.some(p => p.active);" in resumen
+    assert "'la ingesta todavía no arrancó'" in resumen
+    i = html.index("const ingestaArrancada = docs.arrancada;")
     bloque = html[i:html.index("const kpis = ", i)]
-    assert bloque.index("pipelines.some(p => p.active)") < bloque.index('id="infra-docs-refresh"')
-    assert "'la ingesta todavía no arrancó'" in bloque
-    assert "${kpi('', 'Documentos', conDocs.length ? docsTotal.toLocaleString('es-AR') : '—', subDocs, actualizarDocs)}" in html
+    assert 'id="infra-docs-refresh"' in bloque
+    assert "${kpi('', 'Documentos', docs.valor, docs.sub, actualizarDocs)}" in html
 
 
 def test_la_puesta_en_marcha_va_antes_que_las_pipelines():
