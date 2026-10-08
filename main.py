@@ -2786,6 +2786,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
     (terraform_dir / "pipeline.conf").write_text(request.pipeline_conf, encoding="utf-8")
 
     registry = {} if _fresh_deploy_effective(request, terraform_dir) else _read_pipelines_registry(terraform_dir)
+    previo = dict(registry)
     if request.cases:
         for case in request.cases:
             propuesta, excluir = _propuesta_de_seguridad(case)
@@ -2815,6 +2816,16 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
             "retencion_dias": request.retencion_dias or 0,
             "label": _registry_label(slug),
         }
+    # Lo que dejó el paso 1 (dashboards importados, su id y las búsquedas) no
+    # se pierde al reescribir el caso para iniciar la ingesta: sin esto la
+    # puesta en marcha volvía a pedir el paso 1 y la vista Plugins perdía la
+    # tarjeta del dashboard. Solo si el índice es el mismo.
+    for slug_, entrada in registry.items():
+        previa = previo.get(slug_) or {}
+        if previa and previa.get("index") == entrada.get("index"):
+            for clave in _CLAVES_DEL_PASO_1:
+                if clave in previa and clave not in entrada:
+                    entrada[clave] = previa[clave]
     _correlaciones_de_familias(registry)
     _write_pipelines_registry(terraform_dir, registry)
 
@@ -2832,7 +2843,8 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
         "https_enabled": request.https_enabled,
     }
     # Capacidad según el TOTAL de pipelines activas (flavor + workers + discos).
-    _cap = _capacity_for(len(pipelines_var), pesado=_entorno_pesado(pipelines_var))
+    _cap = _capacity_for(len(pipelines_var), pesado=_entorno_pesado(
+        pipelines_var, {s for s, v in registry.items() if (v or {}).get("seguridad")}))
     # Un cluster que ya existe conserva su tamaño (cambiarlo lo podría reemplazar).
     _existente = _opensearch_del_state(terraform_dir)
     if _existente:
@@ -2873,6 +2885,9 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
     # las variables por stdin.
     _write_destroy_creds(terraform_dir, request)
     return registry
+
+
+_CLAVES_DEL_PASO_1 = ("dashboards_imported", "dashboard_id", "busquedas")
 
 
 def _correlaciones_de_familias(registry: dict) -> None:
@@ -3984,7 +3999,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
                     "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."},
         )
     logstash_flavor, opensearch_flavor = _determine_flavor(
-        num_cases, pesado=_entorno_pesado([c.slug for c in (request.cases or [])]))
+        num_cases, pesado=_entorno_pesado([c.slug for c in (request.cases or [])], _con_seguridad(request)))
     slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
     registry = _read_pipelines_registry(terraform_dir)
     if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
@@ -4127,7 +4142,7 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "pipeline_cap", "message": f"Máximo {_MAX_PIPELINES} pipelines por cluster."})
     logstash_flavor, opensearch_flavor = _determine_flavor(
-        num_cases, pesado=_entorno_pesado([c.slug for c in (request.cases or [])]))
+        num_cases, pesado=_entorno_pesado([c.slug for c in (request.cases or [])], _con_seguridad(request)))
     slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
     registry = _read_pipelines_registry(terraform_dir)
     if _MAX_PIPELINES and slug not in registry and len(registry) >= _MAX_PIPELINES:
@@ -4767,9 +4782,23 @@ _FLAVOR_PESADO, _DISCO_PESADO = "ess.spec-8u16g", 80
 _CASOS_PESADO = 5
 
 
-def _entorno_pesado(slugs) -> bool:
+def _con_seguridad(request: "TerraformDeployRequest") -> "set[str]":
+    """Los casos del deploy con reglas de Security Analytics (las del body o las
+    del caso guardado), salvo que se hayan apagado en el paso 2."""
+    return {c.slug for c in (request.cases or [])
+            if (c.seguridad or (custom_cases.get_case(c.slug) or {}).get("seguridad"))
+            and "security_analytics" not in (c.excluir or (custom_cases.get_case(c.slug) or {}).get("excluir") or [])}
+
+
+def _entorno_pesado(slugs, con_seguridad: "set[str] | None" = None) -> bool:
+    """Muchos casos, o alguno con Security Analytics: sus monitores por
+    documento procesan toda la ingesta (visto: FortiAnalyzer con 3 casos más
+    llenó la cola de búsquedas de un nodo de 4 vCPU, y el chat contestaba
+    "all shards failed"). `con_seguridad`: los casos con reglas de un
+    dataset nuevo (los curados ya se saben)."""
     slugs = list(slugs or [])
-    return len(slugs) >= _CASOS_PESADO or "siem" in slugs
+    seguridad = set(verticals.security_specs()) | set(con_seguridad or ())
+    return len(slugs) >= _CASOS_PESADO or any(s in seguridad for s in slugs)
 
 
 def _opensearch_del_state(terraform_dir: Path) -> "tuple[str, int] | None":
@@ -6159,6 +6188,7 @@ def _estado_historico(base: str, user: str, password: str, detector_id: str,
 # cola en 1.000, 260.000 búsquedas rechazadas). Lo que busca en ese momento
 # (backtests de forecast, el alta de un detector de anomalías) se rechaza. El
 # paso 3 espera a que haya lugar y reintenta lo rechazado una vez.
+_ESPERA_REINTENTO_CHAT_S = 20.0   # en el chat se espera poco: hay alguien mirando
 _COLA_LIBRE = 200            # búsquedas en cola por debajo de las que se sigue
 _ESPERA_CLUSTER_S = 15.0     # entre una mirada y otra
 _ESPERA_CLUSTER_MAX_S = 300.0
@@ -9264,26 +9294,43 @@ def _conversar_con_el_agente(base: str, user: str, password: str, agente: str, r
     params = {"question": agente_chat.pregunta_para_el_agente(request.question, fuente, indice, request.contexto)}
     if request.memory_id:
         params["memory_id"] = request.memory_id
-    r = _os_req("POST", f"{base}/_plugins/_ml/agents/{agente}/_execute", user, password,
-                json_body={"parameters": params}, timeout=240)
-    if not _resp_ok(r):
-        print(f"[ppl-chat] el agente no contestó ({_resp_motivo(r)}): sigo sin él")
-        return None
-    try:
-        salida = agente_chat.respuesta(r.json())
-    except ValueError:
-        return None
-    if not salida["respuesta"]:
-        return None
-    trazas: list = []
-    if salida["parent_interaction_id"]:
-        rt = _os_req("GET", f"{base}/_plugins/_ml/memory/message/{salida['parent_interaction_id']}/traces",
-                     user, password, timeout=30)
+
+    def preguntar(params: dict) -> "tuple[dict, dict] | None":
+        r = _os_req("POST", f"{base}/_plugins/_ml/agents/{agente}/_execute", user, password,
+                    json_body={"parameters": params}, timeout=240)
+        if not _resp_ok(r):
+            print(f"[ppl-chat] el agente no contestó ({_resp_motivo(r)}): sigo sin él")
+            return None
         try:
-            trazas = (rt.json() or {}).get("traces") or [] if _resp_ok(rt) else []
+            salida = agente_chat.respuesta(r.json())
         except ValueError:
-            trazas = []
-    leido = agente_chat.de_las_trazas(trazas)
+            return None
+        if not salida["respuesta"]:
+            return None
+        trazas: list = []
+        if salida["parent_interaction_id"]:
+            rt = _os_req("GET", f"{base}/_plugins/_ml/memory/message/{salida['parent_interaction_id']}/traces",
+                         user, password, timeout=30)
+            try:
+                trazas = (rt.json() or {}).get("traces") or [] if _resp_ok(rt) else []
+            except ValueError:
+                trazas = []
+        return salida, agente_chat.de_las_trazas(trazas)
+
+    hecho = preguntar(params)
+    if hecho is None:
+        return None
+    salida, leido = hecho
+    # Con el nodo saturado OpenSearch rechaza la búsqueda y el PPLTool ve "all
+    # shards failed": el agente contestaba "no pude obtener los datos". Se
+    # espera a que baje la cola y se pregunta una vez más, en la misma
+    # conversación.
+    if agente_chat.fallo_por_carga(leido["consultas"]):
+        print("[ppl-chat] las consultas fallaron por carga del cluster: espero y reintento una vez")
+        _esperar_cluster_libre(base, user, password, max_s=_ESPERA_REINTENTO_CHAT_S)
+        otra = preguntar({**params, "memory_id": salida["memory_id"]} if salida["memory_id"] else params)
+        if otra is not None:
+            salida, leido = otra
     buena = agente_chat.ultima_buena(leido["consultas"])
     resultado = (buena or {}).get("result") or {}
     # Sin el gráfico: text to visualization es otro llamado al LLM (~4 s) y se

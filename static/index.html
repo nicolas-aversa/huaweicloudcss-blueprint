@@ -2339,17 +2339,23 @@
 
     /* Los números del entorno: cada uno lleva a su pestaña. */
     .env-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; margin: 0 0 16px; }
+    /* La etiqueta arriba y el número, su detalle y su acción en una línea: en
+       columna, cada indicador ocupaba ~150 px para un número. */
     .env-kpi {
-      display: flex; flex-direction: column; gap: 2px; padding: 14px 16px;
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "lbl lbl lbl" "valor sub accion";
+      align-items: center; column-gap: 10px; row-gap: 2px; padding: 10px 16px;
       background: var(--bg-primary); border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
     }
+    .env-kpi__lbl { grid-area: lbl; }
+    .env-kpi__valor { grid-area: valor; }
+    .env-kpi__sub { grid-area: sub; min-width: 0; }
     .env-kpi.is-link { cursor: pointer; transition: border-color var(--t-base), box-shadow var(--t-base); }
     .env-kpi.is-link:hover, .env-kpi.is-link:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-md); outline: none; }
     .env-kpi__lbl { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
     .env-kpi__valor { font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); font-variant-numeric: tabular-nums; }
     .env-kpi__sub { font-size: var(--fs-sm); color: var(--text-muted); }
-    .env-kpi__accion { align-self: flex-start; margin-top: 8px; }
+    .env-kpi__accion { grid-area: accion; margin: 0; }
 
     /* Las pestañas del entorno, de su tamaño y a la izquierda: estiradas,
        con tres pestañas cada una ocupaba un tercio de la pantalla. */
@@ -2382,8 +2388,12 @@
     .hallazgos__lista > li { margin: 0 -10px; }
 
     /* ── Plugins: una tarjeta por plugin, con su estado y el link a Dashboards ── */
-    .plug-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
+    /* En columnas (mampostería) y no en grilla: en una grilla cada fila toma la
+       altura de la tarjeta más alta (Forecasting, con sus pronósticos) y las
+       demás quedaban con un hueco grande abajo. */
+    .plug-grid { column-width: 290px; column-gap: var(--sp-3); }
     .plug { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3);
+            break-inside: avoid; margin-bottom: var(--sp-3);
             border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-primary); }
     .plug--excluido { opacity: .6; }
     .plug__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-md); }
@@ -2397,7 +2407,7 @@
     .plug__ir:hover { color: var(--accent-hover); }
     .plug__numero { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
     .plug__numero:empty { display: none; }
-    .plug__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
+    .plug__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
     /* Los snapshots de datos de demo. */
     .snap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 0; font-size: var(--fs-sm); }
     .snap__nombre { font-weight: var(--fw-medium); color: var(--text-primary); }
@@ -7365,6 +7375,10 @@
           // aparte para no demorar la respuesta (~4 s más).
           const conT2v = !!(data.memory_id && data.ppl && ((data.result || {}).datarows || []).length > 1 && !data.vega);
           pend.turno = { pregunta: question, ppl: data.ppl || '', respuesta: data.answer || '' };
+          // Ya llegó: deja de estar pendiente ANTES de pintar. Una respuesta
+          // larga (las de "Explicar") no se tipea y avisa que terminó en el
+          // acto: con el mensaje todavía pendiente, no volvían las sugeridas.
+          pend.pendiente = false;
           const el = _msgDe(pend);
           if (!el) return;   // el caso no está en pantalla: se pinta al volver
           // Visualización Vega-Lite (motor de OpenSearch) + respuesta con typewriter + details.

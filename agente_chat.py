@@ -14,6 +14,7 @@ CSS 3.4:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 _FALLO = "Failed to run the tool"
@@ -73,6 +74,18 @@ def _consulta(origen: str, entrada: str, salida: str) -> dict[str, Any]:
     except (ValueError, AttributeError, TypeError):
         c["error"] = salida[:400]
     return c
+
+
+# Lo que dice una consulta que no corrió porque el nodo estaba saturado (la
+# cola de búsquedas llena: OpenSearch la rechaza y el PPLTool ve "all shards
+# failed"). No es un error de la consulta: reintentada, anda.
+_POR_CARGA = re.compile(r"all shards failed|rejected|es_rejected|too many requests|\b429\b|circuit.?break", re.I)
+
+
+def fallo_por_carga(consultas: list[dict[str, Any]]) -> bool:
+    """Ninguna consulta anduvo y alguna falló por carga del cluster."""
+    return bool(consultas) and not any(c.get("ok") for c in consultas) \
+        and any(_POR_CARGA.search(str(c.get("error") or "")) for c in consultas)
 
 
 def ultima_buena(consultas: list[dict[str, Any]]) -> dict[str, Any] | None:

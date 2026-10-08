@@ -6564,3 +6564,42 @@ def test_apply_schema_repone_la_password_del_cluster(monkeypatch, tmp_path):
     res = client.post("/api/v1/onboarding/apply-schema", json=body)
     assert res.status_code == 200, res.text
     assert visto["password"] == "PW-CLUSTER"
+
+
+def test_iniciar_la_ingesta_no_pierde_lo_del_paso_1(monkeypatch, tmp_path):
+    """Visto en CSS 3.4: el deploy de "Iniciar ingesta" reescribía el caso y
+    perdía `dashboards_imported`: la puesta en marcha volvía a pedir el paso 1
+    y la vista Plugins perdía la tarjeta del dashboard."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(_main.subprocess, "run", lambda *a, **k: _OkProc())
+    pedido = lambda indice, arrancar: _main.TerraformDeployRequest(
+        pipeline_conf="filter { }", project_name="x", start_ingestion=arrancar, opensearch_index=indice)
+    _main._prepare_deploy_tfvars(pedido("logs-%{+YYYY.MM}", False), td)
+    reg = _main._read_pipelines_registry(td)
+    reg["logs"].update({"dashboards_imported": True, "dashboard_id": "D", "busquedas": [{"id": "S"}]})
+    _main._write_pipelines_registry(td, reg)
+    _main._prepare_deploy_tfvars(pedido("logs-%{+YYYY.MM}", True), td)
+    caso = _main._read_pipelines_registry(td)["logs"]
+    assert caso["start_ingestion"] is True
+    assert (caso["dashboards_imported"], caso["dashboard_id"], caso["busquedas"]) == (True, "D", [{"id": "S"}])
+
+
+def test_con_otro_indice_no_se_arrastra_el_dashboard_viejo(monkeypatch, tmp_path):
+    import main as _main
+
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(_main.subprocess, "run", lambda *a, **k: _OkProc())
+    pedido = lambda indice: _main.TerraformDeployRequest(
+        pipeline_conf="filter { }", project_name="x", start_ingestion=True, opensearch_index=indice, pipeline_slug="logs")
+    _main._prepare_deploy_tfvars(pedido("logs-%{+YYYY.MM}"), td)
+    reg = _main._read_pipelines_registry(td)
+    reg["logs"].update({"dashboards_imported": True, "dashboard_id": "D"})
+    _main._write_pipelines_registry(td, reg)
+    _main._prepare_deploy_tfvars(pedido("logs-v2-%{+YYYY.MM}"), td)
+    caso = _main._read_pipelines_registry(td)["logs"]
+    assert "dashboards_imported" not in caso and "dashboard_id" not in caso, "el dashboard era del índice anterior"

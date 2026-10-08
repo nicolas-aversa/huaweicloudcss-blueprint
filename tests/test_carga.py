@@ -40,7 +40,7 @@ def test_un_cluster_existente_conserva_su_tamano(monkeypatch, tmp_path):
 def test_los_tfvars_respetan_el_cluster_existente():
     import pathlib
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
-    i = src.index("    _cap = _capacity_for(len(pipelines_var), pesado=_entorno_pesado(pipelines_var))")
+    i = src.index("    _cap = _capacity_for(len(pipelines_var), pesado=_entorno_pesado(")
     bloque = src[i:i + 600]
     assert 'if _existente:\n        _cap["opensearch_flavor"], _cap["opensearch_volume_size"] = _existente' in bloque
 
@@ -145,3 +145,11 @@ def test_un_detector_se_recrea_si_cambian_sus_reglas(monkeypatch, tmp_path):
     assert ("Security Analytics · siem · detector siem_auth", True, "recreado con sus índices y reglas actuales") in pasos
     # Los otros, iguales: no se tocan.
     assert ("Security Analytics · siem · detector siem_waf", True, "ya estaba") in pasos
+
+
+def test_con_security_analytics_el_entorno_es_pesado():
+    """Visto en CSS 3.4: FortiAnalyzer con 3 casos más llenó la cola de
+    búsquedas del nodo de 4 vCPU y el chat contestaba "all shards failed"."""
+    assert main._entorno_pesado(["fortianalyzer", "cts"]) is True
+    assert main._entorno_pesado(["mis-firewall", "cts"], {"mis-firewall"}) is True, "un dataset nuevo con reglas"
+    assert main._entorno_pesado(["ventas-ecommerce", "cts"]) is False

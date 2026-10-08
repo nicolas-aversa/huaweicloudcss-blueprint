@@ -234,3 +234,46 @@ def test_el_grafico_se_pide_aparte(monkeypatch):
     assert r.json() == {"vega": {"mark": "line"}} and vistos == [("q", "source=x", res)]
     monkeypatch.setattr(main, "_visualizar", lambda *a: None)
     assert TestClient(main.app).post("/api/v1/capabilities/visualizar", json={"question": "q", "ppl": "p"}).json() == {"vega": {}}
+
+
+# ── Con el cluster saturado ─────────────────────────────────────────────────
+def test_que_es_fallar_por_carga():
+    falla = {"ok": False, "error": 'execute ppl: all shards failed'}
+    assert ac.fallo_por_carga([falla])
+    assert ac.fallo_por_carga([{"ok": False, "error": "rejected execution of TimedRunnable"}])
+    assert not ac.fallo_por_carga([falla, {"ok": True}]), "si una anduvo, contestó con eso"
+    assert not ac.fallo_por_carga([{"ok": False, "error": "field [x] not found"}]), "un error de la consulta no se reintenta"
+    assert not ac.fallo_por_carga([])
+
+
+def test_si_fallo_por_carga_espera_y_pregunta_otra_vez(monkeypatch):
+    llamadas, esperas = [], []
+
+    def execute(m, url, user, password, json_body=None, timeout=30):
+        if url.endswith("/_execute"):
+            llamadas.append(json_body["parameters"])
+            return _R(200, {"inference_results": [{"output": [
+                {"name": "memory_id", "result": "MEM"}, {"name": "parent_interaction_id", "result": f"P{len(llamadas)}"},
+                {"name": "response", "dataAsMap": {"response": f"respuesta {len(llamadas)}"}}]}]})
+        traza = ("Failed to run the tool PPLTool-x with the error message all shards failed" if url.endswith("/P1/traces")
+                 else json.dumps({"ppl": "source=x | stats count()", "executionResult": json.dumps({"schema": [], "datarows": [[5]]})}))
+        return _R(200, {"traces": [{"origin": "PPLTool-x", "trace_number": 1, "input": "{}", "response": traza}]})
+
+    monkeypatch.setattr(main, "_os_req", execute)
+    monkeypatch.setattr(main, "_esperar_cluster_libre", lambda b, u, p, umbral=None, max_s=None: esperas.append(max_s) or True)
+    req = main.PplChatRequest(question="¿cuántas?", slug="x")
+    r = main._conversar_con_el_agente("http://x", "a", "p", "AG", req, "X", "x-*")
+    assert r.answer == "respuesta 2" and r.result == {"schema": [], "datarows": [[5]]}
+    assert esperas == [main._ESPERA_REINTENTO_CHAT_S]
+    assert llamadas[1]["memory_id"] == "MEM", "en la misma conversación"
+
+
+def test_despues_de_una_respuesta_larga_vuelven_las_sugeridas():
+    """Las de "Explicar" son largas: no se tipean y el final llegaba con el
+    mensaje todavía pendiente, así que no volvían las preguntas sugeridas."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("async function sendCapChat(")
+    fn = html[i:html.index("chatForm?.addEventListener('submit'", i)]
+    assert fn.index("pend.pendiente = false;\n          const el = _msgDe(pend);") < fn.index("_typeInto(answerEl, data.answer || '', () => {")
+    j = html.index("function capChatSeguirHTML(")
+    assert "if (!ultimo || ultimo.who !== 'bot' || ultimo.pendiente) return '';" in html[j:j + 400]
