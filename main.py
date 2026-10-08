@@ -1425,8 +1425,16 @@ def export_case(slug: str) -> Response:
 def export_case_dashboards(slug: str) -> Response:
     import dashboards
 
+    import capabilities as caps
+    from index_template import index_pattern_from_name
+
     datos = _datos_para_exportar(slug)
     ndjson = dashboards.build_ndjson_from_fields(slug, datos["index_name"], datos["fields"])
+    # Lo mismo que se importa al desplegar: la tabla del perfil y las búsquedas de Discover.
+    entrada = {"fields": datos["fields"], "excluir": datos["excluir"]}
+    ndjson = dashboards.con_panel_de_perfil(ndjson, slug, _perfil_de(slug, entrada))
+    spec = caps.build_spec_from_fields(slug, index_pattern_from_name(datos["index_name"]), datos["fields"], datos["label"])
+    ndjson = dashboards.con_busquedas_guardadas(ndjson, slug, spec, datos["fields"], datos["label"])
     return Response(content=ndjson, media_type="application/x-ndjson",
                     headers={"Content-Disposition": f'attachment; filename="{slug}-dashboards.ndjson"'})
 
@@ -4043,12 +4051,15 @@ def plugins_preview(slugs: str = "") -> dict:
                                                    for i, f in enumerate(fcs)]},
                    "anomalias": {"ok": True, "motivo": "", "intervalo_min": 30}, "alertas": {"ok": True, "motivo": ""},
                    "perfil": {"ok": True, "motivo": ""}, "analista": {"ok": True, "motivo": ""},
-                   "ciclo_de_vida": {"ok": True, "motivo": "", "retencion_dias": 90}}
+                   "ciclo_de_vida": {"ok": True, "motivo": "", "retencion_dias": 90},
+                   "reporte": {"ok": True, "motivo": "", "id": f"{slug}-reporte"}}
         import ciclo_de_vida as cdv
         dims, medidas = cdv.dimensiones_y_medidas((verticals.get_vertical(slug) or {}).get("fields") or [], spec)
         if medidas:
             estados["rollup"] = {"ok": True, "motivo": "", "dimensiones": dims, "medidas": medidas}
-        entry = {"dashboards_imported": True, "dashboard_id": f"{slug}-dashboard"}
+        entry = {"dashboards_imported": True, "dashboard_id": f"{slug}-dashboard",
+                 "busquedas": [{"id": f"{slug}-todos", "titulo": f"[{slug}] todos los eventos"},
+                               {"id": f"{slug}-criticos", "titulo": f"[{slug}] eventos críticos"}]}
         fuera[slug] = plugins_vista.tarjetas_del_caso(
             slug, entry=entry, ids=ids, spec=spec, perfil=_perfil_de(slug, entry), enmascarados=_enmascarados_de(slug, entry),
             seguridad_reg=sa_reg if sa else {}, seguridad_spec=sa, estados=estados, analista_creado=True, base=base,
@@ -5599,13 +5610,27 @@ def _import_dashboards(
                 ndjson_content, slug, _perfil_de(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
         except Exception as exc:  # noqa: BLE001 — el dashboard va igual, sin la tabla
             print(f"[dashboards] '{slug}': sin el panel del perfil ({exc!r})")
+        # Las búsquedas de Discover del caso (todos los eventos y los críticos).
+        try:
+            from dashboards import con_busquedas_guardadas
+            entrada = _read_pipelines_registry(terraform_dir).get(slug) or {}
+            ndjson_content = con_busquedas_guardadas(
+                ndjson_content, slug, _resolve_capability_spec(slug, terraform_dir=terraform_dir),
+                fields or entrada.get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or [],
+                entrada.get("label") or (verticals.get_vertical(slug) or {}).get("label", ""))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[dashboards] '{slug}': sin las búsquedas guardadas ({exc!r})")
+    from dashboards import busquedas_del_ndjson
+    busquedas = busquedas_del_ndjson(ndjson_content)
 
     def importado() -> bool:
-        # El id del dashboard, para que la vista Plugins lleve directo a él.
+        # El id del dashboard (y de las búsquedas), para que la vista Plugins
+        # lleve directo a ellos.
         if terraform_dir and dashboard_id:
             registry = _read_pipelines_registry(terraform_dir)
             if slug in registry:
                 registry[slug]["dashboard_id"] = dashboard_id
+                registry[slug]["busquedas"] = busquedas
                 _write_pipelines_registry(terraform_dir, registry)
         return True
 
@@ -7231,6 +7256,38 @@ def _asegurar_aviso(base: str, user: str, password: str, slug: str, monitor_id: 
     return _resp_ok(ru)
 
 
+def _provisionar_reporte(base: str, user: str, password: str, slug: str, dashboard_id: str,
+                         origen: str, force: bool) -> dict:
+    """Una definición de Reporting sobre el dashboard del caso, a demanda: en
+    Dashboards → Reporting, "Generar" da el PDF. Sin el plugin, se dice."""
+    import plugins_vista as pv
+
+    nombre = pv.nombre_del_reporte(slug)
+    r = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20)
+    if r is not None and r.status_code in (400, 404) and "no handler" in (getattr(r, "text", "") or "").lower():
+        return {"ok": False, "reason": "Reporting no está en este cluster"}
+    try:
+        previas = ((r.json() or {}).get("reportDefinitionDetailsList") or []) if _resp_ok(r) else []
+    except ValueError:
+        previas = []
+    ya = next((d for d in previas if ((d.get("reportDefinition") or {}).get("name") == nombre)), None)
+    if ya and not force:
+        return {"ok": True, "reason": "ya estaba", "id": ya.get("id", "")}
+    if ya:
+        _os_req("DELETE", f"{base}/_plugins/_reports/definition/{ya.get('id', '')}", user, password, timeout=20)
+    rc = _os_req("POST", f"{base}/_plugins/_reports/definition", user, password, timeout=30,
+                 json_body=pv.definicion_de_reporte(slug, dashboard_id, origen))
+    if not _resp_ok(rc):
+        motivo = _resp_motivo(rc)
+        return {"ok": False, "reason": "Reporting no está en este cluster" if "no handler" in motivo.lower()
+                else f"no se pudo crear el reporte: {motivo}"}
+    try:
+        rid = str((rc.json() or {}).get("reportDefinitionId") or "")
+    except ValueError:
+        rid = ""
+    return {"ok": True, "reason": f"reporte en PDF del dashboard, a demanda en Dashboards → Reporting", "id": rid}
+
+
 def _provisionar_el_paso_del_tiempo(base: str, user: str, password: str, slug: str, index_pattern: str,
                                     entry: dict, force: bool, terraform_dir: Path, run: dict) -> None:
     """La política de ciclo de vida y el rollup de un caso (lo que no esté
@@ -7696,7 +7753,14 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
     if entry.get("dashboard_id"):
         cuerpo, motivo = _leer(base, user, password, f".kibana/_doc/dashboard:{entry['dashboard_id']}")
         encontrado = cuerpo is not None and (cuerpo or {}).get("found", True)
-        marcar("dashboard", bool(encontrado), "dashboard en Dashboards" if encontrado else f"el dashboard {motivo or 'no está'}")
+        detalle = "dashboard en Dashboards" if encontrado else f"el dashboard {motivo or 'no está'}"
+        # El reporte en PDF va en la misma tarjeta.
+        reporte_ok = True
+        if encontrado and (estados.get("reporte") or {}).get("id"):
+            rep, motivo_rep = _leer(base, user, password, f"_plugins/_reports/definition/{estados['reporte']['id']}")
+            reporte_ok = rep is not None
+            detalle += ", con su reporte en Reporting" if reporte_ok else f"; el reporte {motivo_rep}"
+        marcar("dashboard", bool(encontrado) and reporte_ok, detalle)
     return fuera
 
 
@@ -8291,6 +8355,18 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             res = {"ok": False, "reason": repr(exc)}
         runs.step(run, f"Analista con datos enmascarados · {slug}", res["ok"], res["reason"][:300])
         _guardar_estados(terraform_dir, slug, {"analista": plugins_vista.estado_simple(res)})
+    origen = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, request.https_enabled))
+    for slug in slugs:
+        did = (pipe_reg.get(slug) or {}).get("dashboard_id")
+        if not did:
+            continue
+        try:
+            res = _provisionar_reporte(_base_analistas, user, password, slug, did, origen, request.force)
+        except Exception as exc:  # noqa: BLE001 — pieza de demo
+            res = {"ok": False, "reason": repr(exc)}
+        runs.step(run, f"Reporte en PDF · {slug}", res["ok"], res["reason"][:300])
+        e = plugins_vista.estado_simple(res)
+        _guardar_estados(terraform_dir, slug, {"reporte": e and {**e, "id": res.get("id", "")}})
     for slug in slugs:
         entry = pipe_reg.get(slug) or {}
         indice = entry.get("index") or f"{slug}-%{{+YYYY.MM}}"

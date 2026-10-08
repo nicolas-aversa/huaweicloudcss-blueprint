@@ -24,6 +24,8 @@ APP_SA = "opensearch_security_analytics_dashboards"
 APP_IM = "opensearch_index_management_dashboards"
 APP_INSIGHTS = "query-insights-dashboards"
 APP_DASHBOARDS = "dashboards"
+APP_DISCOVER = "discover"
+APP_REPORTING = "reports-dashboards"
 
 # Estado de una tarjeta: cómo quedó lo que se provisionó.
 OK, PARCIAL, FALLA, EN_CURSO, EXCLUIDO = "ok", "parcial", "falla", "en_curso", "excluido"
@@ -235,12 +237,39 @@ def _rollup(slug: str, estado: dict, fields: list[dict], base: str) -> dict:
                     numero="rollup")
 
 
-def _dashboard(entry: dict, base: str) -> dict:
+def nombre_del_reporte(slug: str) -> str:
+    return f"[{slug}] Dashboard en PDF (plataforma)"
+
+
+def definicion_de_reporte(slug: str, dashboard_id: str, origen: str) -> dict[str, Any]:
+    """`POST _plugins/_reports/definition`: el dashboard del caso en PDF, a
+    demanda (en Dashboards → Reporting, "Generar")."""
+    return {"reportDefinition": {
+        "name": nombre_del_reporte(slug),
+        "isEnabled": True,
+        "source": {"description": f"El dashboard de {slug}, en PDF", "type": "Dashboard",
+                   "origin": origen, "id": dashboard_id},
+        "format": {"duration": "PT8760H", "fileFormat": "pdf", "header": "", "footer": ""},
+        "trigger": {"triggerType": "On demand"},
+    }}
+
+
+def _dashboard(entry: dict, base: str, reporte: "dict | None" = None) -> dict:
     did = entry.get("dashboard_id", "")
     importado = bool(entry.get("dashboards_imported"))
+    filas = [{"texto": "Búsqueda en Discover: " + (b.get("titulo") or "").split("] ", 1)[-1], "estado": OK,
+              "detalle": "guardada", "numero": "", "url": link(base, APP_DISCOVER, f"/view/{b['id']}")}
+             for b in entry.get("busquedas") or [] if b.get("id")]
+    if reporte:
+        filas.append({"texto": "Reporte en PDF (Reporting)", "estado": OK if reporte.get("ok") else FALLA,
+                      "detalle": "a demanda" if reporte.get("ok") else (reporte.get("motivo") or "no se creó"),
+                      "numero": "", "url": link(base, APP_REPORTING, f"/report_definition_details/{reporte['id']}")
+                      if reporte.get("ok") and reporte.get("id") else ""})
     return _tarjeta("dashboard", "Dashboard del caso",
-                    "Gráficos armados con los campos del caso, con el rango de fechas de sus datos.",
-                    OK if importado else FALLA, "" if importado else "no se importó (ver Actividad)",
+                    "Gráficos armados con los campos del caso, con el rango de fechas de sus datos"
+                    + (", sus búsquedas en Discover" if entry.get("busquedas") else "")
+                    + (" y su reporte en PDF" if (reporte or {}).get("ok") else "") + ".",
+                    OK if importado else FALLA, "" if importado else "no se importó (ver Actividad)", filas,
                     links=[{"texto": "Abrir el dashboard",
                             "url": link(base, APP_DASHBOARDS, f"/view/{did}" if did else "/list")}] if importado else [])
 
@@ -259,7 +288,7 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
     provisionado = bool(ids) or bool(estados)
     fuera: list[dict] = []
     if entry.get("dashboards_imported") or entry.get("dashboard_id"):
-        fuera.append(_dashboard(entry, base))
+        fuera.append(_dashboard(entry, base, estados.get("reporte")))
     if "security_analytics" in excluidos:
         fuera.append(_tarjeta("security_analytics", "Security Analytics", "", EXCLUIDO, "excluido en el paso 2"))
     elif seguridad_reg.get("detectores") or (seguridad_spec and provisionado):

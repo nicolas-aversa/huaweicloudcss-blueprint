@@ -95,6 +95,10 @@ def test_los_endpoints(monkeypatch, tmp_path):
     d = c.get("/api/v1/cases/hotel/export/dashboards")
     assert d.status_code == 200 and d.headers["content-type"].startswith("application/x-ndjson")
     assert all(json.loads(l) for l in d.text.splitlines() if l.strip())
+    tipos = [json.loads(l)["type"] for l in d.text.splitlines() if l.strip()]
+    assert "search" in tipos, "las búsquedas de Discover, como al desplegar"
+    assert not any(json.loads(l)["id"] == "perfil-hotel" for l in d.text.splitlines() if l.strip()), \
+        "el perfil apagado en el paso 2 no lleva su tabla"
     assert c.get("/api/v1/cases/no-existe/export").status_code == 404
     # Desplegado: el índice y lo apagado salen del registro (el .conf no: lleva credenciales).
     (tmp_path / main._PIPELINES_REGISTRY_NAME).write_text(json.dumps({"hotel": {

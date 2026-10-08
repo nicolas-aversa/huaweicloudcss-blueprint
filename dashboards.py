@@ -875,6 +875,100 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
     }
 
 
+_ROLES_DE_COLUMNA = ("entity_id", "primary_dimension", "critical_indicator", "success_indicator", "measure", "dimension")
+
+
+def _columnas(fields: list[dict], spec: dict, n: int = 6) -> list[str]:
+    """Las columnas de una búsqueda: primero las de rol (entidad, dimensión
+    principal, indicadores, medida), después el campo del volumen y el resto."""
+    fields = [f for f in fields or [] if isinstance(f, dict) and (f.get("field_path") or "").strip()
+              and (f.get("field_path") or "") != "@timestamp" and (f.get("type") or "") != "date"]
+    orden = sorted(fields, key=lambda f: _ROLES_DE_COLUMNA.index(f.get("role")) if f.get("role") in _ROLES_DE_COLUMNA else 99)
+    fuera: list[str] = []
+    volumen = str((spec or {}).get("volume_field") or "").removesuffix(".keyword")
+    for ruta in [f["field_path"] for f in orden[:2]] + ([volumen] if volumen else []) + [f["field_path"] for f in orden]:
+        if ruta and ruta not in fuera:
+            fuera.append(ruta)
+    return fuera[:n]
+
+
+_PRONOSTICO_DE_FALLAS = re.compile(r"critical|fail|error|denied|block|threat|fraud|downtime|attack", re.I)
+
+
+def consulta_de_criticos(spec: dict) -> str:
+    """El KQL de los eventos críticos, del primer pronóstico de fallas del spec
+    (`critical_events` en un dataset nuevo; `failed_count`, `denied_events`,
+    `fraud_count`… en los curados): un indicador que se suma (`is_fraud`) vale
+    1; uno que se cuenta (el campo `<x>_falla` que arma el filter) está solo
+    en los que fallaron; un `filter` es su término."""
+    for fc in (spec or {}).get("forecasts") or []:
+        if not _PRONOSTICO_DE_FALLAS.search(str(fc.get("feature_name") or "")):
+            continue
+        tipo, cuerpo = next(iter(next(iter((fc.get("aggregation_query") or {}).values()), {}).items()), ("", {}))
+        if tipo == "filter":
+            clase, cond = next(iter((cuerpo or {}).items()), ("", {}))
+            campo, valor = next(iter((cond or {}).items()), ("", None))
+            valores = valor if isinstance(valor, list) else [valor]
+            if campo and valores and all(isinstance(v, (str, int, float)) for v in valores):
+                return f"{campo}:(" + " or ".join(json.dumps(v, ensure_ascii=False) for v in valores) + ")"
+            continue
+        campo = str((cuerpo or {}).get("field") or "").removesuffix(".keyword")
+        if campo and tipo in ("sum", "value_count"):
+            return f"{campo} >= 1" if tipo == "sum" else f"{campo}:*"
+    return ""
+
+
+def con_busquedas_guardadas(ndjson: str, slug: str, spec: "dict | None", fields: "list[dict] | None",
+                            label: str = "") -> str:
+    """Las búsquedas de Discover del caso, junto a su dashboard: todos los
+    eventos con las columnas que importan y, si el caso tiene un indicador de
+    falla, solo los críticos. Sobre el index pattern del dashboard; no se
+    duplican."""
+    objetos = []
+    for linea in (ndjson or "").splitlines():
+        try:
+            objetos.append(json.loads(linea))
+        except ValueError:
+            continue
+    patron = next((o for o in objetos if isinstance(o, dict) and o.get("type") == "index-pattern"
+                   and not str(o.get("id", "")).startswith("perfil-")), None)
+    if patron is None:
+        return ndjson
+    columnas = _columnas(fields or [], spec or {})
+    nombre = label or slug
+    nuevas = []
+    for titulo, consulta in ((f"{nombre}: todos los eventos", ""),
+                             (f"{nombre}: eventos críticos", consulta_de_criticos(spec or {}))):
+        if titulo.endswith("críticos") and not consulta:
+            continue
+        sid = _stable_id(slug, "search", titulo)
+        if any(o.get("id") == sid for o in objetos):
+            continue
+        ssj = json.dumps({"query": {"query": consulta, "language": "kuery"}, "filter": [],
+                          "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"})
+        nuevas.append({"id": sid, "type": "search", "references": [
+            {"name": "kibanaSavedObjectMeta.searchSourceJSON.index", "type": "index-pattern", "id": patron["id"]}],
+            "attributes": {"title": f"[{slug}] {titulo}", "description": "", "hits": 0, "columns": columnas,
+                           "sort": [["@timestamp", "desc"]], "version": 1,
+                           "kibanaSavedObjectMeta": {"searchSourceJSON": ssj}}})
+    if not nuevas:
+        return ndjson
+    return "\n".join(json.dumps(o) for o in objetos + nuevas)
+
+
+def busquedas_del_ndjson(ndjson: str) -> list[dict]:
+    """`[{id, titulo}]` de las búsquedas guardadas de un NDJSON."""
+    fuera = []
+    for linea in (ndjson or "").splitlines():
+        try:
+            o = json.loads(linea)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("type") == "search":
+            fuera.append({"id": o["id"], "titulo": str((o.get("attributes") or {}).get("title", ""))})
+    return fuera
+
+
 def con_panel_de_perfil(ndjson: str, slug: str, perfil: "dict | None") -> str:
     """El dashboard del caso con una tabla más: su perfil por entidad (el
     índice `perfil-<slug>` que escribe el Transform), una fila por entidad y
