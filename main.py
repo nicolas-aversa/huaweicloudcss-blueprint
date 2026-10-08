@@ -1420,6 +1420,41 @@ def export_case(slug: str) -> Response:
                     headers={"Content-Disposition": f'attachment; filename="{slug}-devtools.txt"'})
 
 
+@app.get("/api/v1/cases/{slug}/traspaso", tags=["verticals"],
+         summary="El documento de traspaso del dataset (Markdown)")
+def traspaso_del_caso(slug: str) -> Response:
+    """Qué se configuró y por qué, cómo quedó en el cluster, cuánto cluster
+    hace falta en producción y cómo se opera y se replica (ver traspaso.py)."""
+    import ciclo_de_vida as cdv
+    import dimensionamiento
+    import plan_de_cluster
+    import traspaso
+
+    datos = _datos_para_exportar(slug)
+    plan = plan_de_cluster.plan(slug, datos["fields"], datos["label"], seguridad=datos["seguridad_propuesta"],
+                                retencion_dias=datos["retencion_dias"])
+    tarjetas, url = None, ""
+    terraform_dir = _active_terraform_dir()
+    entrada = _read_pipelines_registry(terraform_dir).get(slug)
+    if entrada:
+        try:
+            url = _build_dashboards_url(_cluster_with_public_access(terraform_dir))
+            tarjetas = _plugins_de_la_vista(terraform_dir, {slug: entrada}, url).get(slug)
+        except Exception as exc:  # noqa: BLE001 — sin el estado, el documento igual sale
+            print(f"[traspaso] '{slug}': sin el estado del cluster ({exc!r})")
+    caso = custom_cases.get_case(slug) or verticals.get_vertical(slug) or {}
+    volumen = caso.get("volumen") or {}
+    dim = None
+    if volumen.get("eventos_por_dia"):
+        dim = dimensionamiento.dimensionar(dimensionamiento.bytes_por_evento(caso.get("sample") or ""),
+                                           volumen["eventos_por_dia"], cdv.retencion(datos["retencion_dias"]),
+                                           volumen.get("alta_disponibilidad", True))
+    md = traspaso.documento(slug, datos["label"], plan, excluir=datos["excluir"], tarjetas=tarjetas,
+                            dimensionamiento=dim, dashboards_url=plugins_vista.base_de_dashboards(url))
+    return Response(content=md, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{slug}-traspaso.md"'})
+
+
 @app.get("/api/v1/cases/{slug}/export/dashboards", tags=["verticals"],
          summary="Los dashboards del dataset, para importar en Saved objects")
 def export_case_dashboards(slug: str) -> Response:

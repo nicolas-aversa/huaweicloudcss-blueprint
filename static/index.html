@@ -6742,7 +6742,8 @@
           p.tarjeta ? `<button type="button" class="btn btn-secondary btn-sm guion__ir" data-tarjeta="${escapeHtml(p.tarjeta)}">${icon('arrow-right')} Su tarjeta</button>` : '',
           p.pregunta ? `<button type="button" class="btn btn-secondary btn-sm guion__preguntar" data-pregunta="${escapeHtml(p.pregunta)}">${icon('chat')} Preguntar</button>` : '',
           p.exportar ? `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/export" download>${icon('download')} Dev Tools</a>`
-            + `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/export/dashboards" download>${icon('download')} Dashboard</a>` : '',
+            + `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/export/dashboards" download>${icon('download')} Dashboard</a>`
+            + `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/traspaso" download>${icon('download')} Traspaso</a>` : '',
         ].join('');
         return `<li class="guion__paso"><span class="guion__texto"><strong>${escapeHtml(p.titulo)}</strong> ${escapeHtml(p.texto)}</span>`
           + (acciones ? `<span class="guion__acciones">${acciones}</span>` : '') + `</li>`;
@@ -8285,6 +8286,7 @@
                 <span>Llevarse:</span>
                 <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/export" download>${icon('download')} Dev Tools</a>
                 <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/export/dashboards" download>${icon('download')} Dashboards</a>
+                <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/traspaso" download>${icon('download')} Traspaso</a>
               </div>
             </article>`).join('')
         : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;

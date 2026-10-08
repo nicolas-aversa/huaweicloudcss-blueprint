@@ -392,7 +392,8 @@ def guion(slug: str, tarjetas: list[dict], pregunta: str = "") -> list[dict]:
         paso("Lo que queda andando", "Sin que nadie lo mire, el cluster tiene " + ", ".join(queda[:-1])
              + (" y " if len(queda) > 1 else "") + queda[-1] + ".", tarjeta=next(p for p in ("alertas", "perfil", "analista", "ciclo_de_vida", "rollup") if p in t))
     paso("Que se lo lleve", "Todo esto, sin la plataforma: el export a Dev Tools y el dashboard, para "
-                            "aplicarlo en su propio cluster.", exportar=slug)
+                            "aplicarlo en su propio cluster, y el documento de traspaso (qué se configuró, por "
+                            "qué, cómo se opera y cuánto cluster hace falta en producción).", exportar=slug)
     return pasos
 
 
