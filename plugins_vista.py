@@ -324,6 +324,49 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
     return fuera
 
 
+# ── El guion de la demo ─────────────────────────────────────────────────────
+_SIRVE = (OK, PARCIAL, EN_CURSO)
+
+
+def guion(slug: str, tarjetas: list[dict], pregunta: str = "") -> list[dict]:
+    """Los pasos de la demo de un caso, en el orden en que se cuentan, con lo
+    que de verdad quedó andando: cada paso con su texto y su acción (el link a
+    Dashboards, ir a la tarjeta o preguntarle al asistente). Lo que falló o se
+    apagó no entra: el guion no manda al SA a mostrar algo roto."""
+    t = {x["plugin"]: x for x in tarjetas if x.get("estado") in _SIRVE}
+    url = lambda plugin: next((l["url"] for l in (t.get(plugin) or {}).get("links") or []), "")
+    pasos: list[dict] = []
+
+    def paso(titulo: str, texto: str, **accion) -> None:
+        pasos.append({"titulo": titulo, "texto": texto, **{k: v for k, v in accion.items() if v}})
+
+    if "dashboard" in t:
+        paso("Los datos", "Arrancá por el dashboard: los datos del caso con su rango de fechas, armado "
+                          "con los campos que descubrió la plataforma.", url=url("dashboard"))
+    if "anomalias" in t:
+        paso("Algo raro", "Mostrá la anomalía más fuerte y pedile a la IA que la explique: compara ese "
+                          "intervalo con el resto de los datos.", tarjeta="anomalias", url=url("anomalias"))
+    if "forecasting" in t:
+        paso("Lo que viene", "Mostrá qué pronostica y cuánto acierta contra lo que pasó de verdad (el error "
+                             "medio de cada pronóstico está en su tarjeta).", tarjeta="forecasting", url=url("forecasting"))
+    if "security_analytics" in t:
+        paso("Seguridad", "Mostrá los hallazgos de las reglas Sigma y, si hay, las correlaciones entre fuentes.",
+             tarjeta="security_analytics", url=url("security_analytics"))
+    if pregunta:
+        paso("Preguntale", f"Preguntale en castellano: «{pregunta}». Responde con el dato real y la consulta PPL "
+                           "que corrió.", pregunta=pregunta)
+    queda = [nombre for plugin, nombre in (("alertas", "la alerta"), ("perfil", "el perfil por entidad"),
+                                          ("analista", "el usuario con datos enmascarados"),
+                                          ("ciclo_de_vida", "el ciclo de vida"), ("rollup", "el resumen por hora"))
+             if plugin in t]
+    if queda:
+        paso("Lo que queda andando", "Sin que nadie lo mire, el cluster tiene " + ", ".join(queda[:-1])
+             + (" y " if len(queda) > 1 else "") + queda[-1] + ".", tarjeta=next(p for p in ("alertas", "perfil", "analista", "ciclo_de_vida", "rollup") if p in t))
+    paso("Que se lo lleve", "Todo esto, sin la plataforma: el export a Dev Tools y el dashboard, para "
+                            "aplicarlo en su propio cluster.", exportar=slug)
+    return pasos
+
+
 # ── Lo que queda guardado de cada provisión ─────────────────────────────────
 # Sin esto el estado de un plugin solo vivía en la respuesta de "Provisionar
 # plugins" y en Actividad (y ahí, sin el detalle de los backtests).

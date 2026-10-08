@@ -2354,6 +2354,8 @@ class TerraformStatusResponse(BaseModel):
     # La vista Plugins: por caso (y `_cluster`), las tarjetas de lo que quedó en
     # el cluster con su link a Dashboards (ver plugins_vista.py).
     plugins: dict = Field(default_factory=dict)
+    # Y el guion de la demo de cada caso, armado con esas tarjetas.
+    guiones: dict = Field(default_factory=dict)
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -4053,7 +4055,7 @@ def plugins_preview(slugs: str = "") -> dict:
             fields=(verticals.get_vertical(slug) or {}).get("fields") or [])
     if fuera:
         fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(agente=True, text2viz={"ok": True}, base=base)
-    return fuera
+    return {"plugins": fuera, "guiones": _guiones(fuera)}
 
 
 # ── Cola de jobs de deploy (reconectable) ────────────────────────────────────
@@ -9367,9 +9369,26 @@ def terraform_status() -> TerraformStatusResponse:
         capabilities=_read_capabilities(terraform_dir),
         cluster_features=_read_cluster_features(terraform_dir) or None,
         security_analytics=_resumen_de_seguridad(terraform_dir),
-        plugins=_plugins_de_la_vista(terraform_dir, registry, dashboards_url),
+        plugins=(vista := _plugins_de_la_vista(terraform_dir, registry, dashboards_url)),
+        guiones=_guiones(vista),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
+
+
+def _pregunta_del_caso(slug: str) -> str:
+    """La primera pregunta sugerida del caso (la del vertical o la del caso guardado)."""
+    caso = verticals.get_vertical(slug) or custom_cases.get_case(slug) or {}
+    return next((str(q).strip() for q in caso.get("suggested_questions") or [] if str(q).strip()), "")
+
+
+def _guiones(vista: dict) -> dict:
+    """El guion de la demo de cada caso (sin `_cluster`). Si falla, sin guiones."""
+    try:
+        return {slug: plugins_vista.guion(slug, tarjetas, _pregunta_del_caso(slug))
+                for slug, tarjetas in (vista or {}).items() if slug != "_cluster"}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[plugins] el guion no se pudo armar: {exc!r}")
+        return {}
 
 
 def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: str) -> dict:
