@@ -2385,6 +2385,12 @@
     .plug__numero { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
     .plug__numero:empty { display: none; }
     .plug__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
+    /* Comprobado en el cluster: lo que la provisión dijo, mirado de verdad. */
+    .plug__verif { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); color: var(--text-muted); }
+    .plug__verif:empty { display: none; }
+    .plug__verif .icon { width: 13px; height: 13px; flex: none; }
+    .plug__verif--ok .icon { color: var(--accent-green); }
+    .plug__verif--mal { color: var(--accent-hover); }
     /* Plugins: los casos en una lista a la izquierda, el detalle a la derecha.
        Con 9 casos, los botones en dos filas se veían desordenados. En
        pantallas angostas la lista pasa arriba, en una fila. */
@@ -6557,6 +6563,7 @@
           + (t.motivo ? `<p class="plug__motivo">${escapeHtml(t.motivo)}</p>` : '')
           + (filas ? `<ul class="plug__filas">${filas}</ul>` : '')
           + (t.numero ? `<div class="plug__numero" data-numero="${escapeHtml(t.numero)}"></div>` : '')
+          + (t.estado !== 'excluido' ? `<div class="plug__verif" data-verif="${escapeHtml(t.plugin)}"></div>` : '')
           + (links ? `<div class="plug__links">${links}</div>` : '')
           + `</article>`;
       }).join('')}</div>`;
@@ -6602,9 +6609,22 @@
       }
       return '';
     }
+    // Lo comprobado en el cluster (`verificado` de /api/v1/plugins/numeros).
+    function verificacionHTML(v) {
+      if (!v) return '';
+      return v.ok ? `${icon('check')} Comprobado en el cluster: ${escapeHtml(v.detalle)}`
+        : `${icon('alert-triangle')} En el cluster: ${escapeHtml(v.detalle)}`;
+    }
     function aplicarNumerosDePlugins(destino, numeros, slug) {
       destino.querySelectorAll('[data-numero]').forEach(el => {
         el.innerHTML = numeroDePlugin(el.dataset.numero, (numeros || {})[el.dataset.numero], slug, el.dataset.estado);
+      });
+      const verif = (numeros || {}).verificado || {};
+      destino.querySelectorAll('[data-verif]').forEach(el => {
+        const v = verif[el.dataset.verif];
+        el.innerHTML = verificacionHTML(v);
+        el.classList.toggle('plug__verif--ok', !!(v && v.ok));
+        el.classList.toggle('plug__verif--mal', !!(v && !v.ok));
       });
     }
     async function verPlugins(btn) {
@@ -6615,7 +6635,7 @@
       document.querySelectorAll('.plug__caso').forEach(b => b.classList.toggle('is-active', b === btn));
       destino.className = 'maestro__detalle';
       destino.innerHTML = pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug]);
-      if (!destino.querySelector('[data-numero]')) return;
+      if (!destino.querySelector('[data-numero], [data-verif]')) return;
       destino.querySelectorAll('[data-numero]').forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
       let numeros = {};
       try {
@@ -8456,6 +8476,9 @@
             if (f.numero.startsWith('forecast:')) fuera[f.numero] = i === 0 ? { error_pct: null, error: 'backtest parcial: 360 de 600 pasos' } : { error_pct: [0, 6.4, 27.9][i] || 12, error: '' };
             if (f.numero.startsWith('seguridad:')) fuera[f.numero] = { eventos: 1842 - i * 400 };
           }));
+          // Todo comprobado, salvo el monitor (para ver cómo se muestra lo que falla).
+          fuera.verificado = Object.fromEntries(((estado.plugins || {})[slug] || []).map(t => [t.plugin,
+            t.plugin === 'alertas' ? { ok: false, detalle: 'el monitor está apagado' } : { ok: true, detalle: 'en el cluster' }]));
           return json(fuera);
         }
         // Una sesión de ejemplo, para ver la cuenta arriba como en el hosteado.

@@ -357,6 +357,88 @@ def test_los_numeros_de_todo_el_cluster(monkeypatch, tmp_path):
     assert d == {"insights": {"latencia_ms": 1840, "n": 1, "error": ""}}
 
 
+# ── Comprobado en el cluster ───────────────────────────────────────────────
+def _cluster_verificable(monkeypatch, respuestas):
+    """`_os_req` que contesta por el final de la ruta; lo que no está, 404."""
+    pedidos = []
+
+    def req(m, url, *a, **k):
+        pedidos.append(url)
+        for fin, (st, cuerpo) in respuestas.items():
+            if url.endswith(fin):
+                return _R(st, cuerpo)
+        return _R(404, {"error": "not found"})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    return pedidos
+
+
+def test_lo_que_se_creo_se_comprueba_en_el_cluster(monkeypatch):
+    _cluster_verificable(monkeypatch, {
+        "forecasters/F1": (200, {"forecaster": {}}),
+        "detectors/D?task=true": (200, {"historical_analysis_task": {"state": "FINISHED"}}),
+        "monitors/M": (200, {"monitor": {"enabled": True}}),
+        "detectors/SA1": (200, {"detector": {"enabled": True}}),
+        "detectors/SA2": (200, {"detector": {"enabled": False}}),
+        "produccion-pozos-perfil/_explain": (200, {"produccion-pozos-perfil": {"transform_metadata": {"status": "started"}}}),
+        "dashboard:DASH": (200, {"found": True}),
+    })
+    v = main._verificar_en_el_cluster(
+        "http://x:9200", "a", "p", "produccion-pozos",
+        {"forecaster_ids": ["F1", "F2"], "detector_id": "D", "monitor_id": "M"},
+        {"detectores": {"uno": {"id": "SA1"}, "dos": {"id": "SA2"}}}, {"dashboard_id": "DASH"})
+    assert v["forecasting"] == {"ok": False, "detalle": "faltan 1 de 2 forecasters"}
+    assert v["anomalias"] == {"ok": True, "detalle": "detector en el cluster, análisis finished"}
+    assert v["alertas"] == {"ok": True, "detalle": "monitor prendido"}
+    assert v["security_analytics"] == {"ok": False, "detalle": "dos: apagado"}
+    assert v["perfil"] == {"ok": True, "detalle": "transform started"}
+    assert v["dashboard"] == {"ok": True, "detalle": "dashboard en Dashboards"}
+
+
+def test_lo_que_no_anda_se_dice(monkeypatch):
+    _cluster_verificable(monkeypatch, {
+        "detectors/D?task=true": (200, {"historical_analysis_task": {"state": "INIT_FAILURE"}}),
+        "monitors/M": (200, {"monitor": {"enabled": False}}),
+        "produccion-pozos-perfil/_explain": (200, {"produccion-pozos-perfil": {
+            "transform_metadata": {"status": "failed", "failure_reason": "Failed to index the documents"}}}),
+        "dashboard:DASH": (200, {"found": False}),
+    })
+    v = main._verificar_en_el_cluster("http://x:9200", "a", "p", "produccion-pozos",
+                                      {"detector_id": "D", "monitor_id": "M"}, {}, {"dashboard_id": "DASH"})
+    assert v["anomalias"] == {"ok": False, "detalle": "el análisis histórico falló"}
+    assert v["alertas"] == {"ok": False, "detalle": "el monitor está apagado"}
+    assert v["perfil"] == {"ok": False, "detalle": "el transform falló: Failed to index the documents"}
+    assert v["dashboard"]["ok"] is False
+    # Un transform que no existe: `_explain` contesta 200 con un texto.
+    _cluster_verificable(monkeypatch, {"produccion-pozos-perfil/_explain": (200, {"produccion-pozos-perfil": "Failed to search"})})
+    v = main._verificar_en_el_cluster("http://x:9200", "a", "p", "produccion-pozos", {"detector_id": "D"}, {}, {})
+    assert v["perfil"] == {"ok": False, "detalle": "el transform no está en el cluster"}
+    assert v["anomalias"] == {"ok": False, "detalle": "el detector no está en el cluster"}
+
+
+def test_el_analista_y_lo_que_el_caso_no_tiene(monkeypatch):
+    _cluster_verificable(monkeypatch, {"internalusers/analista-transacciones-billetera": (200, {})})
+    v = main._verificar_en_el_cluster("http://x:9200", "a", "p", "transacciones-billetera", {"agent_id": "A"}, {}, {})
+    assert v == {"analista": {"ok": True, "detalle": "usuario en el cluster"}}, "solo lo que el caso tiene"
+    # Antes de provisionar (sin IDs) no se comprueba nada.
+    assert main._verificar_en_el_cluster("http://x:9200", "a", "p", "transacciones-billetera", {}, {}, {}) == {}
+
+
+def test_la_verificacion_viaja_con_los_numeros(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    _cluster_falso(monkeypatch, tmp_path, {"produccion-pozos": {"detector_id": "D"}}, pipelines={"produccion-pozos": {}})
+    monkeypatch.setattr(main, "_top_anomalias", lambda *a: (0, [], ""))
+    monkeypatch.setattr(main, "_estado_historico", lambda *a, **k: "FINISHED")
+    monkeypatch.setattr(main, "_os_req", lambda *a, **k: None)
+    monkeypatch.setattr(main, "_verificar_en_el_cluster", lambda *a: {"anomalias": {"ok": True, "detalle": "x"}})
+    d = TestClient(main.app).get("/api/v1/plugins/numeros?slug=produccion-pozos").json()
+    assert d["verificado"] == {"anomalias": {"ok": True, "detalle": "x"}}
+    # Si la verificación se rompe, los números igual llegan.
+    monkeypatch.setattr(main, "_verificar_en_el_cluster", lambda *a: 1 / 0)
+    d = TestClient(main.app).get("/api/v1/plugins/numeros?slug=produccion-pozos").json()
+    assert "verificado" not in d and d["anomalias"]["total"] == 0
+
+
 def test_la_vista_previa_usa_el_mismo_codigo():
     from fastapi.testclient import TestClient
     d = TestClient(main.app).get("/api/v1/dev/plugins-preview?slugs=siem,produccion-pozos,no-existe").json()
@@ -424,6 +506,12 @@ check('eventos de seguridad', numeroDePlugin('seguridad:x', { eventos: 1842 }, '
 check('entidades del perfil', numeroDePlugin('perfil', { entidades: 1 }, 's').includes('<strong>1</strong> fila en el perfil'));
 check('la consulta más lenta', numeroDePlugin('insights', { latencia_ms: 1840 }, '').includes('<strong>1.840 ms</strong>'));
 check('sin número, nada', numeroDePlugin('forecast:F', undefined, 's') === '');
+// Lo comprobado en el cluster.
+check('cada tarjeta, su lugar para la verificación', det.includes('<div class="plug__verif" data-verif="forecasting"></div>')
+  && !det.includes('data-verif="perfil"'), det);
+check('comprobado', verificacionHTML({ ok: true, detalle: 'monitor prendido' }) === '<svg data-i="check"></svg> Comprobado en el cluster: monitor prendido');
+check('lo que falla', verificacionHTML({ ok: false, detalle: 'el <monitor> está apagado' }).includes('<svg data-i="alert-triangle"></svg> En el cluster: el &lt;monitor&gt; está apagado'));
+check('sin verificar, nada', verificacionHTML(undefined) === '');
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """

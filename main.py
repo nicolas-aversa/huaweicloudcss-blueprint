@@ -7312,6 +7312,88 @@ def numeros_de_plugins(slug: str = "") -> dict:
             fuera["perfil"] = {"entidades": int(r.json()["count"]) if _resp_ok(r) else None}
         except (ValueError, KeyError, TypeError):
             fuera["perfil"] = {"entidades": None}
+    try:
+        fuera["verificado"] = _verificar_en_el_cluster(base, user, password, slug, ids, reg, entry)
+    except Exception as exc:  # noqa: BLE001 — sin verificación, los números igual llegan
+        print(f"[plugins] verificación de '{slug}' falló: {exc!r}")
+    return fuera
+
+
+def _leer(base: str, user: str, password: str, ruta: str) -> "tuple[dict | None, str]":
+    """(cuerpo, "") si el objeto existe; (None, motivo) si no."""
+    r = _os_req("GET", f"{base}/{ruta}", user, password, timeout=20)
+    if r is not None and r.status_code == 404:
+        return None, "no está en el cluster"
+    if not _resp_ok(r):
+        return None, f"no se pudo leer ({_resp_motivo(r)[:120]})"
+    try:
+        return (r.json() or {}), ""
+    except ValueError:
+        return {}, ""
+
+
+def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids: dict,
+                             seguridad_reg: dict, entry: dict) -> dict:
+    """Lo que la provisión dijo que creó, comprobado en el cluster: que cada
+    objeto exista y esté andando. `{plugin: {ok, detalle}}`; solo los que el
+    caso tiene. La tarjeta de Plugins lo muestra al lado de su estado."""
+    import accesos
+    import perfiles
+
+    fuera: dict = {}
+
+    def marcar(plugin: str, ok: bool, detalle: str) -> None:
+        fuera[plugin] = {"ok": ok, "detalle": detalle}
+
+    fcs = ids.get("forecaster_ids") or ([ids["forecaster_id"]] if ids.get("forecaster_id") else [])
+    if fcs:
+        faltan = [f for f in fcs if _leer(base, user, password, f"_plugins/_forecast/forecasters/{f}")[0] is None]
+        marcar("forecasting", not faltan, f"faltan {len(faltan)} de {len(fcs)} forecasters" if faltan
+               else f"{len(fcs)} forecaster{'s' if len(fcs) != 1 else ''} en el cluster")
+    if ids.get("detector_id"):
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_anomaly_detection/detectors/{ids['detector_id']}?task=true")
+        estado = str(((cuerpo or {}).get("historical_analysis_task") or {}).get("state") or "")
+        if cuerpo is None:
+            marcar("anomalias", False, f"el detector {motivo}")
+        elif estado in ("FAILED", "INIT_FAILURE"):
+            marcar("anomalias", False, "el análisis histórico falló")
+        else:
+            marcar("anomalias", True, "detector en el cluster" + (f", análisis {estado.lower()}" if estado else ""))
+    if ids.get("monitor_id"):
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_alerting/monitors/{ids['monitor_id']}")
+        prendido = ((cuerpo or {}).get("monitor") or {}).get("enabled")
+        marcar("alertas", bool(cuerpo is not None and prendido),
+               f"el monitor {motivo}" if cuerpo is None else ("monitor prendido" if prendido else "el monitor está apagado"))
+    if seguridad_reg.get("detectores"):
+        mal = []
+        for nombre, d in seguridad_reg["detectores"].items():
+            cuerpo, motivo = _leer(base, user, password, f"_plugins/_security_analytics/detectors/{d.get('id', '')}")
+            if cuerpo is None:
+                mal.append(f"{nombre}: {motivo}")
+            elif not ((cuerpo.get("detector") or {}).get("enabled", True)):
+                mal.append(f"{nombre}: apagado")
+        n = len(seguridad_reg["detectores"])
+        marcar("security_analytics", not mal, "; ".join(mal)[:300] if mal
+               else f"{n} detector{'es' if n != 1 else ''} prendido{'s' if n != 1 else ''}")
+    if _perfil_de(slug, entry) and (ids or fuera):
+        tid = perfiles.nombre_del_transform(slug)
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_transform/{tid}/_explain")
+        # Si no existe, `_explain` trae un texto en vez del objeto.
+        info = (cuerpo or {}).get(tid)
+        meta = (info.get("transform_metadata") or {}) if isinstance(info, dict) else {}
+        if not isinstance(info, dict):
+            marcar("perfil", False, "el transform no está en el cluster")
+        elif str(meta.get("status") or "").lower() == "failed":
+            marcar("perfil", False, f"el transform falló: {str(meta.get('failure_reason') or '')[:200]}")
+        else:
+            marcar("perfil", True, f"transform {str(meta.get('status') or 'creado').lower()}")
+    if _enmascarados_de(slug, entry) and (ids or fuera):
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_security/api/internalusers/{accesos.nombre_del_usuario(slug)}")
+        marcar("analista", cuerpo is not None, "usuario en el cluster" if cuerpo is not None else f"el usuario {motivo}")
+    if entry.get("dashboard_id"):
+        cuerpo, motivo = _leer(base, user, password, f".kibana/_doc/dashboard:{entry['dashboard_id']}")
+        encontrado = cuerpo is not None and (cuerpo or {}).get("found", True)
+        marcar("dashboard", bool(encontrado), "dashboard en Dashboards" if encontrado else f"el dashboard {motivo or 'no está'}")
     return fuera
 
 
