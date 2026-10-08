@@ -1365,6 +1365,7 @@ def create_custom_case(request: dict) -> dict:
                 "seguridad": request.get("seguridad"),
                 "excluir": request.get("excluir") or [],
                 "retencion_dias": request.get("retencion_dias") or 0,
+                "volumen": request.get("volumen") or {},
                 "familia": request.get("familia", ""),
                 "familia_label": request.get("familia_label", ""),
             },
@@ -1679,6 +1680,26 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         inicio_registro=(perfil.inicio_registro if perfil is not None else ""),
         seguridad=propuesta,
     )
+
+
+class DimensionarRequest(BaseModel):
+    bytes_por_evento: int = Field(default=0, ge=0, le=10_000_000)
+    eventos_por_dia: int = Field(default=0, ge=0, le=1_000_000_000_000)
+    retencion_dias: int = Field(default=0, ge=0, le=36500)
+    alta_disponibilidad: bool = True
+
+
+@app.post("/api/v1/onboarding/dimensionar", tags=["onboarding"],
+          summary="Cuánto cluster necesita este dataset en producción")
+def dimensionar_endpoint(request: DimensionarRequest) -> dict:
+    """Nodos, flavor, disco y shards para el volumen que diga el cliente, con
+    los supuestos a la vista (ver dimensionamiento.py)."""
+    import ciclo_de_vida as cdv
+    import dimensionamiento
+
+    d = dimensionamiento.dimensionar(request.bytes_por_evento, request.eventos_por_dia,
+                                     cdv.retencion(request.retencion_dias), request.alta_disponibilidad)
+    return {**d, "en_palabras": dimensionamiento.en_palabras(d)}
 
 
 class PlanDelClusterRequest(BaseModel):

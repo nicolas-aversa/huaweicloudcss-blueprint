@@ -1876,6 +1876,17 @@
     .plan-cluster__item.is-off strong, .plan-cluster__item.is-apagado strong { color: var(--text-muted); }
     .plan-cluster__switch { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; margin-top: 2px; }
     .plan-cluster__global { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    .plan-dim { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; padding: 10px 12px;
+                border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); font-size: var(--fs-sm); }
+    .plan-dim__titulo { display: inline-flex; align-items: center; gap: 6px; }
+    .plan-dim__titulo .icon { width: 14px; height: 14px; color: var(--accent); }
+    .plan-dim__campo { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--fs-xs); }
+    .plan-dim__eventos { width: 130px; padding: 3px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
+    .plan-dim__ha { accent-color: var(--accent); }
+    .plan-dim__resultado { flex: 1 1 100%; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-muted); }
+    .plan-dim__reco { font-size: var(--fs-sm); color: var(--text-primary); font-weight: var(--fw-medium); }
+    .plan-dim__supuestos { display: inline-flex; align-items: center; gap: 4px; cursor: help; }
+    .plan-dim__supuestos .icon { width: 12px; height: 12px; }
     .plan-cluster__retencion { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-secondary); }
     .plan-cluster__dias { width: 72px; padding: 2px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
     .mapping-marca input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
@@ -3996,6 +4007,15 @@
           state.planExcluidos = [...fuera];
           e.currentTarget.closest('.plan-cluster__item')?.classList.toggle('is-apagado', !e.currentTarget.checked);
         }));
+        const volumen = () => {
+          const eventos = Math.round(Number(lugar.querySelector('.plan-dim__eventos')?.value || 0));
+          state.planVolumen = { eventos_por_dia: eventos > 0 ? eventos : 0,
+                                alta_disponibilidad: !!lugar.querySelector('.plan-dim__ha')?.checked };
+          calcularDimensionamiento(lugar);
+        };
+        lugar.querySelector('.plan-dim__eventos')?.addEventListener('change', volumen);
+        lugar.querySelector('.plan-dim__ha')?.addEventListener('change', volumen);
+        calcularDimensionamiento(lugar);
         lugar.querySelector('.plan-cluster__dias')?.addEventListener('change', (e) => {
           const dias = Math.round(Number(e.currentTarget.value));
           state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;
@@ -4037,7 +4057,48 @@
         </summary>
         <ul class="plan-cluster__lista">${propios.map(fila).join('')}</ul>
         <p class="plan-cluster__global">Y para todo el cluster: ${items.filter(delCluster).map(i => escapeHtml(i.titulo)).join(' · ')}.</p>
+        ${dimensionamientoHTML()}
       </details>`;
+    }
+    // Para producción: cuánto cluster hace falta con el volumen del cliente.
+    // Los bytes por evento salen de la muestra; el resto lo dice el cliente.
+    function bytesPorEvento() {
+      const lineas = String(state.logFileContent || state.rawLog || '').split(/\r?\n/).filter(l => l.trim()).slice(0, 2000);
+      if (!lineas.length) return 0;
+      const enc = new TextEncoder();
+      return Math.round(lineas.reduce((t, l) => t + enc.encode(l).length, 0) / lineas.length);
+    }
+    function dimensionamientoHTML() {
+      const v = state.planVolumen || {};
+      return `<div class="plan-dim">
+          <strong class="plan-dim__titulo">${icon('database')} Para producción</strong>
+          <label class="plan-dim__campo">Eventos por día
+            <input type="number" class="plan-dim__eventos" min="0" step="1000" placeholder="p. ej. 5000000"
+              value="${v.eventos_por_dia || ''}" aria-label="Eventos por día"></label>
+          <label class="plan-dim__campo"><input type="checkbox" class="plan-dim__ha" ${v.alta_disponibilidad === false ? '' : 'checked'}> Alta disponibilidad</label>
+          <div class="plan-dim__resultado" aria-live="polite">${v.eventos_por_dia ? '' : 'Con el volumen diario del cliente, la plataforma recomienda nodos, disco y shards.'}</div>
+        </div>`;
+    }
+    async function calcularDimensionamiento(lugar) {
+      const destino = lugar.querySelector('.plan-dim__resultado');
+      const v = state.planVolumen || {};
+      if (!destino || !v.eventos_por_dia) return;
+      try {
+        const res = await fetch('/api/v1/onboarding/dimensionar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bytes_por_evento: bytesPorEvento(), eventos_por_dia: v.eventos_por_dia,
+                                 retencion_dias: state.planRetencion || 0, alta_disponibilidad: v.alta_disponibilidad !== false }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const d = await res.json();
+        destino.innerHTML = `<span class="plan-dim__reco">${escapeHtml(d.en_palabras)}</span>`
+          + `<span class="plan-dim__detalle">~${d.gb_por_dia.toLocaleString('es-AR')} GB por día · ${d.gb_de_disco.toLocaleString('es-AR')} GB de disco`
+          + `${d.replicas ? ' con la réplica' : ''} · pico de ~${d.eventos_por_seg_pico.toLocaleString('es-AR')} eventos/s · `
+          + `${d.bytes_por_evento.toLocaleString('es-AR')} bytes por evento (de la muestra)</span>`
+          + `<span class="plan-dim__supuestos" title="${escapeHtml(d.supuestos.join(' · '))}">${icon('info')} Es una estimación: supuestos</span>`;
+      } catch (_err) {
+        destino.textContent = 'No se pudo calcular.';
+      }
     }
     function renderMappingTable(fields) {
       const container = document.getElementById('mapping-table');
@@ -4882,6 +4943,7 @@
             seguridad: state.seguridad || null,
             excluir: state.planExcluidos || [],
             retencion_dias: state.planRetencion || 0,
+            volumen: state.planVolumen || {},
             log_content: state.logFileContent || '',
             // El nombre con que se subió: así se guarda y así llega al bucket.
             log_filename: state.logFileName || '',
@@ -4954,7 +5016,7 @@
             label: `${label} · ${nombreDeFuente(f.logFileName)}`.slice(0, 60),
             sample: f.rawLog || '', filter_code: f.filterCode || '', fields: f.fields || [],
             questions: f.preguntas || [], seguridad: f.seguridad || null, excluir: f.planExcluidos || [],
-            retencion_dias: state.planRetencion || 0,
+            retencion_dias: state.planRetencion || 0, volumen: state.planVolumen || {},
             log_content: f.logFileContent || '', log_filename: f.logFileName || '',
           }),
         });

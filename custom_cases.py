@@ -286,6 +286,17 @@ def front_entries() -> list[dict]:
 
 
 # ── Escritura ────────────────────────────────────────────────────────────────
+def _volumen(valor) -> dict:
+    """`{eventos_por_dia, alta_disponibilidad}` del paso 2, o vacío."""
+    if not isinstance(valor, dict):
+        return {}
+    try:
+        eventos = max(0, min(int(valor.get("eventos_por_dia") or 0), 1_000_000_000_000))
+    except (TypeError, ValueError):
+        eventos = 0
+    return {"eventos_por_dia": eventos, "alta_disponibilidad": bool(valor.get("alta_disponibilidad", True))} if eventos else {}
+
+
 def _retencion(valor) -> int:
     """Los días de retención del paso 2 (0 = el valor por defecto)."""
     try:
@@ -383,6 +394,8 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
         "seguridad": meta.get("seguridad") if isinstance(meta.get("seguridad"), dict) else None,
         "excluir": [str(x) for x in (meta.get("excluir") or []) if isinstance(x, str)][:10],
         "retencion_dias": _retencion(meta.get("retencion_dias")),
+        # Lo que dijo el cliente para dimensionar el cluster de producción.
+        "volumen": _volumen(meta.get("volumen")),
         "familia": slugify(str(meta.get("familia") or "")) if meta.get("familia") else "",
         "familia_label": str(meta.get("familia_label") or "").strip()[:60],
         # Solo los casos con dataset se pre-cargan en OBS; los `live` leen de la

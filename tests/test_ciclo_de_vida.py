@@ -95,7 +95,7 @@ def test_la_retencion_viaja_del_paso_2_al_entorno():
     assert '"retencion_dias": case.retencion_dias or (custom_cases.get_case(case.slug) or {}).get("retencion_dias") or 0,' in src
     assert '"retencion_dias": request.retencion_dias or 0,' in src
     html = _INDEX.read_text(encoding="utf-8")
-    assert html.count("retencion_dias: state.planRetencion || 0") == 4, "el plan, el caso (una o varias fuentes) y el deploy"
+    assert html.count("retencion_dias: state.planRetencion || 0") == 5,         "el plan, el caso (una o varias fuentes), el deploy y el dimensionamiento"
 
 
 def test_el_caso_guardado_conserva_la_retencion():
