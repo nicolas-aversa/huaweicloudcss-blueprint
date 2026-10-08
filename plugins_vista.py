@@ -29,6 +29,7 @@ APP_REPORTING = "reports-dashboards"
 
 # Estado de una tarjeta: cómo quedó lo que se provisionó.
 OK, PARCIAL, FALLA, EN_CURSO, EXCLUIDO = "ok", "parcial", "falla", "en_curso", "excluido"
+SIN_PROBAR = "sin_probar"
 
 
 def base_de_dashboards(url: str) -> str:
@@ -50,9 +51,12 @@ def link(base: str, app: str, ruta: str = "") -> str:
 
 def _tarjeta(plugin: str, titulo: str, que: str, estado: str, motivo: str = "",
              filas: "list[dict] | None" = None, links: "list[dict] | None" = None,
-             numero: str = "") -> dict:
-    return {"plugin": plugin, "titulo": titulo, "que": que, "estado": estado, "motivo": motivo,
-            "filas": filas or [], "links": [x for x in links or [] if x.get("url")], "numero": numero}
+             numero: str = "", accion: "dict | None" = None) -> dict:
+    t = {"plugin": plugin, "titulo": titulo, "que": que, "estado": estado, "motivo": motivo,
+         "filas": filas or [], "links": [x for x in links or [] if x.get("url")], "numero": numero}
+    if accion:
+        t["accion"] = accion
+    return t
 
 
 def _estado_de_backtest(texto: str) -> tuple[str, str]:
@@ -322,7 +326,8 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
     return fuera
 
 
-def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dict | None" = None) -> list[dict]:
+def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dict | None" = None,
+                         embeddings: "dict | None" = None) -> list[dict]:
     """Lo que es de todo el cluster, no de un caso."""
     import capabilities as caps
 
@@ -346,6 +351,19 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
         fuera.append(_tarjeta("text2viz", "Text to visualization",
                               "Arma el gráfico de cada respuesta del asistente a partir de su consulta.",
                               OK if ok else FALLA, "" if ok else text2viz.get("motivo", "")))
+    probar = {"id": "probar_embeddings", "texto": "Probar de nuevo" if embeddings else "Probarlo ahora"}
+    if embeddings is None:
+        fuera.append(_tarjeta("embeddings", "Búsqueda semántica (embeddings en el cluster)",
+                              "MaaS no tiene un modelo de embeddings: la búsqueda semántica depende de que el CSS "
+                              "deje correr uno adentro. La prueba baja un modelo multilingüe, lo usa y lo borra "
+                              "(tarda unos minutos).", SIN_PROBAR, accion=probar))
+    else:
+        ok = bool(embeddings.get("ok"))
+        fuera.append(_tarjeta("embeddings", "Búsqueda semántica (embeddings en el cluster)",
+                              (f"El cluster corre un modelo de embeddings ({embeddings.get('dimensiones')} dimensiones): "
+                               "se puede sumar búsqueda semántica.") if ok else
+                              "Este CSS no deja correr un modelo de embeddings adentro: la búsqueda queda por palabras.",
+                              OK if ok else FALLA, "" if ok else embeddings.get("motivo", ""), accion=probar))
     fuera.append(_tarjeta("query_insights", "Query Insights",
                           "Las consultas más pesadas del cluster (latencia, CPU, memoria), sin configurar nada.", OK,
                           links=[{"texto": "Ver las consultas", "url": link(base, APP_INSIGHTS, "/queryInsights")}],

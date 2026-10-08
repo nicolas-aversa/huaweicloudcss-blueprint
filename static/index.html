@@ -6638,7 +6638,7 @@
     // la demo. Las tarjetas vienen armadas en /terraform/status (plugins_vista.py)
     // y el número de cada una se pide al elegir el caso.
     const _ESTADO_PLUGIN = { ok: ['Listo', 'sev--ok'], parcial: ['Parcial', 'sev--high'], falla: ['Falló', 'sev--critical'],
-                             en_curso: ['En curso', 'sev--low'], excluido: ['Excluido', ''] };
+                             en_curso: ['En curso', 'sev--low'], excluido: ['Excluido', ''], sin_probar: ['Sin probar', 'sev--low'] };
     const _nPlugins = (tarjetas) => (Array.isArray(tarjetas) ? tarjetas : []).filter(t => t.estado !== 'excluido').length;
     function pluginsHTML(plugins) {
       const casos = Object.keys(plugins || {}).filter(s => s !== '_cluster' && _nPlugins(plugins[s]));
@@ -6680,7 +6680,8 @@
           + (filas ? `<ul class="plug__filas">${filas}</ul>` : '')
           + (t.numero ? `<div class="plug__numero" data-numero="${escapeHtml(t.numero)}"></div>` : '')
           + (t.estado !== 'excluido' ? `<div class="plug__verif" data-verif="${escapeHtml(t.plugin)}"></div>` : '')
-          + (links ? `<div class="plug__links">${links}</div>` : '')
+          + (links || t.accion ? `<div class="plug__links">${links}${t.accion
+            ? `<button type="button" class="btn btn-secondary btn-sm plug__accion" data-accion="${escapeHtml(t.accion.id)}">${icon('play')} ${escapeHtml(t.accion.texto)}</button>` : ''}</div>` : '')
           + `</article>`;
       }).join('')}</div>`;
     }
@@ -6766,6 +6767,24 @@
         el.classList.toggle('plug__verif--ok', !!(v && v.ok));
         el.classList.toggle('plug__verif--mal', !!(v && !v.ok));
       });
+    }
+    // ¿Corre embeddings el cluster? Tarda: baja un modelo, lo usa y lo borra.
+    async function probarEmbeddings(btn) {
+      const tarjeta = btn.closest('.plug');
+      btn.disabled = true;
+      const original = btn.innerHTML;
+      btn.innerHTML = `${icon('clock')} Probando… (unos minutos)`;
+      try {
+        const res = await fetch('/api/v1/plugins/probar-embeddings', { method: 'POST' });
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        toast(d.reason, d.ok ? 'success' : 'info');
+        await hydrateActiveEnv();   // la tarjeta, con el resultado
+      } catch (err) {
+        if (tarjeta) toast(`No se pudo probar: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
     }
     async function verPlugins(btn) {
       const destino = document.getElementById('infra-plugins-detalle');
@@ -8449,6 +8468,8 @@
         if (caso) return verPlugins(caso);
         const explicar = e.target.closest('.anomalia__explicar');
         if (explicar) return explicarAnomalia(explicar);
+        const accion = e.target.closest('.plug__accion[data-accion="probar_embeddings"]');
+        if (accion) return probarEmbeddings(accion);
         // El guion: ir a la tarjeta del paso, o hacerle la pregunta al asistente.
         const ir = e.target.closest('.guion__ir');
         if (ir) {

@@ -7618,6 +7618,88 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
     return {**fuera, **pr.serie(reales, horizonte, ancla, paso)}
 
 
+# ── ¿Corre embeddings el cluster? ───────────────────────────────────────────
+# MaaS no tiene un modelo de embeddings: la búsqueda semántica (y un RAG que
+# entienda sinónimos) depende de que el CSS deje correr uno adentro. Se prueba
+# con un modelo preentrenado multilingüe y se deja todo como estaba.
+MODELO_DE_EMBEDDINGS = {"name": "huggingface/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                        "version": "1.0.1", "model_format": "TORCH_SCRIPT"}
+_EMBEDDINGS_ESPERA_S = 5.0
+_EMBEDDINGS_INTENTOS = 72          # ~6 minutos: el registro baja el modelo (~400 MB)
+
+
+def _esperar_tarea(base: str, user: str, password: str, task_id: str) -> "tuple[str, str]":
+    """(model_id, "") cuando la tarea de ml-commons termina; ("", motivo) si falla."""
+    for i in range(_EMBEDDINGS_INTENTOS):
+        r = _os_req("GET", f"{base}/_plugins/_ml/tasks/{task_id}", user, password, timeout=15)
+        try:
+            cuerpo = r.json() or {} if _resp_ok(r) else {}
+        except ValueError:
+            cuerpo = {}
+        estado = cuerpo.get("state")
+        if estado == "COMPLETED":
+            return str(cuerpo.get("model_id") or ""), ""
+        if estado in ("FAILED", "COMPLETED_WITH_ERROR"):
+            return "", str(cuerpo.get("error") or estado)[:300]
+        if i < _EMBEDDINGS_INTENTOS - 1:
+            time.sleep(_EMBEDDINGS_ESPERA_S)
+    return "", "no terminó a tiempo"
+
+
+def _probar_embeddings(base: str, user: str, password: str) -> dict:
+    """Registra, despliega y usa el modelo; después lo borra. `{ok, paso,
+    reason, dimensiones}`: el paso donde falló dice por qué (registrar = el
+    cluster no baja el modelo, sin salida a internet; desplegar = memoria o
+    nodos de ML)."""
+    r = _os_req("POST", f"{base}/_plugins/_ml/models/_register", user, password, timeout=60,
+                json_body=MODELO_DE_EMBEDDINGS)
+    try:
+        tarea = str((r.json() or {}).get("task_id") or "") if _resp_ok(r) else ""
+    except ValueError:
+        tarea = ""
+    if not tarea:
+        return {"ok": False, "paso": "registrar", "reason": f"no se pudo registrar: {_resp_motivo(r)}"}
+    modelo, motivo = _esperar_tarea(base, user, password, tarea)
+    if not modelo:
+        return {"ok": False, "paso": "registrar",
+                "reason": f"el cluster no pudo bajar el modelo ({motivo}): ¿tiene salida a artifacts.opensearch.org?"}
+    try:
+        rd = _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_deploy", user, password, timeout=60)
+        tarea = str((rd.json() or {}).get("task_id") or "") if _resp_ok(rd) else ""
+        _, motivo = _esperar_tarea(base, user, password, tarea) if tarea else ("", _resp_motivo(rd))
+        if motivo:
+            return {"ok": False, "paso": "desplegar", "reason": f"se bajó pero no se pudo desplegar: {motivo}"}
+        rp = _os_req("POST", f"{base}/_plugins/_ml/_predict/text_embedding/{modelo}", user, password, timeout=60,
+                     json_body={"text_docs": ["¿Qué hago si un pozo queda caído?"], "return_number": True,
+                                "target_response": ["sentence_embedding"]})
+        try:
+            vector = ((((rp.json() or {}).get("inference_results") or [{}])[0].get("output") or [{}])[0]
+                      .get("data") or []) if _resp_ok(rp) else []
+        except (ValueError, AttributeError, IndexError):
+            vector = []
+        if not vector:
+            return {"ok": False, "paso": "predecir", "reason": f"se desplegó pero no devolvió embeddings: {_resp_motivo(rp)}"}
+        return {"ok": True, "paso": "", "dimensiones": len(vector),
+                "reason": f"el cluster corre embeddings ({len(vector)} dimensiones): se puede hacer búsqueda semántica"}
+    finally:
+        # La prueba no deja nada: el modelo ocupa memoria del nodo.
+        _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_undeploy", user, password, timeout=60)
+        _os_req("DELETE", f"{base}/_plugins/_ml/models/{modelo}", user, password, timeout=60)
+
+
+@app.post("/api/v1/plugins/probar-embeddings", tags=["capabilities"],
+          summary="Prueba si el cluster corre un modelo de embeddings adentro (puede tardar unos minutos)")
+def probar_embeddings() -> dict:
+    terraform_dir = _active_terraform_dir()
+    base, user, password = _cluster_del_entorno("embeddings")
+    res = _probar_embeddings(base, user, password)
+    audit.record("probar_embeddings", res["reason"][:200])
+    e = plugins_vista.estado_simple(res)
+    _guardar_estados(terraform_dir, "_cluster", {"embeddings": e and {**e, "paso": res.get("paso", ""),
+                                                                      "dimensiones": res.get("dimensiones", 0)}})
+    return res
+
+
 @app.get("/api/v1/plugins/numeros", tags=["capabilities"])
 def numeros_de_plugins(slug: str = "") -> dict:
     """El número clave de cada plugin de un caso, en vivo (o de todo el cluster,
@@ -9529,7 +9611,8 @@ def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: st
             fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(
                 agente=any((ids or {}).get("agent_id") for ids in caps_reg.values()),
                 text2viz=(estados.get("_cluster") or {}).get("text2viz") or {}, base=base,
-                canal=(estados.get("_cluster") or {}).get("canal") or {})
+                canal=(estados.get("_cluster") or {}).get("canal") or {},
+                embeddings=(estados.get("_cluster") or {}).get("embeddings"))
         return fuera
     except Exception as exc:  # noqa: BLE001
         print(f"[plugins] la vista no se pudo armar: {exc!r}")

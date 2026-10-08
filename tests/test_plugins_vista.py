@@ -152,10 +152,10 @@ def test_el_analista_dice_con_que_usuario_entrar():
 
 def test_lo_de_todo_el_cluster():
     t = {x["plugin"]: x for x in pv.tarjetas_del_cluster(agente=True, text2viz={"ok": False, "motivo": "sin key"}, base=BASE)}
-    assert list(t) == ["agente", "text2viz", "query_insights"]
+    assert list(t) == ["agente", "text2viz", "embeddings", "query_insights"]
     assert (t["text2viz"]["estado"], t["text2viz"]["motivo"]) == (pv.FALLA, "sin key")
     assert t["query_insights"]["links"][0]["url"] == BASE + "/app/query-insights-dashboards#/queryInsights"
-    assert [x["plugin"] for x in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="")] == ["query_insights"]
+    assert [x["plugin"] for x in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="")] == ["embeddings", "query_insights"]
 
 
 # ── Lo que queda guardado de cada provisión ─────────────────────────────────
@@ -301,7 +301,7 @@ def test_la_vista_se_arma_de_los_registros(monkeypatch, tmp_path):
     v = main._plugins_de_la_vista(tmp_path, registro, BASE + "/app/login")
     assert set(v) == {"produccion-pozos", "_cluster"}, "un caso sin nada no aparece"
     assert v["produccion-pozos"][0]["links"][0]["url"] == BASE + "/app/dashboards#/view/DASH"
-    assert [t["plugin"] for t in v["_cluster"]] == ["agente", "text2viz", "query_insights"]
+    assert [t["plugin"] for t in v["_cluster"]] == ["agente", "text2viz", "embeddings", "query_insights"]
     # Si algo se rompe, /terraform/status igual responde (sin la vista).
     monkeypatch.setattr(main, "_read_estados", lambda td: 1 / 0)
     assert main._plugins_de_la_vista(tmp_path, registro, "") == {}
