@@ -247,14 +247,17 @@ def nombre_del_reporte(slug: str) -> str:
 
 def definicion_de_reporte(slug: str, dashboard_id: str, origen: str) -> dict[str, Any]:
     """`POST _plugins/_reports/definition`: el dashboard del caso en PDF, a
-    demanda (en Dashboards → Reporting, "Generar")."""
+    demanda (en Dashboards → Reporting, "Generar"). El backend del plugin
+    espera los nombres de sus enums (`Pdf`, `OnDemand`); "pdf" y "On demand"
+    son los de la interfaz de Dashboards, y con ellos CSS 3.4 respondía 400
+    ("No enum constant ...FileFormat.pdf")."""
     return {"reportDefinition": {
         "name": nombre_del_reporte(slug),
         "isEnabled": True,
         "source": {"description": f"El dashboard de {slug}, en PDF", "type": "Dashboard",
                    "origin": origen, "id": dashboard_id},
-        "format": {"duration": "PT8760H", "fileFormat": "pdf", "header": "", "footer": ""},
-        "trigger": {"triggerType": "On demand"},
+        "format": {"duration": "PT8760H", "fileFormat": "Pdf", "header": "", "footer": ""},
+        "trigger": {"triggerType": "OnDemand"},
     }}
 
 

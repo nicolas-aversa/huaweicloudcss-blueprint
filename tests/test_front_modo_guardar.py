@@ -153,30 +153,28 @@ def test_la_descripcion_de_un_paso_no_se_corta_a_68_caracteres():
     assert "max-width" not in regla[:regla.index("}")]
 
 
-def test_verificar_ingesta_distingue_en_pausa_de_sin_datos():
+def test_sin_documentos_distingue_en_pausa_de_sin_datos():
     """Con las pipelines en pausa, "Sin documentos… revisá el bucket y el
-    filtro" mandaba a buscar el problema donde no estaba: no habían arrancado."""
+    filtro" mandaba a buscar el problema donde no estaba: no habían arrancado.
+    Lo que decía el aviso de "Verificar ingesta" está en el title del chip."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("async function verificarIngesta(btn)")
-    fn = html[i:html.index("function buildDeployBodyFromStatus(", i)]
-    assert "en pausa, la ingesta no arrancó" in fn
-    assert "Iniciar ingesta con Logstash" in fn
-    assert "Logstash lee el bucket cada 60 s" in fn
-    assert "Revisá que el prefijo del bucket tenga objetos y que el filtro matchee" not in fn
-
     j = html.index("const chipDocs = (p) => {")
     chip = html[j:html.index("};", j)]
     assert "sin documentos (en pausa)" in chip, "en pausa, sin documentos no es un error"
+    assert "«Iniciar ingesta con Logstash» en Puesta en marcha" in chip
+    assert "Logstash lee el bucket cada 60 s" in chip
+    assert "verificarIngesta" not in html and "Verificar ingesta" not in html
 
 
-def test_verificar_ingesta_aparece_recien_con_algo_ingestando():
-    """Con todo en pausa, el botón estaba arriba de la puesta en marcha y se
-    tocaba antes de iniciar la ingesta, como si fuera el primer paso."""
+def test_los_documentos_se_cuentan_recien_con_algo_ingestando():
+    """Con todo en pausa, contar decía "sin documentos" de pipelines que ni
+    habían arrancado."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("const verificar = ")
+    i = html.index("const ingestaArrancada = ")
     bloque = html[i:html.index("const kpis = ", i)]
-    assert bloque.index("pipelines.some(p => p.active)") < bloque.index('id="infra-verify-btn"')
-    assert "${kpi('', 'Documentos'" in html and "'se cuentan al verificar la ingesta', verificar)" in html
+    assert bloque.index("pipelines.some(p => p.active)") < bloque.index('id="infra-docs-refresh"')
+    assert "'la ingesta todavía no arrancó'" in bloque
+    assert "${kpi('', 'Documentos', conDocs.length ? docsTotal.toLocaleString('es-AR') : '—', subDocs, actualizarDocs)}" in html
 
 
 def test_la_puesta_en_marcha_va_antes_que_las_pipelines():

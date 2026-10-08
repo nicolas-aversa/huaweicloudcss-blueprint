@@ -280,15 +280,16 @@ def test_la_tarjeta_del_entorno_muestra_si_entraron_documentos():
     fila = html[i:html.index("// Un paso de la secuencia de puesta en marcha", i)]
 
     assert "docs: chipDocs(p)," in fila, "la fila de la pipeline no muestra los documentos"
-    assert 'id="infra-verify-btn"' in fila
+    assert 'id="infra-docs-refresh"' in fila
     # Y una configuración que Logstash no pudo compilar no se ve como "En pausa".
     assert "Configuración inválida" in fila
     assert "p.config_status && p.config_status !== 'available'" in fila, \
         "el chip está pero el estado no se mira"
     assert "${rota(p)" in fila
     assert "sin documentos" in html, "una pipeline vacía tiene que decirlo"
-    # Y el botón tiene que estar cableado, no solo dibujado.
-    assert "'#infra-verify-btn')?.addEventListener('click'" in html
+    # Se cuentan solos al pintar, y el botón cuenta de nuevo.
+    assert "body.querySelector('#infra-docs-refresh')?.addEventListener('click'" in html
+    assert "if (ingestaArrancada) contarDocumentos();" in html
     assert "fetch('/api/v1/pipelines/health')" in html
 
 

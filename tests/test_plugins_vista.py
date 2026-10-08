@@ -506,6 +506,10 @@ check('cada fila con su estado, su número y su link', det.includes('<span class
 check('los links a Dashboards', det.includes('href="https://d/x" target="_blank" rel="noopener"><svg data-i="dashboard"></svg> Ver los forecasters</a>'), det);
 check('lo excluido, apagado', det.includes('class="plug plug--excluido" data-plugin="perfil"'), det);
 check('sin plugins', pluginsDetalleHTML([]).includes('no tiene plugins'));
+const largo = 'no se pudo crear el reporte: status 400: ' + '{"error":"x"}'.repeat(30);
+const conError = pluginsDetalleHTML([T('dashboard', 'ok', { filas: [{ texto: 'Reporte', estado: 'falla', detalle: largo }] })]);
+check('un error largo se corta, entero en el title', conError.includes('…</span></span>') && conError.includes(`title="${escapeHtml(largo)}"`)
+  && !conError.includes(`>${escapeHtml(largo)}<`), conError);
 // Los números.
 check('error bajo en verde', numeroDePlugin('forecast:F', { error_pct: 4.3 }, 's', 'ok').includes('sev--ok">error medio 4,3 %'));
 check('alto en rojo', numeroDePlugin('forecast:F', { error_pct: 93.5 }, 's', 'ok').includes('sev--critical'));
@@ -583,3 +587,48 @@ def test_la_matriz_esta_conectada():
     reabrir = "const abierto = state.pluginsCaso && [...body.querySelectorAll('.mtx__abrir')].find(b => b.dataset.slug === state.pluginsCaso);"
     assert vista.index("body.querySelector('#infra-plugins')?.addEventListener('click'") < vista.index(reabrir)
     assert "fetch('/api/v1/plugins/numeros' + (slug === '_cluster' ? '' : '?slug=' + encodeURIComponent(slug)))" in html
+
+
+def test_un_transform_fallado_se_rearranca(monkeypatch):
+    """Con el nodo saturado al provisionar, la pasada incremental no pudo
+    buscar y los perfiles quedaron en `failed` para siempre."""
+    pedidos = _cluster_verificable(monkeypatch, {
+        "produccion-pozos-perfil/_explain": (200, {"produccion-pozos-perfil": {"transform_metadata": {
+            "status": "failed", "failure_reason": "Failed to get the modified buckets in source indices"}}}),
+        "produccion-pozos-perfil/_stop": (200, {}), "produccion-pozos-perfil/_start": (200, {}),
+    })
+    v = main._verificar_en_el_cluster("http://x:9200", "a", "p", "produccion-pozos", {"detector_id": "D"}, {}, {})
+    assert v["perfil"] == {"ok": True, "detalle": "se rearrancó: había fallado (Failed to get the modified buckets in source indices)"}
+    rutas = [u for u in pedidos if "perfil/_st" in u]
+    assert rutas == ["http://x:9200/_plugins/_transform/produccion-pozos-perfil/_stop",
+                     "http://x:9200/_plugins/_transform/produccion-pozos-perfil/_start"], rutas
+
+
+def test_un_backtest_en_curso_se_rejuzga_al_mirar_el_caso(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    import plugins_vista as pv
+    guardado = {"forecasting": {"ok": True, "motivo": "", "ventana": {"interval_min": 30},
+                                "forecasters": [{"id": "F1", "nombre": "a", "estado": "EN_CURSO (INIT_TEST)"}]}}
+    escrito = []
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"ventas": {"forecaster_ids": ["F1"]}})
+    monkeypatch.setattr(main, "_read_estados", lambda td: {"ventas": guardado})
+    monkeypatch.setattr(main, "_guardar_estados", lambda td, slug, nuevo: escrito.append((slug, nuevo)))
+    monkeypatch.setattr(main, "_pronostico_de", lambda *a: {"error_pct": 4.0})
+    monkeypatch.setattr(main, "_verificar_en_el_cluster", lambda *a, **k: {})
+    monkeypatch.setattr(main, "_rejuzgar_backtests", lambda b, u, p, ids: {"ok": True, "forecaster_ids": ids,
+                                                                            "states": ["a=TEST_COMPLETE"], "note": "ok"})
+    d = TestClient(main.app).get("/api/v1/plugins/numeros?slug=ventas").json()
+    assert d["actualizado"] is True
+    slug, nuevo = escrito[0]
+    assert slug == "ventas" and nuevo["forecasting"]["forecasters"][0]["estado"] == "TEST_COMPLETE"
+    assert nuevo["forecasting"]["ventana"] == {"interval_min": 30}, "la ventana no se pierde"
+    # Lo que ya estaba juzgado no se vuelve a pedir.
+    escrito.clear()
+    guardado["forecasting"]["forecasters"][0]["estado"] = "TEST_COMPLETE"
+    monkeypatch.setattr(main, "_rejuzgar_backtests", lambda *a: (_ for _ in ()).throw(AssertionError("no")))
+    d = TestClient(main.app).get("/api/v1/plugins/numeros?slug=ventas").json()
+    assert "actualizado" not in d and not escrito
+    assert pv  # el módulo de la vista, el mismo que usa el endpoint

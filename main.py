@@ -6821,7 +6821,7 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
                       slug_actual: str = "") -> "tuple[str | None, dict]":
     """El agente conversacional de TODAS las fuentes (uno solo, multi-PPLTool),
     apuntado al Assistant, más text to visualization. `(agent_id, text2viz)`.
-    Deja el id en cada caso del registro que tenga los modelos."""
+    Deja el id en cada caso que consulta y en los que tienen los modelos."""
     import capabilities as caps
 
     agent_verticals = _fuentes_del_agente(base, user, password, terraform_dir, slug_actual)
@@ -6840,6 +6840,14 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
     for otros in registry.values():
         if otros.get("llm_model_id") or otros.get("agent_id"):
             otros["agent_id"] = agent_id
+    # Y en cada caso que el agente consulta (tiene su herramienta), no solo en
+    # los que ya tienen modelos: el chat ofrece los casos con agente, y con solo
+    # el primero anotado los demás aparecían de a uno, a medida que se
+    # provisionaban (en un entorno de 9 casos, once minutos).
+    for v in agent_verticals:
+        caso = str(v.get("tool_name") or "").removeprefix("PPLTool-")
+        if caso:
+            registry.setdefault(caso, {})["agent_id"] = agent_id
     _write_capabilities(terraform_dir, registry)
     print(f"[capabilities] agente registrado con {len(agent_verticals)} fuentes")
     return agent_id, t2v
@@ -7857,6 +7865,20 @@ def probar_embeddings() -> dict:
 RUTA_DE_SNAPSHOTS = "css-demos/snapshots"
 
 
+# Lo que CSS contesta cuando el cluster está en otra operación (un cambio de
+# configuración, una ruta, otro snapshot): no es un error de lo pedido.
+_CSS_OCUPADO = "CSS.0011"
+
+
+def _motivo_de_css(exc: Exception) -> str:
+    """El motivo de un error del SDK de CSS, en palabras. El crudo trae el
+    request_id y el JSON de Huawei; para CSS.0011 alcanza con decir qué pasa."""
+    crudo = str(exc)
+    if _CSS_OCUPADO in crudo:
+        return "el cluster tiene otra operación en curso en CSS (CSS.0011): probá de nuevo en unos minutos"
+    return crudo[:300]
+
+
 def _snapshots_del_entorno() -> "tuple[Any, str, str]":
     """(cliente, cluster_id, indices) del entorno activo, con los snapshots ya
     apuntados al bucket de demos. 4xx con el motivo si falta algo."""
@@ -7881,7 +7903,7 @@ def _snapshots_del_entorno() -> "tuple[Any, str, str]":
     except Exception as exc:  # noqa: BLE001 — el motivo de Huawei, a la vista
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail={"stage": "snapshots", "message": (
             f"No se pudo apuntar los snapshots a {bucket}/{RUTA_DE_SNAPSHOTS} con la agencia {agencia}: "
-            f"{str(exc)[:300]}")}) from exc
+            f"{_motivo_de_css(exc)}")}) from exc
     slugs = list(_read_pipelines_registry(terraform_dir))
     indices = ",".join(f"{s}-*" for s in slugs)
     return cliente, cluster["id"], indices
@@ -7896,7 +7918,7 @@ def listar_snapshots_de_demo() -> dict:
         lista = cliente.listar_snapshots(cluster_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail={"stage": "snapshots", "message": str(exc)[:300]}) from exc
+                            detail={"stage": "snapshots", "message": _motivo_de_css(exc)}) from exc
     return {"snapshots": sorted(lista, key=lambda s: str(s.get("creado") or ""), reverse=True), "indices": indices}
 
 
@@ -7911,7 +7933,7 @@ def guardar_snapshot_de_demo() -> dict:
         sid = cliente.crear_snapshot(cluster_id, nombre, indices, f"Datos de demo: {indices}"[:250])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail={"stage": "snapshots", "message": f"No se pudo crear: {str(exc)[:300]}"}) from exc
+                            detail={"stage": "snapshots", "message": f"No se pudo crear: {_motivo_de_css(exc)}"}) from exc
     audit.record("snapshot_demo", f"{nombre}: {indices}")
     return {"id": sid, "nombre": nombre, "indices": indices}
 
@@ -7926,7 +7948,7 @@ def restaurar_snapshot_de_demo(snapshot_id: str) -> dict:
         cliente.restaurar_snapshot(cluster_id, snapshot_id, cluster_id, indices)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail={"stage": "snapshots", "message": f"No se pudo restaurar: {str(exc)[:300]}"}) from exc
+                            detail={"stage": "snapshots", "message": f"No se pudo restaurar: {_motivo_de_css(exc)}"}) from exc
     audit.record("snapshot_demo_restaurar", f"{snapshot_id}: {indices}")
     return {"restaurando": snapshot_id, "indices": indices}
 
@@ -7967,6 +7989,25 @@ def numeros_de_plugins(slug: str = "") -> dict:
             fuera[f"forecast:{fc_id}"] = {"error_pct": p.get("error_pct"), "error": p.get("error", "")}
         except Exception as exc:  # noqa: BLE001
             fuera[f"forecast:{fc_id}"] = {"error_pct": None, "error": repr(exc)[:200]}
+    # Un backtest que la provisión dejó "en curso" (o sin arrancar) se vuelve a
+    # juzgar al mirar el caso: si terminó, la tarjeta deja de decir "en curso"
+    # (antes se quedaba así hasta volver a provisionar). Solo si cambió, se
+    # guarda y la vista se repinta (`actualizado`).
+    est_fc = (_read_estados(terraform_dir).get(slug) or {}).get("forecasting") or {}
+    fc_ids = ids.get("forecaster_ids") or ([ids["forecaster_id"]] if ids.get("forecaster_id") else [])
+    if fc_ids and any(str(f.get("estado") or "").startswith((FORECAST_EN_CURSO, "no arrancó"))
+                      for f in est_fc.get("forecasters") or []):
+        try:
+            res = _rejuzgar_backtests(base, user, password, fc_ids)
+            nuevo = plugins_vista.estados_desde_resultado({"forecast": res}).get("forecasting")
+            if nuevo and [f.get("estado") for f in nuevo.get("forecasters") or []] \
+                    != [f.get("estado") for f in est_fc.get("forecasters") or []]:
+                if est_fc.get("ventana"):
+                    nuevo.setdefault("ventana", est_fc["ventana"])
+                _guardar_estados(terraform_dir, slug, {"forecasting": nuevo})
+                fuera["actualizado"] = True
+        except Exception as exc:  # noqa: BLE001 — sin rejuzgar, los números igual llegan
+            print(f"[plugins] no se pudieron rejuzgar los backtests de '{slug}': {exc!r}")
     if ids.get("detector_id"):
         total, top, error = _top_anomalias(base, user, password, ids["detector_id"], 1)
         fuera["anomalias"] = {"total": total, "top": top[0] if top else None, "error": error,
@@ -8023,6 +8064,17 @@ def _leer(base: str, user: str, password: str, ruta: str) -> "tuple[dict | None,
         return {}, ""
 
 
+def _rearrancar(base: str, user: str, password: str, ruta: str) -> bool:
+    """Un job continuo (el Transform del perfil, el rollup) que falló queda
+    parado para siempre. Lo visto en CSS 3.4: con el nodo saturado al
+    provisionar (100.000 búsquedas rechazadas), la pasada incremental del
+    minuto siguiente no pudo buscar ("Failed to get the modified buckets in
+    source indices") y los tres perfiles quedaron en `failed` con los datos de
+    la primera pasada. Se rearranca desde su último checkpoint."""
+    _os_req("POST", f"{base}/{ruta}/_stop", user, password, timeout=20)
+    return _resp_ok(_os_req("POST", f"{base}/{ruta}/_start", user, password, timeout=20))
+
+
 def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids: dict,
                              seguridad_reg: dict, entry: dict, estados: "dict | None" = None) -> dict:
     """Lo que la provisión dijo que creó, comprobado en el cluster: que cada
@@ -8075,7 +8127,11 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
         if not isinstance(info, dict):
             marcar("perfil", False, "el transform no está en el cluster")
         elif str(meta.get("status") or "").lower() == "failed":
-            marcar("perfil", False, f"el transform falló: {str(meta.get('failure_reason') or '')[:200]}")
+            motivo_f = str(meta.get("failure_reason") or "")[:200]
+            if _rearrancar(base, user, password, f"_plugins/_transform/{tid}"):
+                marcar("perfil", True, f"se rearrancó: había fallado ({motivo_f})")
+            else:
+                marcar("perfil", False, f"el transform falló: {motivo_f}")
         else:
             marcar("perfil", True, f"transform {str(meta.get('status') or 'creado').lower()}")
     if _enmascarados_de(slug, entry) and (ids or fuera):
@@ -8095,7 +8151,11 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
         if not isinstance(info, dict):
             marcar("rollup", False, "el rollup no está en el cluster")
         elif str(meta.get("status") or "").lower() == "failed":
-            marcar("rollup", False, f"el rollup falló: {str(meta.get('failure_reason') or '')[:200]}")
+            motivo_r = str(meta.get("failure_reason") or "")[:200]
+            if _rearrancar(base, user, password, f"_plugins/_rollup/jobs/{rid}"):
+                marcar("rollup", True, f"se rearrancó: había fallado ({motivo_r})")
+            else:
+                marcar("rollup", False, f"el rollup falló: {motivo_r}")
         else:
             marcar("rollup", True, f"rollup {str(meta.get('status') or 'creado').lower()}")
     if entry.get("dashboard_id"):

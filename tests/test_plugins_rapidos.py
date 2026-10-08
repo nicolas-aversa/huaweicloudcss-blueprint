@@ -316,3 +316,23 @@ def test_con_force_todo_se_baja_una_vez_antes_de_crear(monkeypatch):
     assert len(bajadas) == 2 and max(bajadas) < min(creadas), orden
     assert all(not orden[i][2] for i in creadas), "ninguna pasada vuelve a bajar"
     assert ("registro", {"siem": {}, "ventas-ecommerce": {}}) in orden
+
+
+def test_el_agente_queda_en_todos_los_casos_que_consulta(monkeypatch, tmp_path):
+    """El chat ofrece los casos con agente: anotado solo en el primero (el que
+    tenía los modelos), los demás aparecían de a uno a medida que se
+    provisionaban, aunque el agente ya los consultaba a todos."""
+    monkeypatch.setattr(main, "_fuentes_del_agente", lambda *a, **k: [
+        {"tool_name": "PPLTool-siem"}, {"tool_name": "PPLTool-ventas"}, {"tool_name": "PPLTool-pozos"}])
+    monkeypatch.setattr(main, "_search_ids", lambda *a, **k: [])
+    monkeypatch.setattr(main, "_ml_create", lambda *a, **k: "AG")
+    monkeypatch.setattr(main, "_set_os_chat_root_agent", lambda *a: True)
+    monkeypatch.setattr(main, "_provisionar_text2viz", lambda *a: {})
+    escrito = {}
+    monkeypatch.setattr(main, "_write_capabilities", lambda td, reg: escrito.update(reg))
+    import capabilities
+    monkeypatch.setattr(capabilities, "build_agent_system_instruction", lambda v: "")
+    monkeypatch.setattr(capabilities, "build_conversational_agent", lambda *a: {})
+    registro = {"siem": {"llm_model_id": "M", "ppl_model_id": "P"}}
+    assert main._registrar_agente("http://x", "a", "p", "KEY", tmp_path, registro, "P", "M")[0] == "AG"
+    assert {s: v.get("agent_id") for s, v in escrito.items()} == {"siem": "AG", "ventas": "AG", "pozos": "AG"}

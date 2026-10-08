@@ -506,6 +506,8 @@
       border-radius: var(--radius-md);
       font-size: var(--fs-base);
       margin-bottom: 16px;
+      /* Un motivo largo (la respuesta de Huawei, con JSON) se parte adentro. */
+      overflow-wrap: anywhere;
     }
 
     /* Hecho y error, en el mismo lenguaje que "trabajando" (.status-loading):
@@ -2308,6 +2310,9 @@
     .env-kpi__valor { font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); font-variant-numeric: tabular-nums; }
     .env-kpi__sub { font-size: var(--fs-sm); color: var(--text-muted); }
     .env-kpi__accion { grid-area: accion; margin: 0; }
+    .env-kpi__refrescar { padding: 6px; }
+    .env-kpi__refrescar .icon { width: 15px; height: 15px; }
+    .env-kpi__refrescar.is-girando .icon { animation: spin 1s linear infinite; }
 
     .cap-chart__armando { display: flex; align-items: center; gap: 6px; padding: 8px 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .cap-chart__armando .icon { width: 13px; height: 13px; animation: pulse 1.6s var(--ease) infinite; }
@@ -2387,6 +2392,9 @@
     .plug__fila { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) 0;
                   border-top: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
     .plug__fila-texto { flex: 1 1 140px; min-width: 0; }
+    /* Un estado largo (un error del cluster) se parte adentro de la tarjeta. */
+    .plug__fila > .sev { display: inline-block; max-width: 100%; overflow-wrap: anywhere; line-height: 1.4; }
+    .plug__motivo { overflow-wrap: anywhere; }
     .plug__ir { display: inline-flex; color: var(--text-muted); }
     .plug__ir:hover { color: var(--accent-hover); }
     .plug__numero { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
@@ -2979,7 +2987,7 @@
           <section class="hero">
             <span class="eyebrow eyebrow--muted">Tool de preventa · Huawei Cloud CSS</span>
             <h1 class="hero__title">Del log crudo a OpenSearch,<br><span class="accent">con IA, pronósticos y seguridad</span>.</h1>
-            <p class="hero__sub" id="home-hero-sub">El código lee la estructura y la IA entiende qué significa cada campo. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.</p>
+            <p class="hero__sub" id="home-hero-sub">El código lee la estructura y la IA entiende qué significa cada campo. Elegí un caso ya armado, o subí tus logs y guardalo como un caso nuevo.</p>
             <!-- La entrada al wizard son los dos caminos de abajo; acá solo
                  aparece el atajo a infraestructura cuando hay entorno activo. -->
             <div class="hero__actions">
@@ -2993,19 +3001,19 @@
             <article class="path">
               <div class="path__head">
                 <span class="path__icon"><svg class="icon"><use href="#ic-rocket"/></svg></span>
-                <h2 class="path__name">Datasets de ejemplo</h2>
+                <h2 class="path__name">Casos de ejemplo</h2>
               </div>
-              <p class="path__lead">Casos ya armados, listos para desplegar con dashboards, asistente y los plugins de OpenSearch.</p>
-              <button class="btn btn-primary path__cta" type="button" data-home-mode="demo">Ver los datasets <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
+              <p class="path__lead">Ya armados, listos para desplegar con dashboards, asistente y los plugins de OpenSearch.</p>
+              <button class="btn btn-primary path__cta" type="button" data-home-mode="demo">Ver los casos <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
 
             <article class="path">
               <div class="path__head">
                 <span class="path__icon"><svg class="icon"><use href="#ic-code"/></svg></span>
-                <h2 class="path__name">Dataset nuevo</h2>
+                <h2 class="path__name">Caso nuevo</h2>
               </div>
               <p class="path__lead">Traés tus logs y te mostramos qué va a tener tu cluster antes de desplegarlo.</p>
-              <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un dataset <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
+              <button class="btn btn-primary path__cta" type="button" data-home-mode="custom">Crear un caso <svg class="icon"><use href="#ic-arrow-right"/></svg></button>
             </article>
           </section>
 
@@ -6654,7 +6662,7 @@
         const res = await fetch('/api/v1/demo-snapshots/' + encodeURIComponent(btn.dataset.id) + '/restaurar', { method: 'POST' });
         const d = await res.json();
         if (!res.ok) throw detailError(d);
-        toast('Restaurando: en unos minutos verificá la ingesta y después provisioná los plugins.', 'success');
+        toast('Restaurando: en unos minutos actualizá el conteo de documentos y después provisioná los plugins.', 'success');
       } catch (err) { toast(`No se pudo restaurar: ${err.message}`, 'error'); btn.disabled = false; }
     }
     // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
@@ -6796,10 +6804,15 @@
       if (!(tarjetas || []).length) return '<div class="hallazgos__vacio">Este caso no tiene plugins provisionados.</div>';
       const ir = (url) => url
         ? `<a class="plug__ir" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Ver en Dashboards" aria-label="Ver en Dashboards">${icon('arrow-right')}</a>` : '';
+      // Un motivo largo (la respuesta cruda del cluster) se corta; entero, en el title.
+      const corto = (t, n = 160) => {
+        const x = String(t || '');
+        return x.length > n ? `<span title="${escapeHtml(x)}">${escapeHtml(x.slice(0, n - 1))}…</span>` : escapeHtml(x);
+      };
       return `<div class="plug-grid">${tarjetas.map(t => {
         const [texto, clase] = _ESTADO_PLUGIN[t.estado] || [t.estado, ''];
         const filas = (t.filas || []).map(f => `<li class="plug__fila"><span class="plug__fila-texto">${escapeHtml(f.texto)}</span>`
-          + `<span class="sev ${(_ESTADO_PLUGIN[f.estado] || [])[1] || ''}">${escapeHtml(f.detalle)}</span>`
+          + `<span class="sev ${(_ESTADO_PLUGIN[f.estado] || [])[1] || ''}">${corto(f.detalle)}</span>`
           + (f.numero ? `<span class="plug__numero" data-numero="${escapeHtml(f.numero)}" data-estado="${escapeHtml(f.estado || '')}"></span>` : '')
           + `${ir(f.url)}</li>`).join('');
         const links = (t.links || []).map(l =>
@@ -6807,7 +6820,7 @@
         return `<article class="plug${t.estado === 'excluido' ? ' plug--excluido' : ''}" data-plugin="${escapeHtml(t.plugin)}" tabindex="-1">`
           + `<div class="plug__head"><strong>${escapeHtml(t.titulo)}</strong><span class="sev ${clase}">${escapeHtml(texto)}</span></div>`
           + (t.que ? `<p class="plug__que">${escapeHtml(t.que)}</p>` : '')
-          + (t.motivo ? `<p class="plug__motivo">${escapeHtml(t.motivo)}</p>` : '')
+          + (t.motivo ? `<p class="plug__motivo">${corto(t.motivo, 240)}</p>` : '')
           + (filas ? `<ul class="plug__filas">${filas}</ul>` : '')
           + (t.numero ? `<div class="plug__numero" data-numero="${escapeHtml(t.numero)}"></div>` : '')
           + (t.estado !== 'excluido' ? `<div class="plug__verif" data-verif="${escapeHtml(t.plugin)}"></div>` : '')
@@ -6937,6 +6950,8 @@
         if (res.ok) numeros = await res.json();
       } catch (_err) { /* sin números: las tarjetas igual sirven */ }
       aplicarNumerosDePlugins(destino, numeros, slug);
+      // Un backtest que estaba "en curso" terminó: el estado se guardó, se repinta.
+      if (numeros.actualizado && typeof hydrateActiveEnv === 'function') hydrateActiveEnv();
     }
     // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
     function explicarAnomalia(b) {
@@ -7620,41 +7635,26 @@
     // Terraform diga "success" solo significa que creó la configuración, y una
     // pipeline puede arrancar y quedarse poleando un prefijo vacío sin que nada
     // lo diga. El backend pregunta el `_count` del índice de cada pipeline.
-    async function verificarIngesta(btn) {
-      const original = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = icon('refresh') + ' Verificando…';
+    // Se cuenta solo al abrir el entorno (de nuevo si pasó un minuto) y con el
+    // botón de actualizar; antes había que acordarse de tocar un botón para verlo.
+    const _DOCS_VIGENTE_MS = 60000;
+    async function contarDocumentos({ forzar = false } = {}) {
+      if (state.contandoDocs) return;
+      if (!forzar && state.pipelineHealthAt && Date.now() - state.pipelineHealthAt < _DOCS_VIGENTE_MS) return;
+      state.contandoDocs = true;
       try {
         const res = await fetch('/api/v1/pipelines/health');
         const data = await res.json();
         if (!res.ok) throw new Error(detailMsg(data));
         state.pipelineHealth = Object.fromEntries((data.pipelines || []).map(p => [p.slug, p]));
-        if (!data.reachable) {
-          toast('No pude preguntarle al cluster (¿endpoint o contraseña?). Reingresá por Pipeline → Desplegar.', 'error', 7000);
-        } else {
-          // Una pipeline en pausa no tiene documentos porque no arrancó: el
-          // mensaje de antes mandaba a revisar el bucket y el filtro, que no
-          // tenían nada que ver.
-          const activa = Object.fromEntries(((state.lastStatus || {}).pipelines || [])
-            .map(p => [p.slug, !!p.active]));
-          const vacias = (data.pipelines || []).filter(p => !p.docs);
-          const enPausa = vacias.filter(p => activa[p.slug] === false).map(p => p.slug);
-          const sinDatos = vacias.filter(p => activa[p.slug] !== false).map(p => p.slug);
-          const partes = [];
-          if (enPausa.length) partes.push(
-            `${enPausa.join(', ')}: en pausa, la ingesta no arrancó. Tocá «Iniciar ingesta con Logstash» en Puesta en marcha.`);
-          if (sinDatos.length) partes.push(
-            `${sinDatos.join(', ')}: ingestando pero todavía sin documentos. Logstash lee el bucket cada 60 s: esperá un minuto y volvé a verificar; si sigue igual, revisá que el prefijo tenga objetos.`);
-          toast(partes.length ? partes.join(' · ') : 'Todos los pipelines tienen documentos.',
-            partes.length ? 'info' : 'success', partes.length ? 10000 : 4000);
-        }
-        renderInfraView(state.lastStatus);
+        state.pipelineHealthError = data.reachable ? '' : 'no pude preguntarle al cluster';
       } catch (err) {
-        toast('No pude verificar la ingesta: ' + err.message, 'error');
+        state.pipelineHealthError = 'no se pudieron contar: ' + err.message;
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = original;
+        state.contandoDocs = false;
+        state.pipelineHealthAt = Date.now();
       }
+      if (state.envActive && state.lastStatus) renderInfraView(state.lastStatus);
     }
 
     function buildDeployBodyFromStatus(data) {
@@ -8044,7 +8044,7 @@
     // infraestructura y el subtítulo refleja el estado real. Lo llama
     // renderInfraView (única fuente de verdad del estado del entorno).
     // Debe coincidir con el texto del markup de #home-hero-sub.
-    const HOME_SUB_DEFAULT = 'El código lee la estructura y la IA entiende qué significa cada campo. Elegí un dataset ya armado, o subí el tuyo y guardalo como un dataset nuevo.';
+    const HOME_SUB_DEFAULT = 'El código lee la estructura y la IA entiende qué significa cada campo. Elegí un caso ya armado, o subí tus logs y guardalo como un caso nuevo.';
     function syncHomeHero(active, nPipelines) {
       document.getElementById('home-infra-btn')?.classList.toggle('hidden', !active);
       const sub = document.getElementById('home-hero-sub');
@@ -8339,8 +8339,8 @@
         }
         // En pausa, sin documentos es lo esperable: gris, no rojo de error.
         return p.active
-          ? `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="${escapeHtml(h.index || '')}">${icon('database')} sin documentos</span>`
-          : `<span class="pipe-row__prefix" title="La ingesta de esta pipeline todavía no arrancó">${icon('database')} sin documentos (en pausa)</span>`;
+          ? `<span class="pipe-row__prefix" style="color:var(--accent-hover);" title="Ingestando pero todavía sin documentos en ${escapeHtml(h.index || '')}. Logstash lee el bucket cada 60 s: si en unos minutos sigue igual, revisá que el prefijo tenga objetos.">${icon('database')} sin documentos</span>`
+          : `<span class="pipe-row__prefix" title="La ingesta de esta pipeline todavía no arrancó: «Iniciar ingesta con Logstash» en Puesta en marcha.">${icon('database')} sin documentos (en pausa)</span>`;
       };
       // CSS valida el .conf al crear la configuración y la deja `available` o
       // `unavailable`. Una que no compila no ingiere NADA, y hasta ahora se veía
@@ -8380,17 +8380,20 @@
           <span class="env-kpi__valor">${valor}</span>
           <span class="env-kpi__sub">${sub}</span>${extra}
         </div>`;
-      // Verificar recién tiene sentido con algo ingestando. Con todo en pausa
-      // se leía como el primer paso: se tocaba antes de iniciar la ingesta y
-      // decía "sin documentos" de pipelines que ni habían arrancado.
-      const verificar = pipelines.some(p => p.active)
-        ? `<button class="btn btn-primary btn-sm env-kpi__accion" id="infra-verify-btn">Verificar ingesta</button>`
+      // Contar recién tiene sentido con algo ingestando: con todo en pausa,
+      // "sin documentos" de pipelines que ni habían arrancado confundía.
+      const ingestaArrancada = pipelines.some(p => p.active);
+      const actualizarDocs = ingestaArrancada
+        ? `<button type="button" class="btn btn-ghost btn-sm env-kpi__accion env-kpi__refrescar${state.contandoDocs ? ' is-girando' : ''}" `
+          + `id="infra-docs-refresh" title="Contar de nuevo" aria-label="Contar los documentos de nuevo"${state.contandoDocs ? ' disabled' : ''}>${icon('refresh')}</button>`
         : '';
+      const subDocs = !ingestaArrancada ? 'la ingesta todavía no arrancó'
+        : state.pipelineHealthError ? state.pipelineHealthError
+        : conDocs.length ? `en ${conDocs.length} índice${conDocs.length === 1 ? '' : 's'}` : 'contando…';
       const kpis = `
         <div class="env-kpis">
           ${kpi('', 'Casos', pipelines.length, `${ingestando} ingestando${pipelines.length - ingestando ? ` · ${pipelines.length - ingestando} sin ingestar` : ''}`)}
-          ${kpi('', 'Documentos', conDocs.length ? docsTotal.toLocaleString('es-AR') : '—',
-                conDocs.length ? `en ${conDocs.length} índice${conDocs.length === 1 ? '' : 's'}` : 'se cuentan al verificar la ingesta', verificar)}
+          ${kpi('', 'Documentos', conDocs.length ? docsTotal.toLocaleString('es-AR') : '—', subDocs, actualizarDocs)}
           ${nPlugins ? kpi('plugins', 'Plugins', nPlugins, nConProblemas
             ? `${nConProblemas} con problemas: mirá su motivo` : 'todos listos · cada uno con su link a Dashboards') : ''}
         </div>`;
@@ -8479,7 +8482,7 @@
       // El número de Plugins lleva a la matriz.
       const irALaMatriz = () => body.querySelector('#infra-plugins')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
       env?.addEventListener('click', (e) => {
-        if (e.target.closest('[data-ir]') && !e.target.closest('#infra-verify-btn')) irALaMatriz();
+        if (e.target.closest('[data-ir]') && !e.target.closest('#infra-docs-refresh')) irALaMatriz();
       });
       env?.addEventListener('keydown', (e) => {
         const k = e.target.closest('.env-kpi[data-ir]');
@@ -8526,8 +8529,13 @@
       // (~7 minutos para 9 casos) aunque estuviera bien.
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false));
-      body.querySelector('#infra-verify-btn')?.addEventListener('click', (e) =>
-        verificarIngesta(e.currentTarget));
+      body.querySelector('#infra-docs-refresh')?.addEventListener('click', (e) => {
+        e.currentTarget.disabled = true;
+        e.currentTarget.classList.add('is-girando');
+        contarDocumentos({ forzar: true });
+      });
+      // Los documentos se cuentan solos (si el conteo tiene más de un minuto).
+      if (ingestaArrancada) contarDocumentos();
 
       // Contador en vivo (el span #infra-age recién existe ahora).
       startActiveEnvTicker(data.deployed_seconds_ago || 0);

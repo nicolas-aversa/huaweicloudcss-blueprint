@@ -77,7 +77,9 @@ def test_la_definicion_del_reporte():
     assert d["name"] == "[pozos] Dashboard en PDF (plataforma)"
     assert d["source"] == {"description": "El dashboard de pozos, en PDF", "type": "Dashboard",
                            "origin": "https://consola/x", "id": "DASH"}
-    assert d["format"]["fileFormat"] == "pdf" and d["trigger"] == {"triggerType": "On demand"}
+    # Los nombres de los enums del backend (con "pdf", CSS 3.4: "No enum constant
+    # ...ReportDefinition.FileFormat.pdf").
+    assert d["format"]["fileFormat"] == "Pdf" and d["trigger"] == {"triggerType": "OnDemand"}
 
 
 class _R:

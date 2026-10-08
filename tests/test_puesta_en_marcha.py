@@ -115,13 +115,17 @@ def test_capabilities_se_llama_plugins_en_lo_que_se_ve():
     assert "Corré 'Provisionar plugins'" in src and "Plugins provisionados" in src
 
 
-# ── Verificar ingesta ───────────────────────────────────────────────────────
-def test_verificar_ingesta_es_rojo_y_dice_todos_los_pipelines():
+# ── El conteo de documentos ─────────────────────────────────────────────────
+def test_los_documentos_se_cuentan_solos_y_se_pueden_actualizar():
+    """Antes había que tocar "Verificar ingesta"; ahora se cuentan al abrir el
+    entorno (de nuevo si pasó un minuto) y el botón de actualizar los recuenta."""
     vista = _vista()
-    assert '<button class="btn btn-primary btn-sm env-kpi__accion" id="infra-verify-btn">Verificar ingesta</button>' in vista
-    i = HTML.index("async function verificarIngesta(btn)")
-    assert "'Todos los pipelines tienen documentos.'" in HTML[i:i + 4000]
-    assert "Todas las pipelines" not in HTML
+    assert 'id="infra-docs-refresh" title="Contar de nuevo"' in vista
+    i = HTML.index("async function contarDocumentos(")
+    fn = HTML[i:HTML.index("function buildDeployBodyFromStatus(", i)]
+    assert "Date.now() - state.pipelineHealthAt < _DOCS_VIGENTE_MS" in fn, "sin contar en cada repintado"
+    assert "state.pipelineHealthAt = Date.now();" in fn.split("finally")[1], "aun si falla: sin reintentar en bucle"
+    assert "toast(" not in fn, "solo, no avisa: lo dice el número"
 
 
 def test_con_seguridad_el_paso_1_dice_que_crea_los_detectores():

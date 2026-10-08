@@ -120,3 +120,14 @@ def test_la_lista_en_node(tmp_path):
     js.write_text(_ARNES.replace("{FUNCIONES}", html[i:html.index("    async function verSnapshots() {", i)]), encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_con_el_cluster_ocupado_lo_dice_en_palabras():
+    """Visto en CSS: "ClientRequestException - {status_code:409, request_id:…,
+    error_msg:{"errCode":"CSS.0011",…}}" desbordaba la tarjeta y no decía qué hacer."""
+    crudo = ('ClientRequestException - {status_code:409,request_id:5b07,error_code:409,error_msg:'
+             '{"errCode":"CSS.0011","externalMessage":"CSS.0011 : This operation cannot be performed because '
+             'another operation is being performed on the cluster."}}')
+    assert main._motivo_de_css(Exception(crudo)) == \
+        "el cluster tiene otra operación en curso en CSS (CSS.0011): probá de nuevo en unos minutos"
+    assert main._motivo_de_css(Exception("x" * 500)) == "x" * 300
