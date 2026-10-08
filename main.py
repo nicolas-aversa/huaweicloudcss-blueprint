@@ -1364,6 +1364,7 @@ def create_custom_case(request: dict) -> dict:
                 # archivos juntos, de qué dataset es esta fuente.
                 "seguridad": request.get("seguridad"),
                 "excluir": request.get("excluir") or [],
+                "retencion_dias": request.get("retencion_dias") or 0,
                 "familia": request.get("familia", ""),
                 "familia_label": request.get("familia_label", ""),
             },
@@ -1398,6 +1399,7 @@ def _datos_para_exportar(slug: str) -> dict:
         "seguridad_propuesta": guardado.get("seguridad"),
         # Lo desplegado manda, aunque no se haya apagado nada.
         "excluir": list(entrada["excluir"] if "excluir" in entrada else guardado.get("excluir") or []),
+        "retencion_dias": entrada.get("retencion_dias") or guardado.get("retencion_dias") or 0,
         "filter_code": guardado.get("filter_code") or "",
     }
 
@@ -1684,6 +1686,7 @@ class PlanDelClusterRequest(BaseModel):
     label: str = Field(default="", max_length=200)
     fields: list[dict] = Field(default_factory=list)
     seguridad: dict | None = None
+    retencion_dias: int = Field(default=0, ge=0, le=36500)
 
 
 @app.post("/api/v1/onboarding/plan-del-cluster", tags=["onboarding"],
@@ -1695,7 +1698,8 @@ def plan_del_cluster_endpoint(request: PlanDelClusterRequest) -> dict:
     import plan_de_cluster
 
     slug = (request.slug or "").strip() or "dataset"
-    return {"items": plan_de_cluster.plan(slug, request.fields, request.label, seguridad=request.seguridad)}
+    return {"items": plan_de_cluster.plan(slug, request.fields, request.label, seguridad=request.seguridad,
+                                          retencion_dias=request.retencion_dias)}
 
 
 @app.post(
@@ -2189,6 +2193,7 @@ class PipelineCase(BaseModel):
     input_config: dict = Field(default_factory=dict, description="Fuente propia del caso (`{plugin_type, <plugin>: {...}}`) para casos que NO leen de OBS (Kafka/Beats/JDBC del cliente). Vacío = input s3 sobre el bucket de demos.")
     excluir: list[str] = Field(default_factory=list, description="Plugins del plan del cluster que se apagaron en el paso 2 (forecasting, anomalias, alertas, perfil, analista).")
     seguridad: dict = Field(default_factory=dict, description="Reglas de Security Analytics que propuso el Builder (`seguridad_derivada`). Vacío = las del caso guardado, si tiene.")
+    retencion_dias: int = Field(default=0, ge=0, le=36500, description="Días que se conservan los datos (ciclo de vida). 0 = los del caso guardado, o 90.")
 
 
 class TerraformDeployRequest(BaseModel):
@@ -2210,6 +2215,7 @@ class TerraformDeployRequest(BaseModel):
     https_enabled: bool = Field(default=True, description="Habilitar HTTPS para OpenSearch")
     fields: list[dict] = Field(default_factory=list)
     excluir: list[str] = Field(default_factory=list, description="Plugins del plan del cluster que se apagaron en el paso 2.")
+    retencion_dias: int = Field(default=0, ge=0, le=36500, description="Días que se conservan los datos (ciclo de vida). 0 = 90.")
     namespace: str = Field(default="data", description="Namespace de los campos (para el index template).")
     log_file_content: str = Field(default="", description="Contenido del archivo importado (custom single-case). Se sube tal cual a OBS, sin sintéticos.")
     start_ingestion: bool = Field(default=False)
@@ -2696,6 +2702,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
                 "obs_prefix": case.obs_prefix,
                 "fields": case.fields or [],
                 "excluir": excluir,
+                "retencion_dias": case.retencion_dias or (custom_cases.get_case(case.slug) or {}).get("retencion_dias") or 0,
                 "seguridad": _spec_de_seguridad_del_caso(case, propuesta) if propuesta else None,
                 "familia": (custom_cases.get_case(case.slug) or {}).get("familia", ""),
                 # Cada caso creado desde la plataforma aporta su propio label →
@@ -2711,6 +2718,7 @@ def _prepare_deploy_tfvars(request: TerraformDeployRequest, terraform_dir: Path)
             "obs_prefix": request.obs_prefix,
             "fields": request.fields or [],
             "excluir": list(request.excluir or []),
+            "retencion_dias": request.retencion_dias or 0,
             "label": _registry_label(slug),
         }
     _correlaciones_de_familias(registry)
@@ -3981,7 +3989,12 @@ def plugins_preview(slugs: str = "") -> dict:
                                    "forecasters": [{"id": f, "estado": "parcial: 360 de 600 pasos" if i == 0 else "TEST_COMPLETE"}
                                                    for i, f in enumerate(fcs)]},
                    "anomalias": {"ok": True, "motivo": "", "intervalo_min": 30}, "alertas": {"ok": True, "motivo": ""},
-                   "perfil": {"ok": True, "motivo": ""}, "analista": {"ok": True, "motivo": ""}}
+                   "perfil": {"ok": True, "motivo": ""}, "analista": {"ok": True, "motivo": ""},
+                   "ciclo_de_vida": {"ok": True, "motivo": "", "retencion_dias": 90}}
+        import ciclo_de_vida as cdv
+        dims, medidas = cdv.dimensiones_y_medidas((verticals.get_vertical(slug) or {}).get("fields") or [], spec)
+        if medidas:
+            estados["rollup"] = {"ok": True, "motivo": "", "dimensiones": dims, "medidas": medidas}
         entry = {"dashboards_imported": True, "dashboard_id": f"{slug}-dashboard"}
         fuera[slug] = plugins_vista.tarjetas_del_caso(
             slug, entry=entry, ids=ids, spec=spec, perfil=_perfil_de(slug, entry), enmascarados=_enmascarados_de(slug, entry),
@@ -7068,6 +7081,112 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
                                   f"{perfil.get('etiqueta') or perfil['campo']}{rehecho}"}
 
 
+# ── El paso del tiempo: ciclo de vida (ISM) y rollup ─────────────────────────
+def _provisionar_el_paso_del_tiempo(base: str, user: str, password: str, slug: str, index_pattern: str,
+                                    entry: dict, force: bool, terraform_dir: Path, run: dict) -> None:
+    """La política de ciclo de vida y el rollup de un caso (lo que no esté
+    apagado en el paso 2), con su paso en Actividad y su estado guardado."""
+    import ciclo_de_vida as cdv
+
+    excluidos = _excluidos(entry)
+    if "ciclo_de_vida" not in excluidos:
+        dias = cdv.retencion(entry.get("retencion_dias") or (custom_cases.get_case(slug) or {}).get("retencion_dias"))
+        try:
+            res = _provisionar_ciclo_de_vida(base, user, password, slug, index_pattern, dias, force)
+        except Exception as exc:  # noqa: BLE001 — no frena el paso
+            res = {"ok": False, "reason": repr(exc)}
+        runs.step(run, f"Ciclo de vida · {slug}", res["ok"], res["reason"][:300])
+        e = plugins_vista.estado_simple(res)
+        _guardar_estados(terraform_dir, slug, {"ciclo_de_vida": e and {**e, "retencion_dias": dias}})
+    if "rollup" not in excluidos:
+        fields = entry.get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or []
+        spec = _resolve_capability_spec(slug, terraform_dir=terraform_dir)
+        dims, medidas = cdv.dimensiones_y_medidas(fields, spec, _discover_enums(base, user, password, index_pattern, fields))
+        if not medidas:
+            return
+        try:
+            res = _provisionar_rollup(base, user, password, slug, index_pattern, dims, medidas, force)
+        except Exception as exc:  # noqa: BLE001
+            res = {"ok": False, "reason": repr(exc)}
+        runs.step(run, f"Rollup · {slug}", res["ok"], res["reason"][:300])
+        e = plugins_vista.estado_simple(res)
+        _guardar_estados(terraform_dir, slug, {"rollup": e and {**e, "dimensiones": dims, "medidas": medidas}})
+
+
+def _provisionar_ciclo_de_vida(base: str, user: str, password: str, slug: str, index_pattern: str,
+                               dias: int, force: bool) -> dict:
+    """La política ISM: se crea (o, con `force`, se actualiza) y se aplica a los
+    índices que ya existen; los nuevos la toman por su `ism_template`."""
+    import ciclo_de_vida as cdv
+
+    pid = cdv.nombre_de_politica(slug)
+    ruta = f"{base}/_plugins/_ism/policies/{pid}"
+    cuerpo = cdv.politica(slug, index_pattern, dias)
+    ya = _os_req("GET", ruta, user, password, timeout=20)
+    if _resp_ok(ya):
+        if not force:
+            return {"ok": True, "reason": "ya estaba"}
+        try:
+            previa = ya.json() or {}
+        except ValueError:
+            previa = {}
+        rc = _os_req("PUT", f"{ruta}?if_seq_no={previa.get('_seq_no', 0)}&if_primary_term={previa.get('_primary_term', 1)}",
+                     user, password, json_body=cuerpo, timeout=30)
+        if not _resp_ok(rc):
+            return {"ok": False, "reason": f"no se pudo actualizar la política: {_resp_motivo(rc)}"}
+        _os_req("POST", f"{base}/_plugins/_ism/change_policy/{index_pattern}", user, password, timeout=30,
+                json_body={"policy_id": pid})
+        return {"ok": True, "reason": f"{pid} actualizada: retención de {dias} días"}
+    rc = _os_req("PUT", ruta, user, password, json_body=cuerpo, timeout=30)
+    if not _resp_ok(rc):
+        return {"ok": False, "reason": f"no se pudo crear la política: {_resp_motivo(rc)}"}
+    ra = _os_req("POST", f"{base}/_plugins/_ism/add/{index_pattern}", user, password, timeout=30,
+                 json_body={"policy_id": pid})
+    try:
+        n = int((ra.json() or {}).get("updated_indices") or 0) if _resp_ok(ra) else 0
+    except (ValueError, TypeError):
+        n = 0
+    return {"ok": True, "reason": f"{pid}: retención de {dias} días, aplicada a {n} índice{'s' if n != 1 else ''}"}
+
+
+def _provisionar_rollup(base: str, user: str, password: str, slug: str, index_pattern: str,
+                        dims: list[str], medidas: list[str], force: bool) -> dict:
+    """El rollup por hora: se crea y arranca solo (`enabled`). Si ya estaba, se
+    deja; con `force`, o si había fallado, se rehace con su índice."""
+    import ciclo_de_vida as cdv
+
+    rid = cdv.nombre_del_rollup(slug)
+    ruta = f"{base}/_plugins/_rollup/jobs/{rid}"
+    ya = _os_req("GET", ruta, user, password, timeout=20)
+    rehecho = ""
+    if _resp_ok(ya):
+        fallo = _motivo_si_fallo_el_rollup(base, user, password, rid)
+        if not force and fallo is None:
+            return {"ok": True, "reason": "ya estaba"}
+        rehecho = f" (se rehízo: había fallado, {fallo})" if fallo else ""
+        _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
+        _os_req("DELETE", ruta, user, password, timeout=20)
+        _os_req("DELETE", f"{base}/{cdv.indice_del_rollup(slug)}", user, password, timeout=20)
+    cuerpo = cdv.rollup(slug, index_pattern, dims, medidas, int(time.time() * 1000))
+    rc = _os_req("PUT", ruta, user, password, json_body=cuerpo, timeout=30)
+    if not _resp_ok(rc):
+        return {"ok": False, "reason": f"no se pudo crear el rollup: {_resp_motivo(rc)}"}
+    return {"ok": True, "reason": f"{rid} → {cdv.indice_del_rollup(slug)}: {', '.join(medidas)} por hora"
+                                  + (f" y por {', '.join(dims)}" if dims else "") + rehecho}
+
+
+def _motivo_si_fallo_el_rollup(base: str, user: str, password: str, rid: str) -> "str | None":
+    """El motivo si el rollup quedó en `failed`, o None."""
+    r = _os_req("GET", f"{base}/_plugins/_rollup/jobs/{rid}/_explain", user, password, timeout=20)
+    try:
+        meta = (((r.json() or {}).get(rid) or {}).get("metadata") or {}) if _resp_ok(r) else {}
+    except (ValueError, AttributeError):
+        meta = {}
+    if str(meta.get("status") or "").lower() == "failed":
+        return str(meta.get("failure_reason") or "sin motivo")[:200]
+    return None
+
+
 def _motivo_si_fallo(ruta: str, user: str, password: str) -> "str | None":
     """El motivo si el Transform quedó en `failed`, o None (corriendo, terminado
     o sin poder saberlo: ante la duda no se rehace)."""
@@ -7312,8 +7431,26 @@ def numeros_de_plugins(slug: str = "") -> dict:
             fuera["perfil"] = {"entidades": int(r.json()["count"]) if _resp_ok(r) else None}
         except (ValueError, KeyError, TypeError):
             fuera["perfil"] = {"entidades": None}
+    estados = _read_estados(terraform_dir).get(slug) or {}
+    if "ciclo_de_vida" in estados or "rollup" in estados:
+        import ciclo_de_vida as cdv
+        from index_template import index_pattern_from_name as _ip
+        patron_del_caso = _ip(entry.get("index") or f"{slug}-%{{+YYYY.MM}}")
+        if "ciclo_de_vida" in estados:
+            r = _os_req("GET", f"{base}/_plugins/_ism/explain/{patron_del_caso}", user, password, timeout=20)
+            try:
+                fuera["ciclo_de_vida"] = {"indices": int((r.json() or {}).get("total_managed_indices") or 0)
+                                          if _resp_ok(r) else None}
+            except (ValueError, TypeError):
+                fuera["ciclo_de_vida"] = {"indices": None}
+        if "rollup" in estados:
+            r = _os_req("GET", f"{base}/{cdv.indice_del_rollup(slug)}/_count", user, password, timeout=20)
+            try:
+                fuera["rollup"] = {"docs": int(r.json()["count"]) if _resp_ok(r) else None}
+            except (ValueError, KeyError, TypeError):
+                fuera["rollup"] = {"docs": None}
     try:
-        fuera["verificado"] = _verificar_en_el_cluster(base, user, password, slug, ids, reg, entry)
+        fuera["verificado"] = _verificar_en_el_cluster(base, user, password, slug, ids, reg, entry, estados)
     except Exception as exc:  # noqa: BLE001 — sin verificación, los números igual llegan
         print(f"[plugins] verificación de '{slug}' falló: {exc!r}")
     return fuera
@@ -7333,7 +7470,7 @@ def _leer(base: str, user: str, password: str, ruta: str) -> "tuple[dict | None,
 
 
 def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids: dict,
-                             seguridad_reg: dict, entry: dict) -> dict:
+                             seguridad_reg: dict, entry: dict, estados: "dict | None" = None) -> dict:
     """Lo que la provisión dijo que creó, comprobado en el cluster: que cada
     objeto exista y esté andando. `{plugin: {ok, detalle}}`; solo los que el
     caso tiene. La tarjeta de Plugins lo muestra al lado de su estado."""
@@ -7390,6 +7527,23 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
     if _enmascarados_de(slug, entry) and (ids or fuera):
         cuerpo, motivo = _leer(base, user, password, f"_plugins/_security/api/internalusers/{accesos.nombre_del_usuario(slug)}")
         marcar("analista", cuerpo is not None, "usuario en el cluster" if cuerpo is not None else f"el usuario {motivo}")
+    estados = estados or {}
+    if "ciclo_de_vida" in estados:
+        import ciclo_de_vida as cdv
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_ism/policies/{cdv.nombre_de_politica(slug)}")
+        marcar("ciclo_de_vida", cuerpo is not None, "política en el cluster" if cuerpo is not None else f"la política {motivo}")
+    if "rollup" in estados:
+        import ciclo_de_vida as cdv
+        rid = cdv.nombre_del_rollup(slug)
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_rollup/jobs/{rid}/_explain")
+        info = (cuerpo or {}).get(rid)
+        meta = (info.get("metadata") or {}) if isinstance(info, dict) else {}
+        if not isinstance(info, dict):
+            marcar("rollup", False, "el rollup no está en el cluster")
+        elif str(meta.get("status") or "").lower() == "failed":
+            marcar("rollup", False, f"el rollup falló: {str(meta.get('failure_reason') or '')[:200]}")
+        else:
+            marcar("rollup", True, f"rollup {str(meta.get('status') or 'creado').lower()}")
     if entry.get("dashboard_id"):
         cuerpo, motivo = _leer(base, user, password, f".kibana/_doc/dashboard:{entry['dashboard_id']}")
         encontrado = cuerpo is not None and (cuerpo or {}).get("found", True)
@@ -7984,6 +8138,11 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             res = {"ok": False, "reason": repr(exc)}
         runs.step(run, f"Analista con datos enmascarados · {slug}", res["ok"], res["reason"][:300])
         _guardar_estados(terraform_dir, slug, {"analista": plugins_vista.estado_simple(res)})
+    for slug in slugs:
+        entry = pipe_reg.get(slug) or {}
+        indice = entry.get("index") or f"{slug}-%{{+YYYY.MM}}"
+        _provisionar_el_paso_del_tiempo(_base_analistas, user, password, slug, index_pattern_from_name(indice),
+                                        entry, request.force, terraform_dir, run)
     try:
         _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
                                     list(slugs), terraform_dir, run)

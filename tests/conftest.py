@@ -42,6 +42,12 @@ def _settings_aislados(tmp_path, monkeypatch):
     monkeypatch.setattr(_main, "_ESPERA_CLUSTER_MAX_S", 0.0)
     # Sin cluster de verdad: la cola de búsquedas no se mide (se sigue de largo).
     monkeypatch.setattr(_main, "_cola_de_busquedas", lambda *a, **k: None)
+    # El ciclo de vida y el rollup van contra el cluster (descubren las
+    # dimensiones con una agregación): en los tests del endpoint de provisión,
+    # con una IP de prueba, cada caso esperaba los timeouts. Los tests que lo
+    # prueban usan el original (`_paso_del_tiempo_original`).
+    monkeypatch.setattr(_main, "_paso_del_tiempo_original", _main._provisionar_el_paso_del_tiempo, raising=False)
+    monkeypatch.setattr(_main, "_provisionar_el_paso_del_tiempo", lambda *a, **k: None)
     # El estado de cada plugin (vista Plugins): un test del endpoint de
     # provisión lo escribía en `terraform/` del repo, la carpeta que lee la app
     # local. Ahí va a la carpeta del test; en cualquier otra, donde dijo.

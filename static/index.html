@@ -1876,6 +1876,8 @@
     .plan-cluster__item.is-off strong, .plan-cluster__item.is-apagado strong { color: var(--text-muted); }
     .plan-cluster__switch { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; margin-top: 2px; }
     .plan-cluster__global { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    .plan-cluster__retencion { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-secondary); }
+    .plan-cluster__dias { width: 72px; padding: 2px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
     .mapping-marca input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
     /* Accesos de demo: usuario y contraseña, copiables. */
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
@@ -3980,7 +3982,8 @@
       try {
         const res = await fetch('/api/v1/onboarding/plan-del-cluster', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields: state.fields || [], seguridad: state.seguridad || null }),
+          body: JSON.stringify({ fields: state.fields || [], seguridad: state.seguridad || null,
+                                 retencion_dias: state.planRetencion || 0 }),
         });
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
@@ -3993,6 +3996,11 @@
           state.planExcluidos = [...fuera];
           e.currentTarget.closest('.plan-cluster__item')?.classList.toggle('is-apagado', !e.currentTarget.checked);
         }));
+        lugar.querySelector('.plan-cluster__dias')?.addEventListener('change', (e) => {
+          const dias = Math.round(Number(e.currentTarget.value));
+          state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;
+          pedirPlanDelCluster();   // el motivo dice los días
+        });
       } catch (_err) {
         if (pedido === _planPedido) lugar.innerHTML = '';
       }
@@ -4005,7 +4013,12 @@
         const apagado = i.aplica && fuera.has(i.plugin);
         return `<li class="plan-cluster__item${i.aplica ? '' : ' is-off'}${apagado ? ' is-apagado' : ''}">
           <span class="plan-cluster__icono">${icon(i.aplica ? 'check' : 'x')}</span>
-          <span class="plan-cluster__texto"><strong>${escapeHtml(i.titulo)}</strong><span>${escapeHtml(i.motivo)}</span></span>
+          <span class="plan-cluster__texto"><strong>${escapeHtml(i.titulo)}</strong><span>${escapeHtml(i.motivo)}</span>
+            ${i.plugin === 'ciclo_de_vida' && i.aplica && !apagado
+              ? `<label class="plan-cluster__retencion">Retención
+                   <input type="number" class="plan-cluster__dias" min="7" max="3650" step="1"
+                     value="${(i.config || {}).retencion_dias || 90}" aria-label="Días de retención"> días</label>`
+              : ''}</span>
           ${i.opcional && i.aplica
             ? `<input type="checkbox" class="plan-cluster__switch" data-plugin="${escapeHtml(i.plugin)}" ${apagado ? '' : 'checked'}
                  aria-label="Incluir ${escapeHtml(i.titulo)}" title="Incluirlo en el cluster">`
@@ -4868,6 +4881,7 @@
             // Lo decidido en el plan del cluster (paso 2).
             seguridad: state.seguridad || null,
             excluir: state.planExcluidos || [],
+            retencion_dias: state.planRetencion || 0,
             log_content: state.logFileContent || '',
             // El nombre con que se subió: así se guarda y así llega al bucket.
             log_filename: state.logFileName || '',
@@ -4940,6 +4954,7 @@
             label: `${label} · ${nombreDeFuente(f.logFileName)}`.slice(0, 60),
             sample: f.rawLog || '', filter_code: f.filterCode || '', fields: f.fields || [],
             questions: f.preguntas || [], seguridad: f.seguridad || null, excluir: f.planExcluidos || [],
+            retencion_dias: state.planRetencion || 0,
             log_content: f.logFileContent || '', log_filename: f.logFileName || '',
           }),
         });
@@ -5803,6 +5818,7 @@
         https_enabled: outputCfg.ssl === true,
         fields: state.fields,
         excluir: state.planExcluidos || [],
+        retencion_dias: state.planRetencion || 0,
         namespace: pipelineNamespace(),
         read_existing_bucket: !!state.readExistingMode,
         document_id: state.dedupId || '',
@@ -6602,6 +6618,14 @@
       if (clave === 'perfil') {
         return n.entidades === null || n.entidades === undefined ? '<span>El Transform todavía no escribió el perfil.</span>'
           : `<span><strong>${_fmtN(n.entidades)}</strong> fila${n.entidades === 1 ? '' : 's'} en el perfil</span>`;
+      }
+      if (clave === 'ciclo_de_vida') {
+        return n.indices === null || n.indices === undefined ? ''
+          : `<span><strong>${_fmtN(n.indices)}</strong> índice${n.indices === 1 ? '' : 's'} bajo la política</span>`;
+      }
+      if (clave === 'rollup') {
+        if (n.docs === null || n.docs === undefined) return '<span>El rollup todavía no escribió: corre cada hora.</span>';
+        return `<span><strong>${_fmtN(n.docs)}</strong> fila${n.docs === 1 ? '' : 's'} en el resumen</span>`;
       }
       if (clave === 'insights') {
         if (n.latencia_ms === null || n.latencia_ms === undefined) return `<span>${n.error ? 'No se pudo leer: ' + escapeHtml(n.error) : 'Sin consultas en las últimas 24 h.'}</span>`;
@@ -8471,7 +8495,8 @@
           const slug = new URL(u, location.href).searchParams.get('slug') || '';
           if (!slug) return json({ insights: { latencia_ms: 1840, n: 10, error: '' } });
           const fuera = { anomalias: { total: 37, estado: 'FINISHED', error: '', top: { inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00',
-                          grado: 0.93, valores: [{ nombre: 'eventos', valor: 1840 }] } }, perfil: { entidades: 412 } };
+                          grado: 0.93, valores: [{ nombre: 'eventos', valor: 1840 }] } }, perfil: { entidades: 412 },
+                          ciclo_de_vida: { indices: 12 }, rollup: { docs: 8760 } };
           ((estado.plugins || {})[slug] || []).forEach(t => (t.filas || []).forEach((f, i) => {
             if (f.numero.startsWith('forecast:')) fuera[f.numero] = i === 0 ? { error_pct: null, error: 'backtest parcial: 360 de 600 pasos' } : { error_pct: [0, 6.4, 27.9][i] || 12, error: '' };
             if (f.numero.startsWith('seguridad:')) fuera[f.numero] = { eventos: 1842 - i * 400 };

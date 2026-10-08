@@ -15,6 +15,7 @@ from typing import Any
 
 import accesos
 import capabilities as caps
+import ciclo_de_vida as cdv
 import perfiles
 from dashboards import _CODIGO_DE_PAIS, _PISTA_DE_PAIS
 
@@ -58,7 +59,8 @@ def campo_de_mapa(fields: list[dict]) -> "tuple[str, str] | None":
 
 # Los que se pueden apagar en el paso 2 (el provisioning los saltea, ver
 # `main._excluidos`). El resto es la base: el asistente y lo del cluster.
-OPCIONALES = ("forecasting", "anomalias", "alertas", "perfil", "analista", "security_analytics")
+OPCIONALES = ("forecasting", "anomalias", "alertas", "perfil", "analista", "security_analytics",
+              "ciclo_de_vida", "rollup")
 
 
 def _item(plugin: str, titulo: str, aplica: bool, motivo: str, config: Any = None) -> dict:
@@ -75,7 +77,8 @@ def _forecast_en_palabras(fc: dict, fields: list[dict]) -> str:
 
 
 def plan(slug: str, fields: list[dict], label: str = "",
-         enums: "dict[str, list[str]] | None" = None, seguridad: "dict | None" = None) -> list[dict]:
+         enums: "dict[str, list[str]] | None" = None, seguridad: "dict | None" = None,
+         retencion_dias: int = 0) -> list[dict]:
     """Los plugins de OpenSearch para el dataset `slug`, cada uno con
     `{plugin, titulo, aplica, motivo, config}`."""
     from index_template import index_pattern_from_name
@@ -112,6 +115,20 @@ def plan(slug: str, fields: list[dict], label: str = "",
     items.append(_item("perfil", "Perfil por entidad (Transform)", perfil is not None,
                        f"un resumen por {perfil['etiqueta']}, actualizado solo" if perfil
                        else "no hay una entidad que se repita (marcala como Entidad en el paso 2)", perfil))
+
+    # El paso del tiempo: sin esto los índices crecen hasta llenar el disco.
+    dias = cdv.retencion(retencion_dias)
+    items.append(_item("ciclo_de_vida", "Ciclo de vida de los índices (ISM)", True,
+                       f"solo lectura a los {cdv.DIAS_HASTA_TIBIO} días y borrado pasada la retención "
+                       f"de {dias} días", {"retencion_dias": dias}))
+    dims, medidas = cdv.dimensiones_y_medidas(fields, spec, enums)
+    items.append(_item(
+        "rollup", "Resumen por hora (Rollup)", bool(fecha and medidas),
+        (", ".join(_nombre_de(m, fields) for m in medidas) + " por hora"
+         + (f" y por {', '.join(_nombre_de(d, fields) for d in dims)}" if dims else "")
+         + ": queda aunque se borren los datos crudos")
+        if fecha and medidas else (sin_fecha if not fecha else "no hay medidas numéricas para resumir"),
+        {"dimensiones": dims, "medidas": medidas}))
 
     sensibles = accesos.enmascarados_desde_campos(fields)
     items.append(_item("analista", "Analista con datos enmascarados", bool(sensibles),

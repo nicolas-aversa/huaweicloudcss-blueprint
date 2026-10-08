@@ -286,6 +286,15 @@ def front_entries() -> list[dict]:
 
 
 # ── Escritura ────────────────────────────────────────────────────────────────
+def _retencion(valor) -> int:
+    """Los días de retención del paso 2 (0 = el valor por defecto)."""
+    try:
+        dias = int(valor or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(dias, 3650))
+
+
 def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "") -> dict:
     """Valida, normaliza y persiste un caso nuevo. Devuelve el caso guardado.
 
@@ -373,6 +382,7 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
         # los plugins apagados y la familia (las fuentes que se subieron juntas).
         "seguridad": meta.get("seguridad") if isinstance(meta.get("seguridad"), dict) else None,
         "excluir": [str(x) for x in (meta.get("excluir") or []) if isinstance(x, str)][:10],
+        "retencion_dias": _retencion(meta.get("retencion_dias")),
         "familia": slugify(str(meta.get("familia") or "")) if meta.get("familia") else "",
         "familia_label": str(meta.get("familia_label") or "").strip()[:60],
         # Solo los casos con dataset se pre-cargan en OBS; los `live` leen de la

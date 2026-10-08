@@ -18,6 +18,7 @@ from typing import Any
 
 import accesos
 import capabilities as caps
+import ciclo_de_vida as cdv
 import perfiles
 import plan_de_cluster
 import seguridad
@@ -39,12 +40,13 @@ def _comentario(texto: str) -> str:
 
 def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str = "",
              seguridad_propuesta: "dict | None" = None, excluir: "list[str] | None" = None,
-             filter_code: str = "") -> str:
+             filter_code: str = "", retencion_dias: int = 0) -> str:
     """El script de Dev Tools del dataset `slug`."""
     excluir = set(excluir or [])
     index_name = index_name or f"{slug}-%{{+YYYY.MM}}"
     ip = index_pattern_from_name(index_name)
-    plan = {i["plugin"]: i for i in plan_de_cluster.plan(slug, fields, label, seguridad=seguridad_propuesta)}
+    plan = {i["plugin"]: i for i in plan_de_cluster.plan(slug, fields, label, seguridad=seguridad_propuesta,
+                                                         retencion_dias=retencion_dias)}
     aplica = {k: v["aplica"] and k not in excluir for k, v in plan.items()}
     spec = caps.build_spec_from_fields(slug, ip, fields, label)
     bloques: list[str] = [_comentario(
@@ -122,6 +124,21 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
         nombre = perfiles.nombre_del_transform(slug)
         bloques += [_req("PUT", f"_plugins/_transform/{nombre}", perfiles.build_transform(slug, ip, perfil)),
                     _req("POST", f"_plugins/_transform/{nombre}/_start")]
+
+    if aplica.get("ciclo_de_vida"):
+        seccion("Ciclo de vida de los índices (ISM)", plan["ciclo_de_vida"]["motivo"])
+        pid = cdv.nombre_de_politica(slug)
+        bloques += [_req("PUT", f"_plugins/_ism/policies/{pid}",
+                         cdv.politica(slug, ip, plan["ciclo_de_vida"]["config"]["retencion_dias"])),
+                    _comentario("Los índices que ya existen la toman con:"),
+                    _req("POST", f"_plugins/_ism/add/{ip}", {"policy_id": pid})]
+
+    if aplica.get("rollup"):
+        seccion("Resumen por hora (Rollup)", plan["rollup"]["motivo"])
+        cfg = plan["rollup"]["config"]
+        cuerpo = cdv.rollup(slug, ip, cfg["dimensiones"], cfg["medidas"], 0)
+        cuerpo["rollup"]["schedule"]["interval"]["start_time"] = "<AHORA_EN_EPOCH_MS>"
+        bloques.append(_req("PUT", f"_plugins/_rollup/jobs/{cdv.nombre_del_rollup(slug)}", cuerpo))
 
     if aplica.get("analista"):
         seccion("Analista con datos enmascarados", plan["analista"]["motivo"])

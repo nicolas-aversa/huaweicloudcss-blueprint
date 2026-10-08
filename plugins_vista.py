@@ -12,6 +12,7 @@ aparte (`/api/v1/plugins/numeros`), a demanda.
 from __future__ import annotations
 
 import accesos
+import ciclo_de_vida as cdv
 import perfiles
 from plan_de_cluster import _forecast_en_palabras, _nombre_de
 
@@ -205,6 +206,31 @@ def _analista(slug: str, enmascarados: list[str], estado: dict, fields: list[dic
                     links=[{"texto": "Abrir Dashboards", "url": link(base, "home")}])
 
 
+def _ciclo_de_vida(slug: str, estado: dict, base: str) -> dict:
+    ok = estado.get("ok", True)
+    dias = estado.get("retencion_dias") or cdv.RETENCION_POR_DEFECTO
+    return _tarjeta("ciclo_de_vida", "Ciclo de vida (ISM)",
+                    f"Los índices pasan a solo lectura y se compactan a los {cdv.DIAS_HASTA_TIBIO} días, "
+                    f"y se borran pasada la retención de {dias} días.",
+                    OK if ok else FALLA, "" if ok else estado.get("motivo", ""),
+                    links=[{"texto": "Ver la política",
+                            "url": link(base, APP_IM, f"/policy-details?id={cdv.nombre_de_politica(slug)}")}],
+                    numero="ciclo_de_vida")
+
+
+def _rollup(slug: str, estado: dict, fields: list[dict], base: str) -> dict:
+    ok = estado.get("ok", True)
+    medidas = ", ".join(_nombre_de(m, fields) for m in estado.get("medidas") or []) or "las medidas"
+    dims = ", ".join(_nombre_de(d, fields) for d in estado.get("dimensiones") or [])
+    return _tarjeta("rollup", "Resumen por hora (Rollup)",
+                    f"{medidas} por hora" + (f" y por {dims}" if dims else "")
+                    + f", en {cdv.indice_del_rollup(slug)}: queda aunque se borren los datos crudos.",
+                    OK if ok else FALLA, "" if ok else estado.get("motivo", ""),
+                    links=[{"texto": "Ver el rollup",
+                            "url": link(base, APP_IM, f"/rollup-details?id={cdv.nombre_del_rollup(slug)}")}],
+                    numero="rollup")
+
+
 def _dashboard(entry: dict, base: str) -> dict:
     did = entry.get("dashboard_id", "")
     importado = bool(entry.get("dashboards_imported"))
@@ -253,6 +279,13 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
         fuera.append(_tarjeta("analista", "Analista con datos enmascarados", "", EXCLUIDO, "excluido en el paso 2"))
     elif enmascarados and ("analista" in estados or (analista_creado and provisionado)):
         fuera.append(_analista(slug, enmascarados, estados.get("analista") or {}, fields, base))
+    for plugin, titulo, armar in (
+            ("ciclo_de_vida", "Ciclo de vida (ISM)", lambda: _ciclo_de_vida(slug, estados["ciclo_de_vida"], base)),
+            ("rollup", "Resumen por hora (Rollup)", lambda: _rollup(slug, estados["rollup"], fields, base))):
+        if plugin in excluidos:
+            fuera.append(_tarjeta(plugin, titulo, "", EXCLUIDO, "excluido en el paso 2"))
+        elif plugin in estados:
+            fuera.append(armar())
     return fuera
 
 
