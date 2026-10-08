@@ -7452,10 +7452,14 @@ def _asegurar_aviso(base: str, user: str, password: str, slug: str, monitor_id: 
 
 
 # El tenant en el que Reporting guarda (y lista) las definiciones: el Global,
-# el mismo donde la plataforma deja los dashboards (`.kibana`). Creadas sin el
-# header quedaban con tenant "null": existían (la API las devolvía) pero
-# Dashboards → Reporting, que pide en el Global, no mostraba ninguna.
-_TENANT_DE_REPORTING = {"securitytenant": "global"}
+# el mismo donde la plataforma deja los dashboards (`.kibana`). Dashboards lo
+# pide con `securitytenant: ""` (el símbolo del Global en el plugin de
+# seguridad) y Reporting guarda ese texto tal cual: creadas sin el header
+# quedaban con tenant "null", y con "global" con "global"; en los dos casos la
+# API las devolvía y Dashboards → Reporting no mostraba ninguna.
+_TENANT_DE_REPORTING = {"securitytenant": ""}
+# Donde quedaron las de antes (sin header, y con "global"): se borran.
+_TENANTS_VIEJOS_DE_REPORTING = (None, {"securitytenant": "global"})
 
 
 def _provisionar_reporte(base: str, user: str, password: str, slug: str, dashboard_id: str,
@@ -7465,16 +7469,19 @@ def _provisionar_reporte(base: str, user: str, password: str, slug: str, dashboa
     import plugins_vista as pv
 
     nombre = pv.nombre_del_reporte(slug)
-    # Las que quedaron sin tenant (antes de mandar el header) no se ven en
-    # Dashboards: se borran, y se crea la del Global.
-    rv = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20)
-    try:
-        sin_tenant = ((rv.json() or {}).get("reportDefinitionDetailsList") or []) if _resp_ok(rv) else []
-    except ValueError:
-        sin_tenant = []
-    for d in sin_tenant:
-        if (d.get("reportDefinition") or {}).get("name") == nombre and d.get("tenant") in (None, "", "null"):
-            _os_req("DELETE", f"{base}/_plugins/_reports/definition/{d.get('id', '')}", user, password, timeout=20)
+    # Las que quedaron en otro tenant (antes de mandar el del Global) no se ven
+    # en Dashboards: se borran, y se crea la del Global.
+    for viejo in _TENANTS_VIEJOS_DE_REPORTING:
+        rv = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20,
+                     headers=viejo)
+        try:
+            otras = ((rv.json() or {}).get("reportDefinitionDetailsList") or []) if _resp_ok(rv) else []
+        except ValueError:
+            otras = []
+        for d in otras:
+            if (d.get("reportDefinition") or {}).get("name") == nombre:
+                _os_req("DELETE", f"{base}/_plugins/_reports/definition/{d.get('id', '')}", user, password,
+                        timeout=20, headers=viejo)
     r = _os_req("GET", f"{base}/_plugins/_reports/definitions?maxItems=1000", user, password, timeout=20,
                 headers=_TENANT_DE_REPORTING)
     if r is not None and r.status_code in (400, 404) and "no handler" in (getattr(r, "text", "") or "").lower():
