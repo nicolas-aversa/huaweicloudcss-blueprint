@@ -458,9 +458,7 @@ def test_que_se_va_a_crear_lo_dice():
     """El resumen del paso 4 seguía diciendo "agente + forecasts"."""
     html = _INDEX.read_text(encoding="utf-8")
     assert "SECURITY_SLUGS = new Set(_VVIS.filter(v => v.hasSecurity).map(v => v.slug));" in html
-    assert "Plugins de OpenSearch: agente conversacional (NL→PPL), forecasts, detección de anomalías y alertas" in html
-    assert "const conSeguridad = types.filter(t => SECURITY_SLUGS.has(t))" in html
-    assert "li('shield', `Security Analytics para ${escapeHtml(conSeguridad.join(' y '))}" in html
+    assert "const conSeguridad = casos.filter(c => SECURITY_SLUGS.has(c.id) || c.hasSecurity);" in html
     payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
     assert payload["siem"]["hasSecurity"] and payload["fortianalyzer"]["hasSecurity"]
     assert not payload["transacciones-billetera"]["hasSecurity"]

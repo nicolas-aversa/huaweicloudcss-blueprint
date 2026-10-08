@@ -1569,6 +1569,23 @@
       color: var(--text-muted);
       margin: 0 0 14px;
     }
+    /* "Qué se va a crear": bloques con mosaicos y etiquetas. */
+    .crear__bloque + .crear__bloque { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+    .crear__titulo { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: var(--fs-md); font-weight: var(--fw-semi); color: var(--text-primary); }
+    .crear__titulo .icon { width: 16px; height: 16px; color: var(--accent); }
+    .crear__grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+    .crear__tile { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-subtle);
+                   border-radius: var(--radius-md); background: var(--bg-primary); }
+    .crear__ico { flex: none; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--accent-tint); color: var(--accent);
+                  display: inline-flex; align-items: center; justify-content: center; }
+    .crear__ico .icon { width: 16px; height: 16px; }
+    .crear__txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-sm); color: var(--text-primary); }
+    .crear__txt small { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4; }
+    .crear__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .crear__chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border-subtle);
+                   border-radius: var(--radius-pill); background: var(--bg-primary); font-size: var(--fs-sm); color: var(--text-primary); }
+    .crear__chip .icon { width: 13px; height: 13px; color: var(--text-muted); }
+    .crear__nota { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .deploy-conf { margin-top: 16px; }
     .deploy-conf__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
     .deploy-conf__label { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); }
@@ -5535,34 +5552,64 @@
         // los botones, y estas dos lecturas quedaron apuntando a nada —el paso
         // 4 tiraba "isBuilder is not defined" cada vez que se pintaba—.
         const isBuilder = soloGuarda();
-        const labels = types.map(id => (LOG_EXAMPLES.find(e => e.id === id)?.label) || id);
-        const hasCaps = types.some(t => CAPABILITY_SLUGS.has(t)) || state.deployMode === 'custom';
-        const conSeguridad = types.filter(t => SECURITY_SLUGS.has(t))
-          .map(t => (LOG_EXAMPLES.find(e => e.id === t)?.label) || t);
-        const li = (ic, txt) => `<li style="display:flex; align-items:center; gap:9px; font-size:var(--fs-base); color:var(--text-secondary); padding:4px 0;">
-          <span style="width:26px;height:26px;border-radius:7px;background:var(--accent-tint);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex:none;">${icon(ic)}</span>
-          <span>${txt}</span></li>`;
-        const items = isBuilder ? [
-          li('code', 'Configuration file de Logstash (con tu origen elegido)'),
-          li('dashboard', 'Index template + dashboards de tus campos'),
-          li('spark', 'Chatbot (NL→PPL), forecasts, detección de anomalías y alertas sobre tus datos'),
-          li('plus', 'Queda como una card más del grid, lista para desplegar cuando quieras'),
-        ].join('') : [
-          ...(reuse ? [] : [
-            ...(useExistingCluster ? [] : [li('search', 'Cluster <strong>OpenSearch</strong> (CSS)')]),
-            li('filter', 'Cluster <strong>Logstash</strong> (CSS)'),
-          ]),
-          li('database', `${types.length} pipeline ETL${types.length > 1 ? 's' : ''} de Logstash: ${escapeHtml(labels.join(', '))}`),
-          li('dashboard', 'Index template + dashboards por tipo'),
-          ...(hasCaps ? [li('spark', 'Plugins de OpenSearch: agente conversacional (NL→PPL), forecasts, detección de anomalías y alertas')] : []),
-          ...(conSeguridad.length ? [li('shield', `Security Analytics para ${escapeHtml(conSeguridad.join(' y '))}: reglas Sigma, detectores${types.includes('siem') ? ' y correlaciones entre fuentes' : ''}`)] : []),
-        ].join('');
-        closureEl.innerHTML = `
-          <div class="deploy-panel">
-            <div class="deploy-panel__title">${isBuilder ? 'Qué guarda el dataset' : 'Qué se va a crear'}</div>
-            <ul style="list-style:none; margin:0; padding:0;">${items}</ul>
-          </div>`;
+        const casos = types.map(id => LOG_EXAMPLES.find(e => e.id === id) || { id, label: id });
+        closureEl.innerHTML = queSeVaACrearHTML({
+          casos, builder: isBuilder, reuse, clusterExistente: useExistingCluster,
+          conPlugins: types.some(t => CAPABILITY_SLUGS.has(t)) || state.deployMode === 'custom',
+          retencion: state.planRetencion || 90,
+        });
       }
+    }
+
+    // "Qué se va a crear" (paso 4): la infraestructura, la ingesta (un
+    // pipeline por caso) y lo que queda configurado en OpenSearch. El nodo,
+    // con la misma regla que el backend (`_entorno_pesado`): 5 casos o más, o
+    // alguno con Security Analytics, van en el de 8 vCPU.
+    const _CASOS_PESADO = 5;
+    function queSeVaACrearHTML({ casos = [], builder = false, reuse = false, clusterExistente = false,
+                                 conPlugins = true, retencion = 90 } = {}) {
+      const tile = (ic, titulo, sub) => `<div class="crear__tile"><span class="crear__ico">${icon(ic)}</span>`
+        + `<span class="crear__txt"><strong>${titulo}</strong>${sub ? `<small>${sub}</small>` : ''}</span></div>`;
+      const bloque = (ic, titulo, cuerpo) => `<section class="crear__bloque">`
+        + `<h4 class="crear__titulo">${icon(ic)} ${titulo}</h4>${cuerpo}</section>`;
+      if (builder) {
+        return `<div class="deploy-panel crear"><div class="deploy-panel__title">Qué guarda el dataset</div><div class="crear__grilla">`
+          + tile('code', 'Configuration file de Logstash', 'con el origen que elegiste')
+          + tile('dashboard', 'Index template y dashboard', 'armados con tus campos')
+          + tile('spark', 'Los plugins que tus datos justifican', 'el plan del paso 2, con lo que apagaste')
+          + tile('plus', 'Una tarjeta más del grid', 'lista para desplegar cuando quieras')
+          + `</div></div>`;
+      }
+      const conSeguridad = casos.filter(c => SECURITY_SLUGS.has(c.id) || c.hasSecurity);
+      const conPerfil = casos.filter(c => c.perfil).length;
+      const conAnalista = casos.filter(c => (c.enmascarados || []).length).length;
+      const pesado = casos.length >= _CASOS_PESADO || conSeguridad.length > 0;
+      const n = casos.length;
+      const infra = reuse ? '' : bloque('infra', 'Infraestructura', `<div class="crear__grilla">`
+        + (clusterExistente ? tile('search', 'OpenSearch', 'el cluster existente')
+          : tile('search', 'OpenSearch (CSS)', pesado ? '1 nodo de 8 vCPU y 16 GB, 80 GB de disco' : '1 nodo de 4 vCPU y 8 GB, 40 GB de disco'))
+        + tile('filter', 'Logstash (CSS)', 'lee de OBS y escribe en OpenSearch')
+        + `</div>`);
+      const ingesta = bloque('database', `${reuse ? 'Se agrega' : 'Ingesta'} · ${n} pipeline${n === 1 ? '' : 's'}`,
+        `<div class="crear__chips">${casos.map(c => `<span class="crear__chip">${icon(c.icon || 'database')} ${escapeHtml(c.label || c.id)}</span>`).join('')}</div>`);
+      const plugins = [
+        tile('dashboard', 'Dashboards y búsquedas', 'uno por caso, con el rango de sus datos'),
+        ...(conPlugins ? [
+          tile('chat', 'Asistente en lenguaje natural', 'pregunta en castellano, responde con PPL'),
+          tile('trending', 'Forecasting', 'con backtest contra lo que pasó'),
+          tile('activity', 'Anomalías y alertas', 'análisis histórico y aviso por canal'),
+        ] : []),
+        ...(conSeguridad.length ? [tile('shield', 'Security Analytics',
+          escapeHtml(conSeguridad.map(c => c.label || c.id).join(' y ')) + ': reglas Sigma'
+          + (conSeguridad.some(c => c.id === 'siem') ? ' y correlaciones' : ''))] : []),
+        ...(conPerfil ? [tile('layers', 'Perfil por entidad', `en ${conPerfil} caso${conPerfil === 1 ? '' : 's'}`)] : []),
+        ...(conAnalista ? [tile('key', 'Analista enmascarado', `en ${conAnalista} caso${conAnalista === 1 ? '' : 's'}`)] : []),
+        tile('clock', 'Ciclo de vida y resumen por hora', `retención de ${retencion} días`),
+      ].join('');
+      return `<div class="deploy-panel crear"><div class="deploy-panel__title">Qué se va a crear</div>${infra}${ingesta}`
+        + bloque('spark', 'Lo que queda configurado en OpenSearch', `<div class="crear__grilla crear__grilla--plugins">${plugins}</div>`
+          + `<p class="crear__nota">Cada plugin se arma con los campos de cada caso. Después del deploy, Entorno → Plugins dice qué quedó y lleva a Dashboards.</p>`)
+        + `</div>`;
     }
 
     // Cambiar el tipo activo del review (tabs del paso 4).
