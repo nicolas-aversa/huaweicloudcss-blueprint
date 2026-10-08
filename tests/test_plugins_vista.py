@@ -471,8 +471,16 @@ const plugins = {
 const F = (slug, extra = {}) => ({ slug, nombre: SLUG_LABELS[slug] || slug, indice: `${slug}-*`, prefijo: `${slug}-logs/`, ...extra });
 const filas = [F('produccion-pozos', { punto: '<i class="punto"></i>', docs: '<i>1.234 docs</i>' }), F('cts', { aviso: '<i>En pausa</i>' })];
 check('sin casos, nada', matrizDePluginsHTML([], plugins) === '' && matrizDePluginsHTML(null, plugins) === '');
+// El "?" de cada plugin: qué hace y para qué le sirve al negocio.
+const ayuda = ayudaHTML('forecasting');
+check('el ? con qué hace y para el negocio', ayuda.includes('class="ayuda" tabindex="0" role="button"')
+  && ayuda.includes('<strong>Qué hace</strong>') && ayuda.includes('<strong>Para el negocio</strong>') && ayuda.includes('role="tooltip"'), ayuda);
+check('sin explicación, sin ?', ayudaHTML('no-existe') === '');
+check('a la izquierda en las últimas columnas', ayudaHTML('rollup', true).includes('class="ayuda ayuda--izq"'));
+const todos = [..._COLUMNAS_PLUGIN.map(([id]) => id), 'agente', 'text2viz', 'embeddings', 'query_insights', 'canal'];
+check('cada plugin tiene su explicación', todos.every(id => ayudaHTML(id)), todos.filter(id => !ayudaHTML(id)).join(','));
 const card = matrizDePluginsHTML(filas, plugins);
-const cols = [...card.matchAll(/<th scope="col" class="mtx__th">([^<]*)<\/th>/g)].map(m => m[1]);
+const cols = [...card.matchAll(/<th scope="col" class="mtx__th">([^<]*)</g)].map(m => m[1]);
 check('solo las columnas que algún caso tiene, en orden', JSON.stringify(cols) === JSON.stringify(['Dashboard', 'Pronóstico', 'Perfil']), JSON.stringify(cols));
 check('el caso abre su detalle', card.includes('class="mtx__abrir plug__caso" data-slug="produccion-pozos" aria-expanded="false" aria-controls="mtx-det-produccion-pozos"><svg data-i="chevron"></svg><i class="punto"></i><span class="mtx__nombre">Producción de pozos</span>'), card);
 check('la ingesta en la celda del caso', card.includes('<i>1.234 docs</i>') && card.includes('<i>En pausa</i>'), card);
@@ -505,6 +513,7 @@ check('cada fila con su estado, su número y su link', det.includes('<span class
   && det.includes('data-numero="forecast:F1" data-estado="parcial"') && det.includes('href="https://d/app/forecasting#/forecasters/F1" target="_blank" rel="noopener"'), det);
 check('los links a Dashboards', det.includes('href="https://d/x" target="_blank" rel="noopener"><svg data-i="dashboard"></svg> Ver los forecasters</a>'), det);
 check('lo excluido, apagado', det.includes('class="plug plug--excluido" data-plugin="perfil"'), det);
+check('cada tarjeta, su ? al lado del título', det.includes('<span class="plug__titulo"><strong>forecasting</strong><span class="ayuda"'), det);
 check('sin plugins', pluginsDetalleHTML([]).includes('no tiene plugins'));
 const largo = 'no se pudo crear el reporte: status 400: ' + '{"error":"x"}'.repeat(30);
 const conError = pluginsDetalleHTML([T('dashboard', 'ok', { filas: [{ texto: 'Reporte', estado: 'falla', detalle: largo }] })]);

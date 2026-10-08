@@ -2367,6 +2367,24 @@
     .mtx__llevar a:hover { text-decoration: underline; }
     .mtx__llevar .icon { width: 12px; height: 12px; }
     .mtx__vacio { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+    /* El "?" de cada plugin: qué hace y para qué le sirve al negocio. */
+    .ayuda { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
+             width: 15px; height: 15px; margin-left: 5px; border-radius: 50%; border: 1px solid var(--border-default);
+             font-size: var(--fs-xs); font-weight: 700; line-height: 1; color: var(--text-muted); cursor: help;
+             text-transform: none; letter-spacing: 0; vertical-align: middle; background: var(--bg-primary); }
+    .ayuda:hover, .ayuda:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+    .ayuda__globo { display: none; position: absolute; z-index: 20; top: calc(100% + 6px); left: -8px; width: 280px;
+                    padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+                    background: var(--bg-primary); box-shadow: var(--shadow-md); text-align: left; white-space: normal;
+                    font-size: var(--fs-sm); font-weight: 400; line-height: 1.45; color: var(--text-secondary); }
+    .ayuda--izq .ayuda__globo { left: auto; right: -8px; }
+    /* En la última columna de tarjetas, hacia la izquierda: si no, se corta en el borde. */
+    .plug-col:last-child:not(:first-child) .ayuda__globo { left: auto; right: -8px; }
+    .ayuda__globo strong { display: block; margin: 0 0 2px; font-size: var(--fs-xs); text-transform: uppercase;
+                           letter-spacing: .04em; color: var(--text-primary); }
+    .ayuda__globo strong ~ strong { margin-top: 8px; }
+    .ayuda:hover .ayuda__globo, .ayuda:focus .ayuda__globo { display: block; }
+    .plug__titulo { display: inline-flex; align-items: center; min-width: 0; }
     .plug:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
     /* Accesos y snapshot, lado a lado: son cortos. */
     .env-extras { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 16px; align-items: start; }
@@ -6737,6 +6755,47 @@
       ['ciclo_de_vida', 'Ciclo de vida'], ['rollup', 'Rollup'],
     ];
     const _ICONO_ESTADO = { ok: 'check', parcial: 'alert-triangle', falla: 'x', en_curso: 'clock', sin_probar: 'info' };
+    // Para qué sirve cada plugin: qué hace y qué le resuelve al negocio. Va en
+    // el "?" de su columna y de su tarjeta, para explicárselo a un cliente.
+    const _PARA_QUE_SIRVE = {
+      dashboard: ['Tableros con los gráficos clave de cada fuente, búsquedas guardadas en Discover y un reporte en PDF a demanda.',
+        'Todos miran los mismos números sin armar nada, y el PDF se manda a gerencia o a auditoría.'],
+      forecasting: ['Proyecta hacia adelante cada medida (volumen, montos, eventos) a partir de su historia. El backtest lo compara con lo que pasó de verdad.',
+        'Anticipar picos de demanda o de carga para dimensionar personal, stock o infraestructura. El error medio dice cuánto confiar.'],
+      anomalias: ['Aprende cómo se comporta normalmente cada medida y marca los intervalos que se apartan, con un grado de 0 a 100 %.',
+        'Detectar fraude, caídas o picos raros sin definir umbrales a mano. "Explicarla con IA" dice qué cambió en ese intervalo.'],
+      alertas: ['Vigila las anomalías de grado alto y avisa por el canal configurado (Slack, Teams, webhook).',
+        'El equipo se entera en minutos, no cuando alguien revisa un tablero.'],
+      security_analytics: ['Detectores con reglas Sigma (el estándar de la industria) sobre los logs, con hallazgos y correlaciones entre fuentes, por ejemplo la misma IP en el firewall y en un login.',
+        'Un SIEM sobre los propios logs, sin licencia aparte: respuesta a incidentes y cumplimiento.'],
+      perfil: ['Resume todos los eventos en una fila por entidad (cliente, pozo, IP) que se actualiza sola.',
+        'Una vista 360° de cada cliente o activo: quién compra más, qué IP es más riesgosa, sin consultas pesadas.'],
+      analista: ['Un usuario de solo lectura que ve los datos con los campos sensibles enmascarados (documento, cuenta, paciente).',
+        'Dar acceso a analistas o a terceros cumpliendo con la protección de datos personales.'],
+      ciclo_de_vida: ['Una política que pasa los índices viejos a solo lectura y compactados, y los borra cuando vence la retención.',
+        'Controla el costo de almacenamiento y cumple la retención exigida sin tareas manuales.'],
+      rollup: ['Guarda un resumen por hora de las medidas, que queda aunque se borren los datos crudos.',
+        'Historia de largo plazo (tendencias de años) ocupando una fracción del espacio.'],
+      agente: ['Preguntás en castellano ("¿qué pozo produjo más?") y responde con el dato real, la consulta que usó y un gráfico.',
+        'Cualquiera consulta los datos sin saber el lenguaje de consultas, y cada respuesta se puede auditar.'],
+      text2viz: ['Arma el gráfico de cada respuesta del asistente; en Dashboards, crea una visualización a partir de una frase.',
+        'Del pedido al gráfico en segundos, sin saber armar visualizaciones.'],
+      embeddings: ['Busca por significado y no por palabras exactas: "cobro rechazado" encuentra "pago denegado".',
+        'Buscadores de tickets, documentos o productos que entienden lo que el usuario quiso decir.'],
+      query_insights: ['Muestra las consultas más pesadas del cluster, con su latencia, CPU y memoria.',
+        'Encontrar qué consulta o tablero frena al cluster antes de pagar por agrandarlo.'],
+      canal: ['El destino de los avisos (Slack, Teams, webhook), probado al configurarlo.',
+        'Las alertas llegan donde el equipo ya trabaja.'],
+    };
+    // El "?" de un plugin. `izquierda`: el globo abre hacia la izquierda (en
+    // las últimas columnas, para que no se corte en el borde).
+    function ayudaHTML(plugin, izquierda = false) {
+      const [que, negocio] = _PARA_QUE_SIRVE[plugin] || [];
+      if (!que) return '';
+      return `<span class="ayuda${izquierda ? ' ayuda--izq' : ''}" tabindex="0" role="button" aria-label="${escapeHtml(`Para qué sirve: ${que} ${negocio}`)}">?`
+        + `<span class="ayuda__globo" role="tooltip"><strong>Qué hace</strong>${escapeHtml(que)}`
+        + `<strong>Para el negocio</strong>${escapeHtml(negocio)}</span></span>`;
+    }
     const _tarjetasDe = (plugins, slug) => (Array.isArray((plugins || {})[slug]) ? plugins[slug] : []);
     // `filas`: [{slug, nombre, indice, prefijo, punto, aviso, docs}], una por
     // caso; `punto`, `aviso` (el estado si no es "ingestando") y `docs`, HTML.
@@ -6798,8 +6857,8 @@
             </span>
           </div>
           <div class="mtx-scroll"><table class="mtx">
-            <thead><tr><th scope="col" class="mtx__th-caso">Caso</th>${columnas.map(([, n]) =>
-              `<th scope="col" class="mtx__th">${escapeHtml(n)}</th>`).join('')}</tr></thead>
+            <thead><tr><th scope="col" class="mtx__th-caso">Caso</th>${columnas.map(([id, n], i) =>
+              `<th scope="col" class="mtx__th">${escapeHtml(n)}${ayudaHTML(id, i >= columnas.length / 2)}</th>`).join('')}</tr></thead>
             <tbody>${casos}${cluster}</tbody>
           </table></div>${sinPlugins}
         </div>`;
@@ -6825,7 +6884,8 @@
         const links = (t.links || []).map(l =>
           `<a class="btn btn-secondary btn-sm" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${icon('dashboard')} ${escapeHtml(l.texto)}</a>`).join('');
         return `<article class="plug${t.estado === 'excluido' ? ' plug--excluido' : ''}" data-plugin="${escapeHtml(t.plugin)}" tabindex="-1">`
-          + `<div class="plug__head"><strong>${escapeHtml(t.titulo)}</strong><span class="sev ${clase}">${escapeHtml(texto)}</span></div>`
+          + `<div class="plug__head"><span class="plug__titulo"><strong>${escapeHtml(t.titulo)}</strong>${ayudaHTML(t.plugin)}</span>`
+          + `<span class="sev ${clase}">${escapeHtml(texto)}</span></div>`
           + (t.que ? `<p class="plug__que">${escapeHtml(t.que)}</p>` : '')
           + (t.motivo ? `<p class="plug__motivo">${corto(t.motivo, 240)}</p>` : '')
           + (filas ? `<ul class="plug__filas">${filas}</ul>` : '')

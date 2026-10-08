@@ -4759,6 +4759,97 @@ def _start_ttl_reaper() -> None:
 _start_ttl_reaper()
 
 
+# ── El cuidador de los plugins ───────────────────────────────────────────────
+# Un pico de carga (todo arrancando a la vez al provisionar) deja cosas caídas
+# que no se levantan solas: el Transform del perfil y el rollup son jobs
+# continuos que, con una búsqueda rechazada, quedan en `failed` para siempre; y
+# un backtest en INIT_TEST_FAILED, que Dashboards muestra como "Error". Visto
+# en CSS 3.4: "rejected execution ... queued tasks = 1004" en el rollup de SIEM
+# y un forecaster de ALyC en "Error". Al ver el caso en la plataforma ya se
+# rearrancaban; esto lo hace sin que nadie lo abra (en una demo se muestra
+# Dashboards). Solo con la cola de búsquedas casi vacía, y con tope por pieza:
+# una falla que no es de carga no se rearranca para siempre.
+_CUIDADOR_CADA_S = 600
+_CUIDADOR_TOPE = 3
+_cuidados: "dict[str, int]" = {}
+
+
+def _cuidar_plugins(terraform_dir: Path) -> list[str]:
+    """Rearranca lo caído de un entorno; devuelve qué (vacío si nada, si no
+    hay cluster o si está cargado)."""
+    import ciclo_de_vida as cdv
+    import perfiles
+
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        return []
+    password = _cluster_admin_password(terraform_dir)
+    if not password:
+        return []
+    user, base = "admin", _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    cola = _cola_de_busquedas(base, user, password)
+    if cola is None or cola >= _COLA_LIBRE:
+        return []
+
+    def toca(clave: str) -> bool:
+        clave = f"{terraform_dir}|{clave}"
+        if _cuidados.get(clave, 0) >= _CUIDADOR_TOPE:
+            return False
+        _cuidados[clave] = _cuidados.get(clave, 0) + 1
+        return True
+
+    hecho: list[str] = []
+    estados = _read_estados(terraform_dir)
+    for slug, entry in _read_pipelines_registry(terraform_dir).items():
+        jobs = []
+        if _perfil_de(slug, entry):
+            jobs.append(("perfil", perfiles.nombre_del_transform(slug), "_plugins/_transform", "transform_metadata"))
+        if "rollup" in (estados.get(slug) or {}):
+            jobs.append(("rollup", cdv.nombre_del_rollup(slug), "_plugins/_rollup/jobs", "metadata"))
+        for nombre, jid, ruta, clave in jobs:
+            cuerpo, _ = _leer(base, user, password, f"{ruta}/{jid}/_explain")
+            info = (cuerpo or {}).get(jid)
+            meta = (info.get(clave) or {}) if isinstance(info, dict) else {}
+            if str(meta.get("status") or "").lower() == "failed" and toca(jid) \
+                    and _rearrancar(base, user, password, f"{ruta}/{jid}"):
+                hecho.append(f"{nombre} · {slug}")
+    for slug, ids in _read_capabilities(terraform_dir).items():
+        for fc_id in ids.get("forecaster_ids") or []:
+            _, estado = _forecast_test_state(base, user, password, fc_id, tries=1)
+            if estado.startswith("INIT_TEST_FAILED") and toca(fc_id) and _lanzar_backtest(base, user, password, fc_id):
+                hecho.append(f"backtest · {slug}")
+    return hecho
+
+
+def _dirs_con_entorno() -> list[Path]:
+    """Las carpetas de Terraform con un entorno: la global (single-user) y la
+    de cada usuario (hosteado)."""
+    dirs = [Path(__file__).parent / "terraform"]
+    users_root = auth.DATA_ROOT / "users"
+    if users_root.is_dir():
+        dirs += [u / "terraform" for u in users_root.iterdir() if (u / "terraform").is_dir()]
+    return [d for d in dirs if (d / _PLATFORM_MARKER_NAME).is_file()]
+
+
+@app.on_event("startup")
+def _arrancar_cuidador() -> None:
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CUIDADOR_DE_PLUGINS", "1") == "0":
+        return
+
+    def _loop():
+        import time as _t
+        while True:
+            _t.sleep(_CUIDADOR_CADA_S)
+            for td in _dirs_con_entorno():
+                try:
+                    hecho = _cuidar_plugins(td)
+                    if hecho:
+                        print(f"[cuidador] rearranqué: {', '.join(hecho)}", flush=True)
+                except Exception as exc:  # noqa: BLE001 — el próximo turno
+                    print(f"[cuidador] {td}: {exc!r}", flush=True)
+
+    _threading.Thread(target=_loop, name="cuidador-de-plugins", daemon=True).start()
+
 # Registro de pipelines activas en el cluster. Cada "Nuevo pipeline" agrega una
 # entrada (slug → conf + flags + índice/prefijo) que corre EN PARALELO con las
 # demás. Es la fuente de verdad para reconstruir la var `pipelines` de Terraform
@@ -7532,6 +7623,10 @@ def _provisionar_el_paso_del_tiempo(base: str, user: str, password: str, slug: s
             fields, spec, _discover_enums(base, user, password, index_pattern, cdv.candidatos_a_dimension(fields)))
         if not medidas:
             return
+        # Con la cola libre: los 9 rollups arrancando juntos, encima de los
+        # backtests y los análisis de anomalías, llenaron la cola (1004 de
+        # 1000) y el de SIEM quedó "rejected execution".
+        _esperar_cluster_libre(base, user, password)
         try:
             res = _provisionar_rollup(base, user, password, slug, index_pattern, dims, medidas, force)
         except Exception as exc:  # noqa: BLE001
@@ -8809,6 +8904,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         if not perfil:
             continue
         indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
+        _esperar_cluster_libre(_base_analistas, user, password)   # como los rollups
         try:
             res = _provisionar_perfil(_base_analistas, user, password, slug, index_pattern_from_name(indice),
                                       perfil, request.force)

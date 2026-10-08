@@ -367,3 +367,51 @@ def test_sin_el_protocolo_provisionar_usa_el_del_deploy(monkeypatch):
     vistos.clear()
     c.post("/api/v1/onboarding/provision-capabilities", json={"opensearch_password": "pw", "slugs": ["siem"], "https_enabled": True})
     assert set(vistos) == {True}, "si viene, manda lo que viene"
+
+
+def test_el_cuidador_rearranca_lo_caido_con_la_cola_libre(monkeypatch, tmp_path):
+    """Visto en CSS 3.4 después de provisionar: el rollup de SIEM en failed
+    ("rejected execution ... queued tasks = 1004") y un forecaster de ALyC en
+    "Error" (INIT_TEST_FAILED). Sin abrir el caso, quedaban así."""
+    pedidos, relanzados = [], []
+    cola = {"n": 0}
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
+    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
+    monkeypatch.setattr(main, "_cola_de_busquedas", lambda *a: cola["n"])
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {"siem": {}, "ventas": {}})
+    monkeypatch.setattr(main, "_perfil_de", lambda slug, entry: {"campo": "x"} if slug == "siem" else None)
+    monkeypatch.setattr(main, "_read_estados", lambda td: {"siem": {"rollup": {"ok": True}}, "ventas": {"rollup": {"ok": True}}})
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"transacciones-alyc": {"forecaster_ids": ["F1", "F2"]}})
+    monkeypatch.setattr(main, "_forecast_test_state", lambda b, u, p, f, tries=1: (False, "INIT_TEST_FAILED") if f == "F2" else (True, "TEST_COMPLETE"))
+    monkeypatch.setattr(main, "_lanzar_backtest", lambda b, u, p, f: relanzados.append(f) or "T")
+
+    def req(m, url, *a, **k):
+        pedidos.append((m, url))
+        if url.endswith("siem-rollup/_explain"):
+            return _R(200, {"siem-rollup": {"metadata": {"status": "failed", "failure_reason": "rejected execution"}}})
+        if url.endswith("_explain"):
+            nombre = url.split("/")[-2]
+            return _R(200, {nombre: {"metadata": {"status": "started"}, "transform_metadata": {"status": "started"}}})
+        return _R(200, {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    assert main._cuidar_plugins(tmp_path) == ["rollup · siem", "backtest · transacciones-alyc"]
+    assert ("POST", "http://x:9200/_plugins/_rollup/jobs/siem-rollup/_start") in pedidos and relanzados == ["F2"]
+    # Con la cola cargada no toca nada (rearrancar con el nodo saturado vuelve a fallar).
+    cola["n"] = main._COLA_LIBRE
+    assert main._cuidar_plugins(tmp_path) == []
+    # Con tope: una falla que no es de carga no se rearranca para siempre.
+    cola["n"] = 0
+    for _ in range(5):
+        main._cuidar_plugins(tmp_path)
+    assert relanzados.count("F2") == main._CUIDADOR_TOPE
+    main._cuidados.clear()
+
+
+def test_el_cuidador_arranca_con_el_servidor_y_no_en_los_tests():
+    import pathlib
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    i = src.index('@app.on_event("startup")\ndef _arrancar_cuidador()')
+    cuerpo = src[i:i + 1200]
+    assert 'os.environ.get("PYTEST_CURRENT_TEST")' in cuerpo and "_t.sleep(_CUIDADOR_CADA_S)" in cuerpo
