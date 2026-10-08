@@ -56,3 +56,12 @@ def _settings_aislados(tmp_path, monkeypatch):
     guardar = _main._guardar_estados
     monkeypatch.setattr(_main, "_guardar_estados", lambda td, slug, nuevo: guardar(
         tmp_path if pathlib.Path(td).resolve() == repo_tf else td, slug, nuevo))
+    # Y al revés: en la máquina donde se despliega, `terraform/` del repo tiene
+    # el registro del entorno vivo. Un test que lo leía provisionaba reportes
+    # contra la IP de prueba (minutos de timeouts) y dependía de qué había
+    # desplegado. Para los tests esa carpeta se lee vacía, como en un checkout
+    # limpio; cualquier otra, como está.
+    for nombre in ("_read_pipelines_registry", "_read_capabilities", "_read_estados"):
+        original = getattr(_main, nombre)
+        monkeypatch.setattr(_main, nombre, lambda td, _o=original: {} if pathlib.Path(td).resolve() == repo_tf else _o(td))
+    monkeypatch.setattr(_main, "_ESPERA_LECTURA_TAREA_S", 0.0)

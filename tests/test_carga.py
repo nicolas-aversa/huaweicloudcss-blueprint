@@ -103,7 +103,7 @@ def test_el_paso_3_espera_y_reintenta():
     import pathlib
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def provision_capabilities(")
-    assert "_esperar_cluster_libre(_os_base(cluster, request.https_enabled), user, password)" in src[i:i + 4000]
+    assert "_esperar_cluster_libre(_os_base(cluster, request.https_enabled), user, password)" in src[i:src.index("\n    msg = ", i)]
     j = src.index("def _provisionar_anomalias(")
     ad = src[j:src.index("\ndef ", j + 10)]
     assert ad.index("if not _resp_ok(rd) and _es_saturacion(_resp_motivo(rd)):") < ad.index("detector_id = _resp_id(rd)")

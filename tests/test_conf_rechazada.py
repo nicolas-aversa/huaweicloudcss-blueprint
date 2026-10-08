@@ -136,7 +136,7 @@ def test_el_front_dice_rechazada_por_css():
     import pathlib
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
     i = html.index("const estadoCaso = (p) =>")
-    filas = html[i:html.index("Sin pipelines registradas.", i)]
+    filas = html[i:html.index("// Los números del entorno", i)]
     assert "p.config_status === 'rechazada'" in filas and "Rechazada por CSS" in filas
     assert "escapeHtml(p.config_error" in filas
     assert "const rechazadas = pipelines.filter(p => p.config_status === 'rechazada');" in html

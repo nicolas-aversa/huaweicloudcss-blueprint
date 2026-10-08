@@ -91,7 +91,7 @@ def test_lo_que_falta_y_lo_que_falla_se_dice(entorno, monkeypatch):
 
 def test_la_tarjeta_en_el_resumen():
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert "${snapshotsDeDemoHTML()}` }," in html
+    assert '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>' in html
     assert "body.querySelector('#infra-snapshots-guardar')?.addEventListener('click', (e) => guardarSnapshot(e.currentTarget));" in html
     assert "confirmLabel: 'Restaurar' });" in html, "restaurar pide confirmación"
     assert "css_agency: 'settings-hw-agency'" in html

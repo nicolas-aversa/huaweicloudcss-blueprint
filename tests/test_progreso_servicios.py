@@ -187,6 +187,9 @@ def test_preview_deploy_muestra_la_pantalla_real():
     i = html.index("function renderInfraView(")
     vista = html[i:html.index("if (!active) {", i)]
     assert "provisioningAnimationHTML();\n          return;" not in vista, "volvió la animación sola"
+    # La animación del pipeline (Logs → Logstash → OpenSearch → Dashboards) se
+    # sacó: el progreso del deploy ya dice qué se está haciendo.
+    assert "provisioningAnimationHTML" not in html and "prov-anim" not in html
     j = html.index("async function _vistaPreviaDeploy(paso)")
     previa = html[j:html.index("(function maybePreviewDeployAnim()", j)]
     assert "/api/v1/dev/deploy-preview?paso=" in previa

@@ -141,7 +141,7 @@ def test_provisionar_plugins_no_arma_el_agente_en_cada_caso():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def provision_capabilities(")
     cuerpo = src[i:src.index("\n    msg = ", i)]
-    assert "force=request.force, registrar_agente=False," in cuerpo
+    assert "registrar_agente=False,   # el force ya bajó todo, arriba" in cuerpo
     assert cuerpo.index("registrar_agente=False") < cuerpo.index("_registrar_agente_del_run(")
     j = src.index("def _provision_capabilities(")
     caso = src[j:src.index("    # ── Forecasting", j)]
@@ -214,3 +214,105 @@ def test_la_provision_rejuzga_cuando_ya_estan():
     j = src.index("def _provision_capabilities(")
     caso = src[j:src.index("    # ── Anomaly Detection", j)]
     assert 'result["forecast"] = _rejuzgar_backtests(base, user, password, forecaster_ids)' in caso
+
+
+def test_si_la_tarea_tarda_en_figurar_se_vuelve_a_leer(monkeypatch):
+    """Visto en CSS 3.4: el 409 llegó antes que la tarea, la primera lectura de
+    `?task=true` vino vacía y un backtest que terminó bien quedaba "no arrancó"."""
+    lecturas, esperas = [], []
+
+    def req(m, url, *a, **k):
+        if url.endswith("/_run_once"):
+            r = _R(409)
+            r.text = "cannot start a new test for FC since current test hasn't finished."
+            return r
+        lecturas.append(url)
+        return _R(200, {"run_once_task": {"task_id": "TARDE"}} if len(lecturas) == 3 else {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main.time, "sleep", lambda s: esperas.append(s))
+    assert main._lanzar_backtest("http://x", "a", "p", "FC") == "TARDE"
+    assert len(lecturas) == 3 and esperas == [main._ESPERA_LECTURA_TAREA_S] * 2
+    lecturas.clear()
+    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, **k: req(m, url) if url.endswith("/_run_once")
+                        else lecturas.append(url) or _R(200, {}))
+    assert main._lanzar_backtest("http://x", "a", "p", "FC") == ""
+    assert len(lecturas) == main._LECTURAS_DE_LA_TAREA, "con tope"
+
+
+def test_el_asistente_va_antes_que_los_casos():
+    """Esperaba al primer caso entero (cola libre, backtests, anomalías,
+    Security Analytics): con un SIEM primero, minutos sin chat."""
+    import pathlib
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    i = src.index("def provision_capabilities(")
+    cuerpo = src[i:src.index("\n    msg = ", i)]
+    bucle = cuerpo.index("    for slug in slugs:")
+    assert -1 < cuerpo.index("solo_conversacional=True") < bucle
+    assert -1 < cuerpo.index("_registrar_agente_del_run(") < bucle
+    # Con un force, todo se baja una vez antes de crear nada: bajando caso por
+    # caso, el segundo se llevaba el agente recién armado.
+    assert cuerpo.index("_teardown_slug_caps(_base, user, password, registro[s])") < cuerpo.index("solo_conversacional=True")
+    assert "force=request.force" not in cuerpo
+
+
+def test_solo_el_asistente_no_crea_el_resto(monkeypatch, tmp_path):
+    """La primera pasada deja los modelos (el agente lo arma el run) y nada más:
+    ni forecasters ni detectores."""
+    monkeypatch.setenv("MAAS_API_KEY", "KEY")
+    persistido = {}
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {})
+    monkeypatch.setattr(main, "_write_capabilities", lambda td, reg: persistido.update(reg))
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "_cluster_hwc_creds", lambda td: ("", ""))
+    monkeypatch.setattr(main, "_ml_commons_available", lambda b, u, p: True)
+    monkeypatch.setattr(main, "_resolve_capability_spec", lambda *a: {
+        "index_pattern": "ventas-*", "operations": [], "fields": [], "label": "Ventas",
+        "volume_field": "monto", "forecasts": [{"name": "f", "feature_name": "x"}]})
+    pedidos = []
+    ids = iter(["C1", "C2", "T1", "T2"])
+
+    def req(m, url, *a, json_body=None, **k):
+        pedidos.append(url)
+        if url.endswith("/model_groups/_register"):
+            return _R(200, {"model_group_id": "MG"})
+        if url.endswith("/connectors/_create"):
+            return _R(200, {"connector_id": next(ids)})
+        if url.endswith("/models/_register"):
+            return _R(200, {"task_id": next(ids)})
+        return _R(200, {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main, "_ml_wait_model", lambda b, u, p, t: {"T1": "M1", "T2": "M2"}[t])
+    monkeypatch.setattr(main, "_ml_wait_deployed", lambda b, u, p, m: (True, "DEPLOYED"))
+    r = main._provision_capabilities({"public_endpoint": "x:9200"}, "ventas", "admin", "pw", False,
+                                     registrar_agente=False, solo_conversacional=True)
+    assert r["conversational"]["agente_pendiente"] and set(r) == {"conversational"}
+    assert persistido["ventas"]["ppl_model_id"] == "M1" and persistido["ventas"]["llm_model_id"] == "M2"
+    assert not [u for u in pedidos if "_forecast" in u or "_anomaly" in u or "_alerting" in u]
+
+
+def test_con_force_todo_se_baja_una_vez_antes_de_crear(monkeypatch):
+    """El agente es de todo el cluster y queda anotado en cada caso: bajando
+    caso por caso, el segundo borraba el agente que acababa de armar el primero."""
+    from fastapi.testclient import TestClient
+    orden = []
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "1.2.3.4:9200"})
+    monkeypatch.setattr(main, "_teardown_orphans_by_name", lambda *a: orden.append("huérfanos"))
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"siem": {"agent_id": "AG"}, "ventas-ecommerce": {"agent_id": "AG"}})
+    monkeypatch.setattr(main, "_write_capabilities", lambda td, reg: orden.append(("registro", dict(reg))))
+    monkeypatch.setattr(main, "_teardown_slug_caps", lambda b, u, p, ids: orden.append(("bajar", ids.get("agent_id"))))
+    monkeypatch.setattr(main, "_provision_capabilities", lambda *a, **k: orden.append(("crear", a[1], k.get("force", False))) or {})
+    for f in ("_provisionar_analista", "_provisionar_perfil", "_provisionar_reporte"):
+        monkeypatch.setattr(main, f, lambda *a, **k: {"ok": True, "reason": "ok"})
+    monkeypatch.setattr(main, "_revisar_meses_de_seguridad", lambda *a, **k: None)
+    for f in ("_registrar_capacidades", "_asegurar_ppl_v3", "_provisionar_canal"):
+        monkeypatch.setattr(main, f, lambda *a, **k: None)   # contra la IP de prueba, timeouts
+    r = TestClient(main.app).post("/api/v1/onboarding/provision-capabilities", json={
+        "opensearch_password": "pw", "slugs": ["siem", "ventas-ecommerce"], "force": True})
+    assert r.status_code == 200
+    bajadas = [i for i, x in enumerate(orden) if isinstance(x, tuple) and x[0] == "bajar"]
+    creadas = [i for i, x in enumerate(orden) if isinstance(x, tuple) and x[0] == "crear"]
+    assert len(bajadas) == 2 and max(bajadas) < min(creadas), orden
+    assert all(not orden[i][2] for i in creadas), "ninguna pasada vuelve a bajar"
+    assert ("registro", {"siem": {}, "ventas-ecommerce": {}}) in orden

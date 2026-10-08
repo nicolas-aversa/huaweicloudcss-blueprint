@@ -279,7 +279,7 @@ def test_la_tarjeta_del_entorno_muestra_si_entraron_documentos():
     i = html.index("const salud = state.pipelineHealth")
     fila = html[i:html.index("// Un paso de la secuencia de puesta en marcha", i)]
 
-    assert "${chipDocs(p)}" in fila, "la fila de la pipeline no muestra los documentos"
+    assert "docs: chipDocs(p)," in fila, "la fila de la pipeline no muestra los documentos"
     assert 'id="infra-verify-btn"' in fila
     # Y una configuración que Logstash no pudo compilar no se ve como "En pausa".
     assert "Configuración inválida" in fila

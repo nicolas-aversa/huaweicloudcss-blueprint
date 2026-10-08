@@ -449,7 +449,7 @@ def test_la_vista_previa_usa_el_mismo_codigo():
 # ── El front ────────────────────────────────────────────────────────────────
 def _funciones(html: str) -> str:
     i = html.index("    const _ESTADO_PLUGIN = {")
-    return html[i:html.index("    async function verPlugins(btn) {", i)]
+    return html[i:html.index("    async function verPlugins(btn, plugin = '') {", i)]
 
 
 _ARNES = r"""
@@ -467,15 +467,32 @@ const plugins = {
   cts: [T('perfil', 'excluido')],
   _cluster: [T('query_insights', 'ok')],
 };
-check('sin plugins, nada', pluginsHTML({}) === '' && pluginsHTML(null) === '' && pluginsHTML({ _cluster: [T('q', 'ok')] }) === '');
-const card = pluginsHTML(plugins);
-check('el caso con su nombre y cuántos (sin los excluidos)', card.includes('data-slug="produccion-pozos"><span>Producción de pozos</span><span class="maestro__n">2</span>'), card);
-check('un caso con todo excluido no aparece', !card.includes('data-slug="cts"'), card);
-check('todo el cluster, al final', card.includes('data-slug="_cluster"><span>Todo el cluster</span>'), card);
+// La matriz: una fila por caso, una columna por plugin que algún caso tenga.
+const F = (slug, extra = {}) => ({ slug, nombre: SLUG_LABELS[slug] || slug, indice: `${slug}-*`, prefijo: `${slug}-logs/`, ...extra });
+const filas = [F('produccion-pozos', { punto: '<i class="punto"></i>', docs: '<i>1.234 docs</i>' }), F('cts', { aviso: '<i>En pausa</i>' })];
+check('sin casos, nada', matrizDePluginsHTML([], plugins) === '' && matrizDePluginsHTML(null, plugins) === '');
+const card = matrizDePluginsHTML(filas, plugins);
+const cols = [...card.matchAll(/<th scope="col" class="mtx__th">([^<]*)<\/th>/g)].map(m => m[1]);
+check('solo las columnas que algún caso tiene, en orden', JSON.stringify(cols) === JSON.stringify(['Dashboard', 'Pronóstico', 'Perfil']), JSON.stringify(cols));
+check('el caso abre su detalle', card.includes('class="mtx__abrir plug__caso" data-slug="produccion-pozos" aria-expanded="false" aria-controls="mtx-det-produccion-pozos"><svg data-i="chevron"></svg><i class="punto"></i><span class="mtx__nombre">Producción de pozos</span>'), card);
+check('la ingesta en la celda del caso', card.includes('<i>1.234 docs</i>') && card.includes('<i>En pausa</i>'), card);
+check('la celda con su estado, abre esa tarjeta', card.includes('class="mtx__estado mtx__estado--parcial" data-slug="produccion-pozos" data-plugin="forecasting" title="forecasting: Parcial" aria-label="forecasting: Parcial"><svg data-i="alert-triangle"></svg>'), card);
+check('lo excluido no es un botón', card.includes('<span class="mtx__na" title="perfil: Excluido">excluido</span>'), card);
+check('lo que no aplica', card.includes('<span class="mtx__na" title="No aplica a este caso">·</span>'), card);
+check('un caso sin plugins igual tiene su fila', card.includes('data-fila="cts"'), card);
+check('el detalle, oculto, con el índice, el prefijo y para llevarse', card.includes('id="mtx-det-produccion-pozos" data-det="produccion-pozos" hidden><td colspan="4">')
+  && card.includes('<code class="mtx__indice" title="Índice">produccion-pozos-*</code>') && card.includes('produccion-pozos-logs/')
+  && card.includes('href="/api/v1/cases/produccion-pozos/export" download') && card.includes('href="/api/v1/cases/produccion-pozos/traspaso" download'), card);
+check('todo el cluster, al final, con lo suyo', card.includes('data-fila="_cluster"') && card.indexOf('data-fila="_cluster"') > card.indexOf('data-fila="cts"')
+  && card.includes('class="mtx__global mtx__estado--ok" data-slug="_cluster" data-plugin="query_insights"'), card);
 check('sin provisionar, sin aviso', !card.includes('Provisionando'), card);
 state.provisionandoPlugins = true;
-check('provisionando, lo dice', pluginsHTML(plugins).includes('Provisionando: los demás casos aparecen a medida que terminan.'));
+check('provisionando, lo dice', matrizDePluginsHTML(filas, plugins).includes('Provisionando: los demás casos aparecen a medida que terminan.'));
 state.provisionandoPlugins = false;
+const vacia = matrizDePluginsHTML(filas, {});
+check('sin plugins todavía: los casos y cómo provisionarlos', vacia.includes('data-fila="cts"') && !vacia.includes('class="mtx__th"')
+  && vacia.includes('Los plugins aparecen acá cuando corras "Provisionar plugins"'), vacia);
+check('escapado', matrizDePluginsHTML([F('<x>')], {}).includes('&lt;x&gt;') && !matrizDePluginsHTML([F('<x>')], {}).includes('<x>'));
 const det = pluginsDetalleHTML([
   T('forecasting', 'parcial', { motivo: 'fallaron: A', filas: [{ texto: 'volumen', estado: 'parcial', detalle: 'backtest parcial: 3 de 600 pasos',
     numero: 'forecast:F1', url: 'https://d/app/forecasting#/forecasters/F1' }], links: [{ texto: 'Ver los forecasters', url: 'https://d/x' }] }),
@@ -501,7 +518,8 @@ check('y se explica con el asistente', an.includes('class="btn btn-secondary btn
 check('sin anomalías', numeroDePlugin('anomalias', { total: 0, estado: 'FINISHED' }, 's').includes('el análisis terminó'));
 check('un análisis que falló no "sigue corriendo"', numeroDePlugin('anomalias', { total: 0, estado: 'INIT_FAILURE' }, 's').includes('falló'));
 check('sin estado, se dice', numeroDePlugin('anomalias', { total: 0, estado: 'DESCONOCIDO' }, 's').includes('no se pudo leer'));
-check('tarjetas que no son una lista no rompen', _nPlugins('error') === 0 && pluginsHTML({ detail: 'No autenticado' }) === '');
+check('tarjetas que no son una lista no rompen', _nPlugins('error') === 0
+  && !matrizDePluginsHTML(filas, { detail: 'No autenticado', 'produccion-pozos': 'error' }).includes('mtx__estado'));
 check('eventos de seguridad', numeroDePlugin('seguridad:x', { eventos: 1842 }, 's').includes('<strong>1.842</strong> eventos detectados'));
 check('entidades del perfil', numeroDePlugin('perfil', { entidades: 1 }, 's').includes('<strong>1</strong> fila en el perfil'));
 check('la consulta más lenta', numeroDePlugin('insights', { latencia_ms: 1840 }, '').includes('<strong>1.840 ms</strong>'));
@@ -552,17 +570,16 @@ process.exit(fallos.length ? 1 : 0);
     assert "if (firmaDePlugins(data.plugins) !== firmaDePlugins((state.lastStatus || {}).plugins)) {" in html
 
 
-def test_la_pestana_esta_conectada():
+def test_la_matriz_esta_conectada():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    function renderInfraView(data) {")
     vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    assert "{ id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: nPlugins, html: pluginsHTML(data.plugins) }," in vista
-    assert vista.index("id: 'resumen'") < vista.index("id: 'plugins'"), "después del resumen"
+    assert "${matrizDePluginsHTML(filas, data.plugins)}" in vista
     assert "body.querySelector('#infra-plugins')?.addEventListener('click'" in vista
+    assert "if (abrir) return verPlugins(abrir, celda.dataset.plugin);" in vista, "una celda abre su tarjeta"
     assert "if (explicar) return explicarAnomalia(explicar);" in vista
-    assert ".find(b => b.dataset.slug === state.pluginsCaso)) || panel.querySelector('.plug__caso')]," in html, \
-        "al abrir la pestaña se carga el caso que se miraba, o el primero"
-    # Recién con los clicks enganchados (si no, el click al caso se perdía).
-    assert vista.index("body.querySelector('#infra-plugins')?.addEventListener('click'") < \
-        vista.index("cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);")
+    # Después de un refresco, el caso que estaba abierto (recién con los
+    # clicks enganchados: si no, el click se perdía).
+    reabrir = "const abierto = state.pluginsCaso && [...body.querySelectorAll('.mtx__abrir')].find(b => b.dataset.slug === state.pluginsCaso);"
+    assert vista.index("body.querySelector('#infra-plugins')?.addEventListener('click'") < vista.index(reabrir)
     assert "fetch('/api/v1/plugins/numeros' + (slug === '_cluster' ? '' : '?slug=' + encodeURIComponent(slug)))" in html

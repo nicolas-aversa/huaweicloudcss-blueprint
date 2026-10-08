@@ -86,4 +86,4 @@ def test_desplegado_lleva_como_quedo(monkeypatch, tmp_path):
 def test_se_baja_desde_la_plataforma():
     import pathlib
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert '<a href="/api/v1/cases/${encodeURIComponent(p.slug)}/traspaso" download>${icon(\'download\')} Traspaso</a>' in html
+    assert '<a href="${base}/traspaso" download>${icon(\'download\')} Traspaso</a>' in html

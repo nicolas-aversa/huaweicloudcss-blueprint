@@ -4512,7 +4512,7 @@ def test_provision_capabilities_endpoint(monkeypatch):
     monkeypatch.setattr(main, "_cluster_with_public_access",
                         lambda td: {"public_endpoint": "1.2.3.4:9200"})
     monkeypatch.setattr(main, "_provision_capabilities",
-                        lambda cluster, slug, user, pw, https, force=False, registrar_agente=True:
+                        lambda cluster, slug, user, pw, https, force=False, registrar_agente=True, solo_conversacional=False:
                         {slug: {"anomaly": {"ok": True}}})
     # El analista de demo: sin esto, PUTs reales contra la IP de prueba (timeouts).
     analistas = []

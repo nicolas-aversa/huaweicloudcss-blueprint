@@ -111,5 +111,6 @@ def test_la_tarjeta_del_caso_ofrece_llevarselo():
     import pathlib
 
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert '/api/v1/cases/${encodeURIComponent(p.slug)}/export" download>' in html
-    assert '/export/dashboards" download>' in html
+    assert "const base = `/api/v1/cases/${encodeURIComponent(slug)}`;" in html
+    assert '<a href="${base}/export" download>' in html
+    assert '<a href="${base}/export/dashboards" download>' in html

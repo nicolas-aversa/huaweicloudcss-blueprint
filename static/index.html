@@ -2059,34 +2059,6 @@
     .stat-card__label { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
     .stat-card__value { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); word-break: break-word; font-family: var(--font-mono); }
 
-    /* Casos del entorno: una tarjeta por pipeline, en grilla. */
-    .pipe-list {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
-      gap: 10px; margin: 14px 0 2px;
-    }
-    .caso-card {
-      display: flex; flex-direction: column; gap: 8px; min-width: 0;
-      padding: 12px 14px; background: var(--bg-secondary);
-      border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-    }
-    .caso-card__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .caso-card__nombre {
-      font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-primary);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
-    }
-    .caso-card__datos { display: flex; gap: 4px 12px; flex-wrap: wrap; min-height: 18px; }
-    .caso-card__chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
-    .caso-card__llevar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-muted); }
-    .caso-card__llevar a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); text-decoration: none; }
-    .caso-card__llevar a:hover { text-decoration: underline; }
-    .caso-card__llevar .icon { width: 12px; height: 12px; }
-    .caso-chip {
-      font-family: inherit; font-size: var(--fs-xs); font-weight: 600; line-height: 1.4;
-      padding: 2px 9px; border-radius: var(--radius-pill);
-      background: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border-subtle);
-    }
-    button.caso-chip { cursor: pointer; transition: border-color var(--t-base), color var(--t-base), background var(--t-base); }
-    button.caso-chip:hover, button.caso-chip:focus-visible { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-tint); outline: none; }
     .pipe-row__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-default); }
     .pipe-row__dot.is-active { background: var(--accent-green); box-shadow: 0 0 0 3px var(--accent-green-tint); }
     .pipe-row__idx {
@@ -2220,67 +2192,6 @@
     .status .deploy-progress, .setup-step__status .deploy-progress { margin: 0; max-width: none; }
     .setup-step__status { margin-top: 10px; }
     .setup-step__hecho { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    /* Animacion de aprovisionamiento: pipeline log -> Logstash -> OpenSearch ->
-       dashboards, con pulsos fluyendo entre etapas. Reemplaza el panel educativo
-       durante el deploy. Puramente CSS, theme-aware, respeta prefers-reduced-motion. */
-    .prov-anim {
-      max-width: none; margin: 14px 0 0; padding: 18px 20px; text-align: center;
-      background: var(--bg-primary); border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-    }
-    .prov-anim__stages {
-      display: flex; align-items: flex-start; justify-content: center;
-      gap: clamp(6px, 2.5vw, 22px); flex-wrap: nowrap;
-    }
-    .prov-stage { display: flex; flex-direction: column; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; }
-    .prov-stage__icon {
-      width: 54px; height: 54px; border-radius: var(--radius-xl); position: relative;
-      display: flex; align-items: center; justify-content: center;
-      background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
-      color: var(--text-muted); animation: provPulse 2.8s var(--ease, ease) infinite;
-    }
-    .prov-stage__icon .icon { width: 24px; height: 24px; }
-    .prov-stage:nth-child(1) .prov-stage__icon { animation-delay: 0s; }
-    .prov-stage:nth-child(3) .prov-stage__icon { animation-delay: .7s; }
-    .prov-stage:nth-child(5) .prov-stage__icon { animation-delay: 1.4s; }
-    .prov-stage:nth-child(7) .prov-stage__icon { animation-delay: 2.1s; }
-    .prov-stage__name { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); white-space: nowrap; }
-    .prov-stage__sub { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
-    /* Conector: linea base + dots que viajan de izquierda a derecha. */
-    .prov-flow {
-      flex: 1 1 auto; min-width: 24px; max-width: 90px; height: 54px;
-      display: flex; align-items: center; position: relative; overflow: hidden;
-    }
-    .prov-flow::before {
-      content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px;
-      transform: translateY(-50%); background: var(--border-subtle);
-    }
-    .prov-dot {
-      position: absolute; top: 50%; left: 0; width: 7px; height: 7px; border-radius: 50%;
-      background: var(--accent); transform: translate(-4px, -50%);
-      animation: provFlow 1.9s linear infinite;
-    }
-    .prov-flow .prov-dot:nth-child(2) { animation-delay: .63s; }
-    .prov-flow .prov-dot:nth-child(3) { animation-delay: 1.26s; }
-    .prov-anim__caption {
-      margin: 22px auto 0; max-width: 460px;
-      font-size: var(--fs-sm); line-height: 1.6; color: var(--text-secondary);
-    }
-    .prov-anim__caption strong { color: var(--accent); font-weight: var(--fw-semi); }
-    @keyframes provPulse {
-      0%, 100% { border-color: var(--border-subtle); color: var(--text-muted); box-shadow: none; }
-      50% { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px var(--accent-tint); }
-    }
-    @keyframes provFlow {
-      0% { left: 0; opacity: 0; }
-      15% { opacity: 1; }
-      85% { opacity: 1; }
-      100% { left: 100%; opacity: 0; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .prov-stage__icon { animation: none; border-color: var(--accent); color: var(--accent); }
-      .prov-dot { animation: none; opacity: 1; left: 46%; }
-    }
     .lp-q-btn {
       font-size: var(--fs-base); font-family: var(--font-sans, inherit); cursor: pointer;
       padding: 8px 14px; border-radius: var(--radius-md, 8px); border: 1px solid var(--border-subtle);
@@ -2398,35 +2309,67 @@
     .env-kpi__sub { font-size: var(--fs-sm); color: var(--text-muted); }
     .env-kpi__accion { grid-area: accion; margin: 0; }
 
-    /* Las pestañas del entorno, de su tamaño y a la izquierda: estiradas,
-       con tres pestañas cada una ocupaba un tercio de la pantalla. */
-    .infra-tabs .case-tab { flex: 0 0 auto; padding: 9px 11px; gap: 6px; font-size: var(--fs-sm); }
-    /* Centradas. Con márgenes automáticos y no con justify-content: center,
-       que con scroll recorta las del principio y no se pueden alcanzar. */
-    .infra-tabs .case-tab:first-child { margin-left: auto; }
-    .infra-tabs .case-tab:last-child { margin-right: auto; }
-    /* El clic no deja el recuadro de foco; con teclado, sí se ve. */
-    .infra-tabs .case-tab:focus { outline: none; }
-    .infra-tabs .case-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     .cap-chart__armando { display: flex; align-items: center; gap: 6px; padding: 8px 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .cap-chart__armando .icon { width: 13px; height: 13px; animation: pulse 1.6s var(--ease) infinite; }
-    /* El contador de cada pestaña. */
-    .infra-tab__cuenta {
-      font-size: var(--fs-xs); font-weight: 700; padding: 1px 7px; border-radius: var(--radius-pill);
-      background: var(--bg-tertiary); color: var(--text-muted);
+    /* Los accesos de demo, en grilla. */
+    #infra-accesos-detalle {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; align-items: start;
     }
-    .case-tab.is-active .infra-tab__cuenta { background: var(--accent); color: #fff; }
-
-    /* A todo el ancho, el detalle de cada pestaña va en grilla. */
-    .infra-panel .hallazgos__caso, #infra-accesos-detalle {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(min(440px, 100%), 1fr)); gap: 10px; align-items: start;
-    }
-    .infra-panel .hallazgos__titulo { grid-column: 1 / -1; margin-bottom: 0; }
-    .infra-panel .hallazgos__caso > .hallazgos__det + .hallazgos__det,
     #infra-accesos-detalle > .hallazgos__det + .hallazgos__det { margin-top: 0; }
     #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
     .hallazgos__lista { gap: 2px; }
     .hallazgos__lista > li { margin: 0 -10px; }
+
+    /* ── Casos y plugins: la matriz ── */
+    .mtx-scroll { overflow-x: auto; margin: 12px -4px 0; padding: 0 4px; }
+    .mtx { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
+    .mtx th, .mtx td { padding: 7px 8px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
+    .mtx thead th { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.25;
+                    color: var(--text-muted); text-align: center; background: var(--bg-primary); }
+    .mtx thead .mtx__th { width: 1%; min-width: 64px; }
+    .mtx thead .mtx__th-caso { text-align: left; }
+    /* La columna del caso queda fija al desplazar en pantallas angostas. */
+    .mtx__caso, .mtx__th-caso { position: sticky; left: 0; z-index: 1; background: var(--bg-primary); text-align: left; }
+    .mtx__fila:hover > *, .mtx__fila.is-abierta > * { background: var(--bg-subtle); }
+    .mtx__caso-in { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+    .mtx__abrir { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0;
+                  background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+    .mtx__abrir .icon { width: 14px; height: 14px; color: var(--text-muted); transform: rotate(-90deg);
+                        transition: transform var(--t-base); }
+    .mtx__abrir[aria-expanded="true"] .icon { transform: none; color: var(--accent); }
+    .mtx__abrir:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+    .mtx__nombre { font-weight: var(--fw-semi); white-space: nowrap; }
+    .mtx__indice { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
+    .mtx__caso .pipe-row__state { margin-left: 0; }
+    .mtx__celda { text-align: center; }
+    .mtx__estado, .mtx__global { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; cursor: pointer;
+                                 font: inherit; background: var(--bg-tertiary); color: var(--text-muted); }
+    .mtx__estado { width: 24px; height: 24px; border-radius: 50%; padding: 0; }
+    .mtx__estado .icon, .mtx__global .icon { width: 13px; height: 13px; stroke-width: 2.5; }
+    .mtx__estado--ok { background: var(--accent-green-tint); color: var(--accent-green); }
+    .mtx__estado--parcial { background: var(--accent-yellow-tint); color: #8a6100; }
+    .mtx__estado--falla { background: var(--accent-tint); color: var(--accent); }
+    .mtx__estado:hover, .mtx__estado:focus-visible, .mtx__global:hover, .mtx__global:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+    .mtx__na { color: var(--text-muted); font-size: var(--fs-xs); }
+    .mtx__cluster { display: flex; flex-wrap: wrap; gap: 6px; }
+    .mtx__global { padding: 3px 10px 3px 6px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 600; }
+    .mtx__global .icon { width: 12px; height: 12px; }
+    .mtx__det > td { padding: 12px 8px 4px; background: var(--bg-subtle); }
+    .mtx__det-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 10px; }
+    .mtx__det-head:empty { display: none; }
+    .mtx__llevar { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--fs-xs); color: var(--text-muted); }
+    .mtx__llevar a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-hover); text-decoration: none; }
+    .mtx__llevar a:hover { text-decoration: underline; }
+    .mtx__llevar .icon { width: 12px; height: 12px; }
+    .mtx__vacio { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+    .plug:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* Accesos y snapshot, lado a lado: son cortos. */
+    .env-extras { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 16px; align-items: start; }
+    .env-extras:empty { display: none; }
+    .env-extras > .section-card { margin: 0; }
+    .env-extras .section-card__head { flex-wrap: wrap; }
+    .env-extras .section-card__titlewrap { flex: 1 1 calc(100% - 60px); }
+    .env-extras .section-card__titlewrap + .btn { margin-left: 43px; }
 
     /* ── Plugins: una tarjeta por plugin, con su estado y el link a Dashboards ── */
     /* En columnas (mampostería) y no en grilla: en una grilla cada fila toma la
@@ -6254,33 +6197,6 @@
       progresoFin(document.getElementById('deploy-progress'), ok);
     }
 
-    // ── Animacion de aprovisionamiento ──
-    // Durante el deploy (tiempo muerto, 5-25 min) mostramos el pipeline en movimiento:
-    // log crudo -> Logstash -> OpenSearch -> dashboards, con pulsos fluyendo entre etapas.
-    // Puramente CSS (sin librerias), theme-aware y respeta prefers-reduced-motion.
-    function provisioningAnimationHTML() {
-      const flow = '<div class="prov-flow"><span class="prov-dot"></span><span class="prov-dot"></span><span class="prov-dot"></span></div>';
-      const stage = (ic, name, sub) => `
-        <div class="prov-stage">
-          <div class="prov-stage__icon">${icon(ic)}</div>
-          <div class="prov-stage__name">${name}</div>
-          <div class="prov-stage__sub">${sub}</div>
-        </div>`;
-      return `
-        <div class="prov-anim" role="img" aria-label="Aprovisionando: los logs fluyen por Logstash hacia OpenSearch y los dashboards">
-          <div class="prov-anim__stages">
-            ${stage('code', 'Logs', 'crudos')}
-            ${flow}
-            ${stage('layers', 'Logstash', 'estructura')}
-            ${flow}
-            ${stage('database', 'OpenSearch', 'indexa')}
-            ${flow}
-            ${stage('dashboard', 'Dashboards', 'visualiza')}
-          </div>
-          <div class="prov-anim__caption">Construyendo el pipeline: tus logs se <strong>estructuran</strong> en Logstash, se <strong>indexan</strong> en OpenSearch y alimentan los <strong>dashboards</strong>.</div>
-        </div>`;
-    }
-
     // Botón "Desplegar" (paso 4): crea los clusters (OpenSearch + Logstash) con la
     // ingesta APAGADA. Al terminar, guarda el body completo del deploy (con creds)
     // en `state.pendingDeploy`, lleva a Entorno desplegado y arranca solo el PRIMER
@@ -6798,25 +6714,82 @@
     const _ESTADO_PLUGIN = { ok: ['Listo', 'sev--ok'], parcial: ['Parcial', 'sev--high'], falla: ['Falló', 'sev--critical'],
                              en_curso: ['En curso', 'sev--low'], excluido: ['Excluido', ''], sin_probar: ['Sin probar', 'sev--low'] };
     const _nPlugins = (tarjetas) => (Array.isArray(tarjetas) ? tarjetas : []).filter(t => t.estado !== 'excluido').length;
-    function pluginsHTML(plugins) {
-      const casos = Object.keys(plugins || {}).filter(s => s !== '_cluster' && _nPlugins(plugins[s]));
-      if (!casos.length) return '';
-      const items = casos.map(s => [s, SLUG_LABELS[s] || s, _nPlugins(plugins[s])]);
-      if (_nPlugins(plugins._cluster)) items.push(['_cluster', 'Todo el cluster', _nPlugins(plugins._cluster)]);
+    // Casos y plugins en una matriz: una fila por caso, una columna por plugin
+    // con su estado de un vistazo. Al tocar el caso (o una celda) se abre
+    // debajo, a todo el ancho, el detalle con las tarjetas. Antes eran dos
+    // pestañas (tarjetas de casos, y una lista a la izquierda con el detalle al
+    // costado) que dejaban medio panel vacío.
+    const _COLUMNAS_PLUGIN = [
+      ['dashboard', 'Dashboard'], ['forecasting', 'Pronóstico'], ['anomalias', 'Anomalías'], ['alertas', 'Alertas'],
+      ['security_analytics', 'Seguridad'], ['perfil', 'Perfil'], ['analista', 'Analista'],
+      ['ciclo_de_vida', 'Ciclo de vida'], ['rollup', 'Rollup'],
+    ];
+    const _ICONO_ESTADO = { ok: 'check', parcial: 'alert-triangle', falla: 'x', en_curso: 'clock', sin_probar: 'info' };
+    const _tarjetasDe = (plugins, slug) => (Array.isArray((plugins || {})[slug]) ? plugins[slug] : []);
+    // `filas`: [{slug, nombre, indice, prefijo, punto, aviso, docs}], una por
+    // caso; `punto`, `aviso` (el estado si no es "ingestando") y `docs`, HTML.
+    function matrizDePluginsHTML(filas, plugins) {
+      filas = filas || [];
+      if (!filas.length) return '';
+      const presentes = new Set(filas.flatMap(f => _tarjetasDe(plugins, f.slug).map(t => t.plugin)));
+      // Solo las columnas que algún caso tiene; un plugin nuevo, al final.
+      const columnas = [..._COLUMNAS_PLUGIN.filter(([id]) => presentes.has(id)),
+        ...[...presentes].filter(id => !_COLUMNAS_PLUGIN.some(([c]) => c === id)).map(id => [id, id])];
+      const ancho = columnas.length + 1;
+      const celda = (slug, t) => {
+        if (!t) return '<td class="mtx__celda"><span class="mtx__na" title="No aplica a este caso">·</span></td>';
+        const [texto] = _ESTADO_PLUGIN[t.estado] || [t.estado];
+        const ayuda = escapeHtml(`${t.titulo}: ${texto}${t.motivo ? ` (${t.motivo})` : ''}`);
+        if (t.estado === 'excluido') return `<td class="mtx__celda"><span class="mtx__na" title="${ayuda}">excluido</span></td>`;
+        return `<td class="mtx__celda"><button type="button" class="mtx__estado mtx__estado--${escapeHtml(t.estado)}" `
+          + `data-slug="${escapeHtml(slug)}" data-plugin="${escapeHtml(t.plugin)}" title="${ayuda}" aria-label="${ayuda}">`
+          + `${icon(_ICONO_ESTADO[t.estado] || 'info')}</button></td>`;
+      };
+      const abrir = (slug, nombre, punto = '') => `<button type="button" class="mtx__abrir plug__caso" data-slug="${escapeHtml(slug)}" `
+        + `aria-expanded="false" aria-controls="mtx-det-${escapeHtml(slug)}">${icon('chevron')}${punto}`
+        + `<span class="mtx__nombre">${escapeHtml(nombre)}</span></button>`;
+      const detalle = (slug, cabeza) => `<tr class="mtx__det" id="mtx-det-${escapeHtml(slug)}" data-det="${escapeHtml(slug)}" hidden>`
+        + `<td colspan="${ancho}">${cabeza}<div class="mtx__det-cuerpo" data-detalle="${escapeHtml(slug)}"></div></td></tr>`;
+      const llevarse = (slug) => {
+        const base = `/api/v1/cases/${encodeURIComponent(slug)}`;
+        return `<span class="mtx__llevar" title="Para aplicarlo en otro cluster, sin la plataforma"><span>Llevarse:</span>`
+          + `<a href="${base}/export" download>${icon('download')} Dev Tools</a>`
+          + `<a href="${base}/export/dashboards" download>${icon('download')} Dashboards</a>`
+          + `<a href="${base}/traspaso" download>${icon('download')} Traspaso</a></span>`;
+      };
+      const casos = filas.map(f => {
+        const ts = _tarjetasDe(plugins, f.slug);
+        return `<tr class="mtx__fila" data-fila="${escapeHtml(f.slug)}">`
+          + `<th scope="row" class="mtx__caso"><span class="mtx__caso-in">${abrir(f.slug, f.nombre, f.punto || '')}${f.aviso || ''}${f.docs || ''}</span></th>`
+          + columnas.map(([id]) => celda(f.slug, ts.find(t => t.plugin === id))).join('') + '</tr>'
+          + detalle(f.slug, `<div class="mtx__det-head"><code class="mtx__indice" title="Índice">${escapeHtml(f.indice || '')}</code>`
+            + `${f.prefijo ? `<span class="pipe-row__prefix" title="Prefijo en OBS">${icon('cloud')} ${escapeHtml(f.prefijo)}</span>` : ''}${llevarse(f.slug)}</div>`);
+      }).join('');
+      // Lo que es de todo el cluster (asistente, text2viz, Query Insights…): una fila más.
+      const delCluster = _tarjetasDe(plugins, '_cluster').filter(t => t.estado !== 'excluido');
+      const cluster = delCluster.length
+        ? `<tr class="mtx__fila mtx__fila--cluster" data-fila="_cluster"><th scope="row" class="mtx__caso">${abrir('_cluster', 'Todo el cluster')}</th>`
+          + `<td colspan="${ancho - 1}"><div class="mtx__cluster">${delCluster.map(t => {
+            const [texto] = _ESTADO_PLUGIN[t.estado] || [t.estado];
+            return `<button type="button" class="mtx__global mtx__estado--${escapeHtml(t.estado)}" data-slug="_cluster" data-plugin="${escapeHtml(t.plugin)}" `
+              + `title="${escapeHtml(`${t.titulo}: ${texto}`)}">${icon(_ICONO_ESTADO[t.estado] || 'info')}<span>${escapeHtml(t.titulo)}</span></button>`;
+          }).join('')}</div></td></tr>` + detalle('_cluster', '')
+        : '';
+      const sinPlugins = !presentes.size
+        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando corras "Provisionar plugins" (paso 3 de la puesta en marcha).</p>` : '';
       return `<div class="section-card" id="infra-plugins">
           <div class="section-card__head">
             <span class="section-card__tile">${icon('layers')}</span>
             <span class="section-card__titlewrap">
-              <span class="section-card__title">Plugins</span>
-              <span class="section-card__hint">Lo que quedó en el cluster, caso por caso: qué se configuró con sus datos, si quedó bien y el link directo a OpenSearch Dashboards.${state.provisionandoPlugins ? ' Provisionando: los demás casos aparecen a medida que terminan.' : ''}</span>
+              <span class="section-card__title">Casos y plugins</span>
+              <span class="section-card__hint">Qué quedó configurado en cada caso. Tocá un caso, o una celda, para ver el detalle y los links a OpenSearch Dashboards.${state.provisionandoPlugins ? ' Provisionando: los demás casos aparecen a medida que terminan.' : ''}</span>
             </span>
           </div>
-          <div class="maestro">
-            <div class="maestro__lista" role="group" aria-label="Caso">${items.map(([slug, nombre, n]) =>
-              `<button type="button" class="maestro__item plug__caso" data-slug="${escapeHtml(slug)}">`
-              + `<span>${escapeHtml(nombre)}</span><span class="maestro__n">${n}</span></button>`).join('')}</div>
-            <div class="maestro__detalle" id="infra-plugins-detalle"><div class="hallazgos__vacio">Elegí un caso para ver sus plugins.</div></div>
-          </div>
+          <div class="mtx-scroll"><table class="mtx">
+            <thead><tr><th scope="col" class="mtx__th-caso">Caso</th>${columnas.map(([, n]) =>
+              `<th scope="col" class="mtx__th">${escapeHtml(n)}</th>`).join('')}</tr></thead>
+            <tbody>${casos}${cluster}</tbody>
+          </table></div>${sinPlugins}
         </div>`;
     }
     function pluginsDetalleHTML(tarjetas) {
@@ -6831,7 +6804,7 @@
           + `${ir(f.url)}</li>`).join('');
         const links = (t.links || []).map(l =>
           `<a class="btn btn-secondary btn-sm" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${icon('dashboard')} ${escapeHtml(l.texto)}</a>`).join('');
-        return `<article class="plug${t.estado === 'excluido' ? ' plug--excluido' : ''}" data-plugin="${escapeHtml(t.plugin)}">`
+        return `<article class="plug${t.estado === 'excluido' ? ' plug--excluido' : ''}" data-plugin="${escapeHtml(t.plugin)}" tabindex="-1">`
           + `<div class="plug__head"><strong>${escapeHtml(t.titulo)}</strong><span class="sev ${clase}">${escapeHtml(texto)}</span></div>`
           + (t.que ? `<p class="plug__que">${escapeHtml(t.que)}</p>` : '')
           + (t.motivo ? `<p class="plug__motivo">${escapeHtml(t.motivo)}</p>` : '')
@@ -6928,14 +6901,34 @@
         btn.innerHTML = original;
       }
     }
-    async function verPlugins(btn) {
-      const destino = document.getElementById('infra-plugins-detalle');
-      if (!destino) return;
+    // Abre (o cierra) el detalle de un caso en la matriz. Uno abierto a la vez;
+    // con `plugin` (la celda tocada) abre y lleva a esa tarjeta.
+    async function verPlugins(btn, plugin = '') {
+      const tabla = btn.closest('.mtx');
+      if (!tabla) return;
       const slug = btn.dataset.slug;
+      const det = [...tabla.querySelectorAll('.mtx__det')].find(d => d.dataset.det === slug);
+      if (!det) return;
+      const yaAbierto = btn.getAttribute('aria-expanded') === 'true';
+      tabla.querySelectorAll('.mtx__abrir').forEach(b => b.setAttribute('aria-expanded', 'false'));
+      tabla.querySelectorAll('.mtx__fila').forEach(f => f.classList.remove('is-abierta'));
+      tabla.querySelectorAll('.mtx__det').forEach(d => { d.hidden = true; });
+      if (yaAbierto && !plugin) { state.pluginsCaso = ''; return; }
       state.pluginsCaso = slug;
-      document.querySelectorAll('.plug__caso').forEach(b => b.classList.toggle('is-active', b === btn));
-      destino.className = 'maestro__detalle';
+      btn.setAttribute('aria-expanded', 'true');
+      btn.closest('.mtx__fila')?.classList.add('is-abierta');
+      det.hidden = false;
+      const destino = det.querySelector('.mtx__det-cuerpo');
+      const irALaTarjeta = () => {
+        const t = plugin && [...destino.querySelectorAll('.plug')].find(x => x.dataset.plugin === plugin);
+        if (!t) return;
+        t.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        t.focus({ preventScroll: true });
+      };
+      if (destino.dataset.lleno) { irALaTarjeta(); return; }
+      destino.dataset.lleno = '1';
       destino.innerHTML = pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug]);
+      irALaTarjeta();
       if (!destino.querySelector('[data-numero], [data-verif]')) return;
       destino.querySelectorAll('[data-numero]').forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
       let numeros = {};
@@ -6943,8 +6936,6 @@
         const res = await fetch('/api/v1/plugins/numeros' + (slug === '_cluster' ? '' : '?slug=' + encodeURIComponent(slug)));
         if (res.ok) numeros = await res.json();
       } catch (_err) { /* sin números: las tarjetas igual sirven */ }
-      // Si mientras tanto se eligió otro caso, esto ya no va.
-      if (!btn.classList.contains('is-active')) return;
       aplicarNumerosDePlugins(destino, numeros, slug);
     }
     // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
@@ -8234,51 +8225,6 @@
     // del payload de /terraform/status. Reusa formatAge/ticker para el
     // contador en vivo y destroyEnvironment para las
     // acciones (mismas funciones que usaba el wizard del step 5).
-    // "Entorno desplegado" en secciones: Resumen (puesta en marcha, pipelines,
-    // plugins), Security Analytics y Anomaly Detection, cada una en su pestaña,
-    // en vez de todo apilado (había que bajar mucho para llegar a las anomalías).
-    // Una sección vacía (el entorno no tiene ese plugin) no tiene pestaña; con
-    // una sola sección no hay pestañas. La elegida se recuerda en este navegador.
-    const _CLAVE_SECCION = 'infra-seccion';
-    function infraSeccionGuardada() {
-      try { return localStorage.getItem(_CLAVE_SECCION) || ''; } catch (_) { return ''; }
-    }
-    function infraSeccionesHTML(secciones, guardada) {
-      const llenas = secciones.filter(sec => sec.html);
-      const activa = (llenas.find(sec => sec.id === guardada) || llenas[0] || {}).id;
-      const tabs = llenas.length > 1
-        ? `<div class="case-tabs infra-tabs" role="tablist" aria-label="Secciones del entorno">${llenas.map(sec =>
-            `<button type="button" class="case-tab${sec.id === activa ? ' is-active' : ''}" role="tab" id="infra-tab-${sec.id}" `
-            + `data-infra-tab="${sec.id}" aria-controls="infra-panel-${sec.id}" aria-selected="${sec.id === activa}">`
-            + `<span class="case-tab__icon">${icon(sec.icon)}</span><span class="case-tab__label">${escapeHtml(sec.label)}</span>`
-            + `${sec.cuenta ? `<span class="infra-tab__cuenta">${sec.cuenta}</span>` : ''}</button>`).join('')}</div>`
-        : '';
-      return tabs + llenas.map(sec =>
-        `<div class="infra-panel" id="infra-panel-${sec.id}" data-infra-panel="${sec.id}" role="tabpanel" `
-        + `aria-labelledby="infra-tab-${sec.id}"${sec.id === activa ? '' : ' hidden'}>${sec.html}</div>`).join('');
-    }
-    // Lo que carga cada pestaña al abrirla (una vez por render): el botón que
-    // la actualiza o la primera opción.
-    const _CARGA_DE_SECCION = {
-      // El caso que se estaba mirando (un refresco re-pinta la vista) o el primero.
-      plugins: [(panel) => (state.pluginsCaso && [...panel.querySelectorAll('.plug__caso')]
-        .find(b => b.dataset.slug === state.pluginsCaso)) || panel.querySelector('.plug__caso')],
-    };
-    function cargarSeccionInfra(raiz, id) {
-      const panel = id && raiz.querySelector(`[data-infra-panel="${id}"]`);
-      if (!panel || panel.dataset.cargada) return;
-      panel.dataset.cargada = '1';
-      for (const sel of _CARGA_DE_SECCION[id] || []) (typeof sel === 'function' ? sel(panel) : panel.querySelector(sel))?.click();
-    }
-    function elegirSeccionInfra(raiz, id) {
-      raiz.querySelectorAll('[data-infra-tab]').forEach(t => {
-        const si = t.dataset.infraTab === id;
-        t.classList.toggle('is-active', si);
-        t.setAttribute('aria-selected', String(si));
-      });
-      raiz.querySelectorAll('[data-infra-panel]').forEach(pn => { pn.hidden = pn.dataset.infraPanel !== id; });
-      try { localStorage.setItem(_CLAVE_SECCION, id); } catch (_) { /* sin storage: solo no se recuerda */ }
-    }
     function renderInfraView(data) {
       const body = document.getElementById('infra-body');
       if (!body) return;
@@ -8304,8 +8250,7 @@
                 : 'Creando los clusters CSS, la red y el acceso público en Huawei Cloud. Puede tardar 5-25 min; no cierres esta pestaña.'}</div>
             </div>
             ${progresoHTML('Iniciando…', 'deploy-progress')}
-          </div>
-          ${provisioningAnimationHTML()}`;
+          </div>`;
         return;
       }
 
@@ -8404,56 +8349,24 @@
       const caps = data.capabilities || {};
       const sa = data.security_analytics || {};
       const nombreCaso = (slug) => SLUG_LABELS[slug] || String(slug || '').replace(/-/g, ' ');
-      // Qué tiene cada caso, de un vistazo; los plugins llevan a su tarjeta.
-      const chipsCaso = (p) => {
-        const ids = caps[p.slug] || {};
-        const fc = _forecastersDe(ids).length;
-        const dets = ((sa[p.slug] || {}).detectores || []).length;
-        const enPlugins = _nPlugins((data.plugins || {})[p.slug]) ? 'plugins' : '';
-        return [
-          p.dashboards_imported && ['Dashboards', enPlugins],
-          ids.agent_id && ['Asistente', ''],
-          dets && [`Security Analytics · ${dets}`, enPlugins],
-          ids.detector_id && ['Anomalías', enPlugins],
-          fc && [`Pronósticos · ${fc}`, enPlugins],
-          p.perfil && [`Perfil por ${String(p.perfil).toLowerCase()}`, enPlugins],
-          (p.enmascarados || []).length && ['Analista enmascarado', enPlugins],
-        ].filter(Boolean).map(([texto, ir]) => ir
-          ? `<button type="button" class="caso-chip" data-ir="${ir}" data-slug="${escapeHtml(p.slug)}">${escapeHtml(texto)}</button>`
-          : `<span class="caso-chip">${escapeHtml(texto)}</span>`).join('');
-      };
       const estadoCaso = (p) => `${rota(p)
         ? (p.config_status === 'rechazada'
           // CSS no la aceptó al crearla: no existe, no es que esté en pausa.
           ? `<span class="pipe-row__state is-error" title="${escapeHtml(p.config_error || 'CSS rechazó el configuration file.')}">Rechazada por CSS</span>`
           : `<span class="pipe-row__state is-error" title="Logstash no pudo compilar el configuration file (${escapeHtml(p.config_status)}): revisá el log de la pipeline en la consola de CSS.">Configuración inválida</span>`)
         : `<span class="pipe-row__state ${p.active ? 'is-active' : ''}">${p.active ? 'Ingestando' : 'En pausa'}</span>`}`;
-      // Un caso por tarjeta, en grilla: con 9 casos la lista de filas era una
-      // columna larga y angosta.
-      const pipeRows = pipelines.length
-        ? pipelines.map(p => `
-            <article class="caso-card">
-              <div class="caso-card__head">
-                <span class="pipe-row__dot ${p.active && !rota(p) ? 'is-active' : ''}"></span>
-                <strong class="caso-card__nombre" title="${escapeHtml(p.slug || '')}">${escapeHtml(nombreCaso(p.slug))}</strong>
-                ${estadoCaso(p)}
-              </div>
-              <code class="pipe-row__idx" title="Índice">${escapeHtml(p.index || p.slug || '—')}</code>
-              <div class="caso-card__datos">
-                ${p.obs_prefix ? `<span class="pipe-row__prefix" title="Prefijo en OBS">${icon('cloud')} ${escapeHtml(p.obs_prefix)}</span>` : ''}
-                ${chipDocs(p)}
-              </div>
-              <div class="caso-card__chips">${chipsCaso(p)}</div>
-              <div class="caso-card__llevar" title="Para aplicarlo en otro cluster, sin la plataforma">
-                <span>Llevarse:</span>
-                <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/export" download>${icon('download')} Dev Tools</a>
-                <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/export/dashboards" download>${icon('download')} Dashboards</a>
-                <a href="/api/v1/cases/${encodeURIComponent(p.slug)}/traspaso" download>${icon('download')} Traspaso</a>
-              </div>
-            </article>`).join('')
-        : `<div class="form-hint" style="padding:6px 2px;">Sin pipelines registradas.</div>`;
+      // Una fila por caso en la matriz de "Casos y plugins".
+      const filas = pipelines.map(p => {
+        const ingestando = p.active && !rota(p);
+        return {
+          slug: p.slug, nombre: nombreCaso(p.slug), indice: p.index || p.slug || '—', prefijo: p.obs_prefix || '',
+          punto: `<span class="pipe-row__dot ${ingestando ? 'is-active' : ''}" title="${ingestando ? 'Ingestando' : 'Sin ingestar'}"></span>`,
+          aviso: ingestando ? '' : estadoCaso(p),
+          docs: chipDocs(p),
+        };
+      });
 
-      // Los números del entorno, arriba de todo: cada uno lleva a su pestaña.
+      // Los números del entorno, arriba de todo; el de Plugins lleva a la matriz.
       const conDocs = pipelines.filter(p => salud[p.slug] && salud[p.slug].docs !== null && salud[p.slug].docs !== undefined);
       const docsTotal = conDocs.reduce((t, p) => t + (salud[p.slug].docs || 0), 0);
       const ingestando = pipelines.filter(p => p.active && !rota(p)).length;
@@ -8558,50 +8471,19 @@
           </div>
         </section>
         ${setupPanel}
-        ${infraSeccionesHTML([
-          { id: 'resumen', label: 'Resumen', icon: 'database', html: `
-            ${kpis}
-            <div class="section-card env-casos">
-              <div class="section-card__head">
-                <span class="section-card__tile">${icon('database')}</span>
-                <span class="section-card__titlewrap">
-                  <span class="section-card__title">Casos</span>
-                  <span class="section-card__hint">Cada uno con su índice y prefijo OBS. Para sumar otro log en paralelo: "Nuevo pipeline".</span>
-                </span>
-              </div>
-              <div class="pipe-list">${pipeRows}</div>
-            </div>
-            ${accesosHTML(pipelines)}
-            ${snapshotsDeDemoHTML()}` },
-          { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: nPlugins, html: pluginsHTML(data.plugins) },
-        ], infraSeccionGuardada())}
+        ${kpis}
+        ${matrizDePluginsHTML(filas, data.plugins)}
+        <div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>
         </div>`;
       const env = body.querySelector('.env');
-      // Cada pestaña carga lo suyo al abrirla: antes arrancaban vacías hasta
-      // tocar "Ver…".
-      const irASeccion = (id) => {
-        elegirSeccionInfra(body, id);
-        cargarSeccionInfra(body, id);
-        body.querySelector('.infra-tabs')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      };
-      body.querySelector('.infra-tabs')?.addEventListener('click', (e) => {
-        const t = e.target.closest('[data-infra-tab]');
-        if (!t) return;
-        elegirSeccionInfra(body, t.dataset.infraTab);
-        cargarSeccionInfra(body, t.dataset.infraTab);
-      });
-      // Los números y los chips de cada caso llevan a su pestaña.
+      // El número de Plugins lleva a la matriz.
+      const irALaMatriz = () => body.querySelector('#infra-plugins')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
       env?.addEventListener('click', (e) => {
-        const k = e.target.closest('[data-ir]');
-        if (!k || e.target.closest('#infra-verify-btn')) return;
-        if (k.dataset.slug) state.pluginsCaso = k.dataset.slug;
-        irASeccion(k.dataset.ir);
-        const caso = k.dataset.slug && [...body.querySelectorAll('.plug__caso')].find(b => b.dataset.slug === k.dataset.slug);
-        if (caso && !caso.classList.contains('is-active')) caso.click();
+        if (e.target.closest('[data-ir]') && !e.target.closest('#infra-verify-btn')) irALaMatriz();
       });
       env?.addEventListener('keydown', (e) => {
         const k = e.target.closest('.env-kpi[data-ir]');
-        if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irASeccion(k.dataset.ir); }
+        if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irALaMatriz(); }
       });
 
       // Datos de la demo: guardar, ver y restaurar.
@@ -8613,8 +8495,12 @@
       });
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
       body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
-      // Plugins: por caso, las tarjetas y su número; "Explicarla con IA" va al asistente.
+      // Casos y plugins: el caso abre su detalle; una celda, el detalle en esa
+      // tarjeta. "Explicarla con IA" va al asistente.
       body.querySelector('#infra-plugins')?.addEventListener('click', (e) => {
+        const celda = e.target.closest('.mtx__estado, .mtx__global');
+        const abrir = celda && [...body.querySelectorAll('.mtx__abrir')].find(b => b.dataset.slug === celda.dataset.slug);
+        if (abrir) return verPlugins(abrir, celda.dataset.plugin);
         const caso = e.target.closest('.plug__caso');
         if (caso) return verPlugins(caso);
         const explicar = e.target.closest('.anomalia__explicar');
@@ -8646,9 +8532,9 @@
       // Contador en vivo (el span #infra-age recién existe ahora).
       startActiveEnvTicker(data.deployed_seconds_ago || 0);
 
-      // La pestaña activa se carga recién con los clicks ya enganchados: antes
-      // el "click" al primer caso se perdía y la pestaña quedaba vacía.
-      cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);
+      // Un refresco re-pinta la vista: el caso que estaba abierto, sigue abierto.
+      const abierto = state.pluginsCaso && [...body.querySelectorAll('.mtx__abrir')].find(b => b.dataset.slug === state.pluginsCaso);
+      if (abierto) verPlugins(abierto);
       // Reconectar a un deploy/ingesta en curso (cola de jobs): sobrevive refresh.
       _reconnectDeployJob();
 

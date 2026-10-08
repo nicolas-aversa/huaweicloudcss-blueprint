@@ -268,7 +268,7 @@ def test_los_numeros_en_node(tmp_path):
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    const _ESTADO_PLUGIN = {")
     js = tmp_path / "ciclo.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", html[i:html.index("    async function verPlugins(btn) {", i)]), encoding="utf-8")
+    js.write_text(_ARNES.replace("{FUNCIONES}", html[i:html.index("    async function verPlugins(btn, plugin = '') {", i)]), encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
 

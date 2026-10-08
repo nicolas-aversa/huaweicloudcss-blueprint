@@ -33,11 +33,15 @@ def test_el_ensanchado_mide_el_contenido_y_nunca_achica():
     assert "var(--container-w) -" not in regla
 
 
-def test_los_casos_van_en_grilla_sin_partir_nombres():
-    # Una tarjeta por caso: tantas columnas como entren, y en un teléfono una.
-    assert "grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr))" in _regla(".pipe-list")
-    assert "text-overflow: ellipsis" in _regla(".caso-card__nombre")
-    assert "flex-wrap: wrap" in _regla(".caso-card__chips")
+def test_la_matriz_de_casos_se_desplaza_sin_perder_el_caso():
+    # En un teléfono la tabla se desplaza a lo ancho y la columna del caso
+    # queda fija; los nombres no se parten.
+    assert "overflow-x: auto" in _regla(".mtx-scroll")
+    fija = _regla(".mtx__caso, .mtx__th-caso")
+    assert "position: sticky" in fija and "left: 0" in fija and "background: var(--bg-primary)" in fija
+    assert "white-space: nowrap" in _regla(".mtx__nombre")
+    # Accesos y snapshot lado a lado; en un teléfono, uno debajo del otro.
+    assert "grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr))" in _regla(".env-extras")
     idx = _regla(".pipe-row__idx")
     assert "white-space: nowrap" in idx and "text-overflow: ellipsis" in idx
     assert "white-space: nowrap" in _regla(".pipe-row__prefix")
@@ -188,15 +192,6 @@ def test_las_pestanas_de_casos_no_se_salen_con_muchos_casos():
     assert "riel.addEventListener('pointerdown'" in html and "if (tab && !tab.classList.contains('is-active')) tab.click();" in html
     assert "white-space: nowrap" in tab and "flex: 1 0 auto" in tab and "margin-bottom: -2px" not in tab
     assert html.count("tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });") == 2
-
-
-def test_las_pestanas_del_entorno_van_centradas_sin_recortarse():
-    """Centradas con márgenes automáticos: con justify-content: center, cuando
-    no entran, las del principio quedan fuera del scroll."""
-    assert "margin-left: auto" in _regla(".infra-tabs .case-tab:first-child")
-    assert "margin-right: auto" in _regla(".infra-tabs .case-tab:last-child")
-    assert "justify-content: center" not in _regla(".case-tabs")
-
 
 
 def test_el_riel_marca_la_posicion(tmp_path):

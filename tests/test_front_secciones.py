@@ -1,7 +1,8 @@
-""""Entorno desplegado" en secciones (Resumen, Plugins) en vez de todo
-apilado. Se prueba en node con el código real de la vista."""
+""""Entorno desplegado" sin pestañas: los números, la matriz de casos y
+plugins, y abajo accesos y snapshot. Las pestañas Resumen/Plugins dejaban
+medio panel vacío (la lista de casos a la izquierda, el detalle al costado).
+Se prueba en node con el código real de la vista."""
 import pathlib
-import re
 import shutil
 import subprocess
 
@@ -10,137 +11,119 @@ import pytest
 _INDEX = pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html"
 
 
+def _vista(html: str) -> str:
+    i = html.index("    function renderInfraView(data) {")
+    return html[i:html.index("    async function hydrateActiveEnv() {", i)]
+
+
 def _funciones(html: str) -> str:
-    i = html.index("    const _CLAVE_SECCION = 'infra-seccion';")
-    return html[i:html.index("    function renderInfraView(data) {", i)]
+    i = html.index("    const _ESTADO_PLUGIN = {")
+    return html[i:html.index('    // "Explicar" una anomalía', i)]
 
 
 _ARNES = r"""
 const icon = (n) => `<svg data-i="${n}"></svg>`;
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-let guardado = {};
-let romper = false;
-globalThis.localStorage = {
-  getItem: (k) => { if (romper) throw new Error('bloqueado'); return guardado[k] ?? null; },
-  setItem: (k, v) => { if (romper) throw new Error('bloqueado'); guardado[k] = v; },
-};
+const SLUG_LABELS = {};
+const _fmtPron = (v) => String(v);
+const T = (plugin, estado, extra = {}) => ({ plugin, titulo: plugin, que: '', estado, motivo: '', filas: [], links: [], numero: '', ...extra });
+const state = { lastStatus: { plugins: {
+  siem: [T('dashboard', 'ok', { numero: 'x' }), T('perfil', 'ok'), T('forecasting', 'parcial')],
+  cts: [T('dashboard', 'ok')],
+  _cluster: [T('query_insights', 'ok', { numero: 'insights' })],
+} } };
+const pedidos = [];
+globalThis.fetch = async (url) => { pedidos.push(url); return { ok: true, json: async () => ({}) }; };
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-const secs = [
-  { id: 'resumen', label: 'Resumen', icon: 'database', html: '<p>pipelines</p>' },
-  { id: 'documentos', label: 'Documentos', icon: 'file', html: '' },
-  { id: 'plugins', label: 'Plugins', icon: 'layers', html: '<p>AD</p>' },
-];
-let h = infraSeccionesHTML(secs, '');
-check('pestañas de las secciones con contenido', h.includes('data-infra-tab="resumen"') && h.includes('data-infra-tab="plugins"'), h);
-check('sin plugin, sin pestaña', !h.includes('data-infra-tab="documentos"') && !h.includes('infra-panel-documentos'), h);
-check('la primera, activa', h.includes('id="infra-tab-resumen" data-infra-tab="resumen" aria-controls="infra-panel-resumen" aria-selected="true"'), h);
-check('las otras, ocultas', h.includes('data-infra-panel="plugins" role="tabpanel" aria-labelledby="infra-tab-plugins" hidden>'), h);
-check('la activa, visible', h.includes('data-infra-panel="resumen" role="tabpanel" aria-labelledby="infra-tab-resumen">'), h);
-h = infraSeccionesHTML(secs, 'plugins');
-check('la guardada, activa', h.includes('data-infra-tab="plugins" aria-controls="infra-panel-plugins" aria-selected="true"')
-  && h.includes('aria-labelledby="infra-tab-resumen" hidden>'), h);
-h = infraSeccionesHTML(secs, 'documentos');
-check('guardada pero sin contenido: la primera', h.includes('data-infra-tab="resumen" aria-controls="infra-panel-resumen" aria-selected="true"'), h);
-h = infraSeccionesHTML([secs[0], { ...secs[1] }], '');
-check('una sola sección: sin pestañas', !h.includes('role="tablist"') && h.includes('<p>pipelines</p>') && !h.includes(' hidden>'), h);
+// Un DOM mínimo: la tabla, una fila con su botón y su detalle por caso.
+const clases = () => ({ s: new Set(), add(c) { this.s.add(c); }, remove(c) { this.s.delete(c); }, contains(c) { return this.s.has(c); },
+                        toggle(c, v) { v ? this.add(c) : this.remove(c); } });
+const cuerpo = () => ({
+  dataset: {}, _h: '', tarjetas: [],
+  set innerHTML(h) {
+    this._h = h;
+    this.tarjetas = [...h.matchAll(/<article class="plug[^"]*" data-plugin="([^"]+)"/g)].map(m => ({
+      dataset: { plugin: m[1] }, vista: 0, foco: 0, scrollIntoView() { this.vista++; }, focus() { this.foco++; } }));
+  },
+  get innerHTML() { return this._h; },
+  querySelector(sel) { return sel === '[data-numero], [data-verif]' && /data-(numero|verif)=/.test(this._h) ? {} : null; },
+  querySelectorAll(sel) { return sel === '.plug' ? this.tarjetas : []; },
+});
+const tabla = { abrir: {}, filas: {}, dets: {} };
+for (const slug of ['siem', 'cts', '_cluster']) {
+  const fila = { classList: clases() };
+  tabla.filas[slug] = fila;
+  tabla.abrir[slug] = { dataset: { slug }, attrs: { 'aria-expanded': 'false' },
+    getAttribute(k) { return this.attrs[k]; }, setAttribute(k, v) { this.attrs[k] = v; },
+    closest(sel) { return sel === '.mtx' ? tabla : sel === '.mtx__fila' ? fila : null; } };
+  const c = cuerpo();
+  tabla.dets[slug] = { dataset: { det: slug }, hidden: true, c, querySelector(sel) { return sel === '.mtx__det-cuerpo' ? c : null; } };
+}
+tabla.querySelectorAll = (sel) => Object.values({ '.mtx__det': tabla.dets, '.mtx__abrir': tabla.abrir, '.mtx__fila': tabla.filas }[sel] || {});
+const abierto = (s) => !tabla.dets[s].hidden && tabla.abrir[s].attrs['aria-expanded'] === 'true' && tabla.filas[s].classList.contains('is-abierta');
 
-// Elegir: marca la pestaña, muestra su panel y la recuerda.
-const tab = (id) => ({ dataset: { infraTab: id }, classList: { on: false, toggle(_, v) { this.on = v; } }, attrs: {},
-                       setAttribute(k, v) { this.attrs[k] = v; } });
-const panel = (id) => ({ dataset: { infraPanel: id }, hidden: false });
-const tabs = [tab('resumen'), tab('plugins')];
-const panels = [panel('resumen'), panel('plugins')];
-const raiz = { querySelectorAll: (sel) => sel === '[data-infra-tab]' ? tabs : panels };
-elegirSeccionInfra(raiz, 'plugins');
-check('pestaña marcada', tabs[1].classList.on && tabs[1].attrs['aria-selected'] === 'true' && !tabs[0].classList.on && tabs[0].attrs['aria-selected'] === 'false');
-check('panel visible', panels[1].hidden === false && panels[0].hidden === true);
-check('recordada', guardado['infra-seccion'] === 'plugins' && infraSeccionGuardada() === 'plugins');
-// El contador de cada pestaña (sin contador, nada).
-h = infraSeccionesHTML([{ ...secs[0] }, { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: 9, html: '<p>AD</p>' }], '');
-check('contador', h.includes('<span class="infra-tab__cuenta">9</span>') && h.split('infra-tab__cuenta').length === 2, h);
-
-// Cada pestaña carga lo suyo al abrirla, una sola vez por render.
-const clicks = [];
-const boton = (n, slug) => ({ click: () => clicks.push(n), dataset: { slug } });
-const casos = [boton('siem', 'siem'), boton('pozos', 'produccion-pozos')];
-const panelPlug = () => ({ dataset: {}, querySelector: (sel) => sel === '.plug__caso' ? casos[0] : null,
-                           querySelectorAll: (sel) => sel === '.plug__caso' ? casos : [] });
-let pp = panelPlug();
-const raizC = { querySelector: (sel) => ({ '[data-infra-panel="plugins"]': pp })[sel] || null };
-globalThis.state = {};
-cargarSeccionInfra(raizC, 'plugins');
-cargarSeccionInfra(raizC, 'plugins');
-cargarSeccionInfra(raizC, 'resumen');
-cargarSeccionInfra(raizC, undefined);
-check('carga sola y una vez', JSON.stringify(clicks) === JSON.stringify(['siem']), JSON.stringify(clicks));
-// Plugins: después de un refresco, el caso que se estaba mirando.
-state.pluginsCaso = 'produccion-pozos';
-pp = panelPlug();
-cargarSeccionInfra(raizC, 'plugins');
-check('vuelve al caso que se miraba', clicks[clicks.length - 1] === 'pozos', JSON.stringify(clicks));
-
-romper = true;
-check('sin storage no rompe', infraSeccionGuardada() === '');
-elegirSeccionInfra(raiz, 'resumen');
-check('sin storage igual cambia', panels[0].hidden === false && panels[1].hidden === true);
+await verPlugins(tabla.abrir.siem);
+check('abre el caso', abierto('siem') && state.pluginsCaso === 'siem');
+check('con sus tarjetas', tabla.dets.siem.c.tarjetas.length === 3, tabla.dets.siem.c.innerHTML);
+check('y sus números', JSON.stringify(pedidos) === JSON.stringify(['/api/v1/plugins/numeros?slug=siem']), JSON.stringify(pedidos));
+await verPlugins(tabla.abrir.cts);
+check('uno abierto a la vez', abierto('cts') && !abierto('siem') && tabla.dets.siem.hidden);
+await verPlugins(tabla.abrir.cts);
+check('tocarlo de nuevo lo cierra', !abierto('cts') && state.pluginsCaso === '');
+const leidos = pedidos.length;
+await verPlugins(tabla.abrir.siem, 'perfil');
+const perfil = tabla.dets.siem.c.tarjetas.find(t => t.dataset.plugin === 'perfil');
+check('una celda abre el caso en esa tarjeta', abierto('siem') && perfil.vista === 1 && perfil.foco === 1);
+check('lo ya leído no se vuelve a pedir', pedidos.length === leidos && leidos === 2, JSON.stringify(pedidos));
+await verPlugins(tabla.abrir.siem, 'forecasting');
+const fc = tabla.dets.siem.c.tarjetas.find(t => t.dataset.plugin === 'forecasting');
+check('otra celda del caso abierto no lo cierra', abierto('siem') && fc.foco === 1);
+await verPlugins(tabla.abrir._cluster);
+check('todo el cluster, sin slug', pedidos[pedidos.length - 1] === '/api/v1/plugins/numeros' && abierto('_cluster'), JSON.stringify(pedidos));
+const sinTabla = { dataset: { slug: 'siem' }, closest: () => null };
+await verPlugins(sinTabla);
+check('fuera de la matriz, nada', state.pluginsCaso === 'siem' || state.pluginsCaso === '_cluster');
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_las_secciones_en_node(tmp_path):
-    js = tmp_path / "secciones.mjs"
+def test_abrir_y_cerrar_casos_en_node(tmp_path):
+    js = tmp_path / "matriz.mjs"
     js.write_text(_ARNES.replace("{FUNCIONES}", _funciones(_INDEX.read_text(encoding="utf-8"))), encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_la_vista_arma_sus_secciones_debajo_del_banner():
+def test_la_vista_va_sin_pestanas():
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("    function renderInfraView(data) {")
-    vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    # La franja del entorno con sus acciones y la puesta en marcha arriba,
-    # siempre visibles; después las secciones.
-    assert vista.index('<section class="env-bar">') < vista.index('id="infra-destroy-btn"') \
-        < vista.index("${setupPanel}") < vista.index("${infraSeccionesHTML([")
-    secciones = vista[vista.index("${infraSeccionesHTML(["):vista.index("], infraSeccionGuardada())}")]
-    assert [m for m in re.findall(r"\{ id: '(\w+)'", secciones)] == ["resumen", "plugins"], \
-        "las de cada plugin salieron (los resultados se miran en Dashboards), y la base de conocimiento también"
-    resumen = secciones[:secciones.index("{ id: 'plugins'")]
-    for pieza in ("${kpis}", '<div class="pipe-list">${pipeRows}</div>', "${accesosHTML(pipelines)}"):
-        assert pieza in resumen, pieza
+    vista = _vista(html)
+    # La franja del entorno con sus acciones y la puesta en marcha arriba;
+    # después los números, la matriz, y accesos y snapshot lado a lado.
+    orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${setupPanel}", "${kpis}",
+             "${matrizDePluginsHTML(filas, data.plugins)}",
+             '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>']
+    posiciones = [vista.index(p) for p in orden]
+    assert posiciones == sorted(posiciones), orden
     # El resultado de "Provisionar plugins", dentro de la puesta en marcha.
     k = vista.index("const setupPanel = ")
-    setup = vista[k:vista.index("body.innerHTML = `", k)]
-    assert 'id="infra-capabilities-result"' in setup
-    assert "body.querySelector('.infra-tabs')?.addEventListener('click'" in vista
-    assert "elegirSeccionInfra(body, t.dataset.infraTab);" in vista
+    assert 'id="infra-capabilities-result"' in vista[k:vista.index("body.innerHTML = `", k)]
+    for viejo in ("infraSeccionesHTML", "data-infra-tab", "cargarSeccionInfra", "elegirSeccionInfra", "caso-card", "pipeRows"):
+        assert viejo not in html, viejo
 
 
-def test_lo_que_se_recuerda_no_es_el_chat():
-    """El chat vive solo en memoria (compliance); lo único guardado es qué
-    pestaña estaba elegida."""
-    f = _funciones(_INDEX.read_text(encoding="utf-8"))
-    assert f.count("localStorage.getItem(") == 1 and f.count("localStorage.setItem(") == 1
-    assert "_CLAVE_SECCION = 'infra-seccion'" in f
+def test_no_se_guarda_nada_en_el_navegador():
+    """El chat vive solo en memoria (compliance); y sin pestañas ya no hay
+    una elegida que recordar."""
+    vista = _vista(_INDEX.read_text(encoding="utf-8"))
+    assert "localStorage" not in vista and "infra-seccion" not in vista
 
 
-def test_los_numeros_y_los_chips_llevan_a_plugins():
-    """El indicador de Plugins y los chips de cada caso abren la pestaña
-    Plugins, en la tarjeta de ese caso."""
-    html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("    function renderInfraView(data) {")
-    vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    for ir in ("kpi('plugins', 'Plugins', nPlugins,", "['Anomalías', enPlugins]", "[`Pronósticos · ${fc}`, enPlugins]",
-               'data-ir="${ir}" data-slug="${escapeHtml(p.slug)}"'):
-        assert ir in vista, ir
-    irA = vista[vista.index("const irASeccion = (id) => {"):vista.index("body.querySelector('.infra-tabs')?.addEventListener")]
-    assert "elegirSeccionInfra(body, id);" in irA and "cargarSeccionInfra(body, id);" in irA
-    assert "if (k.dataset.slug) state.pluginsCaso = k.dataset.slug;" in vista
-    assert "if (caso && !caso.classList.contains('is-active')) caso.click();" in vista
-    assert "if (k && (e.key === 'Enter' || e.key === ' '))" in vista, "con teclado también"
-    # La pestaña que quedó elegida carga al entrar.
-    assert "cargarSeccionInfra(body, body.querySelector('[data-infra-tab].is-active')?.dataset.infraTab);" in vista
+def test_el_numero_de_plugins_lleva_a_la_matriz():
+    vista = _vista(_INDEX.read_text(encoding="utf-8"))
+    assert "kpi('plugins', 'Plugins', nPlugins," in vista
+    assert "const irALaMatriz = () => body.querySelector('#infra-plugins')?.scrollIntoView({ block: 'start', behavior: 'smooth' });" in vista
+    assert "if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irALaMatriz(); }" in vista, "con teclado también"

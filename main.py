@@ -6333,6 +6333,10 @@ def _forecast_test_state(base: str, user: str, password: str, fc_id: str, task_i
     return False, f"{FORECAST_EN_CURSO} ({ultimo or 'sin tarea todavía'})"
 
 
+_LECTURAS_DE_LA_TAREA = 4
+_ESPERA_LECTURA_TAREA_S = 5.0
+
+
 def _lanzar_backtest(base: str, user: str, password: str, fc_id: str) -> str:
     """`_run_once` del forecaster: el id de la tarea de su backtest ("" si no se
     pudo, con el motivo en el log). CSS 3.4 responde `{"task_id": …}`; se lee
@@ -6346,11 +6350,19 @@ def _lanzar_backtest(base: str, user: str, password: str, fc_id: str) -> str:
     except (ValueError, AttributeError):
         tarea = ""
     if not tarea and r1 is not None and r1.status_code == 409 and "hasn't finished" in (getattr(r1, "text", "") or ""):
-        rf = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{fc_id}?task=true", user, password, timeout=20)
-        try:
-            tarea = str(((rf.json() or {}).get("run_once_task") or {}).get("task_id") or "") if _resp_ok(rf) else ""
-        except (ValueError, AttributeError):
-            tarea = ""
+        # La tarea puede tardar unos segundos en figurar en `?task=true` (visto
+        # en CSS 3.4: con la primera lectura vacía, un backtest que terminó bien
+        # quedaba como "no arrancó" y se relanzaba).
+        for lectura in range(_LECTURAS_DE_LA_TAREA):
+            if lectura:
+                time.sleep(_ESPERA_LECTURA_TAREA_S)
+            rf = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{fc_id}?task=true", user, password, timeout=20)
+            try:
+                tarea = str(((rf.json() or {}).get("run_once_task") or {}).get("task_id") or "") if _resp_ok(rf) else ""
+            except (ValueError, AttributeError):
+                tarea = ""
+            if tarea:
+                break
     if not tarea:
         print(f"[capabilities] el backtest de {fc_id} no arrancó: {_resp_motivo(r1)}")
     return tarea
@@ -6887,12 +6899,14 @@ def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_ena
 
 def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             password: str, https_enabled: bool,
-                            force: bool = False, registrar_agente: bool = True) -> dict:
+                            force: bool = False, registrar_agente: bool = True,
+                            solo_conversacional: bool = False) -> dict:
     """Provisiona el bundle de capabilities del `slug` (si tiene spec) y persiste
     los IDs en `.capabilities.json`. Devuelve un dict de estado por capability.
 
     Si ``force=True``, tear down de artifacts existentes y recrea (para
-    re-provisionar con modelo nuevo)."""
+    re-provisionar con modelo nuevo). Con ``solo_conversacional``, solo los
+    modelos del asistente (ver `provision_capabilities`: van antes que el resto)."""
     import capabilities as caps
 
     base = _os_base(cluster, https_enabled)
@@ -6963,7 +6977,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
             ppl_model = llm_model = None
             group_id = ppl_conn = llm_conn = None
             for o_slug, o_ids in registry.items():
-                if o_slug == slug or not (o_ids.get("ppl_model_id") and o_ids.get("llm_model_id")):
+                if not (o_ids.get("ppl_model_id") and o_ids.get("llm_model_id")):
                     continue
                 deployed = []
                 for mid in (o_ids["ppl_model_id"], o_ids["llm_model_id"]):
@@ -7045,6 +7059,14 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                                             "reason": deploy_err or "no se pudieron provisionar los modelos (ver logs)"}
         except Exception as exc:  # noqa: BLE001
             result["conversational"] = {"ok": False, "reason": repr(exc)}
+
+    if solo_conversacional:
+        # Con un force, lo que se bajó tampoco queda en el registro (la pasada
+        # siguiente de este caso no lo vuelve a bajar: ya no está).
+        if force:
+            registry[slug] = ids
+            _write_capabilities(terraform_dir, registry)
+        return result
 
     # ── Forecasting ──────────────────────────────────────────────────────────
     forecast_specs = spec.get("forecasts")
@@ -8612,10 +8634,22 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     pipe_reg = _read_pipelines_registry(terraform_dir)
     caps_result: dict = {}
     any_ok = False
+    con_plugins = [s for s in slugs if _caps.get_capability_spec(s) is not None
+                   or (pipe_reg.get(s, {}) or {}).get("fields")]
     if request.force:
         _base = _os_base(cluster, request.https_enabled)
         if _base.rsplit("//", 1)[-1]:
             _teardown_orphans_by_name(_base, user, password)
+            # Cada caso se baja una vez, acá, antes de crear nada. El agente y
+            # los modelos son de todo el cluster y quedan anotados en cada caso:
+            # bajándolos caso por caso, el segundo se llevaba el agente que
+            # acababa de armar el primero.
+            registro = _read_capabilities(terraform_dir)
+            for s in con_plugins:
+                if registro.get(s):
+                    _teardown_slug_caps(_base, user, password, registro[s])
+                    registro[s] = {}
+            _write_capabilities(terraform_dir, registro)
     # Run de Actividad: una fila por capability (chatbot, forecast, …) con su
     # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
     # cuanto el browser cerraba la pestaña.
@@ -8627,11 +8661,23 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)
     except Exception as exc:  # noqa: BLE001 — sin canal, las alertas igual quedan en Alerting
         runs.step(run, "Canal de alertas", False, repr(exc)[:300])
+    # El asistente, antes que los casos: los datos ya están ingestados, así que
+    # con los modelos alcanza para armarlo con todas las fuentes. Antes esperaba
+    # al primer caso entero (cola libre, backtests, anomalías, Security
+    # Analytics): con un SIEM primero, eran minutos sin chat.
     agente_del_run = ""
+    if con_plugins:
+        try:
+            caps_result[con_plugins[0]] = _provision_capabilities(
+                cluster, con_plugins[0], user, password, request.https_enabled,
+                registrar_agente=False, solo_conversacional=True,
+            )
+            agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,
+                                                       terraform_dir, caps_result, run, agente_del_run)
+        except Exception as exc:  # noqa: BLE001 — el bucle lo vuelve a intentar
+            print(f"[provision-capabilities] el asistente antes que los casos falló: {exc!r}")
     for slug in slugs:
-        has_spec = _caps.get_capability_spec(slug) is not None
-        has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
-        if not has_spec and not has_fields:
+        if slug not in con_plugins:
             continue
         # Con el cluster saturado (Security Analytics procesando la ingesta) lo
         # que se lanza ahora se rechaza: primero, que haya lugar.
@@ -8639,7 +8685,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         try:
             caps_result[slug] = _provision_capabilities(
                 cluster, slug, user, password, request.https_enabled,
-                force=request.force, registrar_agente=False,
+                registrar_agente=False,   # el force ya bajó todo, arriba
             )
             if caps_result[slug]:
                 any_ok = True
