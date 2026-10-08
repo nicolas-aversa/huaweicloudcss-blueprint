@@ -5790,6 +5790,38 @@ def _css_client(ak: str, sk: str, project_id: str):
             req.body = UpdateRouteRequestBody(configtype="add_ip", configkey=ip, configvalue="255.255.255.255")
             client.update_route(req)
 
+        # ── Snapshots (datos de demo) ──
+        def configurar_snapshots(self, cluster_id: str, bucket: str, agencia: str, ruta: str) -> None:
+            from huaweicloudsdkcss.v1 import UpdateSnapshotSettingReq, UpdateSnapshotSettingRequest
+            req = UpdateSnapshotSettingRequest()
+            req.cluster_id = cluster_id
+            req.body = UpdateSnapshotSettingReq(bucket=bucket, agency=agencia, base_path=ruta)
+            client.update_snapshot_setting(req)
+
+        def crear_snapshot(self, cluster_id: str, nombre: str, indices: str, descripcion: str) -> str:
+            from huaweicloudsdkcss.v1 import CreateSnapshotReq, CreateSnapshotRequest
+            req = CreateSnapshotRequest()
+            req.cluster_id = cluster_id
+            req.body = CreateSnapshotReq(name=nombre, indices=indices, description=descripcion)
+            resp = client.create_snapshot(req)
+            return str(getattr(getattr(resp, "backup", None), "id", "") or "")
+
+        def listar_snapshots(self, cluster_id: str) -> list:
+            from huaweicloudsdkcss.v1 import ListSnapshotsRequest
+            req = ListSnapshotsRequest()
+            req.cluster_id = cluster_id
+            return [{"id": b.id, "nombre": b.name, "estado": b.status, "creado": b.created, "indices": b.indices,
+                     "descripcion": b.description, "cluster": b.cluster_name, "restaurado": b.restore_status}
+                    for b in (getattr(client.list_snapshots(req), "backups", None) or [])]
+
+        def restaurar_snapshot(self, cluster_id: str, snapshot_id: str, destino: str, indices: str) -> None:
+            from huaweicloudsdkcss.v1 import RestoreSnapshotReq, RestoreSnapshotRequest
+            req = RestoreSnapshotRequest()
+            req.cluster_id = cluster_id
+            req.snapshot_id = snapshot_id
+            req.body = RestoreSnapshotReq(target_cluster=destino, indices=indices)
+            client.restore_snapshot(req)
+
     return _Wrapper()
 
 
@@ -7698,6 +7730,88 @@ def probar_embeddings() -> dict:
     _guardar_estados(terraform_dir, "_cluster", {"embeddings": e and {**e, "paso": res.get("paso", ""),
                                                                       "dimensiones": res.get("dimensiones", 0)}})
     return res
+
+
+# ── Los datos de la demo, en un snapshot ────────────────────────────────────
+# Armar una demo es deploy + ingesta + plugins. Con los datos ya ingestados en
+# un snapshot (en el bucket de demos), el próximo cluster los restaura en vez
+# de ingerirlos. Usa la API de snapshots del CSS: el cluster escribe en OBS con
+# una agencia de IAM (⚙ Infraestructura general).
+RUTA_DE_SNAPSHOTS = "css-demos/snapshots"
+
+
+def _snapshots_del_entorno() -> "tuple[Any, str, str]":
+    """(cliente, cluster_id, indices) del entorno activo, con los snapshots ya
+    apuntados al bucket de demos. 4xx con el motivo si falta algo."""
+    import maas_integrator as _mi
+
+    terraform_dir = _active_terraform_dir()
+    cluster = _cluster_with_public_access(terraform_dir)
+    hw = _mi.get_huawei_settings()
+    bucket, agencia = hw.get("demo_bucket", ""), hw.get("css_agency", "") or "css_obs_agency"
+    ak, sk = _cluster_hwc_creds(terraform_dir)
+    faltan = [n for n, v in (("el cluster", cluster.get("id")), ("el bucket de demos", bucket),
+                              ("las credenciales del deploy", ak and sk), ("el Project ID", get_huawei_project_id())) if not v]
+    if faltan:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "snapshots", "message": "Falta " + ", ".join(faltan) + "."})
+    cliente = _css_client(ak, sk, get_huawei_project_id())
+    if cliente is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "snapshots", "message": "El SDK de CSS no está disponible."})
+    try:
+        cliente.configurar_snapshots(cluster["id"], bucket, agencia, RUTA_DE_SNAPSHOTS)
+    except Exception as exc:  # noqa: BLE001 — el motivo de Huawei, a la vista
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail={"stage": "snapshots", "message": (
+            f"No se pudo apuntar los snapshots a {bucket}/{RUTA_DE_SNAPSHOTS} con la agencia {agencia}: "
+            f"{str(exc)[:300]}")}) from exc
+    slugs = list(_read_pipelines_registry(terraform_dir))
+    indices = ",".join(f"{s}-*" for s in slugs)
+    return cliente, cluster["id"], indices
+
+
+@app.get("/api/v1/demo-snapshots", tags=["infra"], summary="Los snapshots de datos de demo del bucket")
+def listar_snapshots_de_demo() -> dict:
+    """Los que hay en `css-demos/snapshots/` del bucket de demos: los de este
+    cluster y los de clusters anteriores (CSS los lista al apuntar a la ruta)."""
+    cliente, cluster_id, indices = _snapshots_del_entorno()
+    try:
+        lista = cliente.listar_snapshots(cluster_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail={"stage": "snapshots", "message": str(exc)[:300]}) from exc
+    return {"snapshots": sorted(lista, key=lambda s: str(s.get("creado") or ""), reverse=True), "indices": indices}
+
+
+@app.post("/api/v1/demo-snapshots", tags=["infra"], summary="Guarda los datos de los casos en un snapshot")
+def guardar_snapshot_de_demo() -> dict:
+    cliente, cluster_id, indices = _snapshots_del_entorno()
+    if not indices:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "snapshots", "message": "El entorno no tiene casos."})
+    nombre = "demo-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    try:
+        sid = cliente.crear_snapshot(cluster_id, nombre, indices, f"Datos de demo: {indices}"[:250])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail={"stage": "snapshots", "message": f"No se pudo crear: {str(exc)[:300]}"}) from exc
+    audit.record("snapshot_demo", f"{nombre}: {indices}")
+    return {"id": sid, "nombre": nombre, "indices": indices}
+
+
+@app.post("/api/v1/demo-snapshots/{snapshot_id}/restaurar", tags=["infra"],
+          summary="Restaura los datos de un snapshot de demo en este cluster")
+def restaurar_snapshot_de_demo(snapshot_id: str) -> dict:
+    """En un entorno recién desplegado (sin ingerir): los índices de los casos
+    vuelven del snapshot. Los que ya existen no se pisan."""
+    cliente, cluster_id, indices = _snapshots_del_entorno()
+    try:
+        cliente.restaurar_snapshot(cluster_id, snapshot_id, cluster_id, indices)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail={"stage": "snapshots", "message": f"No se pudo restaurar: {str(exc)[:300]}"}) from exc
+    audit.record("snapshot_demo_restaurar", f"{snapshot_id}: {indices}")
+    return {"restaurando": snapshot_id, "indices": indices}
 
 
 @app.get("/api/v1/plugins/numeros", tags=["capabilities"])

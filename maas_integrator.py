@@ -565,6 +565,8 @@ def _chat(client: OpenAI, **kwargs):
 _HUAWEI_FIELDS = (
     "project_id", "region", "vpc_id", "subnet_id",
     "security_group_id", "availability_zone", "demo_bucket",
+    # La agencia de IAM que deja al CSS escribir en el bucket (snapshots de demo).
+    "css_agency",
 )
 
 

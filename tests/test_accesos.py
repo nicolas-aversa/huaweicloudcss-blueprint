@@ -147,5 +147,5 @@ def test_la_tarjeta_en_node(tmp_path):
 
 def test_la_vista_la_pone_en_el_resumen():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "${accesosHTML(pipelines)}` }," in html
+    assert "${accesosHTML(pipelines)}\n            ${snapshotsDeDemoHTML()}` }," in html
     assert "body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));" in html

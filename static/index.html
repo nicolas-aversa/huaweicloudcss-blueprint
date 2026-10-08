@@ -2410,6 +2410,10 @@
     .guion__texto strong { color: var(--text-primary); }
     .guion__acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     .plug.is-resaltada { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+    /* Los snapshots de datos de demo. */
+    .snap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 0; font-size: var(--fs-sm); }
+    .snap__nombre { font-weight: var(--fw-medium); color: var(--text-primary); }
+    .snap__restaurar { margin-left: auto; }
     /* Comprobado en el cluster: lo que la provisión dijo, mirado de verdad. */
     .plug__verif { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-xs); color: var(--text-muted); }
     .plug__verif:empty { display: none; }
@@ -3218,6 +3222,7 @@
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-vpc">VPC ID</label><input class="form-input" id="settings-hw-vpc" autocomplete="off" placeholder="uuid"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-subnet">Subnet ID</label><input class="form-input" id="settings-hw-subnet" autocomplete="off" placeholder="uuid"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-sg">Security Group ID</label><input class="form-input" id="settings-hw-sg" autocomplete="off" placeholder="uuid"></div>
+                <div class="form-group settings-field"><label class="form-label" for="settings-hw-agency">Agencia de CSS para OBS</label><input class="form-input" id="settings-hw-agency" autocomplete="off" placeholder="css_obs_agency" title="La agencia de IAM que deja al CSS escribir en el bucket: la usan los snapshots de datos de demo"></div>
               </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-hw-save">Guardar</button>
@@ -6583,6 +6588,70 @@
       });
     }
 
+    // Los datos de la demo en un snapshot del bucket: el próximo cluster los
+    // restaura en vez de ingerirlos. A demanda (la lista va contra la API de CSS).
+    function snapshotsDeDemoHTML() {
+      return `<div class="section-card" id="infra-snapshots">
+          <div class="section-card__head seguridad__head">
+            <span class="section-card__tile">${icon('database')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Datos de la demo (snapshot)</span>
+              <span class="section-card__hint">Guardá los datos ya ingestados en el bucket de demos. En el próximo entorno, desplegado sin iniciar la ingesta, se restauran en minutos y después se provisionan los plugins.</span>
+            </span>
+            <button type="button" class="btn btn-secondary btn-sm" id="infra-snapshots-ver">${icon('refresh')} Ver los guardados</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="infra-snapshots-guardar">${icon('download')} Guardar estos datos</button>
+          </div>
+          <div id="infra-snapshots-detalle"></div>
+        </div>`;
+    }
+    const _ESTADO_SNAPSHOT = { COMPLETED: ['Listo', 'sev--ok'], IN_PROGRESS: ['Guardando…', 'sev--low'], FAILED: ['Falló', 'sev--critical'] };
+    function snapshotsListaHTML(lista) {
+      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay datos de demo guardados en el bucket.</div>';
+      return `<ul class="hallazgos__lista">${lista.map(s => {
+        const [texto, clase] = _ESTADO_SNAPSHOT[s.estado] || [s.estado || '', ''];
+        return `<li class="snap"><span class="sev ${clase}">${escapeHtml(texto)}</span>`
+          + `<span class="snap__nombre">${escapeHtml(s.nombre)}</span>`
+          + `<span class="hallazgo__meta">${escapeHtml(s.cluster || '')} · ${escapeHtml(s.indices || '')}</span>`
+          + (s.estado === 'COMPLETED' ? `<button type="button" class="btn btn-secondary btn-sm snap__restaurar" data-id="${escapeHtml(s.id)}">${icon('upload')} Restaurar acá</button>` : '')
+          + `</li>`;
+      }).join('')}</ul>`;
+    }
+    async function verSnapshots() {
+      const destino = document.getElementById('infra-snapshots-detalle');
+      if (!destino) return;
+      showStatus(destino, 'Leyendo los snapshots del bucket…', 'loading');
+      try {
+        const res = await fetch('/api/v1/demo-snapshots');
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        destino.className = '';
+        destino.innerHTML = snapshotsListaHTML(d.snapshots);
+      } catch (err) { showStatus(destino, `Error: ${err.message}`, 'error'); }
+    }
+    async function guardarSnapshot(btn) {
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/v1/demo-snapshots', { method: 'POST' });
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        toast(`Guardando ${d.nombre}: tarda unos minutos según el volumen.`, 'success');
+        verSnapshots();
+      } catch (err) { toast(`No se pudo guardar: ${err.message}`, 'error'); }
+      finally { btn.disabled = false; }
+    }
+    async function restaurarSnapshot(btn) {
+      const ok = await confirmModal({ title: 'Restaurar los datos de la demo',
+        message: 'Los índices de los casos vuelven del snapshot. Los que ya existen en este cluster no se pisan. Después corré "Provisionar plugins".',
+        confirmLabel: 'Restaurar' });
+      if (!ok) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/v1/demo-snapshots/' + encodeURIComponent(btn.dataset.id) + '/restaurar', { method: 'POST' });
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        toast('Restaurando: en unos minutos verificá la ingesta y después provisioná los plugins.', 'success');
+      } catch (err) { toast(`No se pudo restaurar: ${err.message}`, 'error'); btn.disabled = false; }
+    }
     // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
     // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
     function accesosHTML(pipelines) {
@@ -8428,7 +8497,8 @@
               </div>
               <div class="pipe-list">${pipeRows}</div>
             </div>
-            ${accesosHTML(pipelines)}` },
+            ${accesosHTML(pipelines)}
+            ${snapshotsDeDemoHTML()}` },
           { id: 'plugins', label: 'Plugins', icon: 'layers', cuenta: nPlugins, html: pluginsHTML(data.plugins) },
         ], infraSeccionGuardada())}
         </div>`;
@@ -8460,6 +8530,13 @@
         if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irASeccion(k.dataset.ir); }
       });
 
+      // Datos de la demo: guardar, ver y restaurar.
+      body.querySelector('#infra-snapshots-ver')?.addEventListener('click', verSnapshots);
+      body.querySelector('#infra-snapshots-guardar')?.addEventListener('click', (e) => guardarSnapshot(e.currentTarget));
+      body.querySelector('#infra-snapshots-detalle')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.snap__restaurar');
+        if (b) restaurarSnapshot(b);
+      });
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
       body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
       // Plugins: por caso, las tarjetas y su número; "Explicarla con IA" va al asistente.
@@ -9945,7 +10022,7 @@
       project_id: 'settings-hw-project', region: 'settings-hw-region',
       availability_zone: 'settings-hw-az', vpc_id: 'settings-hw-vpc',
       subnet_id: 'settings-hw-subnet', security_group_id: 'settings-hw-sg',
-      demo_bucket: 'settings-hw-bucket',
+      demo_bucket: 'settings-hw-bucket', css_agency: 'settings-hw-agency',
     };
     async function refreshHuaweiSettings() {
       try {
