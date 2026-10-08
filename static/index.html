@@ -7561,7 +7561,7 @@
           body: JSON.stringify({
             opensearch_password: password,
             opensearch_user: state.osUser || 'admin',
-            https_enabled: !!state.httpsEnabled,
+            https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del deploy
             slugs,
             force: !!force,
           }),

@@ -336,3 +336,34 @@ def test_el_agente_queda_en_todos_los_casos_que_consulta(monkeypatch, tmp_path):
     registro = {"siem": {"llm_model_id": "M", "ppl_model_id": "P"}}
     assert main._registrar_agente("http://x", "a", "p", "KEY", tmp_path, registro, "P", "M")[0] == "AG"
     assert {s: v.get("agent_id") for s, v in escrito.items()} == {"siem": "AG", "ventas": "AG", "pozos": "AG"}
+
+
+def test_init_test_failed_sin_error_termino(monkeypatch):
+    """Visto en CSS 3.4: INIT_TEST_FAILED sin `error` y con 600 de 601 pasos.
+    Quedaba "EN_CURSO (INIT_TEST_FAILED)" para siempre; es terminal y se juzga
+    por los pasos que escribió."""
+    monkeypatch.setattr(main, "_os_req", lambda *a, **k: _R(200, {"run_once_task": {"task_id": "T", "state": "INIT_TEST_FAILED"}}))
+    assert main._forecast_test_state("http://x", "a", "p", "F", "T", tries=1) == (False, "INIT_TEST_FAILED")
+    monkeypatch.setattr(main, "_pasos_del_backtest", lambda *a: 600)
+    j = main._juzgar_backtests("http://x", "a", "p", [{"fc_id": "F", "task_id": "T"}], {"F": (False, "INIT_TEST_FAILED")}, 601)
+    assert j["F"] == (True, "TEST_COMPLETE")
+
+
+def test_sin_el_protocolo_provisionar_usa_el_del_deploy(monkeypatch):
+    """Con True por defecto, un pedido sin el dato iba por HTTPS a un cluster
+    HTTP: todo fallaba por SSL y se guardaba como fallado (visto al probar)."""
+    from fastapi.testclient import TestClient
+    vistos = []
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "1.2.3.4:9200"})
+    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
+    monkeypatch.setattr(main, "_provision_capabilities", lambda c, s, u, p, https, **k: vistos.append(https) or {})
+    for f in ("_registrar_capacidades", "_asegurar_ppl_v3", "_provisionar_canal", "_revisar_meses_de_seguridad"):
+        monkeypatch.setattr(main, f, lambda *a, **k: None)
+    for f in ("_provisionar_analista", "_provisionar_perfil", "_provisionar_reporte"):
+        monkeypatch.setattr(main, f, lambda *a, **k: {"ok": True, "reason": "ok"})
+    c = TestClient(main.app)
+    assert c.post("/api/v1/onboarding/provision-capabilities", json={"opensearch_password": "pw", "slugs": ["siem"]}).status_code == 200
+    assert vistos and set(vistos) == {False}, vistos
+    vistos.clear()
+    c.post("/api/v1/onboarding/provision-capabilities", json={"opensearch_password": "pw", "slugs": ["siem"], "https_enabled": True})
+    assert set(vistos) == {True}, "si viene, manda lo que viene"

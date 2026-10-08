@@ -6283,7 +6283,10 @@ def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index
 # terminado bien. Visto en CSS 3.4: run_once_task en TEST_COMPLETE, ~17.800
 # resultados, y el perfil en DISABLED; se leía el perfil y se daba por fallido.
 _FORECAST_STATE_OK = {"TEST_COMPLETE"}
-_FORECAST_STATE_FALLIDO = {"FAILED", "STOPPED", "INIT_FAILURE"}
+# INIT_TEST_FAILED es terminal aunque no traiga `error`: visto en CSS 3.4 con
+# 600 de 601 pasos escritos. Sin esto se esperaba para siempre ("EN_CURSO
+# (INIT_TEST_FAILED)") y no se juzgaba por los pasos.
+_FORECAST_STATE_FALLIDO = {"FAILED", "STOPPED", "INIT_FAILURE", "INIT_TEST_FAILED"}
 FORECAST_EN_CURSO = "EN_CURSO"
 _FORECAST_ESPERA_S = 5.0
 
@@ -8594,7 +8597,11 @@ class ProvisionCapabilitiesRequest(BaseModel):
     alerting) sobre el cluster YA con datos ingeridos."""
     opensearch_password: str = Field(default="")
     opensearch_user: str = Field(default="admin")
-    https_enabled: bool = Field(default=True, description="Habilitar HTTPS para OpenSearch")
+    # None → el del deploy (como en el chat). Con True por defecto, un pedido
+    # sin el dato iba por HTTPS a un cluster HTTP: todo fallaba por SSL y se
+    # guardaba como fallado. Y el front, tras recargar, mandaba false aunque el
+    # cluster fuera HTTPS.
+    https_enabled: bool | None = Field(default=None, description="HTTPS para OpenSearch; sin el dato, el del deploy")
     slugs: list[str] = Field(default_factory=list, description="Slugs a provisionar (vacío = todos los que tienen bundle).")
     project_name: str = Field(default="log-analytics")
     force: bool = Field(default=False, description="Si True, tear down de artifacts existentes y recrea (para re-provisionar con modelo nuevo).")
@@ -8682,6 +8689,8 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                 "message": "No hay un cluster alcanzable. ¿Provisionaste el entorno (paso 1)?",
             },
         )
+    if request.https_enabled is None:
+        request.https_enabled = _read_https_enabled_from_state(terraform_dir)
 
     # Si el operador no envió password (ej. recargó la página y perdió el state
     # in-memory), leerla de las creds persistidas por el deploy.
