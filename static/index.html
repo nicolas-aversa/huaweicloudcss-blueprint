@@ -1569,23 +1569,47 @@
       color: var(--text-muted);
       margin: 0 0 14px;
     }
-    /* "Qué se va a crear": bloques con mosaicos y etiquetas. */
-    .crear__bloque + .crear__bloque { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
-    .crear__titulo { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: var(--fs-md); font-weight: var(--fw-semi); color: var(--text-primary); }
-    .crear__titulo .icon { width: 16px; height: 16px; color: var(--accent); }
-    .crear__grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-    .crear__tile { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-subtle);
-                   border-radius: var(--radius-md); background: var(--bg-primary); }
-    .crear__ico { flex: none; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--accent-tint); color: var(--accent);
-                  display: inline-flex; align-items: center; justify-content: center; }
-    .crear__ico .icon { width: 16px; height: 16px; }
-    .crear__txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-sm); color: var(--text-primary); }
-    .crear__txt small { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4; }
-    .crear__chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .crear__chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border-subtle);
-                   border-radius: var(--radius-pill); background: var(--bg-primary); font-size: var(--fs-sm); color: var(--text-primary); }
-    .crear__chip .icon { width: 13px; height: 13px; color: var(--text-muted); }
-    .crear__nota { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    /* "Qué se va a crear": filas compactas, rótulo a la izquierda. */
+    .crear { container-type: inline-size; }
+    .crear .deploy-panel__title { margin-bottom: 4px; }
+    .crear__fila { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 6px 12px; align-items: start; padding: 10px 0; }
+    .crear__fila + .crear__fila { border-top: 1px solid var(--border-subtle); }
+    .crear__rotulo { display: inline-flex; align-items: center; gap: 7px; padding-top: 5px; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
+    .crear__rotulo .icon { width: 14px; height: 14px; color: var(--accent); }
+    .crear__items { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+    .crear__item, .crear__chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 10px; border: 1px solid var(--border-subtle);
+                                 background: var(--bg-primary); font-size: var(--fs-sm); line-height: 1.4; color: var(--text-primary); }
+    .crear__item, .crear__chip { max-width: 100%; }
+    .crear__item > span, .crear__chip > span { min-width: 0; overflow-wrap: anywhere; }
+    .crear__item { border-radius: var(--radius-sm); }
+    .crear__item[title] { cursor: help; }
+    .crear__item .icon { width: 13px; height: 13px; color: var(--accent); }
+    .crear__item small { font-size: inherit; color: var(--text-muted); }
+    .crear__chip { border-radius: var(--radius-pill); }
+    .crear__chip .icon { width: 12px; height: 12px; color: var(--text-muted); }
+    .crear__nota { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    @container (max-width: 600px) {
+      .crear__fila { grid-template-columns: minmax(0, 1fr); }
+      .crear__rotulo { padding-top: 0; }
+    }
+    /* Usar un cluster OpenSearch que ya existe: plegado, con lo elegido a la vista. */
+    .cluster-existente { margin-top: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-primary); }
+    .cluster-existente.en-uso { border-color: var(--accent); }
+    .cluster-existente > summary { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; list-style: none; }
+    .cluster-existente > summary::-webkit-details-marker { display: none; }
+    .cluster-existente > summary:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--radius-lg); }
+    .cluster-existente__ico { flex: none; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--accent-tint); color: var(--accent);
+                              display: inline-flex; align-items: center; justify-content: center; }
+    .cluster-existente__ico .icon { width: 15px; height: 15px; }
+    .cluster-existente__txt { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; font-size: var(--fs-base); color: var(--text-primary); }
+    .cluster-existente__txt small { font-size: var(--fs-sm); color: var(--text-secondary); overflow-wrap: anywhere; }
+    .cluster-existente__chev { width: 16px; height: 16px; flex: none; color: var(--text-muted); transition: transform var(--t-base); }
+    .cluster-existente[open] .cluster-existente__chev { transform: rotate(180deg); }
+    .cluster-existente__cuerpo { padding: 0 16px 14px 58px; }
+    .cluster-existente__cuerpo .form-label { font-size: var(--fs-sm); }
+    .cluster-existente__cuerpo .form-input { max-width: 340px; padding: 8px 12px; font-family: var(--font-mono); font-size: var(--fs-base); }
+    .cluster-existente__cuerpo .form-hint { margin: 6px 0 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--text-secondary); }
+    @media (max-width: 640px) { .cluster-existente__cuerpo { padding-left: 16px; } }
     .deploy-conf { margin-top: 16px; }
     .deploy-conf__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
     .deploy-conf__label { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); }
@@ -3577,11 +3601,21 @@
                  (se reusa el existente, con chatbot ya habilitado). Si se deja vacío,
                  Terraform crea el cluster OpenSearch nuevo — mismo camino que el
                  despliegue productivo. -->
-            <div id="demo-cluster-field" class="form-group hidden" style="margin-top:14px;">
-              <label class="form-label">Endpoint de un cluster OpenSearch existente (IP:port) — opcional</label>
-              <input type="text" class="form-input" id="demo-cluster-endpoint" placeholder="ej: 119.8.150.122:9200 (dejar vacío para crear un cluster nuevo)" autocomplete="off">
-              <p class="form-hint" style="margin-top:6px;">Solo completar si ya tenés un cluster con el chatbot habilitado. Vacío: Terraform crea un cluster OpenSearch nuevo para esta demo.</p>
-            </div>
+            <details id="demo-cluster-field" class="cluster-existente hidden">
+              <summary>
+                <span class="cluster-existente__ico"><svg class="icon"><use href="#ic-infra"/></svg></span>
+                <span class="cluster-existente__txt">
+                  <strong>Usar un cluster OpenSearch que ya existe</strong>
+                  <small id="demo-cluster-resumen">Opcional. Si no, Terraform crea uno nuevo para esta demo.</small>
+                </span>
+                <svg class="icon cluster-existente__chev"><use href="#ic-chevron"/></svg>
+              </summary>
+              <div class="cluster-existente__cuerpo">
+                <label class="form-label" for="demo-cluster-endpoint">Endpoint (IP:puerto)</label>
+                <input type="text" class="form-input" id="demo-cluster-endpoint" placeholder="119.8.150.122:9200" autocomplete="off" spellcheck="false">
+                <p class="form-hint">Tiene que tener el asistente habilitado. Sobre ese cluster se crean solo Logstash, los pipelines y los dashboards.</p>
+              </div>
+            </details>
 
             <!-- CTA principal: como el botón de los otros pasos, debajo del config file.
                  Provisiona el entorno y lleva a Entorno desplegado, donde arranca solo
@@ -5561,23 +5595,26 @@
       }
     }
 
-    // "Qué se va a crear" (paso 4): la infraestructura, la ingesta (un
-    // pipeline por caso) y lo que queda configurado en OpenSearch. El nodo,
-    // con la misma regla que el backend (`_entorno_pesado`): 5 casos o más, o
-    // alguno con Security Analytics, van en el de 8 vCPU.
+    // "Qué se va a crear" (paso 4), en tres filas compactas: la
+    // infraestructura, lo que va en Logstash (un pipeline por caso) y lo que
+    // queda configurado en OpenSearch. Lo que hace cada cosa va en el `title` (al
+    // pasar el mouse). El nodo, con la misma regla que el backend
+    // (`_entorno_pesado`): 5 casos o más, o alguno con Security Analytics, van
+    // en el de 8 vCPU.
     const _CASOS_PESADO = 5;
     function queSeVaACrearHTML({ casos = [], builder = false, reuse = false, clusterExistente = false,
                                  conPlugins = true, retencion = 90 } = {}) {
-      const tile = (ic, titulo, sub) => `<div class="crear__tile"><span class="crear__ico">${icon(ic)}</span>`
-        + `<span class="crear__txt"><strong>${titulo}</strong>${sub ? `<small>${sub}</small>` : ''}</span></div>`;
-      const bloque = (ic, titulo, cuerpo) => `<section class="crear__bloque">`
-        + `<h4 class="crear__titulo">${icon(ic)} ${titulo}</h4>${cuerpo}</section>`;
+      const item = (ic, titulo, det = '', ayuda = '') => `<span class="crear__item"${ayuda ? ` title="${ayuda}"` : ''}>`
+        + `${icon(ic)}<span>${titulo}${det ? ` <small>· ${det}</small>` : ''}</span></span>`;
+      const fila = (ic, rotulo, cuerpo) => `<div class="crear__fila"><span class="crear__rotulo">${icon(ic)}${rotulo}</span>`
+        + `<div class="crear__items">${cuerpo}</div></div>`;
+      const casosDe = k => `${k} caso${k === 1 ? '' : 's'}`;
       if (builder) {
-        return `<div class="deploy-panel crear"><div class="deploy-panel__title">Qué guarda el dataset</div><div class="crear__grilla">`
-          + tile('code', 'Configuration file de Logstash', 'con el origen que elegiste')
-          + tile('dashboard', 'Index template y dashboard', 'armados con tus campos')
-          + tile('spark', 'Los plugins que tus datos justifican', 'el plan del paso 2, con lo que apagaste')
-          + tile('plus', 'Una tarjeta más del grid', 'lista para desplegar cuando quieras')
+        return `<div class="deploy-panel crear"><div class="deploy-panel__title">Qué guarda el dataset</div><div class="crear__items">`
+          + item('code', 'Configuration file de Logstash', 'con el origen que elegiste')
+          + item('dashboard', 'Index template y dashboard', 'con tus campos')
+          + item('spark', 'Los plugins que tus datos justifican', '', 'el plan del paso 2, con lo que apagaste')
+          + item('plus', 'Una tarjeta más del grid', '', 'lista para desplegar cuando quieras')
           + `</div></div>`;
       }
       const conSeguridad = casos.filter(c => SECURITY_SLUGS.has(c.id) || c.hasSecurity);
@@ -5585,30 +5622,29 @@
       const conAnalista = casos.filter(c => (c.enmascarados || []).length).length;
       const pesado = casos.length >= _CASOS_PESADO || conSeguridad.length > 0;
       const n = casos.length;
-      const infra = reuse ? '' : bloque('infra', 'Infraestructura', `<div class="crear__grilla">`
-        + (clusterExistente ? tile('search', 'OpenSearch', 'el cluster existente')
-          : tile('search', 'OpenSearch (CSS)', pesado ? '1 nodo de 8 vCPU y 16 GB, 80 GB de disco' : '1 nodo de 4 vCPU y 8 GB, 40 GB de disco'))
-        + tile('filter', 'Logstash (CSS)', 'lee de OBS y escribe en OpenSearch')
-        + `</div>`);
-      const ingesta = bloque('database', `${reuse ? 'Se agrega' : 'Ingesta'} · ${n} pipeline${n === 1 ? '' : 's'}`,
-        `<div class="crear__chips">${casos.map(c => `<span class="crear__chip">${icon(c.icon || 'database')} ${escapeHtml(c.label || c.id)}</span>`).join('')}</div>`);
+      const infra = reuse ? '' : fila('infra', 'Infraestructura',
+        (clusterExistente ? item('search', 'OpenSearch', 'el cluster existente')
+          : item('search', 'OpenSearch (CSS)', pesado ? '1 nodo, 8 vCPU y 16 GB, 80 GB de disco' : '1 nodo, 4 vCPU y 8 GB, 40 GB de disco'))
+        + item('filter', 'Logstash (CSS)', '', 'lee de OBS y escribe en OpenSearch'));
+      const ingesta = fila('filter', 'En Logstash',
+        casos.map(c => `<span class="crear__chip">${icon(c.icon || 'database')}<span>${escapeHtml(c.label || c.id)}</span></span>`).join(''));
       const plugins = [
-        tile('dashboard', 'Dashboards y búsquedas', 'uno por caso, con el rango de sus datos'),
+        item('dashboard', 'Dashboards y búsquedas', '', 'uno por caso, con el rango de sus datos'),
         ...(conPlugins ? [
-          tile('chat', 'Asistente en lenguaje natural', 'pregunta en castellano, responde con PPL'),
-          tile('trending', 'Forecasting', 'con backtest contra lo que pasó'),
-          tile('activity', 'Anomalías y alertas', 'análisis histórico y aviso por canal'),
+          item('chat', 'Asistente en lenguaje natural', '', 'pregunta en castellano, responde con PPL'),
+          item('trending', 'Forecasting', '', 'con backtest contra lo que pasó'),
+          item('activity', 'Anomalías y alertas', '', 'análisis histórico y aviso por canal'),
         ] : []),
-        ...(conSeguridad.length ? [tile('shield', 'Security Analytics',
-          escapeHtml(conSeguridad.map(c => c.label || c.id).join(' y ')) + ': reglas Sigma'
-          + (conSeguridad.some(c => c.id === 'siem') ? ' y correlaciones' : ''))] : []),
-        ...(conPerfil ? [tile('layers', 'Perfil por entidad', `en ${conPerfil} caso${conPerfil === 1 ? '' : 's'}`)] : []),
-        ...(conAnalista ? [tile('key', 'Analista enmascarado', `en ${conAnalista} caso${conAnalista === 1 ? '' : 's'}`)] : []),
-        tile('clock', 'Ciclo de vida y resumen por hora', `retención de ${retencion} días`),
+        ...(conSeguridad.length ? [item('shield', 'Security Analytics',
+          escapeHtml(conSeguridad.map(c => c.label || c.id).join(' y '))
+          + (conSeguridad.some(c => c.id === 'siem') ? ', con correlaciones' : ''), 'reglas Sigma y detectores por fuente')] : []),
+        ...(conPerfil ? [item('layers', 'Perfil por entidad', casosDe(conPerfil), 'un resumen por entidad con un Transform')] : []),
+        ...(conAnalista ? [item('key', 'Analista enmascarado', casosDe(conAnalista), 'un rol que ve los campos sensibles enmascarados')] : []),
+        item('clock', 'Ciclo de vida y resumen por hora', `retención de ${retencion} días`, 'política ISM y rollup por hora'),
       ].join('');
       return `<div class="deploy-panel crear"><div class="deploy-panel__title">Qué se va a crear</div>${infra}${ingesta}`
-        + bloque('spark', 'Lo que queda configurado en OpenSearch', `<div class="crear__grilla crear__grilla--plugins">${plugins}</div>`
-          + `<p class="crear__nota">Cada plugin se arma con los campos de cada caso. Después del deploy, Entorno → Plugins dice qué quedó y lleva a Dashboards.</p>`)
+        + fila('spark', 'En OpenSearch', plugins)
+        + `<p class="crear__nota">Cada plugin se arma con los campos de cada caso. Después del deploy, Entorno → Plugins dice qué quedó y lleva a Dashboards.</p>`
         + `</div>`;
     }
 
@@ -5627,8 +5663,15 @@
     });
 
     // Escribir/borrar el endpoint del cluster existente cambia si Terraform va
-    // a crear el OpenSearch o no — refleja eso en "Qué se va a crear" al toque.
-    document.getElementById('demo-cluster-endpoint')?.addEventListener('input', () => {
+    // a crear el OpenSearch o no — refleja eso en "Qué se va a crear" al toque,
+    // y en el renglón del plegable (que se lee aunque esté cerrado).
+    document.getElementById('demo-cluster-endpoint')?.addEventListener('input', (e) => {
+      const valor = e.target.value.trim();
+      document.getElementById('demo-cluster-field')?.classList.toggle('en-uso', !!valor);
+      const resumen = document.getElementById('demo-cluster-resumen');
+      if (resumen) resumen.textContent = valor
+        ? `Se usa ${valor}: no se crea un OpenSearch nuevo.`
+        : 'Opcional. Si no, Terraform crea uno nuevo para esta demo.';
       if (document.getElementById('step-4')?.classList.contains('active')) renderDeploySummary();
     });
 
