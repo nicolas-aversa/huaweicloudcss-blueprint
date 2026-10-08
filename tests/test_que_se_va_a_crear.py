@@ -20,13 +20,15 @@ const check = (n, c, x) => { if (!c) f.push(n + ' -> ' + x); };
 const c = (id, extra = {}) => ({ id, label: id.toUpperCase(), icon: 'box', ...extra });
 let h = queSeVaACrearHTML({ casos: [c('ventas'), c('pozos', { perfil: 'Pozo' })] });
 check('infra con el nodo chico', h.includes('OpenSearch (CSS) <small>· 1 nodo, 4 vCPU y 8 GB, 40 GB de disco</small>'), h);
+check('y el de Logstash', h.includes('Logstash (CSS) <small>· 1 nodo, 4 vCPU y 8 GB, 40 GB de disco</small>'), h);
 check('un pipeline por caso', h.includes('En Logstash</span>') && (h.match(/class="crear__chip"/g) || []).length === 2 && h.includes('<span class="crear__chip"><svg data-i="box"></svg><span>VENTAS</span></span>'), h);
 check('sin seguridad, no aparece', !h.includes('Security Analytics'), h);
 check('perfil donde hay', h.includes('Perfil por entidad <small>· 1 caso</small>'), h);
 check('sin analista, no aparece', !h.includes('Analista enmascarado'), h);
 check('la retención', h.includes('retención de 90 días'), h);
 h = queSeVaACrearHTML({ casos: [c('siem'), c('cts')], retencion: 30 });
-check('con Security Analytics, el nodo grande', h.includes('1 nodo, 8 vCPU y 16 GB, 80 GB de disco'), h);
+check('con Security Analytics, el nodo grande', h.includes('OpenSearch (CSS) <small>· 1 nodo, 8 vCPU y 16 GB, 80 GB de disco</small>'), h);
+check('Logstash sigue en el chico', h.includes('Logstash (CSS) <small>· 1 nodo, 4 vCPU y 8 GB, 40 GB de disco</small>'), h);
 check('y para qué casos', h.includes('Security Analytics <small>· SIEM, con correlaciones</small>'), h);
 check('lo que hace, al pasar el mouse', h.includes('title="reglas Sigma y detectores por fuente"'), h);
 check('la retención pedida', h.includes('retención de 30 días'), h);
@@ -58,8 +60,18 @@ def test_el_resumen_en_node(tmp_path):
 
 
 def test_la_regla_del_nodo_es_la_del_backend():
+    """El front repite la regla y los tamaños (`_NODO_CHICO`, `_NODO_GRANDE`):
+    si cambian acá, cambian en queSeVaACrearHTML."""
     import main
-    assert main._CASOS_PESADO == 5, "el front repite la regla: si cambia acá, cambia en queSeVaACrearHTML"
+    assert main._CASOS_PESADO == 5
+    chico, grande = main._capacity_for(1), main._capacity_for(1, pesado=True)
+    assert (chico["logstash_flavor"], chico["logstash_volume_size"]) == ("ess.spec-4u8g", 40)
+    assert (chico["opensearch_flavor"], chico["opensearch_volume_size"]) == ("ess.spec-4u8g", 40)
+    assert (grande["opensearch_flavor"], grande["opensearch_volume_size"]) == ("ess.spec-8u16g", 80)
+    assert (grande["logstash_flavor"], grande["logstash_volume_size"]) == ("ess.spec-4u8g", 40)
+    html = _INDEX.read_text(encoding="utf-8")
+    assert "const _NODO_CHICO = '1 nodo, 4 vCPU y 8 GB, 40 GB de disco';" in html
+    assert "const _NODO_GRANDE = '1 nodo, 8 vCPU y 16 GB, 80 GB de disco';" in html
 
 
 def test_el_cluster_existente_es_un_plegable():

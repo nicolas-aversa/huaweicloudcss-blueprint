@@ -5598,10 +5598,12 @@
     // "Qué se va a crear" (paso 4), en tres filas compactas: la
     // infraestructura, lo que va en Logstash (un pipeline por caso) y lo que
     // queda configurado en OpenSearch. Lo que hace cada cosa va en el `title` (al
-    // pasar el mouse). El nodo, con la misma regla que el backend
-    // (`_entorno_pesado`): 5 casos o más, o alguno con Security Analytics, van
-    // en el de 8 vCPU.
+    // pasar el mouse). Los nodos, como los pide el backend (`_capacity_for`):
+    // Logstash siempre en el de 4 vCPU; OpenSearch también, salvo con 5 casos
+    // o más, o alguno con Security Analytics (`_entorno_pesado`): 8 vCPU.
     const _CASOS_PESADO = 5;
+    const _NODO_CHICO = '1 nodo, 4 vCPU y 8 GB, 40 GB de disco';
+    const _NODO_GRANDE = '1 nodo, 8 vCPU y 16 GB, 80 GB de disco';
     function queSeVaACrearHTML({ casos = [], builder = false, reuse = false, clusterExistente = false,
                                  conPlugins = true, retencion = 90 } = {}) {
       const item = (ic, titulo, det = '', ayuda = '') => `<span class="crear__item"${ayuda ? ` title="${ayuda}"` : ''}>`
@@ -5621,11 +5623,10 @@
       const conPerfil = casos.filter(c => c.perfil).length;
       const conAnalista = casos.filter(c => (c.enmascarados || []).length).length;
       const pesado = casos.length >= _CASOS_PESADO || conSeguridad.length > 0;
-      const n = casos.length;
       const infra = reuse ? '' : fila('infra', 'Infraestructura',
         (clusterExistente ? item('search', 'OpenSearch', 'el cluster existente')
-          : item('search', 'OpenSearch (CSS)', pesado ? '1 nodo, 8 vCPU y 16 GB, 80 GB de disco' : '1 nodo, 4 vCPU y 8 GB, 40 GB de disco'))
-        + item('filter', 'Logstash (CSS)', '', 'lee de OBS y escribe en OpenSearch'));
+          : item('search', 'OpenSearch (CSS)', pesado ? _NODO_GRANDE : _NODO_CHICO))
+        + item('filter', 'Logstash (CSS)', _NODO_CHICO, 'lee de OBS y escribe en OpenSearch'));
       const ingesta = fila('filter', 'En Logstash',
         casos.map(c => `<span class="crear__chip">${icon(c.icon || 'database')}<span>${escapeHtml(c.label || c.id)}</span></span>`).join(''));
       const plugins = [
