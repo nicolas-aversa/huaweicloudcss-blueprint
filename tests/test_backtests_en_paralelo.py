@@ -51,7 +51,7 @@ def test_lanzar_devuelve_el_task_id(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"taskId": "T7"}
+            return {"task_id": "T7"}
 
     pedidos = []
     monkeypatch.setattr(main, "_os_req", lambda m, url, *a, **k: pedidos.append((m, url)) or _R())

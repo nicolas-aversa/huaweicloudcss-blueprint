@@ -2397,8 +2397,6 @@ class TerraformStatusResponse(BaseModel):
     # La vista Plugins: por caso (y `_cluster`), las tarjetas de lo que quedó en
     # el cluster con su link a Dashboards (ver plugins_vista.py).
     plugins: dict = Field(default_factory=dict)
-    # Y el guion de la demo de cada caso, armado con esas tarjetas.
-    guiones: dict = Field(default_factory=dict)
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -4101,7 +4099,7 @@ def plugins_preview(slugs: str = "") -> dict:
             fields=(verticals.get_vertical(slug) or {}).get("fields") or [])
     if fuera:
         fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(agente=True, text2viz={"ok": True}, base=base)
-    return {"plugins": fuera, "guiones": _guiones(fuera)}
+    return fuera
 
 
 # ── Cola de jobs de deploy (reconectable) ────────────────────────────────────
@@ -6306,14 +6304,23 @@ def _forecast_test_state(base: str, user: str, password: str, fc_id: str, task_i
 
 
 def _lanzar_backtest(base: str, user: str, password: str, fc_id: str) -> str:
-    """`_run_once` del forecaster: el `taskId` de su backtest ("" si no se pudo,
-    con el motivo en el log: antes se perdía y el forecaster quedaba sin backtest
-    informado como "en curso")."""
+    """`_run_once` del forecaster: el id de la tarea de su backtest ("" si no se
+    pudo, con el motivo en el log). CSS 3.4 responde `{"task_id": …}`; se lee
+    también `taskId` (la forma de la documentación). Leer solo `taskId` daba
+    "no arrancó" a backtests que sí arrancaron, y el reintento lanzaba otro.
+    Si ya hay uno corriendo (409 "hasn't finished"), es ese."""
     r1 = _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fc_id}/_run_once", user, password, timeout=30)
     try:
-        tarea = str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""
+        cuerpo = (r1.json() or {}) if _resp_ok(r1) else {}
+        tarea = str(cuerpo.get("task_id") or cuerpo.get("taskId") or "")
     except (ValueError, AttributeError):
         tarea = ""
+    if not tarea and r1 is not None and r1.status_code == 409 and "hasn't finished" in (getattr(r1, "text", "") or ""):
+        rf = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{fc_id}?task=true", user, password, timeout=20)
+        try:
+            tarea = str(((rf.json() or {}).get("run_once_task") or {}).get("task_id") or "") if _resp_ok(rf) else ""
+        except (ValueError, AttributeError):
+            tarea = ""
     if not tarea:
         print(f"[capabilities] el backtest de {fc_id} no arrancó: {_resp_motivo(r1)}")
     return tarea
@@ -6348,6 +6355,35 @@ def _pasos_del_backtest(base: str, user: str, password: str, task_id: str) -> "i
         return int((r.json() or {}).get("count", 0)) if _resp_ok(r) else None
     except (ValueError, TypeError, AttributeError):
         return None
+
+
+def _rejuzgar_backtests(base: str, user: str, password: str, forecaster_ids: list[str]) -> dict:
+    """El resultado de "forecast" para forecasters que ya existen: la tarea de
+    backtest de cada uno (de `?task=true`) juzgada por los pasos que escribió.
+    Si no se puede leer nada, el "ya provisionado" de siempre."""
+    lanzados, history = [], 0
+    for fc_id in forecaster_ids:
+        r = _os_req("GET", f"{base}/_plugins/_forecast/forecasters/{fc_id}?task=true", user, password, timeout=20)
+        try:
+            cuerpo = (r.json() or {}) if _resp_ok(r) else {}
+        except ValueError:
+            cuerpo = {}
+        fc = cuerpo.get("forecaster") or {}
+        history = history or int(fc.get("history") or 0)
+        lanzados.append({"nombre": fc.get("name") or fc_id, "fc_id": fc_id,
+                         "task_id": str((cuerpo.get("run_once_task") or {}).get("task_id") or "")})
+    if not any(x["task_id"] for x in lanzados):
+        return {"ok": True, "forecaster_ids": forecaster_ids, "reason": "ya provisionado"}
+    juzgados = _juzgar_backtests(base, user, password, lanzados,
+                                 _esperar_backtests(base, user, password, lanzados, rondas=1), history)
+    states = [f"{x['nombre']}={juzgados[x['fc_id']][1]}" for x in lanzados]
+    n_ok = sum(1 for x in lanzados if juzgados[x["fc_id"]][0])
+    en_curso = [e for e in states if f"={FORECAST_EN_CURSO}" in e]
+    fallidos = [e for e in states if not e.endswith("=TEST_COMPLETE") and e not in en_curso]
+    partes = ([f"backtest OK ({n_ok}/{len(states)})"] if n_ok else [])         + ([f"{len(en_curso)} en curso"] if en_curso else []) + (["fallaron: " + ", ".join(fallidos)] if fallidos else [])
+    ok = n_ok > 0 or (bool(en_curso) and not fallidos)
+    return {"ok": ok, "forecaster_ids": forecaster_ids, "states": states,
+            ("note" if ok else "reason"): " · ".join(partes) or "ya provisionado"}
 
 
 def _juzgar_backtests(base: str, user: str, password: str, lanzados: list[dict],
@@ -6676,15 +6712,24 @@ def _resolve_capability_spec(slug: str, base: str = "", user: str = "",
 
 def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path,
                         slug_actual: str = "") -> list[dict]:
-    """Un PPLTool por caso con datos: los specs curados y los casos del
-    registro (con sus campos). `slug_actual` entra siempre (recién ingerido)."""
+    """Un PPLTool por caso del entorno con datos: el spec curado si lo tiene,
+    si no el que sale de sus campos. `slug_actual` entra siempre (recién
+    ingerido). Solo los del entorno: recorrer todos los curados sumaba las
+    variantes de FortiAnalyzer (soc, traffic, utm, event) sobre los mismos
+    índices, 8 herramientas para 4 casos (visto en CSS 3.4): un prompt más
+    largo, un LLM que duda entre herramientas iguales y más consultas al
+    provisionar."""
     import capabilities as caps
     from index_template import index_pattern_from_name
 
     agent_verticals = []
     pipe_reg = _read_pipelines_registry(terraform_dir)
+    # Sin registro (un entorno de antes), los curados como antes.
+    del_entorno = (set(pipe_reg) | {slug_actual}) if pipe_reg else None
     seen_slugs: set[str] = set()
     for slug2 in caps.get_capability_slugs():
+        if del_entorno is not None and slug2 not in del_entorno:
+            continue
         seen_slugs.add(slug2)
         spec2 = caps.get_capability_spec(slug2) or {}
         if not spec2.get("fields"):
@@ -6759,31 +6804,46 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
 
 
 def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_enabled: bool,
-                              terraform_dir: Path, caps_result: dict, run: dict) -> None:
-    """Al final de "Provisionar plugins": el agente con todas las fuentes, si
-    algún caso dejó los modelos listos y el agente pendiente."""
+                              terraform_dir: Path, caps_result: dict, run: dict,
+                              agente_ya: str = "") -> str:
+    """El agente de "Provisionar plugins", una sola vez por run y apenas un
+    caso deja los modelos listos: los datos ya están ingestados, así que entran
+    todos los casos del entorno y el chat queda andando mientras se provisiona
+    el resto (antes se armaba al final y el chat era lo último en aparecer).
+    Con `agente_ya`, a los casos que lo esperan se les asigna ese, sin
+    rearmarlo. Devuelve el id del agente ("" si no se pudo)."""
     pendientes = [s for s, r in caps_result.items()
                   if ((r or {}).get("conversational") or {}).get("agente_pendiente")]
     if not pendientes:
-        return
+        return agente_ya
+    if agente_ya:
+        registry = _read_capabilities(terraform_dir)
+        for s in pendientes:
+            registry.setdefault(s, {})["agent_id"] = agente_ya
+            conv = caps_result[s]["conversational"]
+            conv.pop("agente_pendiente", None)
+            conv.update({"agent_id": agente_ya, "note": ""})
+        _write_capabilities(terraform_dir, registry)
+        return agente_ya
     from maas_integrator import get_maas_api_key
     registry = _read_capabilities(terraform_dir)
     modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
                     if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
     if not modelos:
         runs.step(run, "Asistente", False, "no hay modelos listos para armar el agente")
-        return
+        return ""
     base = _os_base(cluster, https_enabled)
     try:
         agent_id, t2v = _registrar_agente(base, user, password, get_maas_api_key(), terraform_dir,
                                           registry, modelos[0], modelos[1])
     except Exception as exc:  # noqa: BLE001
         runs.step(run, "Asistente", False, repr(exc)[:300])
-        return
+        return ""
     if not agent_id:
         runs.step(run, "Asistente", False, "los modelos quedaron listos pero no se pudo registrar el agente")
-        return
-    fuentes = sum(1 for ids in registry.values() if ids.get("agent_id") == agent_id)
+        return ""
+    fuentes = len(_read_pipelines_registry(terraform_dir)) or sum(
+        1 for ids in registry.values() if ids.get("agent_id") == agent_id)
     runs.step(run, "Asistente", True, f"un agente para {fuentes} caso{'s' if fuentes != 1 else ''}")
     if t2v:
         runs.step(run, "text2viz", bool(t2v.get("ok")), str(t2v.get("reason") or t2v.get("note") or "")[:300])
@@ -6792,6 +6852,7 @@ def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_ena
         conv = caps_result[s]["conversational"]
         conv.pop("agente_pendiente", None)
         conv.update({"agent_id": agent_id, "note": ""})
+    return agent_id
 
 
 def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
@@ -6964,7 +7025,10 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     else:
         forecaster_ids = ids.get("forecaster_ids") or []
         if forecaster_ids and len(forecaster_ids) >= len(forecast_specs):
-            result["forecast"] = {"ok": True, "forecaster_ids": forecaster_ids, "reason": "ya provisionado"}
+            # Ya están: sus backtests se vuelven a juzgar con lo que hay en el
+            # cluster (sin relanzarlos), así la vista no se queda con un estado
+            # viejo (visto: "no arrancó" de backtests que sí habían corrido).
+            result["forecast"] = _rejuzgar_backtests(base, user, password, forecaster_ids)
         else:
             ready, reason = _index_ready_for_capabilities(base, user, password, ip, spec.get("volume_field", ""), need_docs=True)
             bounds = _index_time_bounds(base, user, password, ip) if ready else None
@@ -7374,7 +7438,8 @@ def _provisionar_el_paso_del_tiempo(base: str, user: str, password: str, slug: s
     if "rollup" not in excluidos:
         fields = entry.get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or []
         spec = _resolve_capability_spec(slug, terraform_dir=terraform_dir)
-        dims, medidas = cdv.dimensiones_y_medidas(fields, spec, _discover_enums(base, user, password, index_pattern, fields))
+        dims, medidas = cdv.dimensiones_y_medidas(
+            fields, spec, _discover_enums(base, user, password, index_pattern, cdv.candidatos_a_dimension(fields)))
         if not medidas:
             return
         try:
@@ -8532,6 +8597,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)
     except Exception as exc:  # noqa: BLE001 — sin canal, las alertas igual quedan en Alerting
         runs.step(run, "Canal de alertas", False, repr(exc)[:300])
+    agente_del_run = ""
     for slug in slugs:
         has_spec = _caps.get_capability_spec(slug) is not None
         has_fields = bool((pipe_reg.get(slug, {}) or {}).get("fields"))
@@ -8552,15 +8618,17 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                 if isinstance(cap, dict) and "ok" in cap:
                     runs.step(run, f"{cap_name} · {slug}", cap.get("ok"),
                               str(cap.get("reason", ""))[:300])
+            # El asistente, apenas el primer caso deja los modelos (ver
+            # `_registrar_agente_del_run`); a los siguientes, el mismo.
+            agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,
+                                                       terraform_dir, caps_result, run, agente_del_run)
         except Exception as exc:  # noqa: BLE001
             print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
-    # El agente, una sola vez y con todas las fuentes: antes se rearmaba en cada
-    # caso, recorriendo todos los índices del entorno cada vez (y text to
-    # visualization también).
+    # Por si el primero no pudo (sin modelos todavía): un último intento.
     _registrar_agente_del_run(cluster, user, password, request.https_enabled, terraform_dir,
-                              caps_result, run)
+                              caps_result, run, agente_del_run)
     _base_analistas = _os_base(cluster, request.https_enabled)
     for slug in slugs:
         perfil = _perfil_de(slug, pipe_reg.get(slug) or {})
@@ -9676,26 +9744,9 @@ def terraform_status() -> TerraformStatusResponse:
         capabilities=_read_capabilities(terraform_dir),
         cluster_features=_read_cluster_features(terraform_dir) or None,
         security_analytics=_resumen_de_seguridad(terraform_dir),
-        plugins=(vista := _plugins_de_la_vista(terraform_dir, registry, dashboards_url)),
-        guiones=_guiones(vista),
+        plugins=_plugins_de_la_vista(terraform_dir, registry, dashboards_url),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
-
-
-def _pregunta_del_caso(slug: str) -> str:
-    """La primera pregunta sugerida del caso (la del vertical o la del caso guardado)."""
-    caso = verticals.get_vertical(slug) or custom_cases.get_case(slug) or {}
-    return next((str(q).strip() for q in caso.get("suggested_questions") or [] if str(q).strip()), "")
-
-
-def _guiones(vista: dict) -> dict:
-    """El guion de la demo de cada caso (sin `_cluster`). Si falla, sin guiones."""
-    try:
-        return {slug: plugins_vista.guion(slug, tarjetas, _pregunta_del_caso(slug))
-                for slug, tarjetas in (vista or {}).items() if slug != "_cluster"}
-    except Exception as exc:  # noqa: BLE001
-        print(f"[plugins] el guion no se pudo armar: {exc!r}")
-        return {}
 
 
 def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: str) -> dict:

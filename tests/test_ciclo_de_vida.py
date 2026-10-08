@@ -278,3 +278,25 @@ def test_el_paso_2_deja_cambiar_la_retencion():
     assert "${i.plugin === 'ciclo_de_vida' && i.aplica && !apagado" in html
     assert 'class="plan-cluster__dias" min="7" max="3650"' in html
     assert "state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;" in html
+
+
+@pytest.mark.parametrize("slug, medidas", [
+    ("transacciones-billetera", ["transaction.funnel.steps_total", "transaction.funnel.steps_completed"]),
+    ("cts", []),                                   # su único número es el `code` HTTP: sin rollup
+    ("siem", ["source.bytes", "destination.bytes", "event.risk_score"]),
+])
+def test_un_codigo_no_es_una_medida(slug, medidas):
+    """Visto en CSS 3.4: el rollup de billetera sumaba `message_type` y
+    `sequence_number`, y el de CTS el `code` HTTP."""
+    v = verticals.get_vertical(slug)
+    assert cdv.dimensiones_y_medidas(v["fields"], v["capability"])[1] == medidas
+
+
+def test_las_dimensiones_las_dice_el_cluster_tambien_en_los_curados():
+    """`_discover_enums` solo mira los campos marcados como dimensión, y en un
+    caso curado no hay marcas: el rollup quedaba sin dimensiones."""
+    campos = [{"field_path": "status", "type": "keyword"}, {"field_path": "order_id", "type": "keyword"},
+              {"field_path": "monto", "type": "double"}]
+    assert cdv.candidatos_a_dimension(campos) == [{"field_path": "status", "type": "keyword", "dimension": True}]
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    assert "_discover_enums(base, user, password, index_pattern, cdv.candidatos_a_dimension(fields))" in src

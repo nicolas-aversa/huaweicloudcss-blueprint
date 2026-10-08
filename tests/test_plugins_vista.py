@@ -442,9 +442,8 @@ def test_la_verificacion_viaja_con_los_numeros(monkeypatch, tmp_path):
 def test_la_vista_previa_usa_el_mismo_codigo():
     from fastapi.testclient import TestClient
     d = TestClient(main.app).get("/api/v1/dev/plugins-preview?slugs=siem,produccion-pozos,no-existe").json()
-    assert set(d["plugins"]) == {"siem", "produccion-pozos", "_cluster"}
-    assert {t["plugin"] for t in d["plugins"]["siem"]} >= {"security_analytics", "forecasting", "anomalias", "perfil"}
-    assert set(d["guiones"]) == {"siem", "produccion-pozos"}, "un guion por caso, no para todo el cluster"
+    assert set(d) == {"siem", "produccion-pozos", "_cluster"}
+    assert {t["plugin"] for t in d["siem"]} >= {"security_analytics", "forecasting", "anomalias", "perfil"}
 
 
 # ── El front ────────────────────────────────────────────────────────────────
@@ -513,17 +512,7 @@ check('cada tarjeta, su lugar para la verificación', det.includes('<div class="
 check('comprobado', verificacionHTML({ ok: true, detalle: 'monitor prendido' }) === '<svg data-i="check"></svg> Comprobado en el cluster: monitor prendido');
 check('lo que falla', verificacionHTML({ ok: false, detalle: 'el <monitor> está apagado' }).includes('<svg data-i="alert-triangle"></svg> En el cluster: el &lt;monitor&gt; está apagado'));
 check('sin verificar, nada', verificacionHTML(undefined) === '');
-// El guion.
-const g = guionHTML([{ titulo: 'Los datos', texto: 'Arrancá <por> acá', url: 'https://d/x' },
-                     { titulo: 'Preguntale', texto: 't', pregunta: '¿Cuánto "vale"?' },
-                     { titulo: 'Algo raro', texto: 't', tarjeta: 'anomalias' },
-                     { titulo: 'Que se lo lleve', texto: 't', exportar: 'pozos' }]);
-check('en orden, escapado', g.startsWith('<ol class="guion">') && g.includes('<strong>Los datos</strong> Arrancá &lt;por&gt; acá'), g);
-check('a Dashboards', g.includes('href="https://d/x" target="_blank" rel="noopener"'), g);
-check('la pregunta', g.includes('class="btn btn-secondary btn-sm guion__preguntar" data-pregunta="¿Cuánto &quot;vale&quot;?"'), g);
-check('a la tarjeta', g.includes('data-tarjeta="anomalias"'), g);
-check('llevárselo', g.includes('href="/api/v1/cases/pozos/export" download'), g);
-check('sin pasos, nada', guionHTML([]) === '' && guionHTML(undefined) === '');
+
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -561,37 +550,6 @@ process.exit(fallos.length ? 1 : 0);
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "if (firmaDePlugins(data.plugins) !== firmaDePlugins((state.lastStatus || {}).plugins)) {" in html
-
-
-# ── El guion de la demo ─────────────────────────────────────────────────────
-def test_el_guion_sigue_lo_que_quedo_andando():
-    t = _pozos(enmascarados=["well"], analista_creado=True)
-    pasos = pv.guion("produccion-pozos", list(t.values()), "¿Cuánto produjo cada pozo?")
-    assert [p["titulo"] for p in pasos] == ["Los datos", "Algo raro", "Lo que viene", "Preguntale",
-                                            "Lo que queda andando", "Que se lo lleve"]
-    por = {p["titulo"]: p for p in pasos}
-    assert por["Los datos"]["url"] == BASE + "/app/dashboards#/view/DASH"
-    assert por["Algo raro"]["tarjeta"] == "anomalias" and por["Algo raro"]["url"].endswith("/detectors/D/results")
-    assert por["Lo que viene"]["tarjeta"] == "forecasting", "parcial igual se muestra (dice cuál)"
-    assert por["Preguntale"]["pregunta"] == "¿Cuánto produjo cada pozo?"
-    assert por["Lo que queda andando"]["texto"] ==         "Sin que nadie lo mire, el cluster tiene la alerta, el perfil por entidad y el usuario con datos enmascarados."
-    assert por["Que se lo lleve"] == {"titulo": "Que se lo lleve", "texto": por["Que se lo lleve"]["texto"],
-                                      "exportar": "produccion-pozos"}
-
-
-def test_lo_que_fallo_o_se_apago_no_entra_al_guion():
-    t = _pozos(ids={"detector_id": "D"}, estados={"anomalias": {"ok": False, "motivo": "x"}},
-               entry={"dashboards_imported": True, "excluir": ["forecasting"]})
-    titulos = [p["titulo"] for p in pv.guion("produccion-pozos", list(t.values()))]
-    assert titulos == ["Los datos", "Lo que queda andando", "Que se lo lleve"],         "ni la anomalía que falló ni el pronóstico apagado; sin pregunta, sin ese paso (el perfil sí quedó)"
-
-
-def test_el_guion_viaja_con_el_estado(tmp_path):
-    vista = {"produccion-pozos": list(_pozos().values()), "_cluster": []}
-    g = main._guiones(vista)
-    assert set(g) == {"produccion-pozos"} and g["produccion-pozos"][0]["titulo"] == "Los datos"
-    assert main._pregunta_del_caso("produccion-pozos"), "la primera sugerida del vertical"
-    assert main._guiones({"x": "no es una lista"}) == {}, "si se rompe, sin guiones (el estado igual responde)"
 
 
 def test_la_pestana_esta_conectada():

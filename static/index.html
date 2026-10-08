@@ -2398,18 +2398,6 @@
     .plug__numero { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
     .plug__numero:empty { display: none; }
     .plug__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
-    /* El guion de la demo: los pasos en orden, arriba de las tarjetas. */
-    .guion__bloque { margin-bottom: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-subtle);
-                     border-radius: var(--radius-lg); background: var(--bg-secondary); }
-    .guion__bloque > summary { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-weight: var(--fw-semi); font-size: var(--fs-md); list-style: none; }
-    .guion__bloque > summary::-webkit-details-marker { display: none; }
-    .guion__bloque > summary .icon { width: 15px; height: 15px; color: var(--accent); }
-    .guion { margin: var(--sp-2) 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-sm); }
-    .guion__paso { padding-left: 4px; }
-    .guion__texto { color: var(--text-secondary); line-height: 1.5; }
-    .guion__texto strong { color: var(--text-primary); }
-    .guion__acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .plug.is-resaltada { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
     /* Los snapshots de datos de demo. */
     .snap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 0; font-size: var(--fs-sm); }
     .snap__nombre { font-weight: var(--fw-medium); color: var(--text-primary); }
@@ -6803,22 +6791,6 @@
       }
       return '';
     }
-    // El guion de la demo del caso: los pasos en orden, cada uno con su acción.
-    function guionHTML(pasos) {
-      if (!(pasos || []).length) return '';
-      return `<ol class="guion">${pasos.map(p => {
-        const acciones = [
-          p.url ? `<a class="btn btn-secondary btn-sm" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${icon('dashboard')} En Dashboards</a>` : '',
-          p.tarjeta ? `<button type="button" class="btn btn-secondary btn-sm guion__ir" data-tarjeta="${escapeHtml(p.tarjeta)}">${icon('arrow-right')} Su tarjeta</button>` : '',
-          p.pregunta ? `<button type="button" class="btn btn-secondary btn-sm guion__preguntar" data-pregunta="${escapeHtml(p.pregunta)}">${icon('chat')} Preguntar</button>` : '',
-          p.exportar ? `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/export" download>${icon('download')} Dev Tools</a>`
-            + `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/export/dashboards" download>${icon('download')} Dashboard</a>`
-            + `<a class="btn btn-secondary btn-sm" href="/api/v1/cases/${encodeURIComponent(p.exportar)}/traspaso" download>${icon('download')} Traspaso</a>` : '',
-        ].join('');
-        return `<li class="guion__paso"><span class="guion__texto"><strong>${escapeHtml(p.titulo)}</strong> ${escapeHtml(p.texto)}</span>`
-          + (acciones ? `<span class="guion__acciones">${acciones}</span>` : '') + `</li>`;
-      }).join('')}</ol>`;
-    }
     // Lo comprobado en el cluster (`verificado` de /api/v1/plugins/numeros).
     function verificacionHTML(v) {
       if (!v) return '';
@@ -6862,10 +6834,7 @@
       state.pluginsCaso = slug;
       document.querySelectorAll('.plug__caso').forEach(b => b.classList.toggle('is-active', b === btn));
       destino.className = 'maestro__detalle';
-      const pasos = ((state.lastStatus || {}).guiones || {})[slug];
-      destino.innerHTML = ((pasos || []).length
-        ? `<details class="guion__bloque" open><summary>${icon('play')} Guion de la demo</summary>${guionHTML(pasos)}</details>` : '')
-        + pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug]);
+      destino.innerHTML = pluginsDetalleHTML(((state.lastStatus || {}).plugins || {})[slug]);
       if (!destino.querySelector('[data-numero], [data-verif]')) return;
       destino.querySelectorAll('[data-numero]').forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
       let numeros = {};
@@ -8547,21 +8516,6 @@
         if (explicar) return explicarAnomalia(explicar);
         const accion = e.target.closest('.plug__accion[data-accion="probar_embeddings"]');
         if (accion) return probarEmbeddings(accion);
-        // El guion: ir a la tarjeta del paso, o hacerle la pregunta al asistente.
-        const ir = e.target.closest('.guion__ir');
-        if (ir) {
-          const t = body.querySelector(`#infra-plugins-detalle .plug[data-plugin="${CSS.escape(ir.dataset.tarjeta)}"]`);
-          t?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          t?.classList.add('is-resaltada');
-          setTimeout(() => t?.classList.remove('is-resaltada'), 1600);
-          return;
-        }
-        const preg = e.target.closest('.guion__preguntar');
-        if (preg) {
-          const slug = body.querySelector('.plug__caso.is-active')?.dataset.slug || '';
-          if (!(capChatPreguntar && capChatPreguntar(slug, preg.dataset.pregunta, '')))
-            toast('Para preguntar hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
-        }
       });
 
       // Acciones: reusan las funciones del flujo.
@@ -8718,9 +8672,7 @@
           if (!estado.plugins && Object.keys(estado.capabilities || {}).length) {
             try {
               const r = await real('/api/v1/dev/plugins-preview?slugs=' + encodeURIComponent(slugs.join(',')));
-              const vista = r.ok ? await r.json() : {};
-              estado.plugins = vista.plugins || {};
-              estado.guiones = vista.guiones || {};
+              estado.plugins = r.ok ? await r.json() : {};
             } catch (_err) { estado.plugins = {}; }
           }
           return json(estado);

@@ -24,6 +24,7 @@ puro y testeable.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # Los índices son mensuales: el del mes en curso se sigue escribiendo hasta 31
@@ -88,6 +89,21 @@ def _ruta(f: dict) -> str:
     return (f.get("field_path") or "").strip()
 
 
+# Números que no son una medida: códigos, tipos, puertos, secuencias,
+# coordenadas, índices (visto: el rollup de billetera sumaba `message_type` y
+# `sequence_number`; el de CTS, el `code` HTTP).
+_NO_ES_MEDIDA = re.compile(r"code|codigo|type|tipo|seq|number|nro|port|puerto|status|estado|proto|transport|"
+                           r"geo|lat$|lon|long$|index|counter|year|month|day|hour|version|level|nivel", re.I)
+
+
+def candidatos_a_dimension(fields: list[dict]) -> list[dict]:
+    """Los campos de texto que pueden ser una dimensión (no un id), marcados
+    para que el cluster diga cuáles tienen pocos valores (`_discover_enums`
+    solo mira los marcados: en un caso curado no hay marcas)."""
+    return [{**f, "dimension": True} for f in fields or []
+            if isinstance(f, dict) and (f.get("type") or "") in _TEXTO and _ruta(f) and not _parece_id(_ruta(f))]
+
+
 def _parece_id(ruta: str) -> bool:
     nombre = ruta.lower().rsplit(".", 1)[-1]
     return nombre in ("id", "uuid") or nombre.endswith(("_id", "id_", "_uuid")) or nombre.startswith("id_")
@@ -119,7 +135,8 @@ def dimensiones_y_medidas(fields: list[dict], spec: "dict | None" = None,
                 if tipo in ("sum", "avg") and campo and campo not in medidas:
                     medidas.append(campo)
     if not medidas:
-        medidas = [_ruta(f) for f in fields if (f.get("type") or "") in _NUMERICOS and not _parece_id(_ruta(f))]
+        medidas = [_ruta(f) for f in fields if (f.get("type") or "") in _NUMERICOS and not _parece_id(_ruta(f))
+                   and not _NO_ES_MEDIDA.search(_ruta(f).rsplit(".", 1)[-1])]
     return dims[:_MAX_DIMENSIONES], medidas[:_MAX_MEDIDAS]
 
 

@@ -4034,7 +4034,7 @@ def test_provision_capabilities_full_sequence(monkeypatch):
             return _FakeResp(201, {"_id": next(fc_ids)})
         if "/_run_once" in url:
             run_once.append(url)
-            return _FakeResp(200, {"taskId": f"T{len(run_once)}"})
+            return _FakeResp(200, {"task_id": f"T{len(run_once)}"})
         # Rango de @timestamp para dimensionar el forecaster (min/max/count).
         if method == "POST" and url.endswith("/_search"):
             aggs = (kwargs.get("json") or {}).get("aggs") or {}
@@ -4181,7 +4181,7 @@ def test_forecast_usa_el_task_id_del_run_once_y_arma_el_mensaje():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def _lanzar_backtest(")
     lanzar = src[i:src.index("\n\n\n", i)]
-    assert 'tarea = str((r1.json() or {}).get("taskId") or "") if _resp_ok(r1) else ""' in lanzar
+    assert 'tarea = str(cuerpo.get("task_id") or cuerpo.get("taskId") or "")' in lanzar
     assert 'print(f"[capabilities] el backtest de {fc_id} no arrancó: {_resp_motivo(r1)}")' in lanzar
     j = src.index("def _esperar_backtests(")
     assert "_forecast_test_state(base, user, password, fc_id, task_id, tries=1)" in src[j:j + 1200]
@@ -4422,7 +4422,7 @@ def test_provision_capabilities_skips_conversational_without_mlcommons(monkeypat
         if "/_plugins/_forecast/forecasters/" in url and url.endswith("/_profile"):
             return _FakeResp(200, {"forecaster_state": "TEST_COMPLETE"})
         if url.endswith("/_run_once"):
-            return _FakeResp(200, {"taskId": "T"})
+            return _FakeResp(200, {"task_id": "T"})
         if "/_plugins/_forecast/forecasters/" in url and url.endswith("?task=true"):
             return _FakeResp(200, {"run_once_task": {"task_id": "T", "state": "TEST_COMPLETE"}})
         return _FakeResp(200, {})
