@@ -1896,23 +1896,8 @@
     /* La tabla de campos se desplaza en pantallas angostas en vez de cortarse. */
     .mapping-table-scroll { overflow-x: auto; }
     .fuentes-tab__n { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 400; }
-    /* "Lo que va a tener tu cluster": el plan derivado de los campos. */
-    .plan-cluster__bloque { border-top: 1px solid var(--border-subtle); padding: 14px 20px 16px; }
-    .plan-cluster__bloque > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
-    .plan-cluster__bloque > summary::-webkit-details-marker { display: none; }
-    .plan-cluster__lista { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-    .plan-cluster__item {
-      display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
-      border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary);
-    }
-    .plan-cluster__icono .icon { width: 15px; height: 15px; color: var(--accent); margin-top: 2px; }
-    .plan-cluster__texto { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; font-size: var(--fs-sm); }
-    .plan-cluster__texto span { color: var(--text-muted); font-size: var(--fs-xs); }
-    .plan-cluster__item.is-off { background: transparent; border-style: dashed; }
-    .plan-cluster__item.is-off .plan-cluster__icono .icon { color: var(--text-muted); }
-    .plan-cluster__item.is-off strong, .plan-cluster__item.is-apagado strong { color: var(--text-muted); }
-    .plan-cluster__switch { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; margin-top: 2px; }
-    .plan-cluster__global { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    /* Para producción: el dimensionamiento, debajo de la tabla de campos. */
+    .dimensionamiento { border-top: 1px solid var(--border-subtle); padding: 2px 20px 16px; }
     .plan-dim { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; padding: 10px 12px;
                 border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); font-size: var(--fs-sm); }
     .plan-dim__titulo { display: inline-flex; align-items: center; gap: 6px; }
@@ -1924,8 +1909,7 @@
     .plan-dim__reco { font-size: var(--fs-sm); color: var(--text-primary); font-weight: var(--fw-medium); }
     .plan-dim__supuestos { display: inline-flex; align-items: center; gap: 4px; cursor: help; }
     .plan-dim__supuestos .icon { width: 12px; height: 12px; }
-    .plan-cluster__retencion { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-secondary); }
-    .plan-cluster__dias { width: 72px; padding: 2px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
+    .plan-dim__dias { width: 72px; padding: 2px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
     /* Accesos de demo: usuario y contraseña, copiables. */
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
     .acceso__lbl { color: var(--text-muted); }
@@ -3754,9 +3738,6 @@
       // Líneas reales del dataset por slug (cache del preview): { [slug]: string[] }.
       // Harness de dev: ?preview=logpanel muestra el panel sin desplegar.
       previewMode: false,
-      // Plugins del plan del cluster que se apagaron en el paso 2: viajan en el
-      // deploy y el provisioning no los crea.
-      planExcluidos: [],
       // Varios archivos de un mismo dataset (un SIEM: firewall, WAF, auth…):
       // cada uno es una fuente con su análisis. La activa vive en los campos de
       // `state` de siempre (fields, filterCode…) y las demás acá.
@@ -3972,7 +3953,6 @@
     // mostrando los campos del dataset anterior.
     function clearMapping() {
       state.fields = [];
-      state.planExcluidos = [];
       state.seguridad = null;
       state.filterCode = '';
       state.generatedFromLog = '';
@@ -4048,87 +4028,27 @@
       return f ? ruta(f) : '';
     }
 
-    // "Lo que va a tener tu cluster": el plan que deriva el backend de los
-    // campos y sus marcas, el mismo que después provisiona.
-    let _planTimer = null;
-    let _planPedido = 0;
-    function pedirPlanDelCluster() {
-      clearTimeout(_planTimer);
-      _planTimer = setTimeout(cargarPlanDelCluster, 250);
-    }
-    async function cargarPlanDelCluster() {
-      const lugar = document.getElementById('plan-cluster');
+    // Los plugins se eligen con el entorno desplegado (Plugins para el
+    // cluster), con sus comandos de Dev Tools a la vista. En el paso 2 queda
+    // solo el dimensionamiento para producción, que va al traspaso.
+    function pintarDimensionamiento() {
+      const lugar = document.getElementById('dimensionamiento');
       if (!lugar) return;
-      const pedido = ++_planPedido;
-      try {
-        const res = await fetch('/api/v1/onboarding/plan-del-cluster', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields: state.fields || [], seguridad: state.seguridad || null,
-                                 retencion_dias: state.planRetencion || 0 }),
-        });
-        if (!res.ok) throw new Error(String(res.status));
-        const data = await res.json();
-        if (pedido !== _planPedido) return;   // llegó uno más nuevo
-        lugar.innerHTML = planDelClusterHTML(data.items || []);
-        lugar.querySelectorAll('.plan-cluster__switch').forEach(c => c.addEventListener('change', (e) => {
-          const plugin = e.currentTarget.dataset.plugin;
-          const fuera = new Set(state.planExcluidos || []);
-          if (e.currentTarget.checked) fuera.delete(plugin); else fuera.add(plugin);
-          state.planExcluidos = [...fuera];
-          e.currentTarget.closest('.plan-cluster__item')?.classList.toggle('is-apagado', !e.currentTarget.checked);
-        }));
-        const volumen = () => {
-          const eventos = Math.round(Number(lugar.querySelector('.plan-dim__eventos')?.value || 0));
-          state.planVolumen = { eventos_por_dia: eventos > 0 ? eventos : 0,
-                                alta_disponibilidad: !!lugar.querySelector('.plan-dim__ha')?.checked };
-          calcularDimensionamiento(lugar);
-        };
-        lugar.querySelector('.plan-dim__eventos')?.addEventListener('change', volumen);
-        lugar.querySelector('.plan-dim__ha')?.addEventListener('change', volumen);
+      lugar.innerHTML = dimensionamientoHTML();
+      const volumen = () => {
+        const eventos = Math.round(Number(lugar.querySelector('.plan-dim__eventos')?.value || 0));
+        state.planVolumen = { eventos_por_dia: eventos > 0 ? eventos : 0,
+                              alta_disponibilidad: !!lugar.querySelector('.plan-dim__ha')?.checked };
         calcularDimensionamiento(lugar);
-        lugar.querySelector('.plan-cluster__dias')?.addEventListener('change', (e) => {
-          const dias = Math.round(Number(e.currentTarget.value));
-          state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;
-          pedirPlanDelCluster();   // el motivo dice los días
-        });
-      } catch (_err) {
-        if (pedido === _planPedido) lugar.innerHTML = '';
-      }
-    }
-    function planDelClusterHTML(items) {
-      if (!items.length) return '';
-      const fuera = new Set(state.planExcluidos || []);
-      const delCluster = (i) => (i.config || {}).alcance === 'cluster';
-      const fila = (i) => {
-        const apagado = i.aplica && fuera.has(i.plugin);
-        return `<li class="plan-cluster__item${i.aplica ? '' : ' is-off'}${apagado ? ' is-apagado' : ''}">
-          <span class="plan-cluster__icono">${icon(i.aplica ? 'check' : 'x')}</span>
-          <span class="plan-cluster__texto"><strong>${escapeHtml(i.titulo)}</strong><span>${escapeHtml(i.motivo)}</span>
-            ${i.plugin === 'ciclo_de_vida' && i.aplica && !apagado
-              ? `<label class="plan-cluster__retencion">Retención
-                   <input type="number" class="plan-cluster__dias" min="7" max="3650" step="1"
-                     value="${(i.config || {}).retencion_dias || 90}" aria-label="Días de retención"> días</label>`
-              : ''}</span>
-          ${i.opcional && i.aplica
-            ? `<input type="checkbox" class="plan-cluster__switch" data-plugin="${escapeHtml(i.plugin)}" ${apagado ? '' : 'checked'}
-                 aria-label="Incluir ${escapeHtml(i.titulo)}" title="Incluirlo en el cluster">`
-            : ''}
-        </li>`;
       };
-      const propios = items.filter(i => !delCluster(i));
-      const n = propios.filter(i => i.aplica).length;
-      return `<details class="plan-cluster__bloque" open>
-        <summary>
-          <span class="mapping-preguntas__tile">${icon('layers')}</span>
-          <span class="mapping-preguntas__titulo">
-            <strong>Lo que va a tener tu cluster · ${n} de ${propios.length}</strong>
-            <span>Sale de tus datos y de las marcas de la tabla: cambiá un Rol, la Entidad o Sensible y se recalcula.</span>
-          </span>
-        </summary>
-        <ul class="plan-cluster__lista">${propios.map(fila).join('')}</ul>
-        <p class="plan-cluster__global">Y para todo el cluster: ${items.filter(delCluster).map(i => escapeHtml(i.titulo)).join(' · ')}.</p>
-        ${dimensionamientoHTML()}
-      </details>`;
+      lugar.querySelector('.plan-dim__eventos')?.addEventListener('change', volumen);
+      lugar.querySelector('.plan-dim__ha')?.addEventListener('change', volumen);
+      lugar.querySelector('.plan-dim__dias')?.addEventListener('change', (e) => {
+        const dias = Math.round(Number(e.currentTarget.value));
+        state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;
+        calcularDimensionamiento(lugar);
+      });
+      calcularDimensionamiento(lugar);
     }
     // Para producción: cuánto cluster hace falta con el volumen del cliente.
     // Los bytes por evento salen de la muestra; el resto lo dice el cliente.
@@ -4145,6 +4065,9 @@
           <label class="plan-dim__campo">Eventos por día
             <input type="number" class="plan-dim__eventos" min="0" step="1000" placeholder="p. ej. 5000000"
               value="${v.eventos_por_dia || ''}" aria-label="Eventos por día"></label>
+          <label class="plan-dim__campo">Retención
+            <input type="number" class="plan-dim__dias" min="7" max="3650" step="1"
+              value="${state.planRetencion || 90}" aria-label="Días de retención"> días</label>
           <label class="plan-dim__campo"><input type="checkbox" class="plan-dim__ha" ${v.alta_disponibilidad === false ? '' : 'checked'}> Alta disponibilidad</label>
           <div class="plan-dim__resultado" aria-live="polite">${v.eventos_por_dia ? '' : 'Con el volumen diario del cliente, la plataforma recomienda nodos, disco y shards.'}</div>
         </div>`;
@@ -4297,7 +4220,7 @@
             </thead>
             <tbody>${tbodyHtml}</tbody>
           </table></div>
-          <div class="plan-cluster" id="plan-cluster" aria-live="polite"></div>
+          <div class="dimensionamiento" id="dimensionamiento"></div>
           ${bloquePreguntas(state.preguntas)}
         </div>`;
 
@@ -4308,7 +4231,7 @@
           toggleFieldEdit(idx);
         });
       });
-      cargarPlanDelCluster();
+      pintarDimensionamiento();
 
       // Toggle de grupos colapsables (click en el header → mostrar/ocultar rows).
       container.querySelectorAll('.mapping-group-header').forEach(header => {
@@ -4986,9 +4909,8 @@
             fields: state.fields || [],
             // Las diez del paso 2 (LLM validado + plantillas con valores reales).
             questions: state.preguntas || [],
-            // Lo decidido en el plan del cluster (paso 2).
             seguridad: state.seguridad || null,
-            excluir: state.planExcluidos || [],
+            // Lo que dijo el cliente en "Para producción" (paso 2).
             retencion_dias: state.planRetencion || 0,
             volumen: state.planVolumen || {},
             log_content: state.logFileContent || '',
@@ -5062,7 +4984,7 @@
             ...comunes,
             label: `${label} · ${nombreDeFuente(f.logFileName)}`.slice(0, 60),
             sample: f.rawLog || '', filter_code: f.filterCode || '', fields: f.fields || [],
-            questions: f.preguntas || [], seguridad: f.seguridad || null, excluir: f.planExcluidos || [],
+            questions: f.preguntas || [], seguridad: f.seguridad || null,
             retencion_dias: state.planRetencion || 0, volumen: state.planVolumen || {},
             log_content: f.logFileContent || '', log_filename: f.logFileName || '',
           }),
@@ -5260,7 +5182,6 @@
         displayEls.type.textContent = state.fields[idx].type || 'string';
         displayEls.type.dataset.type = state.fields[idx].type || 'string';
       }
-      pedirPlanDelCluster();
     }
 
     // Fuerza una regeneración limpia (namespace/overlay cambiaron, o regen manual).
@@ -5967,7 +5888,6 @@
         opensearch_index: indexName,
         https_enabled: outputCfg.ssl === true,
         fields: state.fields,
-        excluir: state.planExcluidos || [],
         retencion_dias: state.planRetencion || 0,
         namespace: pipelineNamespace(),
         read_existing_bucket: !!state.readExistingMode,
@@ -9662,7 +9582,7 @@
     const _DE_LA_FUENTE = {
       logFileContent: '', logFileName: '', logFileLines: 0, muestra: '', rawLog: '',
       fields: [], filterCode: '', verificacion: null, preguntas: [], inicioRegistro: '',
-      seguridad: null, planExcluidos: [], generatedFromLog: '',
+      seguridad: null, generatedFromLog: '',
     };
     const _MAX_FUENTES = 8;
     function guardarFuenteActiva() {
@@ -9687,7 +9607,7 @@
     function _fuenteDeTexto(nombre, texto) {
       const nonEmpty = texto.split(/\r?\n/).filter(l => l.trim().length);
       const sample = (nonEmpty.find(l => !l.trim().startsWith('#')) || nonEmpty[0] || '').trim();
-      return { ..._DE_LA_FUENTE, fields: [], preguntas: [], planExcluidos: [],
+      return { ..._DE_LA_FUENTE, fields: [], preguntas: [],
                logFileContent: texto, logFileName: nombre, logFileLines: nonEmpty.length,
                muestra: muestraRepartida(nonEmpty).join('\n'), rawLog: sample };
     }

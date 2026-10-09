@@ -80,7 +80,7 @@ def _funciones(html: str) -> str:
 _ARNES = r"""
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const icon = (n) => `<i data-icon="${n}"></i>`;
-const state = { planExcluidos: ['perfil'] };
+const state = {};
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
@@ -93,19 +93,12 @@ check('propone la entidad', entidadPropuesta(campos) === 'data.customer_id');
 campos[0].entity = true;
 check('la marcada (por el descubrimiento) manda', entidadPropuesta(campos) === 'data.status');
 check('sin pistas, ninguna', entidadPropuesta([{ field_path: 'x', type: 'string' }]) === '');
-// El plan: lo que aplica con su switch (y el apagado, apagado); lo global aparte.
-const html = planDelClusterHTML([
-  { plugin: 'perfil', titulo: 'Perfil', aplica: true, motivo: 'por <Cliente>', opcional: true, config: {} },
-  { plugin: 'mapa', titulo: 'Mapa', aplica: false, motivo: 'no hay país', opcional: false, config: null },
-  { plugin: 'agente', titulo: 'Asistente', aplica: true, motivo: 'm', opcional: false, config: {} },
-  { plugin: 'text2viz', titulo: 'Gráficos', aplica: true, motivo: 'm', opcional: false, config: { alcance: 'cluster' } },
-]);
-check('cuenta lo que aplica', html.includes('2 de 3'), html);
-check('lo que no se puede apagar no tiene switch', !html.includes('data-plugin="agente"'));
-check('escapa el motivo', html.includes('por &lt;Cliente>'));
-check('el apagado sale apagado', html.includes('is-apagado') && !/data-plugin="perfil" checked/.test(html));
-check('lo que no aplica no tiene switch', !html.includes('data-plugin="mapa"') && html.includes('is-off'));
-check('lo global va aparte', html.includes('Y para todo el cluster: Gráficos.') && !html.includes('data-plugin="text2viz"'));
+// Para producción: el volumen, la retención y la alta disponibilidad.
+const dim = dimensionamientoHTML();
+check('pide el volumen y la retención', dim.includes('class="plan-dim__eventos"') && dim.includes('class="plan-dim__dias" min="7" max="3650"')
+  && dim.includes('value="90"'), dim);
+state.planRetencion = 365;
+check('la retención elegida', dimensionamientoHTML().includes('value="365"'));
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -128,9 +121,19 @@ def test_la_tabla_del_paso_2_no_pide_marcas():
     for fuera in (">Rol</th>", ">Entidad</th>", ">Sensible</th>", "mapping-entidad", "mapping-sensible", "mapping-rol"):
         assert fuera not in html, fuera
     assert "selectorDeRol" not in html and "marcarRol" not in html and "marcarEntidad" not in html
-    assert '<td colspan="5">' in fn and '<div class="plan-cluster" id="plan-cluster"' in fn and "cargarPlanDelCluster();" in fn
+    assert '<td colspan="5">' in fn and '<div class="dimensionamiento" id="dimensionamiento"></div>' in fn
+    assert "pintarDimensionamiento();" in fn
     # La entidad propuesta queda marcada en el campo: viaja con el deploy.
     assert "if (!fields.some(f => f.entity)) {" in fn
+
+
+def test_el_paso_2_no_elige_plugins():
+    """Los plugins se eligen con el entorno desplegado (Plugins para el
+    cluster), con sus comandos a la vista: el paso 2 ya no los lista."""
+    html = _INDEX.read_text(encoding="utf-8")
+    for fuera in ("Lo que va a tener tu cluster", "planDelClusterHTML", "plan-cluster", "planExcluidos", "/api/v1/onboarding/plan-del-cluster"):
+        assert fuera not in html, fuera
+    assert "plan-del-cluster" not in pathlib.Path(main.__file__).read_text(encoding="utf-8")
 
 
 def test_el_estado_informa_perfil_y_enmascarados():

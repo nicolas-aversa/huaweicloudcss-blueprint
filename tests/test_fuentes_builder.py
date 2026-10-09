@@ -40,22 +40,21 @@ state.fuentes = [a, b];
 cargarFuente(0);
 state.fields = [{ field_path: 'srcip' }];
 state.seguridad = { reglas: [1] };
-state.planExcluidos = ['perfil'];
 guardarFuenteActiva();
 cargarFuente(1);
-const enLaOtra = { fields: state.fields.length, rawLog: state.rawLog, seg: state.seguridad, excl: state.planExcluidos };
+const enLaOtra = { fields: state.fields.length, rawLog: state.rawLog, seg: state.seguridad };
 cargarFuente(0);
 console.log(JSON.stringify({
   a: { lineas: a.logFileLines, raw: a.rawLog, muestra: a.muestra.split('\\n').length },
   enLaOtra,
-  vuelta: { fields: state.fields.length, seg: state.seguridad, excl: state.planExcluidos, activa: state.fuenteActiva },
+  vuelta: { fields: state.fields.length, seg: state.seguridad, activa: state.fuenteActiva },
   nombres: [nombreDeFuente('siem-fortigate.log'), nombreDeFuente('sin_ext'), nombreDeFuente('')],
 }));
 """
     r = _correr(tmp_path, js)
     assert r["a"] == {"lineas": 3, "raw": "srcip=1 a=2", "muestra": 3}, "la primera línea que no es comentario"
-    assert r["enLaOtra"] == {"fields": 0, "rawLog": "linea 1", "seg": None, "excl": []}, "cada fuente lo suyo"
-    assert r["vuelta"] == {"fields": 1, "seg": {"reglas": [1]}, "excl": ["perfil"], "activa": 0}
+    assert r["enLaOtra"] == {"fields": 0, "rawLog": "linea 1", "seg": None}, "cada fuente lo suyo"
+    assert r["vuelta"] == {"fields": 1, "seg": {"reglas": [1]}, "activa": 0}
     assert r["nombres"] == ["siem-fortigate", "sin_ext", "fuente"]
 
 
@@ -86,7 +85,7 @@ def test_el_front_cablea_las_fuentes():
     gen = _tramo(html, "    async function runFilterGeneration() {", "    // Reuso: si el LLM ya analizó")
     assert "await analizarFuentes();" in gen
     guardar = _tramo(html, "    async function guardarFamilia() {", "\n    }\n")
-    for clave in ("familia: label", "seguridad: f.seguridad", "excluir: f.planExcluidos", "log_content: f.logFileContent"):
+    for clave in ("familia: label", "seguridad: f.seguridad", "log_content: f.logFileContent"):
         assert clave in guardar, clave
     assert "if ((state.fuentes || []).length > 1) {\n        try {\n          await guardarFamilia();" in html
     # Borrar una familia borra todas sus fuentes.

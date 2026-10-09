@@ -89,17 +89,6 @@ def test_un_caso_guardado_conserva_las_marcas_del_paso_2():
     assert limpios["importe"]["principal"] is True
 
 
-def test_el_endpoint_del_paso_2():
-    from fastapi.testclient import TestClient
-    import main
-
-    r = TestClient(main.app).post("/api/v1/onboarding/plan-del-cluster", json={"fields": HOTEL})
-    assert r.status_code == 200
-    items = {i["plugin"]: i for i in r.json()["items"]}
-    assert items["perfil"]["aplica"] and items["perfil"]["opcional"]
-    assert not items["agente"]["opcional"] and not items["text2viz"]["opcional"]
-
-
 def test_lo_apagado_viaja_en_el_registro_y_apaga_perfil_y_analista(tmp_path):
     import json
     import main

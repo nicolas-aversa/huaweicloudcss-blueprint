@@ -95,7 +95,7 @@ def test_la_retencion_viaja_del_paso_2_al_entorno():
     assert '"retencion_dias": case.retencion_dias or (custom_cases.get_case(case.slug) or {}).get("retencion_dias") or 0,' in src
     assert '"retencion_dias": request.retencion_dias or 0,' in src
     html = _INDEX.read_text(encoding="utf-8")
-    assert html.count("retencion_dias: state.planRetencion || 0") == 5,         "el plan, el caso (una o varias fuentes), el deploy y el dimensionamiento"
+    assert html.count("retencion_dias: state.planRetencion || 0") == 4, "el caso (una o varias fuentes), el deploy y el dimensionamiento"
 
 
 def test_el_caso_guardado_conserva_la_retencion():
@@ -274,9 +274,10 @@ def test_los_numeros_en_node(tmp_path):
 
 
 def test_el_paso_2_deja_cambiar_la_retencion():
+    """En "Para producción", junto al volumen: define el disco y, desplegado,
+    la retención del ciclo de vida."""
     html = _INDEX.read_text(encoding="utf-8")
-    assert "${i.plugin === 'ciclo_de_vida' && i.aplica && !apagado" in html
-    assert 'class="plan-cluster__dias" min="7" max="3650"' in html
+    assert 'class="plan-dim__dias" min="7" max="3650"' in html
     assert "state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;" in html
 
 

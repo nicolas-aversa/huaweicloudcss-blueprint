@@ -95,6 +95,6 @@ def test_los_bytes_en_el_navegador(tmp_path):
 
 def test_el_paso_2_lo_muestra():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "${dimensionamientoHTML()}" in html
+    assert "lugar.innerHTML = dimensionamientoHTML();" in html and "pintarDimensionamiento();" in html
     assert "lugar.querySelector('.plan-dim__eventos')?.addEventListener('change', volumen);" in html
     assert "fetch('/api/v1/onboarding/dimensionar'" in html

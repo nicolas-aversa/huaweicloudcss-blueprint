@@ -1750,27 +1750,6 @@ def dimensionar_endpoint(request: DimensionarRequest) -> dict:
     return {**d, "en_palabras": dimensionamiento.en_palabras(d)}
 
 
-class PlanDelClusterRequest(BaseModel):
-    slug: str = Field(default="", max_length=120)
-    label: str = Field(default="", max_length=200)
-    fields: list[dict] = Field(default_factory=list)
-    seguridad: dict | None = None
-    retencion_dias: int = Field(default=0, ge=0, le=36500)
-
-
-@app.post("/api/v1/onboarding/plan-del-cluster", tags=["onboarding"],
-          summary="Qué plugins de OpenSearch va a tener el cluster de este dataset, y por qué")
-def plan_del_cluster_endpoint(request: PlanDelClusterRequest) -> dict:
-    """El plan del paso 2: cada plugin con `aplica` y su motivo, derivado de
-    los campos y las marcas (Entidad, Sensible, Rol). Es la misma derivación
-    que usa el provisioning (`plan_de_cluster`)."""
-    import plan_de_cluster
-
-    slug = (request.slug or "").strip() or "dataset"
-    return {"items": plan_de_cluster.plan(slug, request.fields, request.label, seguridad=request.seguridad,
-                                          retencion_dias=request.retencion_dias)}
-
-
 @app.post(
     "/api/v1/onboarding/index-template",
     response_model=IndexTemplateResponse,
