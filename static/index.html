@@ -1892,16 +1892,10 @@
       opacity: 0.7;
     }
     .case-tab.is-active .case-tab__icon { opacity: 1; }
-    .mapping-marca { text-align: center; }
     .fuentes-tabs { margin-bottom: 12px; }
     /* La tabla de campos se desplaza en pantallas angostas en vez de cortarse. */
     .mapping-table-scroll { overflow-x: auto; }
     .fuentes-tab__n { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 400; }
-    .mapping-rol {
-      font-family: inherit; font-size: var(--fs-xs); padding: 4px 2px; width: 100%; max-width: 118px;
-      border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
-      background: var(--bg-primary); color: var(--text-primary); cursor: pointer;
-    }
     /* "Lo que va a tener tu cluster": el plan derivado de los campos. */
     .plan-cluster__bloque { border-top: 1px solid var(--border-subtle); padding: 14px 20px 16px; }
     .plan-cluster__bloque > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
@@ -1932,7 +1926,6 @@
     .plan-dim__supuestos .icon { width: 12px; height: 12px; }
     .plan-cluster__retencion { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-secondary); }
     .plan-cluster__dias { width: 72px; padding: 2px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
-    .mapping-marca input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
     /* Accesos de demo: usuario y contraseña, copiables. */
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
     .acceso__lbl { color: var(--text-muted); }
@@ -4043,8 +4036,8 @@
     }
 
     // Paso 2: qué campo identifica a la entidad (el perfil del caso: una fila
-    // por cliente, usuario, IP…) y cuáles son sensibles (el analista de demo los
-    // ve enmascarados). La entidad viene propuesta y se puede cambiar.
+    // por cliente, usuario, IP…). La propone el descubrimiento, como el rol de
+    // cada campo y cuáles son sensibles; no se marcan a mano.
     const _PISTA_DE_ENTIDAD = /(^|[._])(id|ids|user|usuario|cliente|customer|client|account|cuenta|ip|host|device|dispositivo|patient|paciente|comitente|sesion|session|merchant|comercio|well|pozo)($|[._])/i;
     function entidadPropuesta(fields) {
       const ruta = (f) => f.field_path || f.ecs_path || f.raw_name || '';
@@ -4053,34 +4046,6 @@
       const f = (fields || []).find(f => ['string', 'keyword', 'ip'].includes(f.type) && f.dimension !== false
         && (_PISTA_DE_ENTIDAD.test(ruta(f)) || _PISTA_DE_ENTIDAD.test(f.raw_name || '')));
       return f ? ruta(f) : '';
-    }
-    function marcarEntidad(fields, idx) {
-      (fields || []).forEach((f, i) => { f.entity = i === idx; });
-    }
-    // El rol decide qué se pronostica, qué vigilan las anomalías y qué cuenta
-    // como falla. Lo propone el descubrimiento; acá se corrige.
-    const _ROLES = [
-      ['', '—'], ['primary_dimension', 'Dimensión principal'], ['success_indicator', 'Resultado'],
-      ['critical_indicator', 'Señal de falla'], ['entity_id', 'Identificador'], ['measure', 'Medida'],
-      ['timestamp', 'Fecha del evento'],
-    ];
-    const _ROLES_UNICOS = ['primary_dimension', 'success_indicator', 'critical_indicator', 'timestamp'];
-    function selectorDeRol(f, idx) {
-      return `<select class="mapping-rol" data-index="${idx}" aria-label="Rol: ${escapeHtml(f.business_label || f.raw_name || '')}">
-        ${_ROLES.map(([v, t]) => `<option value="${v}" ${(f.role || '') === v ? 'selected' : ''}>${t}</option>`).join('')}
-      </select>`;
-    }
-    function marcarRol(fields, idx, rol) {
-      const f = fields[idx];
-      f.role = rol || null;
-      // Los de un solo campo pasan a este; entre varias medidas, la elegida
-      // es la principal (la que se pronostica).
-      fields.forEach((g, i) => {
-        if (i === idx) return;
-        if (rol && _ROLES_UNICOS.includes(rol) && g.role === rol) g.role = null;
-        if (rol === 'measure' || rol === 'critical_indicator') g.principal = false;
-      });
-      f.principal = rol === 'measure' || rol === 'critical_indicator';
     }
 
     // "Lo que va a tener tu cluster": el plan que deriva el backend de los
@@ -4281,11 +4246,6 @@
                 <option value="geo_point" ${f.type === 'geo_point' ? 'selected' : ''}>geo_point</option>
               </select>
             </td>
-            <td>${selectorDeRol(f, idx)}</td>
-            <td class="mapping-marca"><input type="radio" name="mapping-entidad" class="mapping-entidad" data-index="${idx}"
-                       ${f.entity ? 'checked' : ''} aria-label="Entidad: ${escapeHtml(f.business_label || f.raw_name || '')}"></td>
-            <td class="mapping-marca"><input type="checkbox" class="mapping-sensible" data-index="${idx}"
-                       ${f.sensitive ? 'checked' : ''} aria-label="Sensible: ${escapeHtml(f.business_label || f.raw_name || '')}"></td>
             <td>
               <button class="mapping-edit-btn" id="edit-btn-${idx}" data-index="${idx}" title="Editar campo">${icon('edit')}</button>
             </td>
@@ -4302,7 +4262,7 @@
           if (f.group && !seen.includes(f.group)) {
             seen.push(f.group);
             const count = fields.filter(ff => ff.group === f.group).length;
-            parts.push(`<tr class="mapping-group-header" data-group="${escapeHtml(f.group)}"><td colspan="8"><span class="mapping-group-toggle"><svg class="icon"><use href="#ic-chevron"/></svg></span><span class="mapping-group-title">${escapeHtml(f.group)}</span><span class="mapping-group-count">${count} campos</span></td></tr>`);
+            parts.push(`<tr class="mapping-group-header" data-group="${escapeHtml(f.group)}"><td colspan="5"><span class="mapping-group-toggle"><svg class="icon"><use href="#ic-chevron"/></svg></span><span class="mapping-group-title">${escapeHtml(f.group)}</span><span class="mapping-group-count">${count} campos</span></td></tr>`);
           }
           parts.push(rowArr[idx]);
         });
@@ -4332,9 +4292,6 @@
                 <th>Campo original</th>
                 <th>Etiqueta · Path</th>
                 <th style="width:100px;">Tipo</th>
-                <th style="width:118px;" title="Qué es el campo para el negocio: decide qué se pronostica, qué se vigila y qué cuenta como falla">Rol</th>
-                <th style="width:58px;" title="El campo que identifica a cada entidad (cliente, usuario, IP…): arma el perfil por entidad">Entidad</th>
-                <th style="width:62px;" title="Datos sensibles: el analista de demo los ve enmascarados">Sensible</th>
                 <th style="width:60px;"></th>
               </tr>
             </thead>
@@ -4351,21 +4308,6 @@
           toggleFieldEdit(idx);
         });
       });
-      // Entidad (una sola) y Sensible: van en el campo y viajan con el deploy.
-      container.querySelectorAll('.mapping-entidad').forEach(r => r.addEventListener('change', (e) => {
-        marcarEntidad(fields, parseInt(e.currentTarget.dataset.index));
-        pedirPlanDelCluster();
-      }));
-      container.querySelectorAll('.mapping-sensible').forEach(c => c.addEventListener('change', (e) => {
-        fields[parseInt(e.currentTarget.dataset.index)].sensitive = e.currentTarget.checked;
-        pedirPlanDelCluster();
-      }));
-      container.querySelectorAll('.mapping-rol').forEach(s => s.addEventListener('change', (e) => {
-        marcarRol(fields, parseInt(e.currentTarget.dataset.index), e.currentTarget.value);
-        // Un rol único que se movió deja al anterior sin rol: se re-pinta.
-        container.querySelectorAll('.mapping-rol').forEach(o => { o.value = fields[parseInt(o.dataset.index)].role || ''; });
-        pedirPlanDelCluster();
-      }));
       cargarPlanDelCluster();
 
       // Toggle de grupos colapsables (click en el header → mostrar/ocultar rows).

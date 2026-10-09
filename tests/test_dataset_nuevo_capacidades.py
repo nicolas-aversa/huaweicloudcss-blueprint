@@ -90,23 +90,9 @@ const campos = [
   { field_path: 'data.price', type: 'float' },
 ];
 check('propone la entidad', entidadPropuesta(campos) === 'data.customer_id');
-marcarEntidad(campos, 0);
-check('una sola marcada', campos[0].entity === true && campos[1].entity === false && campos[2].entity === false);
-check('la marcada manda', entidadPropuesta(campos) === 'data.status');
+campos[0].entity = true;
+check('la marcada (por el descubrimiento) manda', entidadPropuesta(campos) === 'data.status');
 check('sin pistas, ninguna', entidadPropuesta([{ field_path: 'x', type: 'string' }]) === '');
-// Rol: los únicos se mueven; entre medidas, la elegida es la principal.
-const roles = [
-  { field_path: 'a', role: 'critical_indicator', principal: true },
-  { field_path: 'b', role: 'measure', principal: true },
-  { field_path: 'c', role: 'measure' },
-  { field_path: 'd' },
-];
-marcarRol(roles, 3, 'critical_indicator');
-check('el crítico se mueve', roles[3].role === 'critical_indicator' && roles[0].role === null && roles[3].principal && !roles[0].principal);
-marcarRol(roles, 2, 'measure');
-check('la medida elegida es la principal', roles[2].principal === true && roles[1].principal === false && roles[1].role === 'measure');
-marcarRol(roles, 2, '');
-check('sin rol', roles[2].role === null && roles[2].principal === false);
 // El plan: lo que aplica con su switch (y el apagado, apagado); lo global aparte.
 const html = planDelClusterHTML([
   { plugin: 'perfil', titulo: 'Perfil', aplica: true, motivo: 'por <Cliente>', opcional: true, config: {} },
@@ -133,19 +119,18 @@ def test_entidad_en_el_paso_2_en_node(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_la_tabla_del_paso_2_tiene_entidad_y_sensible():
+def test_la_tabla_del_paso_2_no_pide_marcas():
+    """Rol, Entidad y Sensible eran columnas para marcar a mano y confundían al
+    desplegar un caso: los propone el descubrimiento y viajan con el campo."""
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    function renderMappingTable(fields) {")
-    fn = html[i:html.index("    function renderMultiCaseMapping(", i)] if "    function renderMultiCaseMapping(" in html[i:] else html[i:i + 12000]
-    assert '<input type="radio" name="mapping-entidad" class="mapping-entidad"' in fn
-    assert '<input type="checkbox" class="mapping-sensible"' in fn
-    assert ">Entidad</th>" in fn and ">Sensible</th>" in fn and ">Rol</th>" in fn and '<td colspan="8">' in fn
-    assert "${selectorDeRol(f, idx)}" in fn and '<div class="plan-cluster" id="plan-cluster"' in fn
-    assert "cargarPlanDelCluster();" in fn and fn.count("pedirPlanDelCluster();") == 3
-    # La propuesta queda marcada en el campo: viaja con el deploy.
+    fn = html[i:html.index("    function renderMultiCaseMapping(", i)]
+    for fuera in (">Rol</th>", ">Entidad</th>", ">Sensible</th>", "mapping-entidad", "mapping-sensible", "mapping-rol"):
+        assert fuera not in html, fuera
+    assert "selectorDeRol" not in html and "marcarRol" not in html and "marcarEntidad" not in html
+    assert '<td colspan="5">' in fn and '<div class="plan-cluster" id="plan-cluster"' in fn and "cargarPlanDelCluster();" in fn
+    # La entidad propuesta queda marcada en el campo: viaja con el deploy.
     assert "if (!fields.some(f => f.entity)) {" in fn
-    assert "fields[parseInt(e.currentTarget.dataset.index)].sensitive = e.currentTarget.checked;" in html
-    assert "marcarEntidad(fields, parseInt(e.currentTarget.dataset.index))" in html
 
 
 def test_el_estado_informa_perfil_y_enmascarados():
