@@ -105,7 +105,7 @@ class _OBS:
     def object_exists(self, clave):
         return self.existe
 
-    def put_file(self, clave, ruta):
+    def put_file_grande(self, clave, ruta):
         with open(ruta, "rb") as f:
             self.subidos.append((clave, f.read()))
 
@@ -133,11 +133,14 @@ class _Descarga:
         yield self.contenido
 
 
-def _obs(monkeypatch, existe, contenido=b"modelo"):
+def _obs(monkeypatch, existe, contenido=b"modelo", carpeta=None):
     import maas_integrator
     import obs_client
     import requests
+    import tempfile
     obs = _OBS(existe)
+    carpeta = carpeta or __import__("pathlib").Path(tempfile.mkdtemp())
+    monkeypatch.setattr(main, "_carpeta_de_modelos", lambda: carpeta)
     bajadas = []
     monkeypatch.setattr(obs_client, "OBSClient", obs)
     monkeypatch.setattr(maas_integrator, "get_obs_creds", lambda: {"ak": "AK", "sk": "SK"})
@@ -159,6 +162,50 @@ def test_en_obs_se_sube_una_vez_y_con_su_hash(monkeypatch):
     obs, _ = _obs(monkeypatch, existe=False, contenido=b"otra cosa")
     url, motivo = main._modelo_en_obs()
     assert url == "" and "otro hash" in motivo and not obs.subidos, "uno incompleto no se sube"
+
+
+def test_si_la_subida_se_corta_no_lo_vuelve_a_bajar(monkeypatch, tmp_path):
+    """Un corte de DNS en la subida (visto: getaddrinfo failed a los ~13 min)
+    tiraba también la bajada: el reintento usa la copia, si su hash es bueno."""
+    monkeypatch.setitem(busqueda.MODELO, "hash", hashlib.sha256(b"modelo").hexdigest())
+    obs, bajadas = _obs(monkeypatch, existe=False, carpeta=tmp_path)
+    monkeypatch.setattr(obs, "put_file_grande", lambda c, r: (_ for _ in ()).throw(
+        __import__("obs_client").OBSUploadError("getaddrinfo failed")))
+    url, motivo = main._modelo_en_obs()
+    assert url == "" and "getaddrinfo" in motivo and len(bajadas) == 1
+    assert (tmp_path / busqueda.MODELO["archivo"]).read_bytes() == b"modelo", "queda la copia"
+    obs, bajadas = _obs(monkeypatch, existe=False, carpeta=tmp_path)
+    url, motivo = main._modelo_en_obs()
+    assert motivo == "" and not bajadas and obs.subidos == [(busqueda.clave_en_obs(), b"modelo")]
+    # Una copia que no da el hash se vuelve a bajar.
+    (tmp_path / busqueda.MODELO["archivo"]).write_bytes(b"cortado")
+    obs, bajadas = _obs(monkeypatch, existe=False, carpeta=tmp_path)
+    assert main._modelo_en_obs()[1] == "" and len(bajadas) == 1
+
+
+def test_la_subida_grande_reintenta_desde_donde_quedo(monkeypatch, tmp_path):
+    import obs_client
+    llamadas = []
+
+    class _Resp:
+        def __init__(self, status):
+            self.status, self.errorMessage = status, "x"
+
+    class _SDK:
+        def uploadFile(self, bucket, key, ruta, **kw):
+            llamadas.append(kw)
+            if len(llamadas) == 1:
+                raise OSError("getaddrinfo failed")
+            return _Resp(500 if len(llamadas) == 2 else 200)
+
+    c = obs_client.OBSClient.__new__(obs_client.OBSClient)
+    c._client, c._bucket = _SDK(), "b"
+    c.put_file_grande("k", str(tmp_path / "m.zip"), espera_s=0)
+    assert len(llamadas) == 3 and all(k["enableCheckpoint"] and k["checkpointFile"].endswith(".subida") for k in llamadas)
+    llamadas.clear()
+    _SDK.uploadFile = lambda self, *a, **kw: (_ for _ in ()).throw(OSError("sin red"))
+    with pytest.raises(obs_client.OBSUploadError, match="4 intentos"):
+        c.put_file_grande("k", str(tmp_path / "m.zip"), espera_s=0)
 
 
 def test_el_endpoint_lo_prepara_y_guarda_el_estado(monkeypatch, tmp_path):

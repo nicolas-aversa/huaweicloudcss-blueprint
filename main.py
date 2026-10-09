@@ -8005,30 +8005,47 @@ def _modelo_en_obs() -> "tuple[str, str]":
             client.close()
 
 
+def _carpeta_de_modelos() -> Path:
+    """Donde queda el modelo bajado (en `data/`, fuera del repo): si la subida
+    al bucket se corta, el reintento no vuelve a bajar ~490 MB."""
+    return auth.DATA_ROOT / "modelos"
+
+
+def _sha256_de(ruta: Path) -> str:
+    import hashlib
+
+    suma = hashlib.sha256()
+    with open(ruta, "rb") as f:
+        for trozo in iter(lambda: f.read(1 << 20), b""):
+            suma.update(trozo)
+    return suma.hexdigest()
+
+
 def _subir_el_modelo(client) -> str:
     """Sube el modelo al bucket si no está: lo baja de artifacts.opensearch.org
-    y le verifica el hash. "" si quedó (o ya estaba); si no, el motivo. Lo
-    hace "Preparar bucket" (una vez, con los datasets); la provisión, solo si
-    falta."""
-    import hashlib
-    import tempfile
+    (o usa la copia ya bajada) y le verifica el hash. "" si quedó (o ya
+    estaba); si no, el motivo. Lo hace "Preparar bucket" (una vez, con los
+    datasets); la provisión, solo si falta."""
     import requests
 
     clave = busqueda.clave_en_obs()
     if client.object_exists(clave):
         return ""
-    with tempfile.TemporaryDirectory() as tmp:
-        destino = Path(tmp) / busqueda.MODELO["archivo"]
-        suma = hashlib.sha256()
+    carpeta = _carpeta_de_modelos()
+    carpeta.mkdir(parents=True, exist_ok=True)
+    local = carpeta / busqueda.MODELO["archivo"]
+    if not (local.is_file() and _sha256_de(local) == busqueda.MODELO["hash"]):
+        parcial = local.with_name(local.name + ".parcial")
         with requests.get(busqueda.MODELO["origen"] + busqueda.MODELO["archivo"], stream=True, timeout=60) as r:
             r.raise_for_status()
-            with open(destino, "wb") as f:
+            with open(parcial, "wb") as f:
                 for trozo in r.iter_content(1 << 20):
                     f.write(trozo)
-                    suma.update(trozo)
-        if suma.hexdigest() != busqueda.MODELO["hash"]:
+        if _sha256_de(parcial) != busqueda.MODELO["hash"]:
+            parcial.unlink(missing_ok=True)
             return "el modelo bajó con otro hash (incompleto o cambiado): no se sube"
-        client.put_file(clave, str(destino))
+        parcial.replace(local)
+    client.put_file_grande(clave, str(local))
     return ""
 
 

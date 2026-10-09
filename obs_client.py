@@ -153,6 +153,30 @@ class OBSClient:
                 f"OBS rechazó el upload de `{key}` con status {status_code}: {err_msg}"
             )
 
+    def put_file_grande(self, key: str, file_path: str, intentos: int = 4, espera_s: float = 10.0) -> None:
+        """Sube un archivo grande por partes (``uploadFile`` con checkpoint): un
+        corte de red a mitad de camino reintenta desde la parte que faltaba, no
+        desde cero. Con ``putFile``, el modelo de embeddings (~490 MB) se perdía
+        entero con un corte de DNS de unos segundos."""
+        import time
+
+        registro = f"{file_path}.subida"
+        ultimo = ""
+        for n in range(1, intentos + 1):
+            try:
+                resp = self._client.uploadFile(self._bucket, key, file_path, partSize=16 * 1024 * 1024, taskNum=3,
+                                               enableCheckpoint=True, checkpointFile=registro)
+                status_code = getattr(resp, "status", None)
+                if status_code is not None and status_code < 300:
+                    return
+                ultimo = (f"status {status_code}: " + (getattr(resp, "errorMessage", "")
+                                                        or getattr(resp, "reason", "") or "(sin detalle)"))
+            except Exception as exc:  # noqa: BLE001 — se reintenta; si no sale, se dice
+                ultimo = str(exc)
+            if n < intentos:
+                time.sleep(espera_s * n)
+        raise OBSUploadError(f"Fallo al subir `{key}` a OBS ({intentos} intentos): {ultimo}")
+
     def signed_url(self, key: str, expires_s: int = 7200) -> str:
         """Un link de lectura temporal (GET firmado) a un objeto del bucket:
         así el cluster baja un archivo sin credenciales ni bucket público."""
