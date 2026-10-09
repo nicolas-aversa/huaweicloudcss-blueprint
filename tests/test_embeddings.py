@@ -1,10 +1,13 @@
-"""¿Este CSS corre un modelo de embeddings adentro? MaaS no tiene uno: la
-búsqueda semántica depende de eso. La prueba registra un modelo preentrenado,
-lo despliega, lo usa y lo borra, y dice en qué paso falló."""
+"""El modelo de embeddings de la búsqueda híbrida. El CSS no sale a internet
+(registrar el preentrenado por nombre daba "Connection timed out" a
+artifacts.opensearch.org): la plataforma lo sube una vez al bucket de demos
+y el cluster lo registra desde un link firmado de OBS."""
+import hashlib
 import json
 
 import pytest
 
+import busqueda
 import main
 import plugins_vista as pv
 
@@ -18,69 +21,163 @@ class _R:
         return self._d
 
 
-def _cluster(monkeypatch, registro="COMPLETED", deploy="COMPLETED", vector=(0.1, 0.2, 0.3)):
+def _cluster(monkeypatch, tmp_path, registro="COMPLETED", deploy="COMPLETED", estados_modelo=None, previos=()):
+    """Un cluster de ml-commons falso. `estados_modelo`: el `model_state` de
+    cada modelo; los registrados acá quedan DEPLOYED si el deploy completa."""
     pedidos = []
+    estados_modelo = dict(estados_modelo or {})
 
-    def req(m, url, user, password, json_body=None, timeout=30):
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
         pedidos.append((m, url, json_body))
         if url.endswith("/_plugins/_ml/models/_register"):
             return _R(200, {"task_id": "T1"})
         if url.endswith("/_deploy"):
             return _R(200, {"task_id": "T2"})
         if url.endswith("/tasks/T1"):
-            return _R(200, {"state": registro, "model_id": "M1", "error": "Connection refused: artifacts.opensearch.org"})
+            return _R(200, {"state": registro, "model_id": "M1", "error": "Connection timed out: obs"})
         if url.endswith("/tasks/T2"):
+            if deploy == "COMPLETED":
+                estados_modelo["M1"] = "DEPLOYED"
+                for k in list(estados_modelo):
+                    if estados_modelo[k] == "REGISTERED":
+                        estados_modelo[k] = "DEPLOYED"
             return _R(200, {"state": deploy, "error": "Native Memory Circuit Breaker is open"})
-        if "/_predict/text_embedding/" in url:
-            return _R(200, {"inference_results": [{"output": [{"data": list(vector)}]}]})
+        if "/_plugins/_ml/models/" in url and m == "GET":
+            mid = url.rsplit("/", 1)[-1]
+            if mid in estados_modelo and estados_modelo[mid] is None:
+                return None                                   # el cluster no contestó
+            return _R(200, {"model_state": estados_modelo.get(mid, "")}) if mid in estados_modelo else _R(404)
         return _R(200)
 
     monkeypatch.setattr(main, "_os_req", req)
     monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(main, "_modelos_por_nombre", lambda *a, **k: list(previos))
+    monkeypatch.setattr(main, "_modelo_en_obs", lambda: ("https://obs/firmado", ""))
     return pedidos
 
 
-def test_si_anda_lo_dice_y_no_deja_nada(monkeypatch):
-    pedidos = _cluster(monkeypatch)
-    r = main._probar_embeddings("http://x", "a", "p")
-    assert r == {"ok": True, "paso": "", "dimensiones": 3,
-                 "reason": "el cluster corre embeddings (3 dimensiones): se puede hacer búsqueda semántica"}
-    assert pedidos[0] == ("POST", "http://x/_plugins/_ml/models/_register", main.MODELO_DE_EMBEDDINGS)
-    assert "multilingual" in main.MODELO_DE_EMBEDDINGS["name"], "las demos están en castellano"
-    assert ("POST", "http://x/_plugins/_ml/models/M1/_undeploy", None) in pedidos
-    assert ("DELETE", "http://x/_plugins/_ml/models/M1", None) in pedidos, "el modelo ocupa memoria: se borra"
+def test_lo_registra_desde_obs_y_lo_despliega(monkeypatch, tmp_path):
+    pedidos = _cluster(monkeypatch, tmp_path)
+    assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path) == ("M1", "")
+    assert ("PUT", "http://x/_cluster/settings", busqueda.ajustes_del_cluster()) in pedidos, "registrar desde un link"
+    registro = next(b for m, u, b in pedidos if u.endswith("/_register"))
+    assert registro["url"] == "https://obs/firmado" and registro["model_content_hash_value"] == busqueda.MODELO["hash"]
+    assert registro["model_config"]["embedding_dimension"] == 384
+    assert not [u for m, u, _ in pedidos if m == "DELETE"], "se queda: es el de la búsqueda"
 
 
-@pytest.mark.parametrize("kw, paso, motivo", [
-    ({"registro": "FAILED"}, "registrar", "¿tiene salida a artifacts.opensearch.org?"),
-    ({"deploy": "FAILED"}, "desplegar", "Native Memory Circuit Breaker is open"),
-    ({"vector": ()}, "predecir", "no devolvió embeddings"),
+def test_reusa_el_que_ya_esta(monkeypatch, tmp_path):
+    pedidos = _cluster(monkeypatch, tmp_path, estados_modelo={"VIEJO": "DEPLOYED"}, previos=["VIEJO"])
+    assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path) == ("VIEJO", "")
+    assert not [u for _, u, _ in pedidos if u.endswith("/_register")], "no lo vuelve a subir ni registrar"
+    # Registrado pero sin desplegar (un reinicio del nodo): solo se despliega.
+    pedidos = _cluster(monkeypatch, tmp_path, estados_modelo={"R": "REGISTERED"}, previos=["R"])
+    assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path) == ("R", "")
+    assert ("POST", "http://x/_plugins/_ml/models/R/_deploy", None) in pedidos
+    assert not [u for _, u, _ in pedidos if u.endswith("/_register")]
+
+
+@pytest.mark.parametrize("kw, motivo", [
+    ({"registro": "FAILED"}, "el cluster no pudo cargar el modelo desde OBS (Connection timed out: obs)"),
+    ({"deploy": "FAILED"}, "se cargó pero no se pudo desplegar: Native Memory Circuit Breaker is open"),
 ])
-def test_si_no_anda_dice_en_que_paso(monkeypatch, kw, paso, motivo):
-    pedidos = _cluster(monkeypatch, **kw)
-    r = main._probar_embeddings("http://x", "a", "p")
-    assert not r["ok"] and r["paso"] == paso and motivo in r["reason"]
-    if paso != "registrar":
-        assert ("DELETE", "http://x/_plugins/_ml/models/M1", None) in pedidos, "aunque falle, se limpia"
+def test_si_no_anda_dice_por_que(monkeypatch, tmp_path, kw, motivo):
+    _cluster(monkeypatch, tmp_path, **kw)
+    modelo, dice = main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path)
+    assert modelo == "" and motivo in dice
 
 
-def test_el_endpoint_guarda_el_resultado(monkeypatch, tmp_path):
+def test_sin_el_modelo_en_obs_no_registra(monkeypatch, tmp_path):
+    pedidos = _cluster(monkeypatch, tmp_path)
+    monkeypatch.setattr(main, "_modelo_en_obs", lambda: ("", "faltan AK/SK o el bucket de demos en ⚙ Configuración"))
+    assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path) == \
+        ("", "faltan AK/SK o el bucket de demos en ⚙ Configuración")
+    assert not [u for _, u, _ in pedidos if u.endswith("/_register")]
+
+
+class _OBS:
+    def __init__(self, existe):
+        self.existe, self.subidos = existe, []
+
+    def __call__(self, **kw):
+        return self
+
+    def object_exists(self, clave):
+        return self.existe
+
+    def put_file(self, clave, ruta):
+        with open(ruta, "rb") as f:
+            self.subidos.append((clave, f.read()))
+
+    def signed_url(self, clave, expires_s=0):
+        return f"https://obs/{clave}?firmado"
+
+    def close(self):
+        pass
+
+
+class _Descarga:
+    def __init__(self, contenido):
+        self.contenido = contenido
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, n):
+        yield self.contenido
+
+
+def _obs(monkeypatch, existe, contenido=b"modelo"):
+    import maas_integrator
+    import obs_client
+    import requests
+    obs = _OBS(existe)
+    bajadas = []
+    monkeypatch.setattr(obs_client, "OBSClient", obs)
+    monkeypatch.setattr(maas_integrator, "get_obs_creds", lambda: {"ak": "AK", "sk": "SK"})
+    monkeypatch.setattr(main, "get_huawei_settings", lambda: {"demo_bucket": "demos"})
+    monkeypatch.setattr(requests, "get", lambda url, **k: bajadas.append(url) or _Descarga(contenido))
+    return obs, bajadas
+
+
+def test_en_obs_se_sube_una_vez_y_con_su_hash(monkeypatch):
+    obs, bajadas = _obs(monkeypatch, existe=True)
+    url, motivo = main._modelo_en_obs()
+    assert (url, motivo) == (f"https://obs/{busqueda.clave_en_obs()}?firmado", "") and not bajadas, "ya estaba: no se baja"
+    obs, bajadas = _obs(monkeypatch, existe=False, contenido=b"modelo")
+    monkeypatch.setitem(busqueda.MODELO, "hash", hashlib.sha256(b"modelo").hexdigest())
+    url, motivo = main._modelo_en_obs()
+    assert motivo == "" and bajadas == [busqueda.MODELO["origen"] + busqueda.MODELO["archivo"]]
+    assert obs.subidos == [(busqueda.clave_en_obs(), b"modelo")]
+    obs, _ = _obs(monkeypatch, existe=False, contenido=b"otra cosa")
+    url, motivo = main._modelo_en_obs()
+    assert url == "" and "otro hash" in motivo and not obs.subidos, "uno incompleto no se sube"
+
+
+def test_el_endpoint_lo_prepara_y_guarda_el_estado(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
     monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
-    monkeypatch.setattr(main, "_probar_embeddings", lambda b, u, p: {"ok": False, "paso": "registrar", "reason": "sin salida"})
-    r = TestClient(main.app).post("/api/v1/plugins/probar-embeddings")
-    assert r.json()["paso"] == "registrar"
-    assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"ok": False, "motivo": "sin salida",
-                                                                     "paso": "registrar", "dimensiones": 0}
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda b, u, p, td: ("", "sin salida a OBS"))
+    r = TestClient(main.app).post("/api/v1/plugins/probar-embeddings").json()
+    assert not r["ok"] and r["reason"] == "sin salida a OBS"
+    assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"ok": False, "motivo": "sin salida a OBS",
+                                                                     "model_id": "", "dimensiones": 0}
 
 
-def test_la_tarjeta_antes_y_despues_de_probar():
+def test_la_tarjeta_del_modelo():
     sin = {t["plugin"]: t for t in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="")}["embeddings"]
-    assert sin["estado"] == pv.SIN_PROBAR and sin["accion"] == {"id": "probar_embeddings", "texto": "Probarlo ahora"}
+    assert sin["titulo"] == "Modelo de embeddings" and sin["estado"] == pv.SIN_PROBAR
+    assert sin["accion"] == {"id": "probar_embeddings", "texto": "Prepararlo ahora"}
     ok = {t["plugin"]: t for t in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="",
                                                           embeddings={"ok": True, "dimensiones": 384})}["embeddings"]
-    assert ok["estado"] == pv.OK and "384 dimensiones" in ok["que"] and ok["accion"]["texto"] == "Probar de nuevo"
+    assert ok["estado"] == pv.OK and "384 dimensiones" in ok["que"] and ok["accion"]["texto"] == "Volver a prepararlo"
     mal = {t["plugin"]: t for t in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="",
                                                            embeddings={"ok": False, "motivo": "sin salida"})}["embeddings"]
     assert (mal["estado"], mal["motivo"]) == (pv.FALLA, "sin salida")
@@ -93,3 +190,39 @@ def test_el_boton_en_la_tarjeta():
     assert 'class="btn btn-secondary btn-sm plug__accion" data-accion="${escapeHtml(t.accion.id)}"' in html
     assert "if (accion) return probarEmbeddings(accion);" in html
     assert "fetch('/api/v1/plugins/probar-embeddings', { method: 'POST' })" in html
+
+
+def test_si_no_se_puede_leer_o_se_esta_cargando_no_registra_otro(monkeypatch, tmp_path):
+    """Con el cluster cargado, un GET sin respuesta se tomaba como "no hay
+    modelo" y se registraba otra copia de ~490 MB al lado del que andaba."""
+    monkeypatch.setattr(main, "_read_estados", lambda td: {"_cluster": {"embeddings": {"model_id": "ANDABA"}}})
+    pedidos = _cluster(monkeypatch, tmp_path, estados_modelo={"ANDABA": None})
+    modelo, motivo = main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path)
+    assert modelo == "" and "no se registra otra copia" in motivo
+    assert not [u for _, u, _ in pedidos if u.endswith("/_register")]
+    pedidos = _cluster(monkeypatch, tmp_path, estados_modelo={"C": "DEPLOYING"}, previos=["C"])
+    modelo, motivo = main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path)
+    assert modelo == "" and "se está cargando (deploying)" in motivo
+    assert not [u for _, u, _ in pedidos if u.endswith(("/_register", "/_deploy"))]
+
+
+def test_uno_a_la_vez(monkeypatch, tmp_path):
+    _cluster(monkeypatch, tmp_path)
+    assert main._preparando_el_modelo.acquire(blocking=False)
+    try:
+        assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path) ==             ("", "el modelo ya se está preparando (otro pedido): en unos minutos queda")
+    finally:
+        main._preparando_el_modelo.release()
+
+
+def test_el_motivo_no_lleva_el_link_firmado(monkeypatch, tmp_path):
+    """El error de ml-commons repite la URL entera (con el AccessKeyId y la
+    firma) y el motivo va a Actividad, a la auditoría y a la pantalla."""
+    pedidos = _cluster(monkeypatch, tmp_path, registro="FAILED")
+    error = ("Server returned HTTP response code: 403 for URL: "
+             "https://demos.obs.la-south-2.myhuaweicloud.com/css-demos/modelos/m.zip?AccessKeyId=AKSECRETO&Signature=abc")
+    main_req = main._os_req
+    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, **k:
+                        _R(200, {"state": "FAILED", "error": error}) if url.endswith("/tasks/T1") else main_req(m, url, *a, **k))
+    modelo, motivo = main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path)
+    assert modelo == "" and "<link de OBS>" in motivo and "AKSECRETO" not in motivo and "Signature" not in motivo

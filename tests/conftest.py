@@ -48,6 +48,10 @@ def _settings_aislados(tmp_path, monkeypatch):
     # prueban usan el original (`_paso_del_tiempo_original`).
     monkeypatch.setattr(_main, "_paso_del_tiempo_original", _main._provisionar_el_paso_del_tiempo, raising=False)
     monkeypatch.setattr(_main, "_provisionar_el_paso_del_tiempo", lambda *a, **k: None)
+    # La búsqueda híbrida baja el modelo y va a OBS: los que la prueban usan
+    # el original (`_busqueda_original`).
+    monkeypatch.setattr(_main, "_busqueda_original", _main._provisionar_la_busqueda, raising=False)
+    monkeypatch.setattr(_main, "_provisionar_la_busqueda", lambda *a, **k: None)
     # El estado de cada plugin (vista Plugins): un test del endpoint de
     # provisión lo escribía en `terraform/` del repo, la carpeta que lee la app
     # local. Ahí va a la carpeta del test; en cualquier otra, donde dijo.

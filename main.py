@@ -56,7 +56,7 @@ def _salida_utf8(*streams) -> None:
 
 
 _salida_utf8(sys.stdout, sys.stderr)
-from fastapi import Body, FastAPI, HTTPException, Request, status
+from fastapi import Body, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, Field, field_validator
@@ -122,6 +122,7 @@ import custom_cases  # noqa: E402
 # Historial persistido de ejecuciones (vista Actividad + cola de jobs del deploy).
 import runs  # noqa: E402
 import plugins_vista  # noqa: E402
+import busqueda  # noqa: E402
 
 import tfstate  # noqa: E402  (lectura del state de Terraform, local o en OBS)
 # Lectura del .conf de Logstash sin regex (bloques, settings, máscara de strings).
@@ -4105,6 +4106,9 @@ def plugins_preview(slugs: str = "") -> dict:
         dims, medidas = cdv.dimensiones_y_medidas((verticals.get_vertical(slug) or {}).get("fields") or [], spec)
         if medidas:
             estados["rollup"] = {"ok": True, "motivo": "", "dimensiones": dims, "medidas": medidas}
+        texto = busqueda.campo_de_texto_libre(_campos_del_caso(slug, {}))
+        if texto:
+            estados["busqueda"] = {"ok": True, "motivo": "", "campo": texto, "textos": 412}
         entry = {"dashboards_imported": True, "dashboard_id": f"{slug}-dashboard",
                  "busquedas": [{"id": f"{slug}-todos", "titulo": f"[{slug}] todos los eventos"},
                                {"id": f"{slug}-criticos", "titulo": f"[{slug}] eventos críticos"}]}
@@ -4113,7 +4117,8 @@ def plugins_preview(slugs: str = "") -> dict:
             seguridad_reg=sa_reg if sa else {}, seguridad_spec=sa, estados=estados, analista_creado=True, base=base,
             fields=(verticals.get_vertical(slug) or {}).get("fields") or [])
     if fuera:
-        fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(agente=True, text2viz={"ok": True}, base=base)
+        fuera["_cluster"] = plugins_vista.tarjetas_del_cluster(agente=True, text2viz={"ok": True}, base=base,
+                                                               embeddings={"ok": True, "dimensiones": busqueda.DIMENSION})
     return fuera
 
 
@@ -4806,6 +4811,33 @@ def _cuidar_plugins(terraform_dir: Path) -> list[str]:
             jobs.append(("perfil", perfiles.nombre_del_transform(slug), "_plugins/_transform", "transform_metadata"))
         if "rollup" in (estados.get(slug) or {}):
             jobs.append(("rollup", cdv.nombre_del_rollup(slug), "_plugins/_rollup/jobs", "metadata"))
+        if ((estados.get(slug) or {}).get("busqueda") or {}).get("ok"):
+            jobs.append(("busqueda", busqueda.nombre_del_transform(slug), "_plugins/_transform", "transform_metadata"))
+            idx = busqueda.indice(slug)
+
+            def contar(consulta: dict) -> int:
+                r = _os_req("POST", f"{base}/{idx}/_count", user, password, timeout=20, json_body={"query": consulta})
+                try:
+                    return int(r.json()["count"]) if _resp_ok(r) else 0
+                except (ValueError, KeyError, TypeError):
+                    return 0
+            # Un campo que creció más allá del tope (ingesta en vivo con textos
+            # siempre distintos): se para, para no cargar el nodo con el modelo.
+            textos = contar(busqueda.CON_TEXTO)
+            if textos > busqueda.MAX_TEXTOS and toca(f"{idx}|tope"):
+                _os_req("POST", f"{base}/_plugins/_transform/{busqueda.nombre_del_transform(slug)}/_stop",
+                        user, password, timeout=20)
+                _guardar_estados(terraform_dir, slug, {"busqueda": {
+                    **(estados.get(slug) or {}).get("busqueda", {}), "ok": False, "no_aplica": True,
+                    "motivo": f"creció a {textos} textos distintos: se paró para no cargar el nodo"}})
+                hecho.append(f"tope de textos · {slug}")
+            # Un texto que quedó sin vector (el índice ya tenía textos cuando se
+            # creó el pipeline): se vectoriza con el pipeline, adentro del cluster.
+            elif contar(busqueda.SIN_VECTOR) and toca(f"{idx}|vectores") and _resp_ok(_os_req(
+                    "POST", f"{base}/{idx}/_update_by_query?pipeline={busqueda.PIPELINE_DE_INGESTA}"
+                            "&conflicts=proceed&wait_for_completion=false", user, password, timeout=30,
+                    json_body={"query": busqueda.SIN_VECTOR})):
+                hecho.append(f"vectores · {slug}")
         for nombre, jid, ruta, clave in jobs:
             cuerpo, _ = _leer(base, user, password, f"{ruta}/{jid}/_explain")
             info = (cuerpo or {}).get(jid)
@@ -7900,12 +7932,12 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
     return {**fuera, **pr.serie(reales, horizonte, ancla, paso)}
 
 
-# ── ¿Corre embeddings el cluster? ───────────────────────────────────────────
-# MaaS no tiene un modelo de embeddings: la búsqueda semántica (y un RAG que
-# entienda sinónimos) depende de que el CSS deje correr uno adentro. Se prueba
-# con un modelo preentrenado multilingüe y se deja todo como estaba.
-MODELO_DE_EMBEDDINGS = {"name": "huggingface/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-                        "version": "1.0.1", "model_format": "TORCH_SCRIPT"}
+# ── La búsqueda híbrida (ver busqueda.py) ───────────────────────────────────
+# MaaS no tiene un modelo de embeddings y el CSS no sale a internet (registrar
+# el preentrenado por nombre daba "Connection timed out" a artifacts.opensearch.org):
+# la plataforma sube el modelo una vez al bucket de demos y el cluster lo
+# registra desde un link firmado de OBS.
+_LINK_DEL_MODELO_S = 7200
 _EMBEDDINGS_ESPERA_S = 5.0
 _EMBEDDINGS_INTENTOS = 72          # ~6 minutos: el registro baja el modelo (~400 MB)
 
@@ -7928,58 +7960,284 @@ def _esperar_tarea(base: str, user: str, password: str, task_id: str) -> "tuple[
     return "", "no terminó a tiempo"
 
 
-def _probar_embeddings(base: str, user: str, password: str) -> dict:
-    """Registra, despliega y usa el modelo; después lo borra. `{ok, paso,
-    reason, dimensiones}`: el paso donde falló dice por qué (registrar = el
-    cluster no baja el modelo, sin salida a internet; desplegar = memoria o
-    nodos de ML)."""
-    r = _os_req("POST", f"{base}/_plugins/_ml/models/_register", user, password, timeout=60,
-                json_body=MODELO_DE_EMBEDDINGS)
+def _modelo_en_obs() -> "tuple[str, str]":
+    """(link firmado, "") del modelo en el bucket de demos; la primera vez lo
+    baja de artifacts.opensearch.org (la plataforma sí tiene internet), le
+    verifica el hash y lo sube. ("", motivo) si no se puede."""
+    import hashlib
+    import tempfile
+    import requests
+    from obs_client import OBSClient, OBSConfigError, OBSUploadError
+    import maas_integrator as _mi
+
+    creds = _mi.get_obs_creds() or {}
+    ak, sk = creds.get("ak", ""), creds.get("sk", "")
+    bucket = get_huawei_settings().get("demo_bucket", "")
+    if not (ak and sk and bucket):
+        return "", "faltan AK/SK o el bucket de demos en ⚙ Configuración"
+    client = None
     try:
-        tarea = str((r.json() or {}).get("task_id") or "") if _resp_ok(r) else ""
+        client = OBSClient(access_key_id=ak, secret_access_key=sk, endpoint=_default_obs_endpoint(), bucket=bucket)
+        clave = busqueda.clave_en_obs()
+        if not client.object_exists(clave):
+            with tempfile.TemporaryDirectory() as tmp:
+                destino = Path(tmp) / busqueda.MODELO["archivo"]
+                suma = hashlib.sha256()
+                with requests.get(busqueda.MODELO["origen"] + busqueda.MODELO["archivo"], stream=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(destino, "wb") as f:
+                        for trozo in r.iter_content(1 << 20):
+                            f.write(trozo)
+                            suma.update(trozo)
+                if suma.hexdigest() != busqueda.MODELO["hash"]:
+                    return "", "el modelo bajó con otro hash (incompleto o cambiado): no se sube"
+                client.put_file(clave, str(destino))
+        return client.signed_url(clave, _LINK_DEL_MODELO_S), ""
+    except (OBSConfigError, OBSUploadError) as exc:
+        return "", str(exc)[:300]
+    except Exception as exc:  # noqa: BLE001 — sin el modelo, la búsqueda queda por palabras
+        return "", f"no se pudo preparar el modelo en OBS: {exc!r}"[:300]
+    finally:
+        if client is not None:
+            client.close()
+
+
+def _estado_del_modelo(base: str, user: str, password: str, model_id: str) -> "str | None":
+    """El `model_state`; "" si no existe (404) y None si no se pudo leer (el
+    cluster no contestó): no es lo mismo, y con None no se registra otra copia."""
+    r = _os_req("GET", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=20)
+    if r is not None and r.status_code == 404:
+        return ""
+    try:
+        return str((r.json() or {}).get("model_state") or "") if _resp_ok(r) else None
+    except ValueError:
+        return None
+
+
+def _modelos_por_nombre(base: str, user: str, password: str) -> list[str]:
+    """Los modelos que se llaman como el de la plataforma. Sin sus pedazos:
+    ml-commons guarda cada ~10 MB del zip como otro doc con el mismo nombre."""
+    r = _os_req("POST", f"{base}/_plugins/_ml/models/_search", user, password, timeout=20, json_body={
+        "size": 20, "_source": False,
+        "query": {"bool": {"must": [{"term": {"name.keyword": busqueda.MODELO["nombre"]}}],
+                           "must_not": [{"exists": {"field": "chunk_number"}}]}}})
+    try:
+        return [h["_id"] for h in ((r.json() or {}).get("hits") or {}).get("hits") or []] if _resp_ok(r) else []
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
+_EN_CURSO_DEL_MODELO = ("REGISTERING", "DEPLOYING")
+_preparando_el_modelo = _threading.Lock()
+_UN_LINK = re.compile(r"https?://\S+")
+
+
+def _sin_links(texto: str) -> str:
+    """Un motivo sin el link firmado de OBS: cuando el cluster no lo puede
+    bajar, el error de ml-commons repite la URL entera (con el AccessKeyId y la
+    firma), y el motivo va a Actividad, a la auditoría y a la pantalla."""
+    return _UN_LINK.sub("<link de OBS>", texto or "")
+
+
+def _asegurar_modelo_de_embeddings(base: str, user: str, password: str, terraform_dir: Path) -> "tuple[str, str]":
+    """(model_id, "") con el modelo desplegado; ("", motivo) si no. Uno a la
+    vez: "Prepararlo ahora" durante una provisión registraba otra copia."""
+    if not _preparando_el_modelo.acquire(blocking=False):
+        return "", "el modelo ya se está preparando (otro pedido): en unos minutos queda"
+    try:
+        modelo, motivo = _preparar_el_modelo(base, user, password, terraform_dir)
+        return modelo, _sin_links(motivo)
+    finally:
+        _preparando_el_modelo.release()
+
+
+def _preparar_el_modelo(base: str, user: str, password: str, terraform_dir: Path) -> "tuple[str, str]":
+    """Reusa el que ya está (por el registro o por nombre); si no, lo registra
+    desde OBS. Un modelo que no se pudo leer o que se está cargando se espera:
+    registrar otro duplicaba los ~490 MB en la memoria del nodo."""
+    previo = ((_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
+    candidatos = ([previo] if previo else []) + _modelos_por_nombre(base, user, password)
+    modelo = ""
+    for mid in dict.fromkeys(candidatos):
+        estado = _estado_del_modelo(base, user, password, mid)
+        if estado is None:
+            return "", "no se pudo leer el estado del modelo (¿cluster cargado?): no se registra otra copia"
+        if estado == "DEPLOYED":
+            return mid, ""
+        if estado in _EN_CURSO_DEL_MODELO:
+            return "", f"el modelo se está cargando ({estado.lower()}): en unos minutos queda"
+        if estado in ("REGISTERED", "UNDEPLOYED", "DEPLOY_FAILED", "PARTIALLY_DEPLOYED"):
+            modelo = mid
+            break
+    if not modelo:
+        _os_req("PUT", f"{base}/_cluster/settings", user, password, json_body=busqueda.ajustes_del_cluster(), timeout=30)
+        url, motivo = _modelo_en_obs()
+        if not url:
+            return "", motivo
+        r = _os_req("POST", f"{base}/_plugins/_ml/models/_register", user, password, timeout=60,
+                    json_body=busqueda.registro_del_modelo(url))
+        try:
+            tarea = str((r.json() or {}).get("task_id") or "") if _resp_ok(r) else ""
+        except ValueError:
+            tarea = ""
+        if not tarea:
+            return "", f"no se pudo registrar el modelo: {_resp_motivo(r)}"
+        modelo, motivo = _esperar_tarea(base, user, password, tarea)
+        if not modelo:
+            return "", f"el cluster no pudo cargar el modelo desde OBS ({motivo})"
+    rd = _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_deploy", user, password, timeout=60)
+    try:
+        tarea = str((rd.json() or {}).get("task_id") or "") if _resp_ok(rd) else ""
     except ValueError:
         tarea = ""
-    if not tarea:
-        return {"ok": False, "paso": "registrar", "reason": f"no se pudo registrar: {_resp_motivo(r)}"}
-    modelo, motivo = _esperar_tarea(base, user, password, tarea)
-    if not modelo:
-        return {"ok": False, "paso": "registrar",
-                "reason": f"el cluster no pudo bajar el modelo ({motivo}): ¿tiene salida a artifacts.opensearch.org?"}
+    _, motivo = _esperar_tarea(base, user, password, tarea) if tarea else ("", _resp_motivo(rd))
+    if motivo or _estado_del_modelo(base, user, password, modelo) != "DEPLOYED":
+        return "", f"se cargó pero no se pudo desplegar: {motivo or 'no quedó DEPLOYED'} (¿memoria del nodo?)"
+    return modelo, ""
+
+
+def _campos_del_caso(slug: str, entry: dict) -> list[dict]:
+    """Los campos de un caso: los del registro (un dataset nuevo) o los de su vertical."""
+    fields = (entry or {}).get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or []
+    return [f for f in fields if isinstance(f, dict)]
+
+
+def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_pattern: str,
+                          fields: list[dict], model_id: str, force: bool) -> dict:
+    """La búsqueda híbrida de un caso: sus textos distintos, vectorizados, en
+    `busqueda-<caso>`. Si el campo es una categoría (pocos valores) o tiene
+    demasiados textos para un nodo sin GPU, no aplica (y se dice)."""
+    campo = busqueda.campo_de_texto_libre(fields)
+    if not campo:
+        return {"ok": False, "no_aplica": True, "reason": "no hay un campo de texto libre"}
+    tipo = busqueda.tipo_del_campo(fields, campo)
+    agrupable = busqueda.campo_agrupable(campo, tipo)
+    rc = _os_req("POST", f"{base}/{index_pattern}/_search", user, password, timeout=60,
+                 json_body={"size": 0, "aggs": {"n": {"cardinality": {"field": agrupable}}}})
     try:
-        rd = _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_deploy", user, password, timeout=60)
-        tarea = str((rd.json() or {}).get("task_id") or "") if _resp_ok(rd) else ""
-        _, motivo = _esperar_tarea(base, user, password, tarea) if tarea else ("", _resp_motivo(rd))
-        if motivo:
-            return {"ok": False, "paso": "desplegar", "reason": f"se bajó pero no se pudo desplegar: {motivo}"}
-        rp = _os_req("POST", f"{base}/_plugins/_ml/_predict/text_embedding/{modelo}", user, password, timeout=60,
-                     json_body={"text_docs": ["¿Qué hago si un pozo queda caído?"], "return_number": True,
-                                "target_response": ["sentence_embedding"]})
-        try:
-            vector = ((((rp.json() or {}).get("inference_results") or [{}])[0].get("output") or [{}])[0]
-                      .get("data") or []) if _resp_ok(rp) else []
-        except (ValueError, AttributeError, IndexError):
-            vector = []
-        if not vector:
-            return {"ok": False, "paso": "predecir", "reason": f"se desplegó pero no devolvió embeddings: {_resp_motivo(rp)}"}
-        return {"ok": True, "paso": "", "dimensiones": len(vector),
-                "reason": f"el cluster corre embeddings ({len(vector)} dimensiones): se puede hacer búsqueda semántica"}
-    finally:
-        # La prueba no deja nada: el modelo ocupa memoria del nodo.
-        _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_undeploy", user, password, timeout=60)
-        _os_req("DELETE", f"{base}/_plugins/_ml/models/{modelo}", user, password, timeout=60)
+        n = int(((rc.json() or {}).get("aggregations") or {}).get("n", {}).get("value")) if _resp_ok(rc) else None
+    except (ValueError, TypeError):
+        n = None
+    if n is None:
+        return {"ok": False, "campo": campo, "reason": f"no se pudieron contar los textos de {campo}: {_resp_motivo(rc)}"}
+    if n < busqueda.MIN_TEXTOS:
+        return {"ok": False, "no_aplica": True, "campo": campo,
+                "reason": f"{campo} tiene {n} valores distintos: es una categoría, no texto libre"}
+    if n > busqueda.MAX_TEXTOS:
+        return {"ok": False, "no_aplica": True, "campo": campo,
+                "reason": f"{campo} tiene {n} textos distintos: vectorizarlos en un nodo sin GPU tardaría demasiado"}
+    _os_req("PUT", f"{base}/_ingest/pipeline/{busqueda.PIPELINE_DE_INGESTA}", user, password, timeout=30,
+            json_body=busqueda.pipeline_de_ingesta(model_id))
+    _os_req("PUT", f"{base}/_search/pipeline/{busqueda.PIPELINE_DE_BUSQUEDA}", user, password, timeout=30,
+            json_body=busqueda.pipeline_de_busqueda())
+    tid, idx = busqueda.nombre_del_transform(slug), busqueda.indice(slug)
+    ruta = f"{base}/_plugins/_transform/{tid}"
+    ya = _os_req("GET", ruta, user, password, timeout=20)
+    if _resp_ok(ya):
+        if not force and _motivo_si_fallo(ruta, user, password) is None:
+            return {"ok": True, "reason": "ya estaba", "campo": campo, "textos": n}
+        _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
+        _os_req("DELETE", ruta, user, password, timeout=20)
+    _os_req("DELETE", f"{base}/{idx}", user, password, timeout=30)
+    ri = _os_req("PUT", f"{base}/{idx}", user, password, json_body=busqueda.mapping_del_indice(), timeout=30)
+    if not _resp_ok(ri):
+        return {"ok": False, "campo": campo, "reason": f"no se pudo crear {idx}: {_resp_motivo(ri)}"}
+    rt = _os_req("PUT", ruta, user, password, json_body=busqueda.transform(slug, index_pattern, campo, tipo), timeout=30)
+    if not _resp_ok(rt):
+        return {"ok": False, "campo": campo, "reason": f"no se pudo crear el Transform: {_resp_motivo(rt)}"}
+    rs = _os_req("POST", f"{ruta}/_start", user, password, timeout=20)
+    if not _resp_ok(rs):
+        return {"ok": False, "campo": campo, "reason": f"el Transform no arrancó: {_resp_motivo(rs)}"}
+    return {"ok": True, "campo": campo, "textos": n,
+            "reason": f"{campo}: {n} textos distintos en {idx}, por palabras y por significado"}
+
+
+def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enabled: bool, terraform_dir: Path,
+                             slugs: list[str], pipe_reg: dict, force: bool, run: dict) -> None:
+    """El modelo (una vez, desde OBS) y la búsqueda de cada caso con texto
+    libre. Va al final de "Provisionar plugins": subir el modelo la primera vez
+    tarda, y no tiene que demorar al resto."""
+    base = _os_base(cluster, https_enabled)
+    casos = {}
+    for slug in slugs:
+        entry = pipe_reg.get(slug) or {}
+        fields = _campos_del_caso(slug, entry)
+        if "busqueda" not in _excluidos(entry) and busqueda.campo_de_texto_libre(fields):
+            casos[slug] = fields
+    if not casos:
+        return
+    model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir)
+    runs.step(run, "Modelo de embeddings", bool(model_id), (motivo or "desplegado, desde el bucket de demos")[:300])
+    guardados = _read_estados(terraform_dir)
+    # Si falló (el cluster cargado, un timeout), el id que andaba se conserva:
+    # el modelo y los índices siguen ahí, y la búsqueda sigue andando.
+    conocido = ((guardados.get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
+    _guardar_estados(terraform_dir, "_cluster", {"embeddings": {
+        "ok": bool(model_id), "motivo": motivo, "model_id": model_id or conocido,
+        "dimensiones": busqueda.DIMENSION if model_id else 0}})
+    for slug, fields in casos.items():
+        indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
+        if not model_id and ((guardados.get(slug) or {}).get("busqueda") or {}).get("ok"):
+            runs.step(run, f"Búsqueda híbrida · {slug}", True, f"sigue la de antes (el modelo: {motivo})"[:300])
+            continue
+        if model_id:
+            _esperar_cluster_libre(base, user, password)
+            try:
+                res = _provisionar_busqueda(base, user, password, slug, index_pattern_from_name(indice),
+                                            fields, model_id, force)
+            except Exception as exc:  # noqa: BLE001 — pieza de demo
+                res = {"ok": False, "reason": repr(exc)}
+        else:
+            res = {"ok": False, "reason": f"sin el modelo de embeddings: {motivo}"}
+        runs.step(run, f"Búsqueda híbrida · {slug}", bool(res["ok"] or res.get("no_aplica")), res["reason"][:300])
+        e = plugins_vista.estado_simple(res)
+        _guardar_estados(terraform_dir, slug, {"busqueda": e and {
+            **e, "campo": res.get("campo") or busqueda.campo_de_texto_libre(fields),
+            "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}})
 
 
 @app.post("/api/v1/plugins/probar-embeddings", tags=["capabilities"],
-          summary="Prueba si el cluster corre un modelo de embeddings adentro (puede tardar unos minutos)")
+          summary="Prepara el modelo de embeddings (desde el bucket de demos): puede tardar unos minutos")
 def probar_embeddings() -> dict:
     terraform_dir = _active_terraform_dir()
     base, user, password = _cluster_del_entorno("embeddings")
-    res = _probar_embeddings(base, user, password)
-    audit.record("probar_embeddings", res["reason"][:200])
-    e = plugins_vista.estado_simple(res)
-    _guardar_estados(terraform_dir, "_cluster", {"embeddings": e and {**e, "paso": res.get("paso", ""),
-                                                                      "dimensiones": res.get("dimensiones", 0)}})
+    conocido = ((_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
+    model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir)
+    res = {"ok": bool(model_id), "model_id": model_id, "dimensiones": busqueda.DIMENSION if model_id else 0,
+           "reason": "el modelo de embeddings quedó desplegado: corré «Provisionar plugins» para armar la búsqueda"
+           if model_id else motivo}
+    audit.record("preparar_embeddings", res["reason"][:200])
+    _guardar_estados(terraform_dir, "_cluster", {"embeddings": {"ok": res["ok"], "motivo": motivo,
+                                                                "model_id": model_id or conocido,
+                                                                "dimensiones": res["dimensiones"]}})
     return res
+
+
+@app.get("/api/v1/plugins/buscar", tags=["capabilities"],
+         summary="La búsqueda de un caso: por palabras y la híbrida, lado a lado")
+def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict:
+    terraform_dir = _active_terraform_dir()
+    estados = _read_estados(terraform_dir)
+    model_id = ((estados.get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
+    caso = (estados.get(slug) or {}).get("busqueda") or {}
+    if not (model_id and caso.get("ok")):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: corré «Provisionar plugins»."})
+    base, user, password = _cluster_del_entorno("busqueda")
+    idx = busqueda.indice(slug)
+    rl = _os_req("POST", f"{base}/{idx}/_search", user, password, json_body=busqueda.consulta_lexica(q), timeout=30)
+    rh = _os_req("POST", f"{base}/{idx}/_search?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}", user, password,
+                 json_body=busqueda.consulta_hibrida(q, model_id), timeout=60)
+
+    def leer(r) -> "tuple[list, str]":
+        try:
+            return (busqueda.resultados(r.json() or {}), "") if _resp_ok(r) else ([], _resp_motivo(r))
+        except ValueError:
+            return [], "respuesta inválida"
+
+    lexica, err_l = leer(rl)
+    hibrida, err_h = leer(rh)
+    return {"campo": caso.get("campo", ""), "lexica": lexica, "hibrida": hibrida, "error": err_h or err_l}
 
 
 # ── Los datos de la demo, en un snapshot ────────────────────────────────────
@@ -8169,6 +8427,17 @@ def numeros_de_plugins(slug: str = "") -> dict:
                 fuera["rollup"] = {"docs": int(r.json()["count"]) if _resp_ok(r) else None}
             except (ValueError, KeyError, TypeError):
                 fuera["rollup"] = {"docs": None}
+    if (estados.get("busqueda") or {}).get("ok"):
+        idx = busqueda.indice(slug)
+
+        def contar(cuerpo: "dict | None") -> "int | None":
+            r = _os_req("POST", f"{base}/{idx}/_count", user, password, json_body=cuerpo, timeout=20)
+            try:
+                return int(r.json()["count"]) if _resp_ok(r) else None
+            except (ValueError, KeyError, TypeError):
+                return None
+        fuera["busqueda"] = {"textos": contar({"query": busqueda.CON_TEXTO}),
+                             "con_vector": contar({"query": {"exists": {"field": "embedding"}}})}
     try:
         fuera["verificado"] = _verificar_en_el_cluster(base, user, password, slug, ids, reg, entry, estados)
     except Exception as exc:  # noqa: BLE001 — sin verificación, los números igual llegan
@@ -8284,6 +8553,21 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
                 marcar("rollup", False, f"el rollup falló: {motivo_r}")
         else:
             marcar("rollup", True, f"rollup {str(meta.get('status') or 'creado').lower()}")
+    if (estados.get("busqueda") or {}).get("ok"):
+        tid = busqueda.nombre_del_transform(slug)
+        cuerpo, motivo = _leer(base, user, password, f"_plugins/_transform/{tid}/_explain")
+        info = (cuerpo or {}).get(tid)
+        meta = (info.get("transform_metadata") or {}) if isinstance(info, dict) else {}
+        if not isinstance(info, dict):
+            marcar("busqueda", False, "el Transform de la búsqueda no está en el cluster")
+        elif str(meta.get("status") or "").lower() == "failed":
+            motivo_b = str(meta.get("failure_reason") or "")[:200]
+            if _rearrancar(base, user, password, f"_plugins/_transform/{tid}"):
+                marcar("busqueda", True, f"se rearrancó: había fallado ({motivo_b})")
+            else:
+                marcar("busqueda", False, f"el Transform falló: {motivo_b}")
+        else:
+            marcar("busqueda", True, f"índice {busqueda.indice(slug)}, Transform {str(meta.get('status') or 'creado').lower()}")
     if entry.get("dashboard_id"):
         cuerpo, motivo = _leer(base, user, password, f".kibana/_doc/dashboard:{entry['dashboard_id']}")
         encontrado = cuerpo is not None and (cuerpo or {}).get("found", True)
@@ -8941,6 +9225,11 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         indice = entry.get("index") or f"{slug}-%{{+YYYY.MM}}"
         _provisionar_el_paso_del_tiempo(_base_analistas, user, password, slug, index_pattern_from_name(indice),
                                         entry, request.force, terraform_dir, run)
+    try:
+        _provisionar_la_busqueda(cluster, user, password, request.https_enabled, terraform_dir,
+                                 slugs, pipe_reg, request.force, run)
+    except Exception as exc:  # noqa: BLE001 — la búsqueda no frena el resto
+        runs.step(run, "Búsqueda híbrida", False, repr(exc)[:300])
     try:
         _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
                                     list(slugs), terraform_dir, run)

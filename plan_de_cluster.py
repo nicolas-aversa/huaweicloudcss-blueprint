@@ -60,7 +60,7 @@ def campo_de_mapa(fields: list[dict]) -> "tuple[str, str] | None":
 # Los que se pueden apagar en el paso 2 (el provisioning los saltea, ver
 # `main._excluidos`). El resto es la base: el asistente y lo del cluster.
 OPCIONALES = ("forecasting", "anomalias", "alertas", "perfil", "analista", "security_analytics",
-              "ciclo_de_vida", "rollup")
+              "ciclo_de_vida", "rollup", "busqueda")
 
 
 def _item(plugin: str, titulo: str, aplica: bool, motivo: str, config: Any = None) -> dict:
@@ -146,6 +146,13 @@ def plan(slug: str, fields: list[dict], label: str = "",
     items.append(_item("explicar", "Explicar un cambio", bool(fecha),
                        ("compara la distribución de los campos" + (f" y los patrones de {_nombre_de(patrones, fields)}" if patrones else ""))
                        if fecha else sin_fecha, {"pattern_field": patrones}))
+
+    import busqueda
+    texto = busqueda.campo_de_texto_libre(fields)
+    items.append(_item("busqueda", "Búsqueda híbrida (por palabras y por significado)", bool(texto),
+                       f"sobre {_nombre_de(texto, fields)}: encuentra también lo que está dicho con otras palabras"
+                       if texto else "no hay un campo de texto libre (un mensaje, una descripción, un motivo)",
+                       {"campo": texto, "tipo": busqueda.tipo_del_campo(fields, texto)} if texto else None))
 
     reglas = (seguridad or {}).get("reglas") or []
     items.append(_item(

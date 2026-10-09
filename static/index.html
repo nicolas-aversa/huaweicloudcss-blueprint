@@ -2367,6 +2367,20 @@
     .mtx__llevar a:hover { text-decoration: underline; }
     .mtx__llevar .icon { width: 12px; height: 12px; }
     .mtx__vacio { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+    /* Probar la búsqueda: por palabras y la híbrida, lado a lado. */
+    .busq { display: flex; flex-direction: column; gap: var(--sp-2); }
+    .busq__fila { display: flex; gap: var(--sp-2); }
+    .busq__q { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); }
+    .busq__res { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--sp-2); }
+    .busq__res:empty { display: none; }
+    .busq__col { min-width: 0; font-size: var(--fs-sm); }
+    .busq__col > strong { display: block; margin-bottom: 4px; font-size: var(--fs-xs); text-transform: uppercase;
+                          letter-spacing: .04em; color: var(--text-muted); }
+    .busq__col ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+    .busq__col li { overflow-wrap: anywhere; }
+    .busq__col li small { margin-left: 6px; color: var(--text-muted); }
+    .busq__nota { grid-column: 1 / -1; margin: 0; font-size: var(--fs-xs); color: var(--text-secondary); }
+    .busq__vacio { color: var(--text-muted); font-size: var(--fs-sm); }
     /* El "?" de cada plugin: qué hace y para qué le sirve al negocio. */
     .ayuda { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none;
              width: 15px; height: 15px; margin-left: 5px; border-radius: 50%; border: 1px solid var(--border-default);
@@ -5608,6 +5622,7 @@
           item('chat', 'Asistente en lenguaje natural', '', 'pregunta en castellano, responde con PPL'),
           item('trending', 'Forecasting', '', 'con backtest contra lo que pasó'),
           item('activity', 'Anomalías y alertas', '', 'análisis histórico y aviso por canal'),
+          item('search', 'Búsqueda híbrida', 'en los casos con texto libre', 'por palabras y por significado, con un modelo que se carga desde tu bucket'),
         ] : []),
         ...(conSeguridad.length ? [item('shield', 'Security Analytics',
           escapeHtml(conSeguridad.map(c => c.label || c.id).join(' y '))
@@ -6752,7 +6767,7 @@
     const _COLUMNAS_PLUGIN = [
       ['dashboard', 'Dashboard'], ['forecasting', 'Pronóstico'], ['anomalias', 'Anomalías'], ['alertas', 'Alertas'],
       ['security_analytics', 'Seguridad'], ['perfil', 'Perfil'], ['analista', 'Analista'],
-      ['ciclo_de_vida', 'Ciclo de vida'], ['rollup', 'Rollup'],
+      ['ciclo_de_vida', 'Ciclo de vida'], ['rollup', 'Rollup'], ['busqueda', 'Búsqueda'],
     ];
     const _ICONO_ESTADO = { ok: 'check', parcial: 'alert-triangle', falla: 'x', en_curso: 'clock', sin_probar: 'info' };
     // Para qué sirve cada plugin: qué hace y qué le resuelve al negocio. Va en
@@ -6780,8 +6795,10 @@
         'Cualquiera consulta los datos sin saber el lenguaje de consultas, y cada respuesta se puede auditar.'],
       text2viz: ['Arma el gráfico de cada respuesta del asistente; en Dashboards, crea una visualización a partir de una frase.',
         'Del pedido al gráfico en segundos, sin saber armar visualizaciones.'],
-      embeddings: ['Busca por significado y no por palabras exactas: "cobro rechazado" encuentra "pago denegado".',
-        'Buscadores de tickets, documentos o productos que entienden lo que el usuario quiso decir.'],
+      busqueda: ['Busca en el texto libre del caso por palabras y por significado a la vez: lo exacto sale arriba y "cobro rechazado" encuentra también "pago denegado".',
+        'Buscadores de tickets, motivos, productos o diagnósticos que entienden lo que el usuario quiso decir, sin perder las coincidencias exactas (un código, una IP).'],
+      embeddings: ['El modelo multilingüe que entiende el significado de los textos, para la búsqueda híbrida. El CSS no sale a internet: se carga desde el bucket de demos.',
+        'Búsqueda por significado en castellano e inglés sin mandar los datos a un servicio externo.'],
       query_insights: ['Muestra las consultas más pesadas del cluster, con su latencia, CPU y memoria.',
         'Encontrar qué consulta o tablero frena al cluster antes de pagar por agrandarlo.'],
       canal: ['El destino de los avisos (Slack, Teams, webhook), probado al configurarlo.',
@@ -6940,6 +6957,12 @@
         if (n.docs === null || n.docs === undefined) return '<span>El rollup todavía no escribió: corre cada hora.</span>';
         return `<span><strong>${_fmtN(n.docs)}</strong> fila${n.docs === 1 ? '' : 's'} en el resumen</span>`;
       }
+      if (clave === 'busqueda') {
+        if (n.textos === null || n.textos === undefined) return '<span>El Transform todavía no escribió los textos.</span>';
+        const faltan = (n.textos || 0) - (n.con_vector || 0);
+        return `<span><strong>${_fmtN(n.textos)}</strong> texto${n.textos === 1 ? '' : 's'} distinto${n.textos === 1 ? '' : 's'}`
+          + (faltan > 0 ? ` · ${_fmtN(faltan)} vectorizándose` : ' · todos con su vector') + '</span>';
+      }
       if (clave === 'insights') {
         if (n.latencia_ms === null || n.latencia_ms === undefined) return `<span>${n.error ? 'No se pudo leer: ' + escapeHtml(n.error) : 'Sin consultas en las últimas 24 h.'}</span>`;
         return `<span>La consulta más lenta de las últimas 24 h: <strong>${_fmtN(n.latencia_ms)} ms</strong></span>`;
@@ -6969,7 +6992,7 @@
       const tarjeta = btn.closest('.plug');
       btn.disabled = true;
       const original = btn.innerHTML;
-      btn.innerHTML = `${icon('clock')} Probando… (unos minutos)`;
+      btn.innerHTML = `${icon('clock')} Preparándolo… (la primera vez sube el modelo a tu bucket: unos minutos)`;
       try {
         const res = await fetch('/api/v1/plugins/probar-embeddings', { method: 'POST' });
         const d = await res.json();
@@ -6977,7 +7000,7 @@
         toast(d.reason, d.ok ? 'success' : 'info');
         await hydrateActiveEnv();   // la tarjeta, con el resultado
       } catch (err) {
-        if (tarjeta) toast(`No se pudo probar: ${err.message}`, 'error');
+        if (tarjeta) toast(`No se pudo preparar el modelo: ${err.message}`, 'error');
         btn.disabled = false;
         btn.innerHTML = original;
       }
@@ -7097,6 +7120,51 @@
         } catch (_err) { /* queda lo que había: igual sirve */ }
       }
     }
+    // Probar la búsqueda híbrida de un caso: lo que encuentra por palabras y lo
+    // que encuentra sumando el significado, lado a lado. Es la demo: la misma
+    // frase, y a la derecha aparece lo que está dicho con otras palabras.
+    function probarBusqueda(btn) {
+      const tarjeta = btn.closest('.plug');
+      const slug = btn.closest('.mtx__det')?.dataset.det;
+      if (!tarjeta || !slug) return;
+      let caja = tarjeta.querySelector('.busq');
+      if (caja) { caja.querySelector('input')?.focus(); return; }
+      caja = document.createElement('form');
+      caja.className = 'busq';
+      caja.innerHTML = `<div class="busq__fila"><input class="form-input busq__q" name="q" maxlength="200" required
+          placeholder="Escribí lo que buscás, con tus palabras" aria-label="Búsqueda">
+          <button class="btn btn-primary btn-sm" type="submit">${icon('search')} Buscar</button></div>
+        <div class="busq__res" aria-live="polite"></div>`;
+      btn.closest('.plug__links')?.insertAdjacentElement('afterend', caja);
+      caja.querySelector('input').focus();
+      caja.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const q = caja.querySelector('input').value.trim();
+        const res = caja.querySelector('.busq__res');
+        if (!q) return;
+        res.innerHTML = '<span class="busq__vacio">Buscando…</span>';
+        try {
+          const r = await fetch('/api/v1/plugins/buscar?slug=' + encodeURIComponent(slug) + '&q=' + encodeURIComponent(q));
+          const d = await r.json();
+          if (!r.ok) throw detailError(d);
+          res.innerHTML = busquedaHTML(d);
+        } catch (err) {
+          res.innerHTML = `<span class="busq__vacio">No se pudo buscar: ${escapeHtml(err.message)}</span>`;
+        }
+      });
+    }
+    function busquedaHTML(d) {
+      const lista = (xs) => (xs || []).length
+        ? `<ol>${xs.map(x => `<li><span>${escapeHtml(x.texto)}</span>${x.cuenta ? `<small>${_fmtN(x.cuenta)}</small>` : ''}</li>`).join('')}</ol>`
+        : '<span class="busq__vacio">Nada.</span>';
+      const lexicos = new Set((d.lexica || []).map(x => x.texto));
+      const nuevos = (d.hibrida || []).filter(x => !lexicos.has(x.texto)).length;
+      return `<div class="busq__col"><strong>Por palabras</strong>${lista(d.lexica)}</div>`
+        + `<div class="busq__col"><strong>Híbrida (palabras + significado)</strong>${lista(d.hibrida)}</div>`
+        + (nuevos ? `<p class="busq__nota">${nuevos} resultado${nuevos === 1 ? '' : 's'} que la búsqueda por palabras no encuentra.</p>` : '')
+        + (d.error ? `<p class="busq__nota">${escapeHtml(d.error)}</p>` : '');
+    }
+
     // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
     function explicarAnomalia(b) {
       const { slug, inicio, fin, grado, valores } = b.dataset;
@@ -8687,6 +8755,8 @@
         if (explicar) return explicarAnomalia(explicar);
         const accion = e.target.closest('.plug__accion[data-accion="probar_embeddings"]');
         if (accion) return probarEmbeddings(accion);
+        const probar = e.target.closest('.plug__accion[data-accion="probar_busqueda"]');
+        if (probar) return probarBusqueda(probar);
       });
 
       // Acciones: reusan las funciones del flujo.
@@ -8859,7 +8929,7 @@
           if (!slug) return json({ insights: { latencia_ms: 1840, n: 10, error: '' } });
           const fuera = { anomalias: { total: 37, estado: 'FINISHED', error: '', top: { inicio: '2025-03-14 02:10:00', fin: '2025-03-14 02:20:00',
                           grado: 0.93, valores: [{ nombre: 'eventos', valor: 1840 }] } }, perfil: { entidades: 412 },
-                          ciclo_de_vida: { indices: 12 }, rollup: { docs: 8760 } };
+                          ciclo_de_vida: { indices: 12 }, rollup: { docs: 8760 }, busqueda: { textos: 412, con_vector: 412 } };
           ((estado.plugins || {})[slug] || []).forEach(t => (t.filas || []).forEach((f, i) => {
             if (f.numero.startsWith('forecast:')) fuera[f.numero] = i === 0 ? { error_pct: null, error: 'backtest parcial: 360 de 600 pasos' } : { error_pct: [0, 6.4, 27.9][i] || 12, error: '' };
             if (f.numero.startsWith('seguridad:')) fuera[f.numero] = { eventos: 1842 - i * 400 };
@@ -8868,6 +8938,14 @@
           fuera.verificado = Object.fromEntries(((estado.plugins || {})[slug] || []).map(t => [t.plugin,
             t.plugin === 'alertas' ? { ok: false, detalle: 'el monitor está apagado' } : { ok: true, detalle: 'existe y anda' }]));
           return json(fuera);
+        }
+        // La búsqueda híbrida: lo que agrega el significado a la búsqueda por palabras.
+        if (u.includes('/api/v1/plugins/buscar')) {
+          await espera(600);
+          return json({ campo: 'rule.name', error: '',
+            lexica: [{ texto: 'SSH brute force attempt', cuenta: 214 }],
+            hibrida: [{ texto: 'SSH brute force attempt', cuenta: 214 }, { texto: 'Multiple failed logins from the same IP', cuenta: 96 },
+                      { texto: 'Password spraying detected', cuenta: 41 }, { texto: 'Account locked after repeated failures', cuenta: 18 }] });
         }
         // Una sesión de ejemplo, para ver la cuenta arriba como en el hosteado.
         if (u.includes('/auth/me')) return json({ auth: true, logged_in: true, email: 'demo@vista-previa.com', is_admin: false });

@@ -153,6 +153,18 @@ class OBSClient:
                 f"OBS rechazó el upload de `{key}` con status {status_code}: {err_msg}"
             )
 
+    def signed_url(self, key: str, expires_s: int = 7200) -> str:
+        """Un link de lectura temporal (GET firmado) a un objeto del bucket:
+        así el cluster baja un archivo sin credenciales ni bucket público."""
+        try:
+            resp = self._client.createSignedUrl("GET", self._bucket, key, expires=expires_s)
+        except Exception as exc:
+            raise OBSUploadError(f"No se pudo firmar el link de `{key}`: {exc}") from exc
+        url = getattr(resp, "signedUrl", "") or (resp.get("signedUrl", "") if isinstance(resp, dict) else "")
+        if not url:
+            raise OBSUploadError(f"OBS no devolvió el link firmado de `{key}`.")
+        return url
+
     def object_exists(self, key: str) -> bool:
         """True si el objeto existe en el bucket (metadata HEAD, sin descargar)."""
         try:

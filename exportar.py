@@ -155,6 +155,29 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
                  accesos.usuario_analista(slug, "<CONTRASEÑA_DEL_ANALISTA>")),
         ]
 
+    if aplica.get("busqueda"):
+        import busqueda
+        seccion("Búsqueda híbrida (por palabras y por significado)", plan["busqueda"]["motivo"])
+        cfg = plan["busqueda"]["config"]
+        tid, idx = busqueda.nombre_del_transform(slug), busqueda.indice(slug)
+        bloques += [
+            _comentario("El modelo de embeddings: el cluster no lo baja de internet. Subí a un bucket de OBS\n"
+                        + busqueda.MODELO["origen"] + busqueda.MODELO["archivo"]
+                        + "\ny registralo desde un link firmado de ese objeto."),
+            _req("PUT", "_cluster/settings", busqueda.ajustes_del_cluster()),
+            _req("POST", "_plugins/_ml/models/_register", busqueda.registro_del_modelo("<LINK_FIRMADO_DE_OBS>")),
+            _comentario("Con el model_id de la tarea (GET _plugins/_ml/tasks/<TASK_ID>):\n"
+                        "POST _plugins/_ml/models/<MODEL_ID>/_deploy"),
+            _req("PUT", f"_ingest/pipeline/{busqueda.PIPELINE_DE_INGESTA}", busqueda.pipeline_de_ingesta("<MODEL_ID>")),
+            _req("PUT", f"_search/pipeline/{busqueda.PIPELINE_DE_BUSQUEDA}", busqueda.pipeline_de_busqueda()),
+            _req("PUT", idx, busqueda.mapping_del_indice()),
+            _req("PUT", f"_plugins/_transform/{tid}", busqueda.transform(slug, ip, cfg["campo"], cfg["tipo"])),
+            _req("POST", f"_plugins/_transform/{tid}/_start"),
+            _comentario("Probala:"),
+            _req("POST", f"{idx}/_search?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}",
+                 busqueda.consulta_hibrida("<LO QUE BUSCÁS>", "<MODEL_ID>")),
+        ]
+
     if con_sa:
         seccion("Security Analytics", plan["security_analytics"]["motivo"])
         lt = seguridad_derivada_spec(slug, seguridad_propuesta)

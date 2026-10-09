@@ -281,6 +281,19 @@ def _dashboard(entry: dict, base: str, reporte: "dict | None" = None) -> dict:
                             "url": link(base, APP_DASHBOARDS, f"/view/{did}" if did else "/list")}] if importado else [])
 
 
+def _busqueda(estado: dict) -> dict:
+    """La búsqueda híbrida del caso: sobre qué campo, y el botón para probarla."""
+    campo = estado.get("campo") or ""
+    if estado.get("no_aplica"):
+        return _tarjeta("busqueda", "Búsqueda híbrida", "", EXCLUIDO, estado.get("motivo") or "no aplica")
+    ok = bool(estado.get("ok"))
+    return _tarjeta("busqueda", "Búsqueda híbrida",
+                    f"Busca en «{campo}» por palabras y por significado a la vez: lo exacto sale arriba y "
+                    "encuentra también lo que está dicho con otras palabras.",
+                    OK if ok else FALLA, "" if ok else estado.get("motivo", ""), numero="busqueda" if ok else "",
+                    accion={"id": "probar_busqueda", "texto": "Probar una búsqueda"} if ok else None)
+
+
 def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: "dict | None",
                       enmascarados: list[str], seguridad_reg: dict, seguridad_spec: dict,
                       estados: dict, analista_creado: bool, base: str,
@@ -326,6 +339,10 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
             fuera.append(_tarjeta(plugin, titulo, "", EXCLUIDO, "excluido en el paso 2"))
         elif plugin in estados:
             fuera.append(armar())
+    if "busqueda" in excluidos:
+        fuera.append(_tarjeta("busqueda", "Búsqueda híbrida", "", EXCLUIDO, "excluido en el paso 2"))
+    elif estados.get("busqueda"):
+        fuera.append(_busqueda(estados["busqueda"]))
     return fuera
 
 
@@ -354,19 +371,20 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
         fuera.append(_tarjeta("text2viz", "Text to visualization",
                               "Arma el gráfico de cada respuesta del asistente a partir de su consulta.",
                               OK if ok else FALLA, "" if ok else text2viz.get("motivo", "")))
-    probar = {"id": "probar_embeddings", "texto": "Probar de nuevo" if embeddings else "Probarlo ahora"}
+    # El modelo de la búsqueda híbrida. El CSS no sale a internet: lo sube la
+    # plataforma al bucket de demos y el cluster lo carga desde ahí.
+    preparar = {"id": "probar_embeddings", "texto": "Volver a prepararlo" if embeddings else "Prepararlo ahora"}
+    que = ("El modelo multilingüe que entiende el significado de los textos, para la búsqueda híbrida. "
+           "El CSS no sale a internet: se carga desde el bucket de demos.")
     if embeddings is None:
-        fuera.append(_tarjeta("embeddings", "Búsqueda semántica (embeddings en el cluster)",
-                              "MaaS no tiene un modelo de embeddings: la búsqueda semántica depende de que el CSS "
-                              "deje correr uno adentro. La prueba baja un modelo multilingüe, lo usa y lo borra "
-                              "(tarda unos minutos).", SIN_PROBAR, accion=probar))
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " Se prepara al provisionar los plugins "
+                              "si algún caso tiene texto libre (la primera vez sube ~490 MB al bucket).",
+                              SIN_PROBAR, accion=preparar))
     else:
         ok = bool(embeddings.get("ok"))
-        fuera.append(_tarjeta("embeddings", "Búsqueda semántica (embeddings en el cluster)",
-                              (f"El cluster corre un modelo de embeddings ({embeddings.get('dimensiones')} dimensiones): "
-                               "se puede sumar búsqueda semántica.") if ok else
-                              "Este CSS no deja correr un modelo de embeddings adentro: la búsqueda queda por palabras.",
-                              OK if ok else FALLA, "" if ok else embeddings.get("motivo", ""), accion=probar))
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings",
+                              que + (f" Desplegado ({embeddings.get('dimensiones')} dimensiones)." if ok else ""),
+                              OK if ok else FALLA, "" if ok else embeddings.get("motivo", ""), accion=preparar))
     fuera.append(_tarjeta("query_insights", "Query Insights",
                           "Las consultas más pesadas del cluster (latencia, CPU, memoria), sin configurar nada.", OK,
                           links=[{"texto": "Ver las consultas", "url": link(base, APP_INSIGHTS, "/queryInsights")}],

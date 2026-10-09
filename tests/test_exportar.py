@@ -66,8 +66,8 @@ def test_las_reglas_van_como_curl_con_su_yaml():
 def test_lo_que_no_aplica_o_se_apago_no_se_exporta():
     rutas = [r for _, r, _ in _requests(_texto(excluir=["perfil", "anomalias", "security_analytics"],
                                                seguridad_propuesta=None))]
-    assert not any("_transform" in r or "anomaly_detection" in r or "_alerting" in r or "security_analytics" in r
-                   for r in rutas)
+    assert not any("_transform/hotel-perfil" in r or "anomaly_detection" in r or "_alerting" in r
+                   or "security_analytics" in r for r in rutas)
     assert "_plugins/_forecast/forecasters" in rutas
 
 
@@ -91,7 +91,7 @@ def test_los_endpoints(monkeypatch, tmp_path):
     c = TestClient(main.app)
     r = c.get("/api/v1/cases/hotel/export")
     assert r.status_code == 200 and "hotel-devtools.txt" in r.headers["content-disposition"]
-    assert "_plugins/_security_analytics/detectors" in r.text and "_transform" not in r.text, "lo apagado no va"
+    assert "_plugins/_security_analytics/detectors" in r.text and "_transform/hotel-perfil" not in r.text, "lo apagado no va"
     d = c.get("/api/v1/cases/hotel/export/dashboards")
     assert d.status_code == 200 and d.headers["content-type"].startswith("application/x-ndjson")
     assert all(json.loads(l) for l in d.text.splitlines() if l.strip())
