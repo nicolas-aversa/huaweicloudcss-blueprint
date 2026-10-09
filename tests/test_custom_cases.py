@@ -329,6 +329,33 @@ def test_un_dataset_custom_se_resube_aunque_ya_este_en_el_bucket(client, store, 
     assert all(e["slug"] != "firewall-de-acme" for e in saltados)
 
 
+def test_preparar_bucket_sube_el_modelo_de_la_busqueda(client, store, monkeypatch):
+    """El modelo de embeddings va con los datasets: bajarlo y subirlo es lo
+    lento (~490 MB) y se hace una vez. Al aplicar la búsqueda solo se carga en
+    el cluster. La segunda vez ya está."""
+    import busqueda
+    import main
+    calls, subidos = {}, []
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+    monkeypatch.setattr(main, "_subir_el_modelo", lambda c: subidos.append(c) or "")
+    res = client.post("/api/v1/datasets/preload", json={"access_key": "AK", "secret_key": "SK", "bucket": "b"})
+    del_modelo = [e for e in _eventos(res) if e.get("slug") == "_modelo"]
+    assert [e["state"] for e in del_modelo] == ["uploading", "done"] and len(subidos) == 1
+    assert busqueda.clave_en_obs() in del_modelo[0]["key"] and del_modelo[0]["size_mb"] > 400
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls, ya_estan={busqueda.clave_en_obs()}))
+    res = client.post("/api/v1/datasets/preload", json={"access_key": "AK", "secret_key": "SK", "bucket": "b"})
+    assert [e["state"] for e in _eventos(res) if e.get("slug") == "_modelo"] == ["skipped"] and len(subidos) == 1
+    # Si lo está subiendo otro pedido (la provisión), no se baja dos veces.
+    assert main._preparando_el_modelo.acquire(blocking=False)
+    try:
+        monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls))
+        res = client.post("/api/v1/datasets/preload", json={"access_key": "AK", "secret_key": "SK", "bucket": "b"})
+        otro = [e for e in _eventos(res) if e.get("slug") == "_modelo"]
+        assert [e["state"] for e in otro] == ["skipped"] and "otro pedido" in otro[0]["detail"] and len(subidos) == 1
+    finally:
+        main._preparando_el_modelo.release()
+
+
 # ── El chatbot de un caso creado desde el Builder ───────────────────────────
 # El síntoma reportado fue "no se generó el chatbot". El agente SÍ se creaba; lo
 # que faltaba era (a) que el front renderizara el chat —cubierto en

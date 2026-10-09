@@ -3076,7 +3076,7 @@
               </div>
               <ol class="guide-list">
                 <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS, MaaS API key, bucket) e <strong>Infraestructura general</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
-                <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros. Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
+                <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros, y el modelo de la búsqueda híbrida (~490 MB, solo la primera vez). Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
               </ol>
             </section>
 

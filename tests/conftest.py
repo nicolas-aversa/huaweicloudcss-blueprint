@@ -52,6 +52,10 @@ def _settings_aislados(tmp_path, monkeypatch):
     # el original (`_busqueda_original`).
     monkeypatch.setattr(_main, "_busqueda_original", _main._provisionar_la_busqueda, raising=False)
     monkeypatch.setattr(_main, "_provisionar_la_busqueda", lambda *a, **k: None)
+    # "Preparar bucket" sube el modelo (lo baja de internet, ~490 MB): los
+    # tests que lo prueban usan el original (`_subir_el_modelo_original`).
+    monkeypatch.setattr(_main, "_subir_el_modelo_original", _main._subir_el_modelo, raising=False)
+    monkeypatch.setattr(_main, "_subir_el_modelo", lambda client: "")
     # El estado de cada plugin (vista Plugins): un test del endpoint de
     # provisión lo escribía en `terraform/` del repo, la carpeta que lee la app
     # local. Ahí va a la carpeta del test; en cualquier otra, donde dijo.

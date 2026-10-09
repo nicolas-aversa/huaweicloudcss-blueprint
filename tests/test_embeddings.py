@@ -143,6 +143,7 @@ def _obs(monkeypatch, existe, contenido=b"modelo"):
     monkeypatch.setattr(maas_integrator, "get_obs_creds", lambda: {"ak": "AK", "sk": "SK"})
     monkeypatch.setattr(main, "get_huawei_settings", lambda: {"demo_bucket": "demos"})
     monkeypatch.setattr(requests, "get", lambda url, **k: bajadas.append(url) or _Descarga(contenido))
+    monkeypatch.setattr(main, "_subir_el_modelo", main._subir_el_modelo_original)
     return obs, bajadas
 
 

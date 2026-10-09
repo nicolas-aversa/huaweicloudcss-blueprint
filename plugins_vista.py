@@ -389,8 +389,8 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
         fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que, FALLA,
                               "la preparación se interrumpió (¿se reinició la plataforma?)", accion=preparar))
     elif embeddings is None:
-        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " Se prepara al provisionar los plugins "
-                              "si algún caso tiene texto libre (la primera vez sube ~490 MB al bucket).",
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " Lo sube al bucket «Preparar bucket» "
+                              "(⚙ Configuración) y el cluster lo carga al aplicar la búsqueda híbrida.",
                               SIN_PROBAR, accion=preparar))
     else:
         ok = bool(embeddings.get("ok"))

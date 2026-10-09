@@ -2231,6 +2231,35 @@ def preload_datasets(request: dict):
                             "state": "live",
                             "detail": "lee de " + custom_cases.source_label(case["slug"])
                                       + " en cada deploy: no hay dataset que subir"})
+            # El modelo de la búsqueda híbrida: el CSS no sale a internet, lo
+            # carga desde acá. La primera vez son ~490 MB (bajarlos y subirlos);
+            # después, al aplicar la búsqueda, solo se carga en el cluster.
+            clave = busqueda.clave_en_obs()
+            nombre = f"{clave} (modelo de la búsqueda híbrida)"
+            if not _preparando_el_modelo.acquire(blocking=False):
+                yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "skipped",
+                            "detail": "lo está subiendo otro pedido"})
+            else:
+                try:
+                    if client.object_exists(clave):
+                        skipped += 1
+                        yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "skipped"})
+                    else:
+                        yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "uploading",
+                                    "size_mb": round(busqueda.MODELO["bytes"] / 1e6, 1)})
+                        motivo = _subir_el_modelo(client)
+                        if motivo:
+                            errors += 1
+                            yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "error", "detail": motivo})
+                        else:
+                            uploaded += 1
+                            yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "done"})
+                except Exception as exc:  # noqa: BLE001 — los datasets ya quedaron
+                    errors += 1
+                    yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "error",
+                                "detail": f"no se pudo subir: {exc!r}"[:300]})
+                finally:
+                    _preparando_el_modelo.release()
             yield _sse({"type": "complete",
                         "uploaded": uploaded, "skipped": skipped, "errors": errors})
         finally:
@@ -7951,12 +7980,9 @@ def _esperar_tarea(base: str, user: str, password: str, task_id: str) -> "tuple[
 
 
 def _modelo_en_obs() -> "tuple[str, str]":
-    """(link firmado, "") del modelo en el bucket de demos; la primera vez lo
-    baja de artifacts.opensearch.org (la plataforma sí tiene internet), le
-    verifica el hash y lo sube. ("", motivo) si no se puede."""
-    import hashlib
-    import tempfile
-    import requests
+    """(link firmado, "") del modelo en el bucket de demos; si no está (no se
+    corrió "Preparar bucket"), lo sube (`_subir_el_modelo`). ("", motivo) si
+    no se puede."""
     from obs_client import OBSClient, OBSConfigError, OBSUploadError
     import maas_integrator as _mi
 
@@ -7968,21 +7994,8 @@ def _modelo_en_obs() -> "tuple[str, str]":
     client = None
     try:
         client = OBSClient(access_key_id=ak, secret_access_key=sk, endpoint=_default_obs_endpoint(), bucket=bucket)
-        clave = busqueda.clave_en_obs()
-        if not client.object_exists(clave):
-            with tempfile.TemporaryDirectory() as tmp:
-                destino = Path(tmp) / busqueda.MODELO["archivo"]
-                suma = hashlib.sha256()
-                with requests.get(busqueda.MODELO["origen"] + busqueda.MODELO["archivo"], stream=True, timeout=60) as r:
-                    r.raise_for_status()
-                    with open(destino, "wb") as f:
-                        for trozo in r.iter_content(1 << 20):
-                            f.write(trozo)
-                            suma.update(trozo)
-                if suma.hexdigest() != busqueda.MODELO["hash"]:
-                    return "", "el modelo bajó con otro hash (incompleto o cambiado): no se sube"
-                client.put_file(clave, str(destino))
-        return client.signed_url(clave, _LINK_DEL_MODELO_S), ""
+        motivo = _subir_el_modelo(client)
+        return ("", motivo) if motivo else (client.signed_url(busqueda.clave_en_obs(), _LINK_DEL_MODELO_S), "")
     except (OBSConfigError, OBSUploadError) as exc:
         return "", str(exc)[:300]
     except Exception as exc:  # noqa: BLE001 — sin el modelo, la búsqueda queda por palabras
@@ -7990,6 +8003,33 @@ def _modelo_en_obs() -> "tuple[str, str]":
     finally:
         if client is not None:
             client.close()
+
+
+def _subir_el_modelo(client) -> str:
+    """Sube el modelo al bucket si no está: lo baja de artifacts.opensearch.org
+    y le verifica el hash. "" si quedó (o ya estaba); si no, el motivo. Lo
+    hace "Preparar bucket" (una vez, con los datasets); la provisión, solo si
+    falta."""
+    import hashlib
+    import tempfile
+    import requests
+
+    clave = busqueda.clave_en_obs()
+    if client.object_exists(clave):
+        return ""
+    with tempfile.TemporaryDirectory() as tmp:
+        destino = Path(tmp) / busqueda.MODELO["archivo"]
+        suma = hashlib.sha256()
+        with requests.get(busqueda.MODELO["origen"] + busqueda.MODELO["archivo"], stream=True, timeout=60) as r:
+            r.raise_for_status()
+            with open(destino, "wb") as f:
+                for trozo in r.iter_content(1 << 20):
+                    f.write(trozo)
+                    suma.update(trozo)
+        if suma.hexdigest() != busqueda.MODELO["hash"]:
+            return "el modelo bajó con otro hash (incompleto o cambiado): no se sube"
+        client.put_file(clave, str(destino))
+    return ""
 
 
 def _estado_del_modelo(base: str, user: str, password: str, model_id: str) -> "str | None":
