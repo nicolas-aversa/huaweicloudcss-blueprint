@@ -102,7 +102,8 @@ def test_los_endpoints(monkeypatch, tmp_path):
     assert c.get("/api/v1/cases/no-existe/export").status_code == 404
     # Desplegado: el índice y lo apagado salen del registro (el .conf no: lleva credenciales).
     (tmp_path / main._PIPELINES_REGISTRY_NAME).write_text(json.dumps({"hotel": {
-        "index": "hotel-%{+YYYY_MM}", "excluir": [], "pipeline_conf": "password => 'secreta'"}}), encoding="utf-8")
+        "index": "hotel-%{+YYYY_MM}", "excluir": [], "fields": HOTEL, "pipeline_conf": "password => 'secreta'"}}),
+        encoding="utf-8")
     r = c.get("/api/v1/cases/hotel/export")
     assert "_plugins/_transform/hotel-perfil" in r.text and "secreta" not in r.text
 

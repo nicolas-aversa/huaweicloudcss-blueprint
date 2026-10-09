@@ -71,7 +71,7 @@ def test_volver_a_provisionar_no_rehace_todo():
     """Con los plugins ya provisionados el botón mandaba `force` y rehacía todo
     (agente, pronósticos, anomalías y alertas de los 9 casos): ~7 minutos."""
     html = _html()
-    assert "provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false));" in html
+    assert "provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false, { recomendados: true }));" in html
     assert "provisionCapabilitiesFromInfra(e.currentTarget, pipelines, capsDone)" not in html
 
 

@@ -1416,6 +1416,10 @@ def export_case(slug: str) -> Response:
     import exportar
 
     datos = _datos_para_exportar(slug)
+    terraform_dir = _active_terraform_dir()
+    desplegado = _read_pipelines_registry(terraform_dir).get(slug)
+    if desplegado is not None:
+        datos["decidido"] = _lo_que_aplica(slug, desplegado or {}, terraform_dir)
     texto = exportar.devtools(slug, **datos)
     return Response(content=texto, media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{slug}-devtools.txt"'})
@@ -2398,6 +2402,7 @@ class TerraformStatusResponse(BaseModel):
     # La vista Plugins: por caso (y `_cluster`), las tarjetas de lo que quedó en
     # el cluster con su link a Dashboards (ver plugins_vista.py).
     plugins: dict = Field(default_factory=dict)
+    catalogo: list = Field(default_factory=list)
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -7035,7 +7040,7 @@ def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_ena
 def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                             password: str, https_enabled: bool,
                             force: bool = False, registrar_agente: bool = True,
-                            solo_conversacional: bool = False) -> dict:
+                            solo_conversacional: bool = False, apagados: "set[str] | None" = None) -> dict:
     """Provisiona el bundle de capabilities del `slug` (si tiene spec) y persiste
     los IDs en `.capabilities.json`. Devuelve un dict de estado por capability.
 
@@ -7058,8 +7063,10 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     ids: dict = dict(registry.get(slug, {}))
     result: dict = {}
     ip = spec["index_pattern"]
-    # Lo que se apagó en el paso 2 ("Lo que va a tener tu cluster") no se crea.
-    excluidos = _excluidos(_read_pipelines_registry(terraform_dir).get(slug) or {})
+    # Lo que se apagó en el paso 2 ("Lo que va a tener tu cluster") no se crea;
+    # tampoco lo que este pedido no incluye (`apagados`: se aplica de a uno).
+    paso2 = _excluidos(_read_pipelines_registry(terraform_dir).get(slug) or {})
+    excluidos = paso2 | set(apagados or ())
 
     # ── Cluster Routes del CSS → salida a MaaS (prerequisito del agente) ──────
     # El agente/chatbot llama a MaaS por el connector; sin las Cluster Routes del
@@ -7093,7 +7100,9 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
     # del cliente, no los recursos del operador.
     from maas_integrator import get_maas_api_key
     api_key = get_maas_api_key()
-    if not api_key:
+    if "agente" in excluidos:
+        pass                                   # no se pidió el asistente
+    elif not api_key:
         result["conversational"] = {"ok": False, "reason": "API Key de MaaS no configurada (⚙ Configuración o MAAS_API_KEY)"}
     elif not _ml_commons_available(base, user, password):
         result["conversational"] = {"ok": False, "reason": "ml-commons no disponible en el cluster"}
@@ -7312,7 +7321,9 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
         result["anomalias"] = {"ok": True, "detector_id": ids["detector_id"], "reason": "ya provisionado"}
     else:
         result["anomalias"] = _provisionar_anomalias(base, user, password, slug, ip, spec, ids)
-    if excluidos & {"anomalias", "alertas"}:
+    # La alerta va sobre el detector: apagada si se apagó ella o, en el paso 2,
+    # las anomalías. Pedir solo la alerta la arma sobre el detector que ya está.
+    if "alertas" in excluidos or "anomalias" in paso2:
         pass
     elif not ids.get("detector_id"):
         result["alertas"] = {"ok": False, "reason": "sin detector de anomalías"}
@@ -8204,7 +8215,7 @@ def probar_embeddings() -> dict:
     conocido = ((_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
     model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir)
     res = {"ok": bool(model_id), "model_id": model_id, "dimensiones": busqueda.DIMENSION if model_id else 0,
-           "reason": "el modelo de embeddings quedó desplegado: corré «Provisionar plugins» para armar la búsqueda"
+           "reason": "el modelo de embeddings quedó desplegado: aplicá la búsqueda híbrida para armarla"
            if model_id else motivo}
     audit.record("preparar_embeddings", res["reason"][:200])
     _guardar_estados(terraform_dir, "_cluster", {"embeddings": {"ok": res["ok"], "motivo": motivo,
@@ -8222,7 +8233,7 @@ def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict
     caso = (estados.get(slug) or {}).get("busqueda") or {}
     if not (model_id and caso.get("ok")):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: corré «Provisionar plugins»."})
+            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: aplicala en Plugins para el cluster."})
     base, user, password = _cluster_del_entorno("busqueda")
     idx = busqueda.indice(slug)
     rl = _os_req("POST", f"{base}/{idx}/_search", user, password, json_body=busqueda.consulta_lexica(q), timeout=30)
@@ -9013,6 +9024,12 @@ class ProvisionCapabilitiesRequest(BaseModel):
     slugs: list[str] = Field(default_factory=list, description="Slugs a provisionar (vacío = todos los que tienen bundle).")
     project_name: str = Field(default="log-analytics")
     force: bool = Field(default=False, description="Si True, tear down de artifacts existentes y recrea (para re-provisionar con modelo nuevo).")
+    # Los plugins a aplicar, elegidos en la vista (de a uno). Vacío = todos
+    # los que aplican, como antes.
+    plugins: list[str] = Field(default_factory=list)
+    # "Aplicar los recomendados" (el paso 3): los de PLUGINS_RECOMENDADOS, sin
+    # prender lo que se apagó en el paso 2 (eso lo hace elegir uno a mano).
+    recomendados: bool = False
 
 
 class ProvisionCapabilitiesResponse(BaseModel):
@@ -9113,7 +9130,25 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     any_ok = False
     con_plugins = [s for s in slugs if _caps.get_capability_spec(s) is not None
                    or (pipe_reg.get(s, {}) or {}).get("fields")]
-    if request.force:
+    # Solo los plugins pedidos: el resto queda apagado para este pedido. Lo que
+    # se pide explícitamente deja de estar apagado (si se apagó en el paso 2).
+    solo = set(PLUGINS_RECOMENDADOS) if request.recomendados else set(request.plugins or [])
+    apagados = (PLUGINS_APLICABLES - solo) if solo else set()
+    if solo and not request.recomendados:
+        cambio = False
+        for s in slugs:
+            e = pipe_reg.get(s)
+            if e and set(e.get("excluir") or []) & solo:
+                e["excluir"] = [x for x in e["excluir"] if x not in solo]
+                cambio = True
+        if cambio:
+            _write_pipelines_registry(terraform_dir, pipe_reg)
+    pide = lambda p: p not in apagados  # noqa: E731
+    pipe_reg = {s: {**(e or {}), "excluir": sorted(set((e or {}).get("excluir") or []) | apagados)}
+                for s, e in pipe_reg.items()}
+    # Con una lista, `force` rehace solo lo pedido (cada plugin con el suyo):
+    # bajar el caso entero se llevaba también lo que no se pidió.
+    if request.force and not solo:
         _base = _os_base(cluster, request.https_enabled)
         if _base.rsplit("//", 1)[-1]:
             _teardown_orphans_by_name(_base, user, password)
@@ -9135,7 +9170,8 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
     try:
-        _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)
+        if pide("alertas"):
+            _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)
     except Exception as exc:  # noqa: BLE001 — sin canal, las alertas igual quedan en Alerting
         runs.step(run, "Canal de alertas", False, repr(exc)[:300])
     # El asistente, antes que los casos: los datos ya están ingestados, así que
@@ -9143,7 +9179,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     # al primer caso entero (cola libre, backtests, anomalías, Security
     # Analytics): con un SIEM primero, eran minutos sin chat.
     agente_del_run = ""
-    if con_plugins:
+    if con_plugins and pide("agente"):
         try:
             caps_result[con_plugins[0]] = _provision_capabilities(
                 cluster, con_plugins[0], user, password, request.https_enabled,
@@ -9153,8 +9189,9 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                                                        terraform_dir, caps_result, run, agente_del_run)
         except Exception as exc:  # noqa: BLE001 — el bucle lo vuelve a intentar
             print(f"[provision-capabilities] el asistente antes que los casos falló: {exc!r}")
+    por_caso = {"agente", "forecasting", "anomalias", "alertas"}
     for slug in slugs:
-        if slug not in con_plugins:
+        if slug not in con_plugins or por_caso <= apagados:
             continue
         # Con el cluster saturado (Security Analytics procesando la ingesta) lo
         # que se lanza ahora se rechaza: primero, que haya lugar.
@@ -9163,6 +9200,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
             caps_result[slug] = _provision_capabilities(
                 cluster, slug, user, password, request.https_enabled,
                 registrar_agente=False,   # el force ya bajó todo, arriba
+                apagados=apagados,
             )
             if caps_result[slug]:
                 any_ok = True
@@ -9173,15 +9211,17 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                               str(cap.get("reason", ""))[:300])
             # El asistente, apenas el primer caso deja los modelos (ver
             # `_registrar_agente_del_run`); a los siguientes, el mismo.
-            agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,
-                                                       terraform_dir, caps_result, run, agente_del_run)
+            if pide("agente"):
+                agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,
+                                                           terraform_dir, caps_result, run, agente_del_run)
         except Exception as exc:  # noqa: BLE001
             print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
             caps_result[slug] = {"error": repr(exc)}
             runs.step(run, slug, False, repr(exc)[:300])
     # Por si el primero no pudo (sin modelos todavía): un último intento.
-    _registrar_agente_del_run(cluster, user, password, request.https_enabled, terraform_dir,
-                              caps_result, run, agente_del_run)
+    if pide("agente"):
+        _registrar_agente_del_run(cluster, user, password, request.https_enabled, terraform_dir,
+                                  caps_result, run, agente_del_run)
     _base_analistas = _os_base(cluster, request.https_enabled)
     for slug in slugs:
         perfil = _perfil_de(slug, pipe_reg.get(slug) or {})
@@ -9211,7 +9251,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     origen = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, request.https_enabled))
     for slug in slugs:
         did = (pipe_reg.get(slug) or {}).get("dashboard_id")
-        if not did:
+        if not did or not pide("reporte"):
             continue
         try:
             res = _provisionar_reporte(_base_analistas, user, password, slug, did, origen, request.force)
@@ -9231,11 +9271,15 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     except Exception as exc:  # noqa: BLE001 — la búsqueda no frena el resto
         runs.step(run, "Búsqueda híbrida", False, repr(exc)[:300])
     try:
-        _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
-                                    list(slugs), terraform_dir, run)
+        if pide("security_analytics"):
+            _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
+                                        list(slugs), terraform_dir, run)
     except Exception as exc:  # noqa: BLE001 — es una revisión, no frena el paso
         print(f"[provision-capabilities] revisión de meses falló: {exc!r}")
 
+    # Aplicando de a uno puede no haber pasado por los casos (un perfil, un
+    # rollup): cuenta cualquier paso que salió bien.
+    any_ok = any_ok or any(ev.get("type") == "step" and ev.get("ok") for ev in (run or {}).get("events") or [])
     msg = "Plugins provisionados" if any_ok else "No se provisionó ningún plugin"
     runs.finish(run, "complete" if any_ok else "error", detail=msg)
     return ProvisionCapabilitiesResponse(
@@ -9735,7 +9779,7 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     if not ppl_model or not llm_model:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "ppl_chat",
-                                    "message": "El chatbot no está provisionado para este tipo. Corré 'Provisionar plugins'."})
+                                    "message": "El chatbot no está provisionado para este tipo: aplicá el asistente (paso 3 o Plugins para el cluster)."})
 
     # 1) NL → PPL. Pasamos el system_prompt del SLUG elegido (índice + campos + reglas)
     # para que el modelo apunte al vertical correcto. Sin esto, el _predict directo usa
@@ -10321,8 +10365,127 @@ def terraform_status() -> TerraformStatusResponse:
         cluster_features=_read_cluster_features(terraform_dir) or None,
         security_analytics=_resumen_de_seguridad(terraform_dir),
         plugins=_plugins_de_la_vista(terraform_dir, registry, dashboards_url),
+        catalogo=_catalogo_de_plugins(terraform_dir, registry),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
+
+
+# Lo que se puede aplicar desde la vista Plugins (el orden es el del catálogo).
+PLUGINS_APLICABLES = {"agente", "forecasting", "anomalias", "alertas", "perfil", "analista", "reporte",
+                      "busqueda", "ciclo_de_vida", "rollup", "security_analytics"}
+# Lo que luce en una demo. El ciclo de vida y el rollup se notan con meses de
+# datos: se arman solo si se eligen.
+PLUGINS_RECOMENDADOS = PLUGINS_APLICABLES - {"ciclo_de_vida", "rollup"}
+_ORDEN_DEL_CATALOGO = ("agente", "forecasting", "anomalias", "alertas", "security_analytics", "perfil",
+                       "analista", "busqueda", "reporte", "ciclo_de_vida", "rollup")
+
+
+def _lo_que_aplica(slug: str, entry: dict, terraform_dir: Path) -> dict:
+    """Qué plugins aplica la provisión a un caso, con lo mismo que usa ella (el
+    spec del caso, su perfil, sus campos sensibles, su texto libre), sin tocar
+    el cluster. El plan del paso 2 sale solo de los campos: en un caso curado
+    no sabe de sus pronósticos (visto: Ventas con 3, el plan decía que no)."""
+    import capabilities as _caps
+    import ciclo_de_vida as cdv
+    from index_template import index_pattern_from_name as _ip
+
+    libre = {**(entry or {}), "excluir": []}
+    fields = _campos_del_caso(slug, entry or {})
+    spec = _caps_spec_de(slug) or (
+        _caps.build_spec_from_fields(slug, _ip((entry or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"), fields,
+                                     (entry or {}).get("label") or slug) if fields else {})
+    perfil, enmascarados = _perfil_de(slug, libre), _enmascarados_de(slug, libre)
+    medidas = cdv.dimensiones_y_medidas(fields, spec)[1] if spec else []
+    sa = slug in _specs_de_seguridad(terraform_dir) or bool((_read_security(terraform_dir).get(slug) or {}).get("detectores"))
+    con_ad = bool(spec and _caps.features_de_anomalias(spec))
+    return {"spec": spec, "perfil": perfil, "enmascarados": enmascarados,
+            "seguridad": _specs_de_seguridad(terraform_dir).get(slug), "aplica": {
+        "agente": bool(spec), "forecasting": bool(spec.get("forecasts")), "anomalias": con_ad, "alertas": con_ad,
+        "security_analytics": sa, "perfil": bool(perfil), "analista": bool(enmascarados),
+        "busqueda": bool(busqueda.campo_de_texto_libre(fields)), "reporte": bool((entry or {}).get("dashboard_id")),
+        "ciclo_de_vida": True, "rollup": bool(medidas)}}
+
+
+def _catalogo_de_plugins(terraform_dir: Path, registry: dict) -> list[dict]:
+    """Por plugin: en qué casos aplica (lo que decide la provisión) y en cuáles
+    ya está aplicado (los registros, sin tocar el cluster). Lo usa la vista
+    para elegir qué armar."""
+    try:
+        caps_reg, estados, seg = _read_capabilities(terraform_dir), _read_estados(terraform_dir), _read_security(terraform_dir)
+        aplica: dict[str, list[str]] = {p: [] for p in _ORDEN_DEL_CATALOGO}
+        aplicado: dict[str, list[str]] = {p: [] for p in _ORDEN_DEL_CATALOGO}
+        for slug in registry:
+            decide = _lo_que_aplica(slug, registry[slug] or {}, terraform_dir)["aplica"]
+            ids, est = caps_reg.get(slug) or {}, estados.get(slug) or {}
+            hecho = {
+                "agente": bool(ids.get("agent_id")),
+                "forecasting": bool(ids.get("forecaster_ids") or ids.get("forecaster_id")),
+                "anomalias": bool(ids.get("detector_id")), "alertas": bool(ids.get("monitor_id")),
+                "security_analytics": bool((seg.get(slug) or {}).get("detectores")),
+                **{p: bool((est.get(p) or {}).get("ok")) for p in ("perfil", "analista", "reporte", "busqueda",
+                                                                    "ciclo_de_vida", "rollup")},
+            }
+            for p in _ORDEN_DEL_CATALOGO:
+                if decide.get(p):
+                    aplica[p].append(slug)
+                if hecho.get(p):
+                    aplicado[p].append(slug)
+        return [{"plugin": p, "aplica": aplica[p], "aplicado": aplicado[p], "recomendado": p in PLUGINS_RECOMENDADOS}
+                for p in _ORDEN_DEL_CATALOGO]
+    except Exception as exc:  # noqa: BLE001 — sin catálogo, la vista igual anda
+        print(f"[plugins] el catálogo no se pudo armar: {exc!r}")
+        return []
+
+
+@app.get("/api/v1/plugins/comandos", tags=["capabilities"],
+         summary="Los requests de Dev Tools de un plugin, caso por caso")
+def comandos_del_plugin(plugin: str) -> dict:
+    """Lo que hace la plataforma al aplicar el plugin, escrito como se pega en
+    Dev Tools (sin secretos: lo que devuelve cada respuesta va como <ID>)."""
+    terraform_dir = _active_terraform_dir()
+    return {"plugin": plugin, "casos": _comandos(plugin, _read_pipelines_registry(terraform_dir), terraform_dir)}
+
+
+def _comandos(plugin: str, registry: dict, terraform_dir: Path) -> list[dict]:
+    import exportar
+
+    fuera = []
+    for slug, entry in registry.items():
+        try:
+            datos = _datos_para_exportar(slug)
+        except HTTPException:
+            continue
+        datos["excluir"] = []          # se ven aunque estén apagados
+        datos["filter_code"] = ""
+        texto = exportar.secciones(slug, **datos, decidido=_lo_que_aplica(slug, entry or {}, terraform_dir)).get(plugin)
+        if texto:
+            fuera.append({"slug": slug, "label": datos["label"], "texto": texto})
+    return fuera
+
+
+def _registro_de_ejemplo(slugs: str) -> dict:
+    """Los casos de demo pedidos como si estuvieran desplegados (con su
+    dashboard), para la vista previa."""
+    return {s: {"index": f"{s}-%{{+YYYY.MM}}", "dashboard_id": f"{s}-dashboard"}
+            for s in slugs.split(",") if s and verticals.get_vertical(s) is not None}
+
+
+@app.get("/api/v1/dev/catalogo-preview", tags=["dev"],
+         summary="Vista previa del catálogo de plugins (casos de demo, sin cluster)")
+def catalogo_preview(slugs: str = "") -> dict:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as vacio:
+        return {"catalogo": _catalogo_de_plugins(Path(vacio), _registro_de_ejemplo(slugs))}
+
+
+@app.get("/api/v1/dev/comandos-preview", tags=["dev"],
+         summary="Vista previa de los comandos de un plugin (casos de demo, sin cluster)")
+def comandos_preview(plugin: str, slugs: str = "") -> dict:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as vacio:
+        return {"plugin": plugin, "casos": _comandos(plugin, _registro_de_ejemplo(slugs), Path(vacio))}
 
 
 def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: str) -> dict:

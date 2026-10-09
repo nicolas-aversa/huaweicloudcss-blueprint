@@ -131,7 +131,7 @@ check('la tarjeta', card.includes('id="infra-accesos-ver"') && card.includes('En
 check('sin contraseña en la tarjeta', !card.includes('Contraseña</span><code>'), card);
 const d = accesosDetalleHTML([{ slug: 'encuentros-clinicos', usuario: 'analista-encuentros-clinicos', password: 'Ab#1<x>', enmascarados: ['patient'] }]);
 check('usuario y contraseña', d.includes('<code>analista-encuentros-clinicos</code>') && d.includes('<code>Ab#1&lt;x&gt;</code>'), d);
-check('sin analistas', accesosDetalleHTML([]).includes('Provisionar plugins'));
+check('sin analistas', accesosDetalleHTML([]).includes('Aplicar los recomendados'));
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """

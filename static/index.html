@@ -2367,6 +2367,32 @@
     .mtx__llevar a:hover { text-decoration: underline; }
     .mtx__llevar .icon { width: 12px; height: 12px; }
     .mtx__vacio { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+    /* Plugins para el cluster: uno por fila, en dos columnas si entra. El que
+       muestra sus comandos ocupa todo el ancho. */
+    .cat { list-style: none; margin: 10px 0 0; padding: 0; display: grid; column-gap: 28px; grid-auto-flow: row dense;
+           grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); }
+    .cat__item { min-width: 0; border-bottom: 1px solid var(--border-subtle); }
+    .cat__item.is-abierto { grid-column: 1 / -1; }
+    .cat__fila { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 8px 0; }
+    .cat__que { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+    .cat__nombre { display: inline-flex; align-items: center; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
+    .cat__donde { font-size: var(--fs-xs); color: var(--text-muted); }
+    .cat__acciones { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
+    @media (max-width: 520px) { .cat__fila { flex-wrap: wrap; } }
+    .cat__nota { font-size: var(--fs-xs); color: var(--text-muted); }
+    .cat__det { padding: 2px 0 12px; }
+    .cat__casos { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+    .cat__caso { padding: 2px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); cursor: pointer;
+                 background: var(--bg-primary); color: var(--text-secondary); font-size: var(--fs-xs); font-weight: 600; }
+    .cat__caso[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-hover); }
+    .cat__caso:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .cat__cmd { margin: 0; max-height: 360px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border-subtle);
+                border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-primary);
+                font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5; white-space: pre; }
+    .cat__cmd:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .cat__pie a.btn { text-decoration: none; }
+    .cat__pie { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--fs-xs); color: var(--text-muted); }
+    .setup-paso__link { color: var(--accent-hover); white-space: nowrap; }
     /* Probar la búsqueda: por palabras y la híbrida, lado a lado. */
     .busq { display: flex; flex-direction: column; gap: var(--sp-2); }
     .busq__fila { display: flex; gap: var(--sp-2); }
@@ -3263,7 +3289,7 @@
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-alert-triangle"/></svg></span>
                 <div>
                   <div class="settings-card__title">Avisos de alertas</div>
-                  <div class="settings-card__hint">Adónde avisan las alertas de anomalías. Se aplica en "Provisionar plugins", que manda un mensaje de prueba. El cluster tiene que poder salir a ese host: la plataforma le agrega la ruta.</div>
+                  <div class="settings-card__hint">Adónde avisan las alertas de anomalías. Se configura junto con las alertas y manda un mensaje de prueba. El cluster tiene que poder salir a ese host: la plataforma le agrega la ruta.</div>
                 </div>
               </div>
               <div class="settings-fields" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,3fr); gap:14px;">
@@ -6691,7 +6717,7 @@
     }
     async function restaurarSnapshot(btn) {
       const ok = await confirmModal({ title: 'Restaurar los datos de la demo',
-        message: 'Los índices de los casos vuelven del snapshot. Los que ya existen en este cluster no se pisan. Después corré "Provisionar plugins".',
+        message: 'Los índices de los casos vuelven del snapshot. Los que ya existen en este cluster no se pisan. Después aplicá los plugins (paso 3).',
         confirmLabel: 'Restaurar' });
       if (!ok) return;
       btn.disabled = true;
@@ -6714,7 +6740,7 @@
             <span class="section-card__tile">${icon('key')}</span>
             <span class="section-card__titlewrap">
               <span class="section-card__title">Accesos de demo</span>
-              <span class="section-card__hint">Un analista de solo lectura por caso que ve los datos sensibles enmascarados · entrá a Dashboards con su usuario · los crea "Provisionar plugins"</span>
+              <span class="section-card__hint">Un analista de solo lectura por caso que ve los datos sensibles enmascarados · entrá a Dashboards con su usuario · los crea "Aplicar los recomendados"</span>
             </span>
             <button type="button" class="btn btn-primary btn-sm" id="infra-accesos-ver">Ver accesos</button>
           </div>
@@ -6723,7 +6749,7 @@
         </div>`;
     }
     function accesosDetalleHTML(lista) {
-      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay analistas: corré "Provisionar plugins".</div>';
+      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay analistas: corré "Aplicar los recomendados" o aplicá el analista en Plugins para el cluster.</div>';
       return lista.map(a => `<div class="hallazgos__det"><div class="hallazgos__head">`
         + `<strong>${escapeHtml(SLUG_LABELS[a.slug] || a.slug)}</strong>`
         + `<span class="hallazgos__total">enmascarado: ${escapeHtml((a.enmascarados || []).join(', '))}</span></div>`
@@ -6864,7 +6890,7 @@
           }).join('')}</div></td></tr>` + detalle('_cluster', '')
         : '';
       const sinPlugins = !presentes.size
-        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando corras "Provisionar plugins" (paso 3 de la puesta en marcha).</p>` : '';
+        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando los apliques: "Aplicar los recomendados" (paso 3 de la puesta en marcha) o uno por uno, en Plugins para el cluster.</p>` : '';
       return `<div class="section-card" id="infra-plugins">
           <div class="section-card__head">
             <span class="section-card__tile">${icon('layers')}</span>
@@ -6879,6 +6905,127 @@
             <tbody>${casos}${cluster}</tbody>
           </table></div>${sinPlugins}
         </div>`;
+    }
+    // ── Plugins para el cluster: elegir qué armar ──────────────────────────────
+    // Con el entorno ya desplegado, plugin por plugin: en qué casos aplica,
+    // sus comandos de Dev Tools y un botón que arma solo ese, sin tocar los
+    // demás. El paso 3 aplica los recomendados; lo que en una demo sobra (el
+    // ciclo de vida y el rollup se notan con meses de datos) se arma si se
+    // elige acá. El catálogo viene en /terraform/status (_catalogo_de_plugins).
+    const _NOMBRE_DEL_PLUGIN = {
+      agente: 'Asistente en lenguaje natural', forecasting: 'Pronósticos', anomalias: 'Detección de anomalías',
+      alertas: 'Alertas de anomalías', security_analytics: 'Security Analytics', perfil: 'Perfil por entidad',
+      analista: 'Analista con datos enmascarados', busqueda: 'Búsqueda híbrida', reporte: 'Reporte en PDF',
+      ciclo_de_vida: 'Ciclo de vida de los índices', rollup: 'Resumen por hora (Rollup)',
+    };
+    // La consola de Dev Tools, a partir de la URL de Dashboards.
+    function devToolsDe(dashUrl) {
+      const base = String(dashUrl || '').replace(/\/app\/.*$/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+      return base ? `${base}/app/dev_tools#/console` : '';
+    }
+    function catalogoHTML(catalogo) {
+      // Los que no aplican a ningún caso, al final.
+      const items = (catalogo || []).filter(c => _NOMBRE_DEL_PLUGIN[c.plugin])
+        .sort((a, b) => (!a.aplica.length) - (!b.aplica.length));
+      if (!items.length) return '';
+      const nombres = (slugs) => slugs.map(s => SLUG_LABELS[s] || s).join(', ');
+      const fila = (c) => {
+        const p = c.plugin;
+        const n = c.aplica.length;
+        const faltan = c.aplica.filter(s => !c.aplicado.includes(s));
+        const hechos = n - faltan.length;
+        const abierto = n > 0 && state.catalogoAbierto === p;
+        const estado = !n ? '<span class="cat__donde">No aplica a estos casos</span>'
+          : !faltan.length ? `<span class="sev sev--ok">Listo</span><span class="cat__donde" title="${escapeHtml(nombres(c.aplica))}">en ${n === 1 ? 'su caso' : `los ${n} casos`}</span>`
+          : hechos ? `<span class="sev sev--high" title="${escapeHtml(`Falta en: ${nombres(faltan)}`)}">En ${hechos} de ${n} casos</span>`
+          : `<span class="cat__donde" title="${escapeHtml(nombres(c.aplica))}">aplica en ${n === 1 ? '1 caso' : `${n} casos`}</span>`;
+        const opcional = c.recomendado ? ''
+          : '<span class="sev" title="Se nota con meses de datos: en una demo no se ve. No entra en «Aplicar los recomendados».">Opcional</span>';
+        const ver = n ? `<button type="button" class="btn btn-ghost btn-sm cat__ver" data-plugin="${escapeHtml(p)}" `
+          + `aria-expanded="${abierto}" aria-controls="cat-det-${escapeHtml(p)}">${icon('code')} Comandos</button>` : '';
+        // Security Analytics se arma en el paso 1: sus detectores tienen que
+        // existir antes que los datos.
+        const aplicar = !faltan.length ? ''
+          : p === 'security_analytics' ? '<span class="cat__nota">Se arma en el paso 1, antes que los datos.</span>'
+          : `<button type="button" class="btn btn-secondary btn-sm cat__aplicar" data-plugin="${escapeHtml(p)}"${state.provisionandoPlugins ? ' disabled' : ''}>`
+            + `${state.aplicandoPlugin === p ? 'Aplicando…' : hechos ? 'Completar' : 'Aplicar'}</button>`;
+        return `<li class="cat__item${abierto ? ' is-abierto' : ''}">`
+          + `<div class="cat__fila"><span class="cat__que"><span class="cat__nombre">${escapeHtml(_NOMBRE_DEL_PLUGIN[p])}${ayudaHTML(p)}</span>`
+          + `${opcional}${estado}</span><span class="cat__acciones">${ver}${aplicar}</span></div>`
+          + `<div class="cat__det" id="cat-det-${escapeHtml(p)}" data-det="${escapeHtml(p)}"${abierto ? '' : ' hidden'}></div></li>`;
+      };
+      return `<div class="section-card" id="infra-catalogo">
+          <div class="section-card__head">
+            <span class="section-card__tile">${icon('plus')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Plugins para el cluster</span>
+              <span class="section-card__hint">Elegí qué armar. Cada uno muestra sus comandos de Dev Tools, caso por caso, y se aplica solo, sin tocar los demás.</span>
+            </span>
+          </div>
+          <ul class="cat">${items.map(fila).join('')}</ul>
+        </div>`;
+    }
+    // Los comandos de un plugin, caso por caso. Se piden una vez por entorno
+    // (cambian si cambian los casos).
+    async function pintarComandos(det, plugin) {
+      const cache = state.comandos || (state.comandos = {});
+      const clave = `${plugin}|${((state.lastStatus || {}).pipelines || []).map(p => p.slug).join(',')}`;
+      if (!cache[clave]) {
+        det.innerHTML = '<div class="status status-loading">Armando los comandos…</div>';
+        try {
+          const res = await fetch(`/api/v1/plugins/comandos?plugin=${encodeURIComponent(plugin)}`);
+          const d = await res.json();
+          if (!res.ok) throw detailError(d);
+          cache[clave] = d.casos || [];
+        } catch (err) {
+          det.innerHTML = `<div class="status status-error">No se pudieron armar los comandos: ${escapeHtml(err.message)}</div>`;
+          return;
+        }
+      }
+      const casos = cache[clave];
+      if (!casos.length) {
+        det.innerHTML = '<div class="hallazgos__vacio">No aplica a ninguno de los casos de este entorno.</div>';
+        return;
+      }
+      const c = casos.find(x => x.slug === (state.comandoCaso || {})[plugin]) || casos[0];
+      const nombre = (x) => SLUG_LABELS[x.slug] || x.label || x.slug;
+      const consola = devToolsDe((state.lastStatus || {}).dashboards_url);
+      det.innerHTML = (casos.length > 1
+          ? `<div class="cat__casos" role="group" aria-label="Caso">${casos.map(x => `<button type="button" class="cat__caso" `
+            + `data-caso="${escapeHtml(x.slug)}" aria-pressed="${x === c}">${escapeHtml(nombre(x))}</button>`).join('')}</div>` : '')
+        + `<pre class="cat__cmd" tabindex="0" aria-label="${escapeHtml(`Comandos de Dev Tools: ${nombre(c)}`)}">${escapeHtml(c.texto)}</pre>`
+        + '<div class="cat__pie"><button type="button" class="btn btn-secondary btn-sm cat__copiar">Copiar</button>'
+        + (consola ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(consola)}" target="_blank" rel="noopener">Abrir Dev Tools</a>` : '')
+        + '<span>Van en orden. Lo que está entre &lt; &gt; (el id que devuelve una respuesta, una contraseña) se reemplaza antes de mandarlo.</span></div>';
+    }
+    function verComandos(btn) {
+      const plugin = btn.dataset.plugin;
+      const det = document.getElementById(`cat-det-${plugin}`);
+      if (!det) return;
+      const abrir = det.hidden;
+      // De a uno: los comandos son largos.
+      document.querySelectorAll('#infra-catalogo .cat__det').forEach(d => {
+        d.hidden = true;
+        d.closest('.cat__item')?.classList.remove('is-abierto');
+      });
+      document.querySelectorAll('#infra-catalogo .cat__ver').forEach(b => b.setAttribute('aria-expanded', 'false'));
+      state.catalogoAbierto = abrir ? plugin : null;
+      if (!abrir) return;
+      det.hidden = false;
+      det.closest('.cat__item')?.classList.add('is-abierto');
+      btn.setAttribute('aria-expanded', 'true');
+      pintarComandos(det, plugin);
+    }
+    // Aplica un plugin donde falta. La alerta vigila al detector de anomalías:
+    // donde todavía no hay, se arman los dos.
+    function aplicarPlugin(btn, pipelines, catalogo) {
+      const c = (catalogo || []).find(x => x.plugin === btn.dataset.plugin);
+      if (!c) return;
+      const faltan = c.aplica.filter(s => !c.aplicado.includes(s));
+      const anomalias = (catalogo || []).find(x => x.plugin === 'anomalias') || { aplicado: [] };
+      const plugins = c.plugin === 'alertas' && faltan.some(s => !anomalias.aplicado.includes(s))
+        ? ['anomalias', 'alertas'] : [c.plugin];
+      return provisionCapabilitiesFromInfra(btn, pipelines, false, { plugins, slugs: faltan, clave: c.plugin });
     }
     // `verificar`: cada tarjeta reserva desde el principio la línea de
     // "Comprobado en el cluster" (llega después, con los números): aparecer
@@ -7174,7 +7321,7 @@
         + `Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.`,
         // El intervalo: el backend mide qué cambió contra el período anterior.
         { desde: inicio, hasta: fin }));
-      if (!tomada) toast('Para explicarla hace falta el asistente de este caso: corré "Provisionar plugins".', 'info');
+      if (!tomada) toast('Para explicarla hace falta el asistente: aplicalo en el paso 3 o en Plugins para el cluster.', 'info');
       return tomada;
     }
 
@@ -7753,19 +7900,31 @@
     }
 
     // Paso 3 (post-ingesta): provisiona capabilities sobre el cluster con datos ya
-    // ingeridos. Lo dispara el botón "Provisionar plugins" de la vista infra.
-    async function provisionCapabilitiesFromInfra(btn, pipelines, force) {
+    // ingeridos. Lo disparan "Aplicar los recomendados" (`recomendados`) y el
+    // "Aplicar" de cada plugin en Plugins para el cluster (`plugins`, en los
+    // `slugs` donde falta). Sin ninguno, todos los que aplican. `clave`: el
+    // plugin del botón, que sigue diciendo "Aplicando…" si la vista se repinta.
+    async function provisionCapabilitiesFromInfra(btn, pipelines, force,
+                                                  { plugins = null, recomendados = false, slugs = null, clave = '' } = {}) {
       const mount = document.getElementById('infra-capabilities-result');
       if (!btn) return;
+      // De a uno: dos a la vez se pisan en el cluster.
+      if (state.provisionandoPlugins) {
+        toast('Ya se están aplicando plugins: esperá a que termine.', 'info');
+        return;
+      }
       let password = state.osPassword || '';
-      const slugs = (pipelines || []).filter(p => p.has_capabilities).map(p => p.slug);
+      slugs = slugs || (pipelines || []).filter(p => p.has_capabilities).map(p => p.slug);
       btn.disabled = true;
       const original = btn.innerHTML;
-      btn.innerHTML = 'Provisionando…';
+      btn.innerHTML = 'Aplicando…';
       // Mientras tanto, los casos aparecen a medida que terminan (ver
       // refrescarPluginsEnCurso): sin esto la vista era una foto a mitad de camino.
       state.provisionandoPlugins = true;
+      state.aplicandoPlugin = clave;
+      document.querySelectorAll('#infra-catalogo .cat__aplicar').forEach(b => { b.disabled = true; });
       const refresco = setInterval(refrescarPluginsEnCurso, _REFRESCO_PLUGINS_MS);
+      let listo = false;
       try {
         const res = await fetch('/api/v1/onboarding/provision-capabilities', {
           method: 'POST',
@@ -7776,6 +7935,8 @@
             https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del deploy
             slugs,
             force: !!force,
+            ...(plugins ? { plugins } : {}),
+            ...(recomendados ? { recomendados: true } : {}),
           }),
         });
         const data = await res.json();
@@ -7786,24 +7947,35 @@
           else if (typeof detail === 'string') msg = detail;
           throw new Error(msg);
         }
-        // Recién provisionados, el asistente se abre solo. Si se cierra, se
+        // Recién provisionado, el asistente se abre solo. Si se cierra, se
         // vuelve a abrir con la burbuja de abajo a la derecha.
-        capChatAbierto = true;
+        if (!plugins || plugins.includes('agente')) capChatAbierto = true;
         if (mount) {
           mount.innerHTML = '';
           renderCapabilitiesResult(data.capabilities || {}, mount);
         }
+        if (plugins) {
+          const nombre = _NOMBRE_DEL_PLUGIN[clave] || 'El plugin';
+          toast(data.status === 'success' ? `${nombre}: aplicado. Su estado, en Casos y plugins.`
+                                          : `${nombre}: no se aplicó. El motivo está en Actividad.`,
+                data.status === 'success' ? 'success' : 'error');
+        }
         await hydrateActiveEnv();
+        listo = true;
       } catch (err) {
         // El error, debajo de SU botón (como los otros dos pasos).
-        const statusEl = document.getElementById('infra-capabilities-btn-status');
+        const statusEl = !plugins && document.getElementById('infra-capabilities-btn-status');
         if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
+        else if (plugins) toast(`No se pudo aplicar: ${err.message}`, 'error');
         else if (mount) mount.innerHTML = `<div class="status status-error">Error: ${escapeHtml(err.message)}</div>`;
       } finally {
         clearInterval(refresco);
         state.provisionandoPlugins = false;
+        state.aplicandoPlugin = '';
         btn.disabled = false;
         btn.innerHTML = original;
+        // Si la vista se repintó mientras tanto, quedó con los botones apagados.
+        if (!listo && !btn.isConnected && state.lastStatus) renderInfraView(state.lastStatus);
       }
     }
 
@@ -8685,10 +8857,11 @@
                   : 'Arranca Logstash: recién acá empiezan a entrar los datos.',
                 'infra-ingest-btn', 'Iniciar ingesta con Logstash', 'Reiniciar ingesta')}
               ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
-                ingestDone ? 'Asistente, anomalías, pronósticos y alertas. Esperá ~1-2 min a que carguen datos.'
-                           : 'Iniciá la ingesta y esperá que entren documentos.',
-                // "Volver a provisionar" completa lo que falta o quedó fallado.
-                'infra-capabilities-btn', 'Provisionar plugins', 'Volver a provisionar plugins') : ''}
+                (ingestDone ? 'Asistente, pronósticos, anomalías, alertas, perfiles, búsqueda y reporte. Esperá ~1-2 min a que carguen datos.'
+                            : 'Iniciá la ingesta y esperá que entren documentos.')
+                  + ((data.catalogo || []).length ? ' <a href="#infra-catalogo" class="setup-paso__link">O elegí cuáles, uno por uno</a>' : ''),
+                // "Volver a aplicar" completa lo que falta o quedó fallado.
+                'infra-capabilities-btn', 'Aplicar los recomendados', 'Volver a aplicar los recomendados') : ''}
             </div>
             <div id="infra-capabilities-result" class="setup-card__plugins"></div>
           </div>
@@ -8721,6 +8894,7 @@
         ${setupPanel}
         ${kpis}
         ${matrizDePluginsHTML(filas, data.plugins)}
+        ${catalogoHTML(data.catalogo)}
         <div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>
         </div>`;
       const env = body.querySelector('.env');
@@ -8775,7 +8949,29 @@
       // plugins ya provisionados, el botón mandaba force y rehacía todo
       // (~7 minutos para 9 casos) aunque estuviera bien.
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
-        provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false));
+        provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false, { recomendados: true }));
+      body.querySelector('.setup-paso__link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        body.querySelector('#infra-catalogo')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      });
+      // Plugins para el cluster: los comandos de cada uno y aplicarlo.
+      body.querySelector('#infra-catalogo')?.addEventListener('click', (e) => {
+        const ver = e.target.closest('.cat__ver');
+        if (ver) return verComandos(ver);
+        const caso = e.target.closest('.cat__caso');
+        if (caso) {
+          const det = caso.closest('.cat__det');
+          (state.comandoCaso || (state.comandoCaso = {}))[det.dataset.det] = caso.dataset.caso;
+          return pintarComandos(det, det.dataset.det);
+        }
+        const copiar = e.target.closest('.cat__copiar');
+        if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
+        const aplicar = e.target.closest('.cat__aplicar');
+        if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);
+      });
+      // Un repintado deja a la vista los comandos que se estaban mirando.
+      const comandosAbiertos = state.catalogoAbierto && body.querySelector(`#cat-det-${state.catalogoAbierto}`);
+      if (comandosAbiertos && !comandosAbiertos.hidden) pintarComandos(comandosAbiertos, state.catalogoAbierto);
       body.querySelector('#infra-docs-refresh')?.addEventListener('click', (e) => {
         e.currentTarget.disabled = true;
         e.currentTarget.classList.add('is-girando');
@@ -8915,6 +9111,19 @@
         const u = String(url);
         const metodo = (opts.method || 'GET').toUpperCase();
         if (u.includes('/api/v1/terraform/status')) {
+          if (!estado.catalogo) {
+            try {
+              const r = await real('/api/v1/dev/catalogo-preview?slugs=' + encodeURIComponent(slugs.join(',')));
+              estado.catalogo = r.ok ? (await r.json()).catalogo || [] : [];
+            } catch (_err) { estado.catalogo = []; }
+            // Con los plugins provisionados, los recomendados quedan listos (la
+            // búsqueda, a medias); el ciclo de vida y el rollup, por elegir.
+            if (Object.keys(estado.capabilities || {}).length) {
+              estado.catalogo.forEach(c => {
+                if (c.recomendado) c.aplicado = c.plugin === 'busqueda' ? c.aplica.slice(0, 2) : [...c.aplica];
+              });
+            }
+          }
           if (!estado.plugins && Object.keys(estado.capabilities || {}).length) {
             try {
               const r = await real('/api/v1/dev/plugins-preview?slugs=' + encodeURIComponent(slugs.join(',')));
@@ -8957,8 +9166,17 @@
           await espera(900);
           return json({ index_template_applied: true, dashboards_imported: true });
         }
+        if (u.includes('/api/v1/plugins/comandos')) {
+          const plugin = new URL(u, location.href).searchParams.get('plugin') || '';
+          return real(`/api/v1/dev/comandos-preview?plugin=${encodeURIComponent(plugin)}&slugs=${encodeURIComponent(slugs.join(','))}`);
+        }
         if (u.includes('/api/v1/onboarding/provision-capabilities')) {
           await espera(1500);
+          let pedido = {};
+          try { pedido = JSON.parse(opts.body || '{}'); } catch (_) { /* sin body */ }
+          (estado.catalogo || []).forEach(c => {
+            if (pedido.recomendados ? c.recomendado : !pedido.plugins || pedido.plugins.includes(c.plugin)) c.aplicado = [...c.aplica];
+          });
           estado.capabilities = conPlugins();
           return json({ status: 'success', capabilities: Object.fromEntries(slugs.map(s => [s, {
             conversational: { ok: true, agent_id: ids.agent_id }, forecast: { ok: true, forecaster_id: ids.forecaster_id } }])) });
@@ -9006,6 +9224,8 @@
       };
       state.previewMode = true;
       if (params.get('chat') === '1') capChatAbierto = true;   // entra con el asistente abierto
+      // `&comandos=forecasting`: entra con los comandos de ese plugin a la vista.
+      if (params.get('comandos')) state.catalogoAbierto = params.get('comandos');
       showView('infra');
       hydrateActiveEnv();
     }
@@ -10303,7 +10523,7 @@
         const d = await res.json();
         if (!res.ok) throw detailError(d);
         document.getElementById('settings-canal-url').value = '';
-        estado.textContent = d.configurado ? `Guardado: ${d.host}. Se aplica en "Provisionar plugins".` : 'Canal borrado.';
+        estado.textContent = d.configurado ? `Guardado: ${d.host}. Se aplica junto con las alertas.` : 'Canal borrado.';
       } catch (err) {
         estado.textContent = `Error: ${err.message}`;
       }

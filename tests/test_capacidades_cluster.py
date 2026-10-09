@@ -118,7 +118,7 @@ def test_se_detecta_al_aplicar_y_al_provisionar_y_se_expone():
     assert "_registrar_capacidades(cluster, os_user, request.opensearch_password," in src[i:i + 5000]
     j = src.index("def provision_capabilities(")
     assert ("_registrar_capacidades(cluster, user, password, request.https_enabled,\n"
-            "                                            terraform_dir, run))") in src[j:j + 3800]
+            "                                            terraform_dir, run))") in src[j:j + 5000]
     assert "cluster_features=_read_cluster_features(terraform_dir) or None," in src
     # Al destruir el entorno se va con él, y nunca va al repo.
     k = src.index("_remove_capabilities(terraform_dir)\n    for tmp in")

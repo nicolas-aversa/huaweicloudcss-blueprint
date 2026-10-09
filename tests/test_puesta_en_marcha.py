@@ -51,7 +51,7 @@ def test_cada_paso_hecho_se_puede_rehacer():
     assert "Hecho" in hecho and 'id="${btnId}">${redoLabel}</button>' in hecho
     assert "'infra-apply-schema-btn', paso1.boton, 'Volver a aplicar')" in vista
     for boton, texto, rehacer in (("infra-ingest-btn", "Iniciar ingesta con Logstash", "Reiniciar ingesta"),
-                                  ("infra-capabilities-btn", "Provisionar plugins", "Volver a provisionar plugins")):
+                                  ("infra-capabilities-btn", "Aplicar los recomendados", "Volver a aplicar los recomendados")):
         assert f"'{boton}', '{texto}', '{rehacer}'" in vista, boton
 
 
@@ -112,7 +112,7 @@ def test_capabilities_se_llama_plugins_en_lo_que_se_ve():
     assert not [v for v in visibles if v in HTML]
     assert "'Plugins de OpenSearch'" in _vista() and "label: 'Plugins'" in HTML
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
-    assert "Corré 'Provisionar plugins'" in src and "Plugins provisionados" in src
+    assert "aplicá el asistente (paso 3 o Plugins para el cluster)" in src and "Plugins provisionados" in src
 
 
 # ── El conteo de documentos ─────────────────────────────────────────────────

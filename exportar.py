@@ -38,17 +38,51 @@ def _comentario(texto: str) -> str:
     return "\n".join(f"# {l}" if l else "#" for l in texto.splitlines())
 
 
-def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str = "",
-             seguridad_propuesta: "dict | None" = None, excluir: "list[str] | None" = None,
-             filter_code: str = "", retencion_dias: int = 0) -> str:
+def devtools(slug: str, fields: list[dict], **kw: Any) -> str:
     """El script de Dev Tools del dataset `slug`."""
+    bloques, _ = _armar(slug, fields, **kw)
+    return "\n\n".join(bloques) + "\n"
+
+
+def secciones(slug: str, fields: list[dict], **kw: Any) -> dict[str, str]:
+    """Los requests de cada plugin por separado (`{plugin: texto}`), para la
+    vista Plugins: "Comandos" muestra los de uno solo."""
+    bloques, marcas = _armar(slug, fields, **kw)
+    fuera: dict[str, str] = {}
+    for n, (plugin, inicio) in enumerate(marcas):
+        fin = marcas[n + 1][1] if n + 1 < len(marcas) else len(bloques)
+        texto = "\n\n".join(bloques[inicio:fin])
+        fuera[plugin] = (fuera[plugin] + "\n\n" + texto) if plugin in fuera else texto
+    return fuera
+
+
+def _armar(slug: str, fields: list[dict], *, label: str = "", index_name: str = "",
+           seguridad_propuesta: "dict | None" = None, excluir: "list[str] | None" = None,
+           filter_code: str = "", retencion_dias: int = 0, decidido: "dict | None" = None
+           ) -> "tuple[list[str], list[tuple[str, int]]]":
+    """Los bloques del script y dónde empieza cada plugin (`(plugin, índice)`).
+
+    `decidido`: lo que decide la provisión para un caso desplegado (`aplica`,
+    `spec`, `perfil`, `enmascarados`; ver `main._lo_que_aplica`). Manda sobre
+    el plan, que sale de los campos y en los casos curados no sabe, p. ej., de
+    sus pronósticos."""
     excluir = set(excluir or [])
     index_name = index_name or f"{slug}-%{{+YYYY.MM}}"
     ip = index_pattern_from_name(index_name)
     plan = {i["plugin"]: i for i in plan_de_cluster.plan(slug, fields, label, seguridad=seguridad_propuesta,
                                                          retencion_dias=retencion_dias)}
     aplica = {k: v["aplica"] and k not in excluir for k, v in plan.items()}
-    spec = caps.build_spec_from_fields(slug, ip, fields, label)
+    decidido = decidido or {}
+    for k, v in (decidido.get("aplica") or {}).items():
+        aplica[k] = bool(v) and k not in excluir
+    spec = decidido.get("spec") or caps.build_spec_from_fields(slug, ip, fields, label)
+
+    def motivo(p: str) -> str:
+        """El del plan si el plan coincide; si no, nada (el del plan diría otra cosa)."""
+        return (plan.get(p) or {}).get("motivo", "") if (plan.get(p) or {}).get("aplica") else ""
+
+    def config(p: str, otra: Any) -> Any:
+        return (plan.get(p) or {}).get("config") if (plan.get(p) or {}).get("aplica") and (plan.get(p) or {}).get("config") else otra
     bloques: list[str] = [_comentario(
         f"Configuración de OpenSearch para «{label or slug}» (índices {ip}).\n"
         "Pegalo en Dev Tools y corré cada request en orden. Lo que va entre <> lo\n"
@@ -57,7 +91,11 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
         "Los dashboards van aparte: el .ndjson se importa en Dashboards → Management →\n"
         "Saved objects → Import.")]
 
-    def seccion(titulo: str, motivo: str = "") -> None:
+    marcas: list[tuple[str, int]] = []
+
+    def seccion(titulo: str, motivo: str = "", plugin: str = "") -> None:
+        if plugin:
+            marcas.append((plugin, len(bloques)))
         bloques.append(_comentario(f"── {titulo} " + "─" * max(4, 60 - len(titulo))
                                    + (f"\n{motivo}" if motivo else "")))
 
@@ -66,16 +104,16 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
     con_sa = aplica.get("security_analytics")
     if con_sa:
         template.setdefault("template", {}).setdefault("aliases", {})[seguridad.alias_del_caso(ip)] = {}
-    seccion("Index template", "Los tipos de cada campo, antes de la ingesta.")
+    seccion("Index template", "Los tipos de cada campo, antes de la ingesta.", "template")
     bloques.append(_req("PUT", f"_index_template/{slug}", template))
     if filter_code:
         seccion("Logstash", "El filter del dataset: en CSS → Logstash → Configuration file,\n"
-                            f"con output al índice {index_name}.")
+                            f"con output al índice {index_name}.", "logstash")
         bloques.append(_comentario(filter_code.strip()))
 
     # El asistente: PPLTool sobre este índice.
     if aplica.get("agente"):
-        seccion("Asistente en lenguaje natural (ml-commons)", plan["agente"]["motivo"])
+        seccion("Asistente en lenguaje natural (ml-commons)", motivo("agente"), "agente")
         ppl_prompt = caps.build_ppl_system_prompt(ip, spec["operations"], spec["fields"],
                                                   spec.get("success_code", ""), label or slug)
         bloques += [
@@ -99,7 +137,7 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
                                    '{"parameters": {"question": "¿…?"}}'))
 
     if aplica.get("forecasting"):
-        seccion("Pronósticos (Forecasting)", plan["forecasting"]["motivo"])
+        seccion("Pronósticos (Forecasting)", motivo("forecasting"), "forecasting")
         for fc in spec["forecasts"]:
             bloques.append(_req("POST", "_plugins/_forecast/forecasters", caps.build_forecaster(
                 ip, spec["volume_field"], interval_minutes=spec.get("forecast_interval_minutes", 240),
@@ -110,11 +148,11 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
 
     feats = caps.features_de_anomalias(spec)
     if aplica.get("anomalias"):
-        seccion("Detección de anomalías", plan["anomalias"]["motivo"])
+        seccion("Detección de anomalías", motivo("anomalias"), "anomalias")
         bloques += [_req("POST", "_plugins/_anomaly_detection/detectors", caps.build_ad_detector(slug, ip, feats, 10)),
                     _req("POST", "_plugins/_anomaly_detection/detectors/<DETECTOR_ID>/_start")]
         if aplica.get("alertas"):
-            seccion("Alerta de anomalías (Alerting)", plan["alertas"]["motivo"])
+            seccion("Alerta de anomalías (Alerting)", motivo("alertas"), "alertas")
             bloques.append(_comentario("Para que la alerta le llegue a alguien, el canal (Slack; para Teams o un\n"
                                        "webhook cambiá `config_type` y su clave). El cluster tiene que poder salir\n"
                                        "a ese host: en CSS, una Cluster Route a su IP."))
@@ -125,40 +163,42 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
                                 caps.build_monitor_de_anomalias(slug, "<DETECTOR_ID>", canal_id=caps.CANAL_DE_ALERTAS)))
 
     if aplica.get("perfil"):
-        seccion("Perfil por entidad (Transform)", plan["perfil"]["motivo"])
-        perfil = plan["perfil"]["config"]
+        seccion("Perfil por entidad (Transform)", motivo("perfil"), "perfil")
+        perfil = decidido.get("perfil") or config("perfil", None)
         nombre = perfiles.nombre_del_transform(slug)
         bloques += [_req("PUT", f"_plugins/_transform/{nombre}", perfiles.build_transform(slug, ip, perfil)),
                     _req("POST", f"_plugins/_transform/{nombre}/_start")]
 
     if aplica.get("ciclo_de_vida"):
-        seccion("Ciclo de vida de los índices (ISM)", plan["ciclo_de_vida"]["motivo"])
+        seccion("Ciclo de vida de los índices (ISM)", motivo("ciclo_de_vida"), "ciclo_de_vida")
         pid = cdv.nombre_de_politica(slug)
-        bloques += [_req("PUT", f"_plugins/_ism/policies/{pid}",
-                         cdv.politica(slug, ip, plan["ciclo_de_vida"]["config"]["retencion_dias"])),
+        dias = (config("ciclo_de_vida", {}) or {}).get("retencion_dias") or cdv.retencion(retencion_dias)
+        bloques += [_req("PUT", f"_plugins/_ism/policies/{pid}", cdv.politica(slug, ip, dias)),
                     _comentario("Los índices que ya existen la toman con:"),
                     _req("POST", f"_plugins/_ism/add/{ip}", {"policy_id": pid})]
 
     if aplica.get("rollup"):
-        seccion("Resumen por hora (Rollup)", plan["rollup"]["motivo"])
-        cfg = plan["rollup"]["config"]
+        seccion("Resumen por hora (Rollup)", motivo("rollup"), "rollup")
+        dims, medidas = cdv.dimensiones_y_medidas(fields, spec)
+        cfg = config("rollup", {"dimensiones": dims, "medidas": medidas})
         cuerpo = cdv.rollup(slug, ip, cfg["dimensiones"], cfg["medidas"], 0)
         cuerpo["rollup"]["schedule"]["interval"]["start_time"] = "<AHORA_EN_EPOCH_MS>"
         bloques.append(_req("PUT", f"_plugins/_rollup/jobs/{cdv.nombre_del_rollup(slug)}", cuerpo))
 
     if aplica.get("analista"):
-        seccion("Analista con datos enmascarados", plan["analista"]["motivo"])
+        seccion("Analista con datos enmascarados", motivo("analista"), "analista")
         bloques += [
             _req("PUT", f"_plugins/_security/api/roles/{accesos.nombre_del_rol(slug)}",
-                 accesos.rol_analista(ip, plan["analista"]["config"])),
+                 accesos.rol_analista(ip, decidido.get("enmascarados") or config("analista", []))),
             _req("PUT", f"_plugins/_security/api/internalusers/{accesos.nombre_del_usuario(slug)}",
                  accesos.usuario_analista(slug, "<CONTRASEÑA_DEL_ANALISTA>")),
         ]
 
     if aplica.get("busqueda"):
         import busqueda
-        seccion("Búsqueda híbrida (por palabras y por significado)", plan["busqueda"]["motivo"])
-        cfg = plan["busqueda"]["config"]
+        seccion("Búsqueda híbrida (por palabras y por significado)", motivo("busqueda"), "busqueda")
+        campo = busqueda.campo_de_texto_libre(fields)
+        cfg = config("busqueda", {"campo": campo, "tipo": busqueda.tipo_del_campo(fields, campo)})
         tid, idx = busqueda.nombre_del_transform(slug), busqueda.indice(slug)
         bloques += [
             _comentario("El modelo de embeddings: el cluster no lo baja de internet. Subí a un bucket de OBS\n"
@@ -179,22 +219,34 @@ def devtools(slug: str, fields: list[dict], *, label: str = "", index_name: str 
         ]
 
     if con_sa:
-        seccion("Security Analytics", plan["security_analytics"]["motivo"])
-        lt = seguridad_derivada_spec(slug, seguridad_propuesta)
-        bloques.append(_req("POST", "_plugins/_security_analytics/logtype", seguridad.build_log_type(lt)))
-        curls = []
-        for n, r in enumerate(lt["reglas"], start=1):
-            curls.append(f"Regla {n}: {r['titulo']}  →  su id es <RULE_ID_{n}>\n"
-                         f"curl -k -u admin:<CONTRASEÑA_ADMIN> -X POST \"https://<ENDPOINT>:9200/"
-                         f"_plugins/_security_analytics/rules?category={lt['nombre']}\" \\\n"
-                         "  -H 'Content-Type: application/json' --data-binary @- <<'YAML'\n"
-                         + seguridad.sigma_yaml(r, lt["nombre"]) + "YAML")
-        bloques.append(_comentario("Las reglas Sigma van en YAML, no en JSON: se crean con curl.\n\n"
-                                   + "\n\n".join(curls)))
-        reglas = [(f"<RULE_ID_{n}>", r["nivel"]) for n, r in enumerate(lt["reglas"], start=1)]
-        bloques.append(_req("POST", "_plugins/_security_analytics/detectors",
-                            seguridad.build_detector(slug, lt["nombre"], [seguridad.alias_del_caso(ip)], reglas)))
-    return "\n\n".join(bloques) + "\n"
+        seccion("Security Analytics", motivo("security_analytics"), "security_analytics")
+        # Un caso curado trae varios tipos de log (el SIEM, cuatro); uno nuevo, el
+        # que se deriva de sus campos.
+        lts = (decidido.get("seguridad") or {}).get("log_types") or [seguridad_derivada_spec(slug, seguridad_propuesta)]
+        for k, lt in enumerate(lts, start=1):
+            pre = f"{k}_" if len(lts) > 1 else ""
+            bloques.append(_req("POST", "_plugins/_security_analytics/logtype", seguridad.build_log_type(lt)))
+            curls = []
+            for n, r in enumerate(lt["reglas"], start=1):
+                curls.append(f"Regla {n}: {r['titulo']}  →  su id es <RULE_ID_{pre}{n}>\n"
+                             f"curl -k -u admin:<CONTRASEÑA_ADMIN> -X POST \"https://<ENDPOINT>:9200/"
+                             f"_plugins/_security_analytics/rules?category={lt['nombre']}\" \\\n"
+                             "  -H 'Content-Type: application/json' --data-binary @- <<'YAML'\n"
+                             + seguridad.sigma_yaml(r, lt["nombre"]) + "YAML")
+            bloques.append(_comentario("Las reglas Sigma van en YAML, no en JSON: se crean con curl.\n\n"
+                                       + "\n\n".join(curls)))
+            reglas = [(f"<RULE_ID_{pre}{n}>", r["nivel"]) for n, r in enumerate(lt["reglas"], start=1)]
+            bloques.append(_req("POST", "_plugins/_security_analytics/detectors",
+                                seguridad.build_detector(slug, lt["nombre"], [seguridad.alias_del_caso(ip)], reglas)))
+
+    # El reporte en PDF del dashboard (desde Dev Tools va en el tenant de quien
+    # lo corre: el mismo donde están los dashboards).
+    import plugins_vista
+    seccion("Reporte en PDF (Reporting)", "El dashboard del caso en PDF, a demanda en Dashboards → Reporting.",
+            "reporte")
+    bloques.append(_req("POST", "_plugins/_reports/definition",
+                        plugins_vista.definicion_de_reporte(slug, "<DASHBOARD_ID>", "<URL_DE_DASHBOARDS>")))
+    return bloques, marcas
 
 
 def seguridad_derivada_spec(slug: str, propuesta: dict) -> dict:

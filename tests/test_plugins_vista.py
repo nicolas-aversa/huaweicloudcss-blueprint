@@ -499,7 +499,7 @@ check('provisionando, lo dice', matrizDePluginsHTML(filas, plugins).includes('Pr
 state.provisionandoPlugins = false;
 const vacia = matrizDePluginsHTML(filas, {});
 check('sin plugins todavía: los casos y cómo provisionarlos', vacia.includes('data-fila="cts"') && !vacia.includes('class="mtx__th"')
-  && vacia.includes('Los plugins aparecen acá cuando corras "Provisionar plugins"'), vacia);
+  && vacia.includes('Los plugins aparecen acá cuando los apliques: "Aplicar los recomendados"'), vacia);
 check('escapado', matrizDePluginsHTML([F('<x>')], {}).includes('&lt;x&gt;') && !matrizDePluginsHTML([F('<x>')], {}).includes('<x>'));
 const det = pluginsDetalleHTML([
   T('forecasting', 'parcial', { motivo: 'fallaron: A', filas: [{ texto: 'volumen', estado: 'parcial', detalle: 'backtest parcial: 3 de 600 pasos',
