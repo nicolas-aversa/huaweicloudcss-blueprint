@@ -2334,7 +2334,7 @@
     .mtx__estado:hover, .mtx__estado:focus-visible, .mtx__global:hover, .mtx__global:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
     .mtx__na { color: var(--text-muted); font-size: var(--fs-xs); }
     .mtx__cluster { display: flex; flex-wrap: wrap; gap: 6px; }
-    .mtx__global { padding: 3px 10px 3px 6px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 600; }
+    .mtx__global { white-space: nowrap; padding: 3px 10px 3px 6px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 600; }
     .mtx__global .icon { width: 12px; height: 12px; }
     .mtx__det > td { padding: 12px 8px 4px; background: var(--bg-subtle); }
     .mtx__det-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 10px; }
@@ -6744,12 +6744,12 @@
       // Lo que es de todo el cluster (asistente, text2viz, Query Insights…): una fila más.
       const delCluster = _tarjetasDe(plugins, '_cluster').filter(t => t.estado !== 'excluido');
       const cluster = delCluster.length
-        ? `<tr class="mtx__fila mtx__fila--cluster" data-fila="_cluster"><th scope="row" class="mtx__caso">${abrir('_cluster', 'Todo el cluster')}</th>`
-          + `<td colspan="${ancho - 1}"><div class="mtx__cluster">${delCluster.map(t => {
+        ? `<tr class="mtx__fila mtx__fila--cluster" data-fila="_cluster"><th scope="row" class="mtx__caso"><span class="mtx__caso-in">${abrir('_cluster', 'Todo el cluster')}`
+          + `<span class="mtx__cluster">${delCluster.map(t => {
             const [texto] = _ESTADO_PLUGIN[t.estado] || [t.estado];
             return `<button type="button" class="mtx__global mtx__estado--${escapeHtml(t.estado)}" data-slug="_cluster" data-plugin="${escapeHtml(t.plugin)}" `
               + `title="${escapeHtml(`${t.titulo}: ${texto}`)}">${icon(_ICONO_ESTADO[t.estado] || 'info')}<span>${escapeHtml(t.titulo)}</span></button>`;
-          }).join('')}</div></td></tr>` + detalle('_cluster', '')
+          }).join('')}</span></span></th><td colspan="${ancho - 1}"></td></tr>` + detalle('_cluster', '')
         : '';
       const sinPlugins = !presentes.size
         ? `<p class="mtx__vacio">Los plugins aparecen acá cuando los apliques: "Aplicar los recomendados" (paso 3 de la puesta en marcha) o uno por uno, en Plugins para el cluster.</p>` : '';
@@ -6763,7 +6763,7 @@
           </div>
           <div class="mtx-scroll"><table class="mtx">
             <thead><tr><th scope="col" class="mtx__th-caso">Caso</th>${columnas.map(([id, n], i) =>
-              `<th scope="col" class="mtx__th">${escapeHtml(n)}${ayudaHTML(id, i >= columnas.length / 2)}</th>`).join('')}</tr></thead>
+              `<th scope="col" class="mtx__th">${escapeHtml(n)}${ayudaHTML(id, columnas.length <= 4 || i >= columnas.length / 2)}</th>`).join('')}</tr></thead>
             <tbody>${casos}${cluster}</tbody>
           </table></div>${sinPlugins}
         </div>`;
