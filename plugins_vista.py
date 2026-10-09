@@ -11,6 +11,8 @@ aparte (`/api/v1/plugins/numeros`), a demanda.
 """
 from __future__ import annotations
 
+import time as _time
+
 import accesos
 import ciclo_de_vida as cdv
 import perfiles
@@ -30,6 +32,8 @@ APP_REPORTING = "reports-dashboards"
 # Estado de una tarjeta: cómo quedó lo que se provisionó.
 OK, PARCIAL, FALLA, EN_CURSO, EXCLUIDO = "ok", "parcial", "falla", "en_curso", "excluido"
 SIN_PROBAR = "sin_probar"
+# Más que esto preparando el modelo es que el pedido se cortó (un reinicio).
+_PREPARACION_MAXIMA_S = 7200
 
 
 def base_de_dashboards(url: str) -> str:
@@ -376,7 +380,15 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
     preparar = {"id": "probar_embeddings", "texto": "Volver a prepararlo" if embeddings else "Prepararlo ahora"}
     que = ("El modelo multilingüe que entiende el significado de los textos, para la búsqueda híbrida. "
            "El CSS no sale a internet: se carga desde el bucket de demos.")
-    if embeddings is None:
+    desde = int((embeddings or {}).get("en_curso") or 0)
+    if desde and _time.time() - desde < _PREPARACION_MAXIMA_S:
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que, EN_CURSO,
+                              "se está preparando: la primera vez baja el modelo (~490 MB) y lo sube al bucket de "
+                              "demos, unos minutos"))
+    elif desde:   # el pedido que lo preparaba no terminó (al terminar, lo borra)
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que, FALLA,
+                              "la preparación se interrumpió (¿se reinició la plataforma?)", accion=preparar))
+    elif embeddings is None:
         fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " Se prepara al provisionar los plugins "
                               "si algún caso tiene texto libre (la primera vez sube ~490 MB al bucket).",
                               SIN_PROBAR, accion=preparar))

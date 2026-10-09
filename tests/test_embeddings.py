@@ -226,3 +226,53 @@ def test_el_motivo_no_lleva_el_link_firmado(monkeypatch, tmp_path):
                         _R(200, {"state": "FAILED", "error": error}) if url.endswith("/tasks/T1") else main_req(m, url, *a, **k))
     modelo, motivo = main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path)
     assert modelo == "" and "<link de OBS>" in motivo and "AKSECRETO" not in motivo and "Signature" not in motivo
+
+
+def test_la_provision_espera_al_que_lo_esta_preparando(monkeypatch, tmp_path):
+    """"Prepararlo ahora" y después "Aplicar los recomendados": la provisión
+    llegaba a la búsqueda con el modelo todavía bajándose y marcaba como
+    fallida la de cada caso. Ahora lo espera y lo encuentra desplegado."""
+    import threading
+    _cluster(monkeypatch, tmp_path, estados_modelo={"YA": "DEPLOYED"}, previos=["YA"])
+    assert main._preparando_el_modelo.acquire(blocking=False)
+    threading.Timer(0.2, main._preparando_el_modelo.release).start()
+    assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path, espera_s=5) == ("YA", "")
+    # Sin espera (el botón), dice que lo prepara otro.
+    assert main._preparando_el_modelo.acquire(blocking=False)
+    try:
+        assert main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path) == ("", main.MODELO_OCUPADO)
+    finally:
+        main._preparando_el_modelo.release()
+
+
+def test_mientras_se_prepara_la_tarjeta_dice_en_curso(monkeypatch, tmp_path):
+    vistos = []
+    _cluster(monkeypatch, tmp_path)
+    real = main._preparar_el_modelo
+    monkeypatch.setattr(main, "_preparar_el_modelo", lambda *a: vistos.append(
+        (main._read_estados(tmp_path).get("_cluster") or {}).get("embeddings")) or real(*a))
+    main._asegurar_modelo_de_embeddings("http://x", "a", "p", tmp_path)
+    assert vistos[0]["en_curso"] > 0
+    cluster = lambda e: {t["plugin"]: t for t in pv.tarjetas_del_cluster(  # noqa: E731
+        agente=False, text2viz={}, base="", embeddings=e)}["embeddings"]
+    en_curso = cluster({"ok": False, "motivo": "lo de antes", "en_curso": int(main.time.time())})
+    assert en_curso["estado"] == pv.EN_CURSO and "se está preparando" in en_curso["motivo"] and not en_curso.get("accion")
+    cortada = cluster({"ok": True, "en_curso": int(main.time.time()) - 3 * 3600})
+    assert cortada["estado"] == pv.FALLA and "se interrumpió" in cortada["motivo"] and cortada["accion"]
+
+
+def test_ocupado_no_pisa_el_estado_con_un_fallo(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a, **k: ("", main.MODELO_OCUPADO))
+    main._guardar_estados(tmp_path, "_cluster", {"embeddings": {"en_curso": 123}})
+    r = TestClient(main.app).post("/api/v1/plugins/probar-embeddings").json()
+    assert r["en_curso"] and not r["ok"]
+    assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"en_curso": 123}, "lo deja el otro pedido"
+    # La provisión, si después de esperar sigue ocupado: ni el modelo ni la búsqueda fallaron.
+    pasos = main.runs.start("capabilities")
+    pipe = {"a": {"fields": [{"field_path": "msg", "type": "text"}]}}
+    main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path, ["a"], pipe, False, pasos)
+    assert "a" not in main._read_estados(tmp_path)
+    assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"en_curso": 123}

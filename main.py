@@ -8019,6 +8019,10 @@ def _modelos_por_nombre(base: str, user: str, password: str) -> list[str]:
 
 _EN_CURSO_DEL_MODELO = ("REGISTERING", "DEPLOYING")
 _preparando_el_modelo = _threading.Lock()
+MODELO_OCUPADO = "el modelo ya se está preparando (otro pedido): en unos minutos queda"
+# La provisión espera a otro pedido que lo esté preparando (va al final: no
+# demora al resto). La primera vez baja ~465 MB y los sube al bucket.
+_ESPERA_DEL_MODELO_S = 1800
 _UN_LINK = re.compile(r"https?://\S+")
 
 
@@ -8029,12 +8033,20 @@ def _sin_links(texto: str) -> str:
     return _UN_LINK.sub("<link de OBS>", texto or "")
 
 
-def _asegurar_modelo_de_embeddings(base: str, user: str, password: str, terraform_dir: Path) -> "tuple[str, str]":
+def _asegurar_modelo_de_embeddings(base: str, user: str, password: str, terraform_dir: Path,
+                                   espera_s: float = 0) -> "tuple[str, str]":
     """(model_id, "") con el modelo desplegado; ("", motivo) si no. Uno a la
-    vez: "Prepararlo ahora" durante una provisión registraba otra copia."""
-    if not _preparando_el_modelo.acquire(blocking=False):
-        return "", "el modelo ya se está preparando (otro pedido): en unos minutos queda"
+    vez: "Prepararlo ahora" durante una provisión registraba otra copia. Con
+    `espera_s`, si otro pedido lo está preparando, lo espera (y después lo
+    encuentra desplegado); sin, devuelve MODELO_OCUPADO."""
+    tomado = (_preparando_el_modelo.acquire(timeout=espera_s) if espera_s > 0
+              else _preparando_el_modelo.acquire(blocking=False))
+    if not tomado:
+        return "", MODELO_OCUPADO
     try:
+        # Mientras tanto la tarjeta dice "En curso": la primera vez son minutos.
+        previo = (_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}
+        _guardar_estados(terraform_dir, "_cluster", {"embeddings": {**previo, "en_curso": int(time.time())}})
         modelo, motivo = _preparar_el_modelo(base, user, password, terraform_dir)
         return modelo, _sin_links(motivo)
     finally:
@@ -8156,7 +8168,12 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
             casos[slug] = fields
     if not casos:
         return
-    model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir)
+    model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir, _ESPERA_DEL_MODELO_S)
+    if motivo == MODELO_OCUPADO:
+        # Lo sigue preparando otro pedido: ni el modelo ni la búsqueda fallaron.
+        runs.step(run, "Búsqueda híbrida", False,
+                  "el modelo de embeddings se sigue preparando: cuando quede, aplicá la búsqueda híbrida")
+        return
     runs.step(run, "Modelo de embeddings", bool(model_id), (motivo or "desplegado, desde el bucket de demos")[:300])
     guardados = _read_estados(terraform_dir)
     # Si falló (el cluster cargado, un timeout), el id que andaba se conserva:
@@ -8193,6 +8210,9 @@ def probar_embeddings() -> dict:
     base, user, password = _cluster_del_entorno("embeddings")
     conocido = ((_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
     model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir)
+    if motivo == MODELO_OCUPADO:
+        # El otro pedido deja el resultado; este no lo pisa con un fallo.
+        return {"ok": False, "en_curso": True, "model_id": "", "dimensiones": 0, "reason": motivo}
     res = {"ok": bool(model_id), "model_id": model_id, "dimensiones": busqueda.DIMENSION if model_id else 0,
            "reason": "el modelo de embeddings quedó desplegado: aplicá la búsqueda híbrida para armarla"
            if model_id else motivo}
