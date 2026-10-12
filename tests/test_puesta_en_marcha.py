@@ -51,7 +51,7 @@ def test_cada_paso_hecho_se_puede_rehacer():
     assert "Hecho" in hecho and 'id="${btnId}">${redoLabel}</button>' in hecho
     assert "'infra-apply-schema-btn', paso1.boton, 'Volver a aplicar')" in vista
     for boton, texto, rehacer in (("infra-ingest-btn", "Iniciar ingesta con Logstash", "Reiniciar ingesta"),
-                                  ("infra-capabilities-btn", "Aplicar los recomendados", "Volver a aplicar los recomendados")):
+                                  ("infra-capabilities-btn", "Activar los plugins", "Volver a activar los plugins")):
         assert f"'{boton}', '{texto}', '{rehacer}'" in vista, boton
 
 

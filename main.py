@@ -9083,7 +9083,7 @@ class ProvisionCapabilitiesRequest(BaseModel):
     # Los plugins a aplicar, elegidos en la vista (de a uno). Vacío = todos
     # los que aplican, como antes.
     plugins: list[str] = Field(default_factory=list)
-    # "Aplicar los recomendados" (el paso 3): los de PLUGINS_RECOMENDADOS, sin
+    # "Activar los plugins" (el paso 3): los de PLUGINS_RECOMENDADOS, sin
     # prender lo que se apagó en el paso 2 (eso lo hace elegir uno a mano).
     recomendados: bool = False
 

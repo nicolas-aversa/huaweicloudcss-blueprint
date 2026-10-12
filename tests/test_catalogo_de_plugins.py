@@ -248,7 +248,10 @@ def test_que_podes_mostrar_esta_conectado():
     assert "if (fila) return verFuncion(fila, data);" in vista
     assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
-    assert 'href="#infra-funciones" class="setup-paso__link"' in vista
+    # El paso 3 activa todo lo que hace falta: sin "recomendados" ni "elegí cuáles" (traían dudas).
+    assert "'infra-capabilities-btn', 'Activar los plugins', 'Volver a activar los plugins'" in vista
+    assert "recomendados" not in vista.replace("{ recomendados: true }", "") and "setup-paso__link" not in html
+    assert "la búsqueda por significado" in vista
     # Los pedidos llevan la lista o los recomendados.
     assert "...(plugins ? { plugins } : {})," in html and "...(recomendados ? { recomendados: true } : {})," in html
     # De a uno: dos a la vez se pisan.

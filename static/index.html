@@ -2432,7 +2432,6 @@
     .cat__cmd:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .cat__pie a.btn { text-decoration: none; }
     .cat__pie { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--fs-xs); color: var(--text-muted); }
-    .setup-paso__link { color: var(--accent-hover); white-space: nowrap; }
     /* Probar la búsqueda: por palabras y la híbrida, lado a lado. */
     .busq { display: flex; flex-direction: column; gap: var(--sp-2); }
     .busq__fila { display: flex; gap: var(--sp-2); }
@@ -6665,7 +6664,7 @@
             <span class="section-card__tile">${icon('key')}</span>
             <span class="section-card__titlewrap">
               <span class="section-card__title">Accesos de demo</span>
-              <span class="section-card__hint">Un analista de solo lectura por caso que ve los datos sensibles enmascarados · entrá a Dashboards con su usuario · los crea "Aplicar los recomendados"</span>
+              <span class="section-card__hint">Un analista de solo lectura por caso que ve los datos sensibles enmascarados · entrá a Dashboards con su usuario · los crea "Activar los plugins"</span>
             </span>
             <button type="button" class="btn btn-primary btn-sm" id="infra-accesos-ver">Ver accesos</button>
           </div>
@@ -6674,7 +6673,7 @@
         </div>`;
     }
     function accesosDetalleHTML(lista) {
-      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay analistas: corré "Aplicar los recomendados" o aplicá el analista en Plugins para el cluster.</div>';
+      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay analistas: corré "Activar los plugins" (paso 3 de la puesta en marcha).</div>';
       return lista.map(a => `<div class="hallazgos__det"><div class="hallazgos__head">`
         + `<strong>${escapeHtml(SLUG_LABELS[a.slug] || a.slug)}</strong>`
         + `<span class="hallazgos__total">enmascarado: ${escapeHtml((a.enmascarados || []).join(', '))}</span></div>`
@@ -6814,7 +6813,7 @@
           }).join('')}</span></span></th><td colspan="${ancho - 1}"></td></tr>` + detalle('_cluster', '')
         : '';
       const sinPlugins = !presentes.size
-        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando los apliques: "Aplicar los recomendados" (paso 3 de la puesta en marcha) o uno por uno, en Qué podés mostrar.</p>` : '';
+        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando los actives: "Activar los plugins" (paso 3 de la puesta en marcha).</p>` : '';
       // Plegada: para mostrar alcanza con "Qué podés mostrar"; acá, cada caso
       // con sus tarjetas, sus números y "Explicarla con IA".
       return `<details class="section-card env-plegable" id="infra-plugins"${state.casosAbiertos ? ' open' : ''}>
@@ -6836,7 +6835,7 @@
     // ── Plugins para el cluster: elegir qué armar ──────────────────────────────
     // Con el entorno ya desplegado, plugin por plugin: en qué casos aplica,
     // sus comandos de Dev Tools y un botón que arma solo ese, sin tocar los
-    // demás. El paso 3 aplica los recomendados; lo que en una demo sobra (el
+    // demás. El paso 3 activa todos los que hacen falta; lo que en una demo sobra (el
     // ciclo de vida y el rollup se notan con meses de datos) se arma si se
     // elige acá. El catálogo viene en /terraform/status (_catalogo_de_plugins).
     const _NOMBRE_DEL_PLUGIN = {
@@ -6910,7 +6909,7 @@
         : `${f.problemas ? 'Con avisos' : 'Lista'} · ${n === 1 ? '1 caso' : `${n} casos`}`;
       // Una sola acción. Security Analytics y los tableros se arman en el
       // paso 1 (antes que los datos): no se activan desde acá. Secundaria: lo
-      // primario es "Aplicar los recomendados" (paso 3).
+      // primario es "Activar los plugins" (paso 3).
       const falta = f.c && f.hechos.length < f.aplica.length && f.id !== 'security_analytics';
       const accion = f.id === 'agente' && f.hechos.length
         ? '<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>'
@@ -7916,7 +7915,7 @@
     }
 
     // Paso 3 (post-ingesta): provisiona capabilities sobre el cluster con datos ya
-    // ingeridos. Lo disparan "Aplicar los recomendados" (`recomendados`) y el
+    // ingeridos. Lo disparan "Activar los plugins" (`recomendados`: todos los de la demo) y el
     // "Aplicar" de cada plugin en Plugins para el cluster (`plugins`, en los
     // `slugs` donde falta). Sin ninguno, todos los que aplican. `clave`: el
     // plugin del botón, que sigue diciendo "Aplicando…" si la vista se repinta.
@@ -8860,11 +8859,11 @@
                   : 'Arranca Logstash: recién acá empiezan a entrar los datos.',
                 'infra-ingest-btn', 'Iniciar ingesta con Logstash', 'Reiniciar ingesta')}
               ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
-                (ingestDone ? 'Asistente, pronósticos, anomalías, alertas, perfiles, búsqueda y reporte. Esperá ~1-2 min a que carguen datos.'
-                            : 'Iniciá la ingesta y esperá que entren documentos.')
-                  + ((data.catalogo || []).length ? ' <a href="#infra-funciones" class="setup-paso__link">O elegí cuáles, una por una</a>' : ''),
-                // "Volver a aplicar" completa lo que falta o quedó fallado.
-                'infra-capabilities-btn', 'Aplicar los recomendados', 'Volver a aplicar los recomendados') : ''}
+                ingestDone ? 'Arma todo lo que estos datos permiten mostrar: el asistente, los pronósticos, las anomalías y sus avisos, '
+                             + 'la búsqueda por significado, las fichas y el reporte. Esperá ~1-2 min a que carguen datos.'
+                           : 'Iniciá la ingesta y esperá que entren documentos.',
+                // "Volver a activar" completa lo que falta o quedó fallado.
+                'infra-capabilities-btn', 'Activar los plugins', 'Volver a activar los plugins') : ''}
             </div>
             <div id="infra-capabilities-result" class="setup-card__plugins"></div>
           </div>
@@ -8968,10 +8967,6 @@
       // (~7 minutos para 9 casos) aunque estuviera bien.
       body.querySelector('#infra-capabilities-btn')?.addEventListener('click', (e) =>
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false, { recomendados: true }));
-      body.querySelector('.setup-paso__link')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        body.querySelector('#infra-funciones')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      });
       // Qué podés mostrar: abrir una función, activarla, probarla y sus comandos.
       body.querySelectorAll('.fn-seccion').forEach(seccion => seccion.addEventListener('click', (e) => {
         const aplicar = e.target.closest('.cat__aplicar');
@@ -9151,7 +9146,7 @@
               const r = await real('/api/v1/dev/catalogo-preview?slugs=' + encodeURIComponent(slugs.join(',')));
               estado.catalogo = r.ok ? (await r.json()).catalogo || [] : [];
             } catch (_err) { estado.catalogo = []; }
-            // Con los plugins provisionados, los recomendados quedan listos (la
+            // Con los plugins provisionados, los de la demo quedan listos (la
             // búsqueda, a medias); el ciclo de vida y el rollup, por elegir.
             if (Object.keys(estado.capabilities || {}).length) {
               estado.catalogo.forEach(c => {
