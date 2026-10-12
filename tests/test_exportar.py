@@ -76,9 +76,12 @@ def test_sin_secretos():
     secretos conocidos del repo."""
     texto = _texto()
     assert "<MAAS_API_KEY>" in texto and "<CONTRASEÑA_DEL_ANALISTA>" in texto
-    assert not re.search(r"HPUA|vJfk|VTd4|Huawei1234|k72q30|sk-[A-Za-z0-9]{20}", texto)
+    assert not re.search(r"HPUA|vJfk|VTd4|Huawei1234|k72q30|sk-[A-Za-z0-9]{20}|nvapi-", texto)
     connectors = [c for _, r, c in _requests(texto) if r == "_plugins/_ml/connectors/_create"]
-    assert len(connectors) == 2 and all(c["credential"] == {"maas_key": "<MAAS_API_KEY>"} for c in connectors)
+    maas = [c for c in connectors if "maas_key" in c["credential"]]
+    nvidia = [c for c in connectors if "api_key" in c["credential"]]
+    assert len(maas) == 2 and all(c["credential"] == {"maas_key": "<MAAS_API_KEY>"} for c in maas)
+    assert len(nvidia) == 2 and all(c["credential"] == {"api_key": "<NVIDIA_API_KEY>"} for c in nvidia), "los de la búsqueda"
 
 
 def test_los_endpoints(monkeypatch, tmp_path):

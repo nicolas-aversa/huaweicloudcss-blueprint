@@ -7,11 +7,15 @@ pierde, porque busca "parecidos". La híbrida corre las dos y mezcla los
 resultados: lo literal sale arriba y además encuentra lo que está dicho con
 otras palabras ("cobro rechazado" → "pago denegado").
 
-Cómo, sin salida a internet y sin cargar el nodo:
+Cómo:
 
-* El modelo de embeddings (multilingüe, open source) no lo puede bajar el
-  cluster: lo sube la plataforma una vez al bucket de demos y el cluster lo
-  registra desde un link firmado de OBS (`url` en `_register`).
+* Los vectores los calcula NVIDIA NIM (nemotron-3-embed-1b, multilingüe): el
+  cluster se los pide por un conector de ml-commons, como el asistente le pide
+  respuestas a MaaS. El CSS no deja desplegar modelos locales: el motor (DJL)
+  baja PyTorch de internet y el nodo no lo puede guardar ("Failed to save
+  pytorch index file"), sea TorchScript u ONNX; y MaaS (ap-southeast-1) no
+  tiene embeddings. Los textos del campo viajan a NVIDIA: con datos de un
+  cliente, se avisa.
 * No se calcula un vector por evento (100.000 eventos en un nodo sin GPU son
   horas): un Transform deja una fila por texto DISTINTO, con cuántas veces
   aparece, en `busqueda-<caso>`; ese índice tiene el pipeline de embeddings
@@ -27,20 +31,22 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# El modelo: multilingüe (castellano e inglés en el mismo espacio), 384
-# dimensiones, ~490 MB. Lo que pide `_register` con `url` sale de su config.json.
-MODELO = {
-    "nombre": "plataforma-embeddings-multilingue",
-    "origen": ("https://artifacts.opensearch.org/models/ml-models/huggingface/sentence-transformers/"
-               "paraphrase-multilingual-MiniLM-L12-v2/1.0.1/torch_script/"),
-    "archivo": "sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2-1.0.1-torch_script.zip",
-    "version": "1.0.1",
-    "bytes": 488135181,
-    "hash": "a2ae3c4f161bd8e5a99a19ba5589443d33a120bb2bd67aa9da102c8b201f1277",
-    "config": {"model_type": "bert", "embedding_dimension": 384, "framework_type": "sentence_transformers"},
+# Quién calcula los vectores. Multilingüe (castellano entre 34 idiomas),
+# 2048 dimensiones, normalizados. La API es la de OpenAI.
+PROVEEDOR = {
+    "nombre": "NVIDIA NIM",
+    "url": "https://integrate.api.nvidia.com/v1/embeddings",
+    "modelo": "nvidia/nemotron-3-embed-1b",
+    # Global Accelerator de AWS: IPs fijas, las que piden las rutas del CSS.
+    "ips": ("75.2.113.119", "99.83.136.103"),
 }
-DIMENSION = 384
-CARPETA_EN_OBS = "css-demos/modelos"
+DESTINO_PERMITIDO = r"^https://integrate\.api\.nvidia\.com/.*$"
+DIMENSION = 2048
+# Textos por pedido: la API acepta hasta 256; el tier gratis, ~40 pedidos por minuto.
+LOTE = 100
+# Un modelo para los textos (al cargar) y otro para lo que se busca: el de
+# NVIDIA rinde mejor si sabe cuál es cuál (`input_type`).
+NOMBRES_DE_MODELO = {"passage": "plataforma-embeddings-textos", "query": "plataforma-embeddings-consultas"}
 PIPELINE_DE_INGESTA = "plataforma-embeddings"
 PIPELINE_DE_BUSQUEDA = "plataforma-hibrida"
 # Lo que pesa cada parte en la mezcla: más el significado que la palabra
@@ -99,30 +105,37 @@ def nombre_del_transform(slug: str) -> str:
     return f"{slug}-busqueda"
 
 
-def clave_en_obs() -> str:
-    return f"{CARPETA_EN_OBS}/{MODELO['archivo']}"
-
-
-def registro_del_modelo(url: str) -> dict[str, Any]:
-    """`POST _plugins/_ml/models/_register` desde un link (el firmado de OBS)."""
+def conector(tipo: str, api_key: str) -> dict[str, Any]:
+    """`POST _plugins/_ml/connectors/_create`: el pedido de vectores a NVIDIA,
+    para los textos (`passage`) o para lo que se busca (`query`)."""
     return {
-        "name": MODELO["nombre"], "version": MODELO["version"],
-        "description": "Embeddings multilingües para la búsqueda híbrida (plataforma)",
-        "model_format": "TORCH_SCRIPT", "function_name": "TEXT_EMBEDDING",
-        "model_content_hash_value": MODELO["hash"], "model_config": dict(MODELO["config"]),
-        "url": url,
+        "name": NOMBRES_DE_MODELO[tipo], "version": "1", "protocol": "http",
+        "description": f"Embeddings de {PROVEEDOR['nombre']} ({tipo}) para la búsqueda híbrida (plataforma)",
+        "parameters": {"model": PROVEEDOR["modelo"], "input_type": tipo},
+        "credential": {"api_key": api_key},
+        "actions": [{
+            "action_type": "predict", "method": "POST", "url": PROVEEDOR["url"],
+            "headers": {"Authorization": "Bearer ${credential.api_key}", "Content-Type": "application/json"},
+            "request_body": ('{ "input": ${parameters.input}, "model": "${parameters.model}", '
+                             '"input_type": "${parameters.input_type}", "encoding_format": "float" }'),
+            "pre_process_function": "connector.pre_process.openai.embedding",
+            "post_process_function": "connector.post_process.openai.embedding",
+        }],
     }
 
 
-def ajustes_del_cluster() -> dict[str, Any]:
-    """Registrar un modelo desde un link está apagado por defecto."""
-    return {"persistent": {"plugins.ml_commons.allow_registering_model_via_url": True,
-                           "plugins.ml_commons.only_run_on_ml_node": False}}
+def registro_del_modelo(tipo: str, connector_id: str) -> dict[str, Any]:
+    """`POST _plugins/_ml/models/_register?deploy=true`: un modelo remoto (no
+    se instala nada en el nodo)."""
+    return {"name": NOMBRES_DE_MODELO[tipo], "function_name": "remote", "connector_id": connector_id,
+            "description": f"{PROVEEDOR['modelo']} ({tipo}) para la búsqueda híbrida (plataforma)"}
 
 
 def pipeline_de_ingesta(model_id: str) -> dict[str, Any]:
+    """Vectoriza al entrar, de a `LOTE` textos por pedido a NVIDIA."""
     return {"description": "Vectoriza el texto de la búsqueda híbrida (plataforma)",
-            "processors": [{"text_embedding": {"model_id": model_id, "field_map": {"texto": "embedding"}}}]}
+            "processors": [{"text_embedding": {"model_id": model_id, "field_map": {"texto": "embedding"},
+                                               "batch_size": LOTE}}]}
 
 
 def pipeline_de_busqueda() -> dict[str, Any]:
@@ -144,8 +157,9 @@ def mapping_del_indice() -> dict[str, Any]:
             "texto": {"type": "text", "fields": {"es": {"type": "text", "analyzer": "spanish"},
                                                  "keyword": {"type": "keyword", "ignore_above": 1024}}},
             "cuenta": {"type": "long"},
+            # Los vectores de NVIDIA vienen normalizados: el producto interno es el coseno.
             "embedding": {"type": "knn_vector", "dimension": DIMENSION,
-                          "method": {"name": "hnsw", "engine": "lucene", "space_type": "cosinesimil"}},
+                          "method": {"name": "hnsw", "engine": "faiss", "space_type": "innerproduct"}},
         }},
     }
 

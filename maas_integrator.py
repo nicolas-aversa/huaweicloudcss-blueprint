@@ -495,6 +495,65 @@ def maas_key_problem() -> str:
     return ""
 
 
+def get_nvidia_api_key() -> str:
+    """La API key de NVIDIA (build.nvidia.com) para los vectores de la búsqueda
+    por significado: la de ⚙ Configuración > NVIDIA_API_KEY del env. Se valida
+    al leer, como la de MaaS."""
+    guardada = (_read_settings().get("nvidia_api_key") or "").strip()
+    if guardada:
+        try:
+            return validate_api_key(guardada)
+        except InvalidApiKey as exc:
+            print(f"[settings] la key de NVIDIA guardada no es usable ({exc}); uso el env")
+    return (os.getenv("NVIDIA_API_KEY", "") or "").strip()
+
+
+def set_nvidia_api_key(key: str) -> None:
+    """Persiste (cifrada, con el resto de los settings) o borra la key de NVIDIA."""
+    key = validate_api_key(key)
+    data = _read_settings()
+    if key:
+        data["nvidia_api_key"] = key
+    else:
+        data.pop("nvidia_api_key", None)
+    _write_settings(data)
+
+
+def nvidia_key_source() -> str:
+    """'settings' | 'env' | 'none'."""
+    guardada = (_read_settings().get("nvidia_api_key") or "").strip()
+    try:
+        if guardada and validate_api_key(guardada):
+            return "settings"
+    except InvalidApiKey:
+        pass
+    return "env" if (os.getenv("NVIDIA_API_KEY", "") or "").strip() else "none"
+
+
+def probar_nvidia_api_key() -> dict:
+    """Pide el vector de un texto con la key: ``{ok, detail}``."""
+    import requests
+    import busqueda
+
+    key = get_nvidia_api_key()
+    if not key:
+        return {"ok": False, "detail": "No hay API key de NVIDIA configurada."}
+    try:
+        r = requests.post(busqueda.PROVEEDOR["url"], timeout=30, headers={"Authorization": f"Bearer {key}"},
+                          json={"model": busqueda.PROVEEDOR["modelo"], "input": ["prueba"], "input_type": "query"})
+    except requests.RequestException as exc:
+        return {"ok": False, "detail": f"No se pudo llegar a NVIDIA: {type(exc).__name__}"}
+    if r.status_code == 200:
+        try:
+            n = len(r.json()["data"][0]["embedding"])
+        except (ValueError, KeyError, IndexError, TypeError):
+            n = 0
+        return {"ok": True, "detail": f"Funciona: {busqueda.PROVEEDOR['modelo']} devolvió un vector de {n} dimensiones."}
+    if r.status_code in (401, 403):
+        return {"ok": False, "detail": "NVIDIA rechazó la API key (401/403): revisala en build.nvidia.com."}
+    return {"ok": False, "detail": f"NVIDIA respondió {r.status_code}: {r.text[:200]}"}
+
+
 def get_pipeline_model() -> str:
     """Modelo del análisis/generación de pipeline (MAAS_PIPELINE_MODEL o default)."""
     return os.getenv("MAAS_PIPELINE_MODEL", DEFAULT_MODEL)

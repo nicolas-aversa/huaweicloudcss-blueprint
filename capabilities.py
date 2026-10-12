@@ -72,6 +72,15 @@ def trusted_endpoint_regex(endpoint: str | None = None) -> str:
     return rf"^https://{ep}/.*$"
 
 
+def destinos_permitidos(endpoint: str | None = None) -> list[str]:
+    """A dónde pueden llamar los conectores: MaaS (el asistente) y NVIDIA (los
+    vectores de la búsqueda). Las dos siempre: poner una lista con una sola
+    pisaba a la otra al reprovisionar."""
+    import busqueda
+
+    return [trusted_endpoint_regex(endpoint), busqueda.DESTINO_PERMITIDO]
+
+
 # ── Cluster settings (ml-commons) ────────────────────────────────────────────
 
 def build_cluster_settings(endpoint: str | None = None) -> dict[str, Any]:
@@ -80,7 +89,7 @@ def build_cluster_settings(endpoint: str | None = None) -> dict[str, Any]:
     conversación para el agente."""
     return {
         "persistent": {
-            "plugins.ml_commons.trusted_connector_endpoints_regex": [trusted_endpoint_regex(endpoint)],
+            "plugins.ml_commons.trusted_connector_endpoints_regex": destinos_permitidos(endpoint),
             "plugins.ml_commons.only_run_on_ml_node": False,
             "plugins.ml_commons.memory_feature_enabled": True,
             "plugins.ml_commons.connector_access_control_enabled": False,

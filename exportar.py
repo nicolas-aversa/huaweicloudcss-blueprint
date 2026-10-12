@@ -25,6 +25,7 @@ import seguridad
 from index_template import build_index_template, index_pattern_from_name
 
 MAAS_API_KEY = "<MAAS_API_KEY>"
+NVIDIA_API_KEY = "<NVIDIA_API_KEY>"
 
 
 def _req(metodo: str, ruta: str, cuerpo: Any = None) -> str:
@@ -201,21 +202,26 @@ def _armar(slug: str, fields: list[dict], *, label: str = "", index_name: str = 
         cfg = config("busqueda", {"campo": campo, "tipo": busqueda.tipo_del_campo(fields, campo)})
         tid, idx = busqueda.nombre_del_transform(slug), busqueda.indice(slug)
         bloques += [
-            _comentario("El modelo de embeddings: el cluster no lo baja de internet. Subí a un bucket de OBS\n"
-                        + busqueda.MODELO["origen"] + busqueda.MODELO["archivo"]
-                        + "\ny registralo desde un link firmado de ese objeto."),
-            _req("PUT", "_cluster/settings", busqueda.ajustes_del_cluster()),
-            _req("POST", "_plugins/_ml/models/_register", busqueda.registro_del_modelo("<LINK_FIRMADO_DE_OBS>")),
-            _comentario("Con el model_id de la tarea (GET _plugins/_ml/tasks/<TASK_ID>):\n"
-                        "POST _plugins/_ml/models/<MODEL_ID>/_deploy"),
-            _req("PUT", f"_ingest/pipeline/{busqueda.PIPELINE_DE_INGESTA}", busqueda.pipeline_de_ingesta("<MODEL_ID>")),
+            _comentario(f"Los vectores los calcula {busqueda.PROVEEDOR['nombre']} ({busqueda.PROVEEDOR['modelo']}): el cluster\n"
+                        "se los pide por un conector. Tiene que poder salir a integrate.api.nvidia.com (en CSS,\n"
+                        "rutas del cluster a " + " y ".join(busqueda.PROVEEDOR["ips"]) + "). Los textos viajan a NVIDIA."),
+            _req("PUT", "_cluster/settings", {"persistent": {
+                "plugins.ml_commons.trusted_connector_endpoints_regex": caps.destinos_permitidos()}}),
+            _req("POST", "_plugins/_ml/connectors/_create", busqueda.conector("passage", NVIDIA_API_KEY)),
+            _req("POST", "_plugins/_ml/models/_register?deploy=true",
+                 busqueda.registro_del_modelo("passage", "<CONNECTOR_ID_TEXTOS>")),
+            _req("POST", "_plugins/_ml/connectors/_create", busqueda.conector("query", NVIDIA_API_KEY)),
+            _req("POST", "_plugins/_ml/models/_register?deploy=true",
+                 busqueda.registro_del_modelo("query", "<CONNECTOR_ID_CONSULTAS>")),
+            _comentario("Cada _register devuelve su model_id (o un task_id: GET _plugins/_ml/tasks/<TASK_ID>)."),
+            _req("PUT", f"_ingest/pipeline/{busqueda.PIPELINE_DE_INGESTA}", busqueda.pipeline_de_ingesta("<MODEL_ID_TEXTOS>")),
             _req("PUT", f"_search/pipeline/{busqueda.PIPELINE_DE_BUSQUEDA}", busqueda.pipeline_de_busqueda()),
             _req("PUT", idx, busqueda.mapping_del_indice()),
             _req("PUT", f"_plugins/_transform/{tid}", busqueda.transform(slug, ip, cfg["campo"], cfg["tipo"])),
             _req("POST", f"_plugins/_transform/{tid}/_start"),
             _comentario("Probala:"),
             _req("POST", f"{idx}/_search?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}",
-                 busqueda.consulta_hibrida("<LO QUE BUSCÁS>", "<MODEL_ID>")),
+                 busqueda.consulta_hibrida("<LO QUE BUSCÁS>", "<MODEL_ID_CONSULTAS>")),
         ]
 
     if con_sa:

@@ -375,23 +375,22 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
         fuera.append(_tarjeta("text2viz", "Text to visualization",
                               "Arma el gráfico de cada respuesta del asistente a partir de su consulta.",
                               OK if ok else FALLA, "" if ok else text2viz.get("motivo", "")))
-    # El modelo de la búsqueda híbrida. El CSS no sale a internet: "Preparar
-    # bucket" lo sube al bucket de demos y el cluster lo carga desde ahí al
-    # activar la búsqueda. Sin botón propio: activar la búsqueda lo prepara.
+    # El modelo de la búsqueda híbrida: el de NVIDIA, por un conector (el CSS no
+    # deja desplegar modelos locales). Sin botón propio: activar la búsqueda lo
+    # prepara.
     reintentar = "se reintenta con «Completar» en Búsqueda por significado"
-    que = ("El modelo multilingüe que entiende el significado de los textos, para la búsqueda híbrida. "
-           "El CSS no sale a internet: se carga desde el bucket de demos.")
+    que = ("El modelo multilingüe de NVIDIA (nemotron-3-embed-1b) que entiende el significado de los textos. "
+           "El cluster le pide los vectores por un conector, como el asistente a MaaS: los textos viajan a NVIDIA.")
     desde = int((embeddings or {}).get("en_curso") or 0)
     if desde and _time.time() - desde < _PREPARACION_MAXIMA_S:
         fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que, EN_CURSO,
-                              "se está preparando: la primera vez baja el modelo (~490 MB) y lo sube al bucket de "
-                              "demos, unos minutos"))
+                              "se está preparando: el conector y los modelos remotos de NVIDIA"))
     elif desde:   # el pedido que lo preparaba no terminó (al terminar, lo borra)
         fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que, FALLA,
                               f"la preparación se interrumpió (¿se reinició la plataforma?): {reintentar}"))
     elif embeddings is None:
-        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " El cluster lo carga al activar la búsqueda.",
-                              SIN_PROBAR))
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " Se prepara al activar la búsqueda "
+                              "(necesita la API key de NVIDIA en ⚙ Configuración).", SIN_PROBAR))
     else:
         ok = bool(embeddings.get("ok"))
         motivo = embeddings.get("motivo", "")

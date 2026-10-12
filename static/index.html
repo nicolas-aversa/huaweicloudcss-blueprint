@@ -3138,7 +3138,7 @@
               </div>
               <ol class="guide-list">
                 <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS, MaaS API key, bucket) e <strong>Infraestructura general</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
-                <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros, y el modelo de la búsqueda híbrida (~490 MB, solo la primera vez). Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
+                <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros. Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
               </ol>
             </section>
 
@@ -3318,6 +3318,31 @@
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-hw-save">Guardar</button>
                 <span id="settings-hw-status" class="settings-status"></span>
+              </div>
+            </div>
+
+            <!-- Card 4: la API key de NVIDIA, para los vectores de la búsqueda por
+                 significado. La key no vuelve al navegador. -->
+            <div class="settings-card">
+              <div class="settings-card__head">
+                <span class="settings-card__tile"><svg class="icon"><use href="#ic-search"/></svg></span>
+                <div>
+                  <div class="settings-card__title">Búsqueda por significado (NVIDIA)</div>
+                  <div class="settings-card__hint">El cluster le pide los vectores a NVIDIA NIM (nemotron-3-embed-1b): los textos del campo de búsqueda viajan a NVIDIA. La key se crea gratis en build.nvidia.com y se guarda cifrada. Sin key, la búsqueda por significado no se activa.</div>
+                </div>
+              </div>
+              <div class="settings-fields" style="display:grid; grid-template-columns:minmax(0,1fr); gap:14px;">
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-nvidia-key">API key de NVIDIA</label>
+                  <div class="settings-field__row">
+                    <input type="password" class="form-input" id="settings-nvidia-key" autocomplete="off" placeholder="nvapi-…">
+                    <button class="btn btn-muted" type="button" id="settings-nvidia-test" title="Pide un vector a NVIDIA con esta key">Probar</button>
+                  </div>
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button class="btn btn-primary" id="settings-nvidia-save">Guardar</button>
+                <span id="settings-nvidia-status" class="settings-status"></span>
               </div>
             </div>
 
@@ -6744,9 +6769,9 @@
         'Cualquiera consulta los datos sin saber el lenguaje de consultas, y cada respuesta se puede auditar.'],
       text2viz: ['Arma el gráfico de cada respuesta del asistente; en Dashboards, crea una visualización a partir de una frase.',
         'Del pedido al gráfico en segundos, sin saber armar visualizaciones.'],
-      busqueda: ['Busca en el texto libre del caso por palabras y por significado a la vez: lo exacto sale arriba y "cobro rechazado" encuentra también "pago denegado".',
+      busqueda: ['Busca en el texto libre del caso por palabras y por significado a la vez: lo exacto sale arriba y "cobro rechazado" encuentra también "pago denegado". Los textos se vectorizan con NVIDIA: con datos de un cliente, avisale.',
         'Buscadores de tickets, motivos, productos o diagnósticos que entienden lo que el usuario quiso decir, sin perder las coincidencias exactas (un código, una IP).'],
-      embeddings: ['El modelo multilingüe que entiende el significado de los textos, para la búsqueda híbrida. El CSS no sale a internet: se carga desde el bucket de demos.',
+      embeddings: ['El modelo multilingüe de NVIDIA que entiende el significado de los textos. El cluster le pide los vectores por API, sin instalar nada (el CSS no deja correr modelos propios).',
         'Búsqueda por significado en castellano e inglés sin mandar los datos a un servicio externo.'],
       query_insights: ['Muestra las consultas más pesadas del cluster, con su latencia, CPU y memoria.',
         'Encontrar qué consulta o tablero frena al cluster antes de pagar por agrandarlo.'],
@@ -10567,6 +10592,45 @@
       }
     });
     cargarCanalDeAlertas();
+    // La key de NVIDIA (búsqueda por significado): no vuelve; se muestra si está.
+    async function cargarClaveDeNvidia() {
+      const estado = document.getElementById('settings-nvidia-status');
+      try {
+        const c = await (await fetch('/api/v1/settings/nvidia')).json();
+        if (estado) estado.textContent = c.configured ? `Configurada (${c.masked})` : 'Sin key: la búsqueda por significado no se activa.';
+      } catch (_err) { /* sin datos, la tarjeta queda vacía */ }
+    }
+    document.getElementById('settings-nvidia-save')?.addEventListener('click', async () => {
+      const estado = document.getElementById('settings-nvidia-status');
+      const campo = document.getElementById('settings-nvidia-key');
+      try {
+        const res = await fetch('/api/v1/settings/nvidia', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: campo.value.trim() }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        campo.value = '';
+        estado.textContent = d.configured ? 'Guardada. Se usa al activar la búsqueda.' : 'Key borrada.';
+      } catch (err) {
+        estado.textContent = `Error: ${err.message}`;
+      }
+    });
+    document.getElementById('settings-nvidia-test')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const estado = document.getElementById('settings-nvidia-status');
+      btn.disabled = true;
+      estado.textContent = 'Probando…';
+      try {
+        const d = await (await fetch('/api/v1/settings/nvidia/test', { method: 'POST' })).json();
+        estado.textContent = d.detail;
+      } catch (err) {
+        estado.textContent = `Error: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    cargarClaveDeNvidia();
     document.getElementById('settings-hw-save')?.addEventListener('click', async () => {
       const st = document.getElementById('settings-hw-status');
       // Todos los campos de infra son obligatorios para desplegar.

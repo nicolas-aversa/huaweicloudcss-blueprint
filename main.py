@@ -2000,6 +2000,40 @@ def test_maas_settings() -> dict:
     return _mi.probar_api_key()
 
 
+@app.get("/api/v1/settings/nvidia", tags=["settings"],
+         summary="Estado de la API key de NVIDIA (vectores de la búsqueda por significado)")
+def get_nvidia_settings() -> dict:
+    """Nunca devuelve la key: si está, de dónde sale y los últimos 4."""
+    import maas_integrator as _mi
+
+    key = _mi.get_nvidia_api_key()
+    return {"configured": bool(key), "source": _mi.nvidia_key_source(), "masked": f"••••{key[-4:]}" if key else "",
+            "modelo": busqueda.PROVEEDOR["modelo"]}
+
+
+@app.post("/api/v1/settings/nvidia", tags=["settings"],
+          summary="Configura la API key de NVIDIA (vacía la borra)")
+def set_nvidia_settings(request: dict) -> dict:
+    import maas_integrator as _mi
+
+    try:
+        _mi.set_nvidia_api_key(str(request.get("api_key", "") or ""))
+    except _mi.InvalidApiKey as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"stage": "settings_nvidia", "message": str(exc)}) from exc
+    key = _mi.get_nvidia_api_key()
+    audit.record("settings_nvidia", "API key de NVIDIA actualizada" if key else "API key de NVIDIA borrada")
+    return {"configured": bool(key), "source": _mi.nvidia_key_source()}
+
+
+@app.post("/api/v1/settings/nvidia/test", tags=["settings"],
+          summary="Prueba la API key de NVIDIA pidiendo un vector")
+def test_nvidia_settings() -> dict:
+    import maas_integrator as _mi
+
+    return _mi.probar_nvidia_api_key()
+
+
 @app.get(
     "/api/v1/settings/huawei",
     tags=["settings"],
@@ -2231,35 +2265,6 @@ def preload_datasets(request: dict):
                             "state": "live",
                             "detail": "lee de " + custom_cases.source_label(case["slug"])
                                       + " en cada deploy: no hay dataset que subir"})
-            # El modelo de la búsqueda híbrida: el CSS no sale a internet, lo
-            # carga desde acá. La primera vez son ~490 MB (bajarlos y subirlos);
-            # después, al aplicar la búsqueda, solo se carga en el cluster.
-            clave = busqueda.clave_en_obs()
-            nombre = f"{clave} (modelo de la búsqueda híbrida)"
-            if not _preparando_el_modelo.acquire(blocking=False):
-                yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "skipped",
-                            "detail": "lo está subiendo otro pedido"})
-            else:
-                try:
-                    if client.object_exists(clave):
-                        skipped += 1
-                        yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "skipped"})
-                    else:
-                        yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "uploading",
-                                    "size_mb": round(busqueda.MODELO["bytes"] / 1e6, 1)})
-                        motivo = _subir_el_modelo(client)
-                        if motivo:
-                            errors += 1
-                            yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "error", "detail": motivo})
-                        else:
-                            uploaded += 1
-                            yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "done"})
-                except Exception as exc:  # noqa: BLE001 — los datasets ya quedaron
-                    errors += 1
-                    yield _sse({"type": "file", "slug": "_modelo", "key": nombre, "state": "error",
-                                "detail": f"no se pudo subir: {exc!r}"[:300]})
-                finally:
-                    _preparando_el_modelo.release()
             yield _sse({"type": "complete",
                         "uploaded": uploaded, "skipped": skipped, "errors": errors})
         finally:
@@ -7956,13 +7961,10 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
 
 
 # ── La búsqueda híbrida (ver busqueda.py) ───────────────────────────────────
-# MaaS no tiene un modelo de embeddings y el CSS no sale a internet (registrar
-# el preentrenado por nombre daba "Connection timed out" a artifacts.opensearch.org):
-# la plataforma sube el modelo una vez al bucket de demos y el cluster lo
-# registra desde un link firmado de OBS.
-_LINK_DEL_MODELO_S = 7200
+# Los vectores los pide el cluster a NVIDIA NIM por un conector de ml-commons
+# (como el asistente a MaaS): el CSS no deja desplegar modelos locales.
 _EMBEDDINGS_ESPERA_S = 5.0
-_EMBEDDINGS_INTENTOS = 72          # ~6 minutos: el registro baja el modelo (~400 MB)
+_EMBEDDINGS_INTENTOS = 72
 
 
 def _esperar_tarea(base: str, user: str, password: str, task_id: str) -> "tuple[str, str]":
@@ -7983,76 +7985,6 @@ def _esperar_tarea(base: str, user: str, password: str, task_id: str) -> "tuple[
     return "", "no terminó a tiempo"
 
 
-def _modelo_en_obs() -> "tuple[str, str]":
-    """(link firmado, "") del modelo en el bucket de demos; si no está (no se
-    corrió "Preparar bucket"), lo sube (`_subir_el_modelo`). ("", motivo) si
-    no se puede."""
-    from obs_client import OBSClient, OBSConfigError, OBSUploadError
-    import maas_integrator as _mi
-
-    creds = _mi.get_obs_creds() or {}
-    ak, sk = creds.get("ak", ""), creds.get("sk", "")
-    bucket = get_huawei_settings().get("demo_bucket", "")
-    if not (ak and sk and bucket):
-        return "", "faltan AK/SK o el bucket de demos en ⚙ Configuración"
-    client = None
-    try:
-        client = OBSClient(access_key_id=ak, secret_access_key=sk, endpoint=_default_obs_endpoint(), bucket=bucket)
-        motivo = _subir_el_modelo(client)
-        return ("", motivo) if motivo else (client.signed_url(busqueda.clave_en_obs(), _LINK_DEL_MODELO_S), "")
-    except (OBSConfigError, OBSUploadError) as exc:
-        return "", str(exc)[:300]
-    except Exception as exc:  # noqa: BLE001 — sin el modelo, la búsqueda queda por palabras
-        return "", f"no se pudo preparar el modelo en OBS: {exc!r}"[:300]
-    finally:
-        if client is not None:
-            client.close()
-
-
-def _carpeta_de_modelos() -> Path:
-    """Donde queda el modelo bajado (en `data/`, fuera del repo): si la subida
-    al bucket se corta, el reintento no vuelve a bajar ~490 MB."""
-    return auth.DATA_ROOT / "modelos"
-
-
-def _sha256_de(ruta: Path) -> str:
-    import hashlib
-
-    suma = hashlib.sha256()
-    with open(ruta, "rb") as f:
-        for trozo in iter(lambda: f.read(1 << 20), b""):
-            suma.update(trozo)
-    return suma.hexdigest()
-
-
-def _subir_el_modelo(client) -> str:
-    """Sube el modelo al bucket si no está: lo baja de artifacts.opensearch.org
-    (o usa la copia ya bajada) y le verifica el hash. "" si quedó (o ya
-    estaba); si no, el motivo. Lo hace "Preparar bucket" (una vez, con los
-    datasets); la provisión, solo si falta."""
-    import requests
-
-    clave = busqueda.clave_en_obs()
-    if client.object_exists(clave):
-        return ""
-    carpeta = _carpeta_de_modelos()
-    carpeta.mkdir(parents=True, exist_ok=True)
-    local = carpeta / busqueda.MODELO["archivo"]
-    if not (local.is_file() and _sha256_de(local) == busqueda.MODELO["hash"]):
-        parcial = local.with_name(local.name + ".parcial")
-        with requests.get(busqueda.MODELO["origen"] + busqueda.MODELO["archivo"], stream=True, timeout=60) as r:
-            r.raise_for_status()
-            with open(parcial, "wb") as f:
-                for trozo in r.iter_content(1 << 20):
-                    f.write(trozo)
-        if _sha256_de(parcial) != busqueda.MODELO["hash"]:
-            parcial.unlink(missing_ok=True)
-            return "el modelo bajó con otro hash (incompleto o cambiado): no se sube"
-        parcial.replace(local)
-    client.put_file_grande(clave, str(local))
-    return ""
-
-
 def _estado_del_modelo(base: str, user: str, password: str, model_id: str) -> "str | None":
     """El `model_state`; "" si no existe (404) y None si no se pudo leer (el
     cluster no contestó): no es lo mismo, y con None no se registra otra copia."""
@@ -8065,12 +7997,11 @@ def _estado_del_modelo(base: str, user: str, password: str, model_id: str) -> "s
         return None
 
 
-def _modelos_por_nombre(base: str, user: str, password: str) -> list[str]:
-    """Los modelos que se llaman como el de la plataforma. Sin sus pedazos:
-    ml-commons guarda cada ~10 MB del zip como otro doc con el mismo nombre."""
+def _modelos_por_nombre(base: str, user: str, password: str, nombre: str) -> list[str]:
+    """Los modelos con ese nombre (sin los pedazos de uno local, si quedara)."""
     r = _os_req("POST", f"{base}/_plugins/_ml/models/_search", user, password, timeout=20, json_body={
         "size": 20, "_source": False,
-        "query": {"bool": {"must": [{"term": {"name.keyword": busqueda.MODELO["nombre"]}}],
+        "query": {"bool": {"must": [{"term": {"name.keyword": nombre}}],
                            "must_not": [{"exists": {"field": "chunk_number"}}]}}})
     try:
         return [h["_id"] for h in ((r.json() or {}).get("hits") or {}).get("hits") or []] if _resp_ok(r) else []
@@ -8082,81 +8013,133 @@ _EN_CURSO_DEL_MODELO = ("REGISTERING", "DEPLOYING")
 _preparando_el_modelo = _threading.Lock()
 MODELO_OCUPADO = "el modelo ya se está preparando (otro pedido): en unos minutos queda"
 # La provisión espera a otro pedido que lo esté preparando (va al final: no
-# demora al resto). La primera vez baja ~465 MB y los sube al bucket.
+# demora al resto).
 _ESPERA_DEL_MODELO_S = 1800
-_UN_LINK = re.compile(r"https?://\S+")
+SIN_CLAVE_DE_NVIDIA = ("falta la API key de NVIDIA en ⚙ Configuración: la búsqueda por significado "
+                       "le pide los vectores a NVIDIA")
 
 
-def _sin_links(texto: str) -> str:
-    """Un motivo sin el link firmado de OBS: cuando el cluster no lo puede
-    bajar, el error de ml-commons repite la URL entera (con el AccessKeyId y la
-    firma), y el motivo va a Actividad, a la auditoría y a la pantalla."""
-    return _UN_LINK.sub("<link de OBS>", texto or "")
+def _huella(clave: str) -> str:
+    """Para saber si cambió la clave sin guardarla."""
+    import hashlib
+
+    return hashlib.sha256((clave or "").encode("utf-8")).hexdigest()[:12] if clave else ""
 
 
 def _asegurar_modelo_de_embeddings(base: str, user: str, password: str, terraform_dir: Path,
-                                   espera_s: float = 0) -> "tuple[str, str]":
-    """(model_id, "") con el modelo desplegado; ("", motivo) si no. Uno a la
-    vez: "Prepararlo ahora" durante una provisión registraba otra copia. Con
-    `espera_s`, si otro pedido lo está preparando, lo espera (y después lo
-    encuentra desplegado); sin, devuelve MODELO_OCUPADO."""
+                                   espera_s: float = 0) -> "tuple[dict, str]":
+    """({"passage": id, "query": id}, "") con los modelos de NVIDIA desplegados;
+    ({}, motivo) si no. Uno a la vez: dos pedidos creaban dos copias. Con
+    `espera_s`, si otro pedido los está preparando, lo espera; sin, devuelve
+    MODELO_OCUPADO."""
     tomado = (_preparando_el_modelo.acquire(timeout=espera_s) if espera_s > 0
               else _preparando_el_modelo.acquire(blocking=False))
     if not tomado:
-        return "", MODELO_OCUPADO
+        return {}, MODELO_OCUPADO
     try:
-        # Mientras tanto la tarjeta dice "En curso": la primera vez son minutos.
         previo = (_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}
         _guardar_estados(terraform_dir, "_cluster", {"embeddings": {**previo, "en_curso": int(time.time())}})
-        modelo, motivo = _preparar_el_modelo(base, user, password, terraform_dir)
-        return modelo, _sin_links(motivo)
+        return _preparar_los_modelos(base, user, password, previo.get("clave", ""))
     finally:
         _preparando_el_modelo.release()
 
 
-def _preparar_el_modelo(base: str, user: str, password: str, terraform_dir: Path) -> "tuple[str, str]":
-    """Reusa el que ya está (por el registro o por nombre); si no, lo registra
-    desde OBS. Un modelo que no se pudo leer o que se está cargando se espera:
-    registrar otro duplicaba los ~490 MB en la memoria del nodo."""
-    previo = ((_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
-    candidatos = ([previo] if previo else []) + _modelos_por_nombre(base, user, password)
-    modelo = ""
-    for mid in dict.fromkeys(candidatos):
-        estado = _estado_del_modelo(base, user, password, mid)
-        if estado is None:
-            return "", "no se pudo leer el estado del modelo (¿cluster cargado?): no se registra otra copia"
-        if estado == "DEPLOYED":
-            return mid, ""
-        if estado in _EN_CURSO_DEL_MODELO:
-            return "", f"el modelo se está cargando ({estado.lower()}): en unos minutos queda"
-        if estado in ("REGISTERED", "UNDEPLOYED", "DEPLOY_FAILED", "PARTIALLY_DEPLOYED"):
-            modelo = mid
-            break
-    if not modelo:
-        _os_req("PUT", f"{base}/_cluster/settings", user, password, json_body=busqueda.ajustes_del_cluster(), timeout=30)
-        url, motivo = _modelo_en_obs()
-        if not url:
-            return "", motivo
-        r = _os_req("POST", f"{base}/_plugins/_ml/models/_register", user, password, timeout=60,
-                    json_body=busqueda.registro_del_modelo(url))
-        try:
-            tarea = str((r.json() or {}).get("task_id") or "") if _resp_ok(r) else ""
-        except ValueError:
-            tarea = ""
-        if not tarea:
-            return "", f"no se pudo registrar el modelo: {_resp_motivo(r)}"
-        modelo, motivo = _esperar_tarea(base, user, password, tarea)
-        if not modelo:
-            return "", f"el cluster no pudo cargar el modelo desde OBS ({motivo})"
-    rd = _os_req("POST", f"{base}/_plugins/_ml/models/{modelo}/_deploy", user, password, timeout=60)
+def _desplegar(base: str, user: str, password: str, model_id: str) -> bool:
+    rd = _os_req("POST", f"{base}/_plugins/_ml/models/{model_id}/_deploy", user, password, timeout=60)
     try:
         tarea = str((rd.json() or {}).get("task_id") or "") if _resp_ok(rd) else ""
     except ValueError:
         tarea = ""
-    _, motivo = _esperar_tarea(base, user, password, tarea) if tarea else ("", _resp_motivo(rd))
-    if motivo or _estado_del_modelo(base, user, password, modelo) != "DEPLOYED":
-        return "", f"se cargó pero no se pudo desplegar: {motivo or 'no quedó DEPLOYED'} (¿memoria del nodo?)"
-    return modelo, ""
+    if tarea:
+        _esperar_tarea(base, user, password, tarea)
+    return _estado_del_modelo(base, user, password, model_id) == "DEPLOYED"
+
+
+def _borrar_modelo_remoto(base: str, user: str, password: str, model_id: str) -> None:
+    """El modelo y su conector (llevan la clave vieja)."""
+    r = _os_req("GET", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=20)
+    try:
+        conector = str((r.json() or {}).get("connector_id") or "") if _resp_ok(r) else ""
+    except ValueError:
+        conector = ""
+    _os_req("POST", f"{base}/_plugins/_ml/models/{model_id}/_undeploy", user, password, timeout=30)
+    _os_req("DELETE", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=30)
+    if conector:
+        _os_req("DELETE", f"{base}/_plugins/_ml/connectors/{conector}", user, password, timeout=30)
+
+
+def _preparar_los_modelos(base: str, user: str, password: str, huella_previa: str) -> "tuple[dict, str]":
+    """Reusa los que ya están (por nombre); si no, crea el conector y el modelo
+    remoto de cada uno. Con otra clave, los rehace (el conector lleva la clave).
+    Al final, un vector de prueba: dice si el cluster llega a NVIDIA."""
+    import maas_integrator as _mi
+
+    clave = _mi.get_nvidia_api_key()
+    if not clave:
+        return {}, SIN_CLAVE_DE_NVIDIA
+    otra_clave = bool(huella_previa) and huella_previa != _huella(clave)
+    ids: dict = {}
+    for tipo, nombre in busqueda.NOMBRES_DE_MODELO.items():
+        existentes = _modelos_por_nombre(base, user, password, nombre)
+        if otra_clave:
+            for mid in existentes:
+                _borrar_modelo_remoto(base, user, password, mid)
+            existentes = []
+        for mid in existentes:
+            estado = _estado_del_modelo(base, user, password, mid)
+            if estado is None:
+                return {}, "no se pudo leer el estado del modelo (¿cluster cargado?): no se crea otra copia"
+            # Registrado sin desplegar (un reinicio del nodo): se despliega.
+            if estado == "DEPLOYED" or _desplegar(base, user, password, mid):
+                ids[tipo] = mid
+                break
+        if tipo in ids:
+            continue
+        cid = _ml_create(base, user, password, "/_plugins/_ml/connectors/_create",
+                         busqueda.conector(tipo, clave), "connector_id")
+        if not cid:
+            return {}, "no se pudo crear el conector a NVIDIA"
+        r = _os_req("POST", f"{base}/_plugins/_ml/models/_register?deploy=true", user, password, timeout=60,
+                    json_body=busqueda.registro_del_modelo(tipo, cid))
+        try:
+            cuerpo = (r.json() or {}) if _resp_ok(r) else {}
+        except ValueError:
+            cuerpo = {}
+        mid, motivo = (_esperar_tarea(base, user, password, str(cuerpo["task_id"])) if cuerpo.get("task_id")
+                       else (str(cuerpo.get("model_id") or ""), _resp_motivo(r)))
+        mid = mid or str(cuerpo.get("model_id") or "")
+        if not mid:
+            return {}, f"no se pudo registrar el modelo de NVIDIA: {motivo}"
+        if _estado_del_modelo(base, user, password, mid) != "DEPLOYED" and not _desplegar(base, user, password, mid):
+            return {}, "el modelo de NVIDIA no quedó desplegado"
+        ids[tipo] = mid
+    rp = _os_req("POST", f"{base}/_plugins/_ml/models/{ids['passage']}/_predict", user, password, timeout=60,
+                 json_body={"parameters": {"input": ["prueba"]}})
+    try:
+        n = len(rp.json()["inference_results"][0]["output"][0]["data"])
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        n = 0
+    if not n:
+        return {}, (f"el cluster no obtuvo un vector de NVIDIA: {_resp_motivo(rp)[:200]} "
+                    "(¿la ruta del CSS a NVIDIA o la API key?)")
+    return ids, ""
+
+
+def _salida_a_nvidia(cluster: dict, base: str, user: str, password: str, terraform_dir: Path) -> None:
+    """Que el cluster llegue a NVIDIA: rutas del CSS a sus dos IPs fijas (solo
+    esas) y el host entre los destinos de los conectores. Best-effort, como MaaS."""
+    import capabilities as _caps
+
+    try:
+        ak, sk = _cluster_hwc_creds(terraform_dir)
+        cid, pid = cluster.get("id", ""), get_huawei_project_id()
+        if cid and ak and sk and pid:
+            print(f"[css-routes] (nvidia) {_add_css_cluster_routes(cid, ak, sk, pid, ips=list(busqueda.PROVEEDOR['ips']))}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[css-routes] (nvidia) fallo: {exc!r}")
+    _os_req("PUT", f"{base}/_cluster/settings", user, password, timeout=30, json_body={"persistent": {
+        "plugins.ml_commons.trusted_connector_endpoints_regex": _caps.destinos_permitidos(),
+        "plugins.ml_commons.only_run_on_ml_node": False}})
 
 
 def _campos_del_caso(slug: str, entry: dict) -> list[dict]:
@@ -8229,19 +8212,26 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
             casos[slug] = fields
     if not casos:
         return
-    model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir, _ESPERA_DEL_MODELO_S)
+    import maas_integrator as _mi
+
+    _salida_a_nvidia(cluster, base, user, password, terraform_dir)
+    ids, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir, _ESPERA_DEL_MODELO_S)
+    model_id = ids.get("passage", "")
     if motivo == MODELO_OCUPADO:
         # Lo sigue preparando otro pedido: ni el modelo ni la búsqueda fallaron.
         runs.step(run, "Búsqueda híbrida", False,
                   "el modelo de embeddings se sigue preparando: cuando quede, aplicá la búsqueda híbrida")
         return
-    runs.step(run, "Modelo de embeddings", bool(model_id), (motivo or "desplegado, desde el bucket de demos")[:300])
+    runs.step(run, "Modelo de embeddings", bool(model_id),
+              (motivo or f"{busqueda.PROVEEDOR['modelo']}, de {busqueda.PROVEEDOR['nombre']}")[:300])
     guardados = _read_estados(terraform_dir)
-    # Si falló (el cluster cargado, un timeout), el id que andaba se conserva:
-    # el modelo y los índices siguen ahí, y la búsqueda sigue andando.
-    conocido = ((guardados.get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
+    # Si falló (el cluster cargado, un timeout), los ids que andaban se
+    # conservan: los modelos y los índices siguen ahí, y la búsqueda sigue andando.
+    conocido = (guardados.get("_cluster") or {}).get("embeddings") or {}
     _guardar_estados(terraform_dir, "_cluster", {"embeddings": {
-        "ok": bool(model_id), "motivo": motivo, "model_id": model_id or conocido,
+        "ok": bool(model_id), "motivo": motivo, "model_id": model_id or conocido.get("model_id", ""),
+        "model_id_consulta": ids.get("query") or conocido.get("model_id_consulta", ""),
+        "clave": _huella(_mi.get_nvidia_api_key()) if model_id else conocido.get("clave", ""),
         "dimensiones": busqueda.DIMENSION if model_id else 0}})
     for slug, fields in casos.items():
         indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
@@ -8269,7 +8259,8 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
 def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict:
     terraform_dir = _active_terraform_dir()
     estados = _read_estados(terraform_dir)
-    model_id = ((estados.get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
+    embeddings = (estados.get("_cluster") or {}).get("embeddings") or {}
+    model_id = embeddings.get("model_id_consulta") or embeddings.get("model_id") or ""
     caso = (estados.get(slug) or {}).get("busqueda") or {}
     if not (model_id and caso.get("ok")):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={

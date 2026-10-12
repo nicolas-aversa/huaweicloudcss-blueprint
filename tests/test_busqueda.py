@@ -52,9 +52,10 @@ def test_las_piezas():
     assert t["data_selection_query"] == {"exists": {"field": "comentario.keyword"}}
     m = busqueda.mapping_del_indice()
     assert m["settings"]["index.default_pipeline"] == busqueda.PIPELINE_DE_INGESTA and m["settings"]["index.knn"]
-    assert m["mappings"]["properties"]["embedding"]["dimension"] == busqueda.DIMENSION == 384
+    assert m["mappings"]["properties"]["embedding"]["dimension"] == busqueda.DIMENSION == 2048
+    assert m["mappings"]["properties"]["embedding"]["method"]["space_type"] == "innerproduct", "vienen normalizados"
     assert busqueda.pipeline_de_ingesta("M")["processors"][0]["text_embedding"] == \
-        {"model_id": "M", "field_map": {"texto": "embedding"}}
+        {"model_id": "M", "field_map": {"texto": "embedding"}, "batch_size": busqueda.LOTE}, "de a lotes a NVIDIA"
     norm = busqueda.pipeline_de_busqueda()["phase_results_processors"][0]["normalization-processor"]
     assert norm["combination"]["parameters"]["weights"] == [0.3, 0.7]
     h = busqueda.consulta_hibrida("cobro rechazado", "M")["query"]["hybrid"]["queries"]
@@ -118,22 +119,25 @@ def test_si_ya_estaba_lo_deja_y_si_fallo_lo_rehace(monkeypatch):
 def test_el_run_prepara_el_modelo_una_vez_y_cada_caso(monkeypatch, tmp_path):
     estados = {}
     monkeypatch.setattr(main, "_guardar_estados", lambda td, slug, nuevo: estados.setdefault(slug, {}).update(nuevo))
-    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ("M1", ""))
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ({"passage": "M1", "query": "Q1"}, ""))
+    import maas_integrator
+    monkeypatch.setattr(maas_integrator, "get_nvidia_api_key", lambda: "clave-de-prueba")
     monkeypatch.setattr(main, "_provisionar_busqueda", lambda b, u, p, slug, ip, fields, m, force:
                         {"ok": True, "campo": "msg", "textos": 10, "reason": "ok"} if slug == "a"
                         else {"ok": False, "no_aplica": True, "campo": "msg", "reason": "es una categoría"})
     pipe = {"a": {"fields": [F("msg")]}, "b": {"fields": [F("msg")]}, "c": {"fields": [F("monto", "float")]},
             "d": {"fields": [F("msg")], "excluir": ["busqueda"]}}
     main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path, ["a", "b", "c", "d"], pipe, False, main.runs.start("capabilities"))
-    assert estados["_cluster"]["embeddings"] == {"ok": True, "motivo": "", "model_id": "M1", "dimensiones": 384}
+    assert estados["_cluster"]["embeddings"] == {"ok": True, "motivo": "", "model_id": "M1", "model_id_consulta": "Q1",
+                                                 "clave": main._huella("clave-de-prueba"), "dimensiones": 2048}
     assert estados["a"]["busqueda"]["ok"] and estados["a"]["busqueda"]["textos"] == 10
     assert estados["b"]["busqueda"]["no_aplica"] and estados["b"]["busqueda"]["motivo"] == "es una categoría"
     assert "c" not in estados and "d" not in estados, "sin texto libre, o apagada en el paso 2: nada"
     # Sin el modelo, cada caso lo dice.
     estados.clear()
-    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ("", "sin salida a OBS"))
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ({}, "sin salida a NVIDIA"))
     main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path, ["a"], pipe, False, main.runs.start("capabilities"))
-    assert estados["a"]["busqueda"] == {"ok": False, "motivo": "sin el modelo de embeddings: sin salida a OBS", "ya": False,
+    assert estados["a"]["busqueda"] == {"ok": False, "motivo": "sin el modelo de embeddings: sin salida a NVIDIA", "ya": False,
                                         "campo": "msg", "textos": None, "no_aplica": False}
 
 
@@ -170,7 +174,9 @@ def test_el_export_lleva_la_busqueda():
     campos = [F("@timestamp", "date", role="timestamp"), F("comentario", "text"), F("monto", "float", role="measure")]
     texto = exportar.devtools("hotel", campos, label="Hotel")
     for pedazo in ("PUT _plugins/_transform/hotel-busqueda", "PUT _search/pipeline/plataforma-hibrida",
-                   "PUT busqueda-hotel", '"url": "<LINK_FIRMADO_DE_OBS>"', busqueda.MODELO["archivo"]):
+                   "PUT busqueda-hotel", '"url": "https://integrate.api.nvidia.com/v1/embeddings"',
+                   '"api_key": "<NVIDIA_API_KEY>"', '"model_id": "<MODEL_ID_TEXTOS>"', '"model_id": "<MODEL_ID_CONSULTAS>"',
+                   "75.2.113.119", "Los textos viajan a NVIDIA"):
         assert pedazo in texto, pedazo
     assert "hotel-busqueda" not in exportar.devtools("hotel", campos, label="Hotel", excluir=["busqueda"])
 
@@ -193,7 +199,7 @@ def test_si_el_modelo_falla_lo_que_andaba_sigue(monkeypatch, tmp_path):
     estados = {"_cluster": {"embeddings": {"ok": True, "model_id": "M_OK"}}, "a": {"busqueda": {"ok": True, "campo": "msg"}}}
     monkeypatch.setattr(main, "_read_estados", lambda td: estados)
     monkeypatch.setattr(main, "_guardar_estados", lambda td, slug, nuevo: estados.setdefault(slug, {}).update(nuevo))
-    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ("", "no se pudo leer el estado del modelo"))
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ({}, "no se pudo leer el estado del modelo"))
     pipe = {"a": {"fields": [F("msg")]}, "b": {"fields": [F("msg")]}}
     main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path, ["a", "b"], pipe, False,
                             main.runs.start("capabilities"))
