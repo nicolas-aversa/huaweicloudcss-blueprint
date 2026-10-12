@@ -103,8 +103,9 @@ def test_la_vista_va_sin_pestanas():
     vista = _vista(html)
     # La franja del entorno con sus acciones y la puesta en marcha arriba;
     # después los números, la matriz, y accesos y snapshot lado a lado.
-    orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${setupPanel}", "${kpis}",
-             "${funcionesHTML(data)}", "${matrizDePluginsHTML(filas, data.plugins)}",
+    orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${allDone ? '' : setupPanel}",
+             "${funcionesHTML(data)}", '<details class="env-mas" id="infra-mas"', "${allDone ? setupPanel : ''}",
+             "${funcionesHTML(data, { extra: true })}", "${matrizDePluginsHTML(filas, data.plugins)}",
              '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>']
     posiciones = [vista.index(p) for p in orden]
     assert posiciones == sorted(posiciones), orden
@@ -129,11 +130,15 @@ def test_lo_que_no_hace_falta_para_mostrar_va_plegado():
     "Más opciones", plegados (y siguen como estaban al repintar)."""
     html = _INDEX.read_text(encoding="utf-8")
     vista = _vista(html)
-    assert "kpi('plugins'" not in vista and "irALaMatriz" not in vista, "el número de plugins lo dice la lista"
+    assert "kpi(" not in vista and "irALaMatriz" not in vista, "los números, en la franja de arriba"
     assert '<details class="section-card env-plegable" id="infra-plugins"${state.casosAbiertos ? \' open\' : \'\'}>' in html
-    assert '<details class="section-card env-plegable env-mas" id="infra-mas"${state.masAbierto ? \' open\' : \'\'}>' in vista
+    assert '<details class="env-mas" id="infra-mas"${state.masAbierto ? \' open\' : \'\'}>' in vista
     assert "state.casosAbiertos = e.currentTarget.open;" in vista and "state.masAbierto = e.currentTarget.open;" in vista
-    assert ">Detalle por caso</span>" in html and ">Más opciones</span>" in vista
+    assert ">Detalle por caso</span>" in html and " Más opciones <svg" in vista
+    # Nuevo pipeline, destruir y los endpoints, en el menú del entorno.
+    menu = vista[vista.index('<details class="env-menu" id="infra-menu">'):vista.index("</details>", vista.index('id="infra-menu"'))]
+    assert 'id="infra-new-pipeline-btn"' in menu and 'id="infra-destroy-btn"' in menu and "${escapeHtml(osEp)}" in menu
+    assert "document.querySelectorAll('.env-menu[open]').forEach(m => { if (!m.contains(e.target)) m.open = false; });" in vista
 
 
 _ARNES_REPARTO = r"""

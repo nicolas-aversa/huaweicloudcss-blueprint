@@ -175,16 +175,17 @@ def test_los_documentos_se_cuentan_recien_con_algo_ingestando():
     assert "const arrancada = pipelines.some(p => p.active);" in resumen
     assert "'la ingesta todavía no arrancó'" in resumen
     i = html.index("const ingestaArrancada = docs.arrancada;")
-    bloque = html[i:html.index("const kpis = ", i)]
-    assert 'id="infra-docs-refresh"' in bloque
-    assert "${kpi('Documentos', docs.valor, docs.sub, actualizarDocs)}" in html
+    bloque = html[i:html.index("// Un paso de la secuencia de puesta en marcha", i)]
+    assert 'id="infra-docs-refresh"' in bloque and '<strong id="infra-docs-valor">${docs.valor}</strong> documentos${actualizarDocs}' in bloque
+    assert "' · la ingesta todavía no arrancó'" in bloque
 
 
 def test_la_puesta_en_marcha_va_antes_que_las_pipelines():
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("${setupPanel}")
-    j = html.index("${matrizDePluginsHTML(filas, data.plugins)}")
+    i = html.index("${allDone ? '' : setupPanel}")
+    j = html.index("${funcionesHTML(data)}")
     assert i < j, "el paso que falta tiene que verse antes que el estado"
+    assert html.index("${allDone ? setupPanel : ''}") > j, "hecha, va en Más opciones"
     # Sin cartel de cierre ("Entorno operativo"): terminada, queda plegada.
     assert "donePanel" not in html and "Entorno operativo" not in html
 
@@ -209,7 +210,7 @@ def test_las_acciones_del_entorno_van_antes_de_la_puesta_en_marcha():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("function renderInfraView(")
     vista = html[i:html.index("// Acciones: reusan las funciones del flujo.", i)]
-    puesta = vista.index("${setupPanel}")
+    puesta = vista.index("${allDone ? '' : setupPanel}")
     for boton in ('id="infra-new-pipeline-btn"', 'id="infra-dashboards-btn"', 'id="infra-destroy-btn"'):
         assert vista.index(boton) < puesta, boton
 

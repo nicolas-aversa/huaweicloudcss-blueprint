@@ -179,29 +179,39 @@ const data = {
 };
 check('sin nada, nada', funcionesHTML({ pipelines: [], catalogo: [], plugins: {} }) === '');
 const h = funcionesHTML(data);
-check('en lenguaje de negocio, con el nombre técnico chico', h.includes('<span class="fn__titulo">Pronosticar lo que viene</span><span class="fn__sub">Forecasting</span>'), h);
-check('una acción: completar lo que falta', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="forecasting">Completar</button>'), h);
-check('a medias, con cuántos', /data-fn="forecasting"[\s\S]*?en 1 de 2 casos/.test(h) && h.includes('class="fn fn--parcial" data-fn="forecasting"'), h);
-check('el asistente se prueba', h.includes('<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>'), h);
-check('las acciones, en secundario (lo primario es el paso 3)', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="anomalias">Activar</button>')
-  && !h.includes('btn-primary'), h);
+const tile = (html, id) => (html.match(new RegExp(`<div class="fn-tile[^"]*" data-fn="${id}">[\\s\\S]*?</div>`)) || [''])[0];
+check('una tarjeta con ícono, nombre corto y estado', tile(h, 'forecasting').includes('<span class="fn-tile__icono"><svg data-i="trending"></svg></span>'
+  + '<span class="fn-tile__titulo">Pronósticos</span><span class="fn-tile__estado">En 1 de 2 casos</span>'), tile(h, 'forecasting'));
+check('el nombre técnico no va en la tarjeta (va en su panel)', !h.includes('Forecasting'), h);
+check('a medias, en amarillo, con su acción', tile(h, 'forecasting').startsWith('<div class="fn-tile fn--parcial" data-fn="forecasting">')
+  && tile(h, 'forecasting').includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="forecasting">Completar</button>'), tile(h, 'forecasting'));
+check('el asistente se prueba', tile(h, 'agente').includes('<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>')
+  && tile(h, 'agente').includes('Lista · 2 casos'), tile(h, 'agente'));
+check('sin activar, en gris, con Activar', tile(h, 'anomalias').startsWith('<div class="fn-tile fn--off"')
+  && tile(h, 'anomalias').includes('Sin activar') && tile(h, 'anomalias').includes('data-plugin="anomalias">Activar</button>'), tile(h, 'anomalias'));
+check('las acciones, en secundario (lo primario es el paso 3)', !h.includes('btn-primary'), h);
+check('Security Analytics no se activa desde acá', !h.includes('data-plugin="security_analytics"') && h.includes('data-fn="security_analytics"'), h);
+check('los tableros, de las tarjetas', tile(h, 'dashboard').includes('Lista · 2 casos'), tile(h, 'dashboard'));
+check('lo que no aplica no se muestra', !h.includes('data-fn="rollup"') && !h.includes('data-fn="busqueda"'), h);
+check('lo opcional y lo del cluster, no acá', !h.includes('data-fn="ciclo_de_vida"') && !h.includes('data-fn="query_insights"'), h);
+const extra = funcionesHTML(data, { extra: true });
+check('van en "Otras funciones"', extra.includes('id="infra-funciones-extra"') && extra.includes('>Otras funciones<')
+  && tile(extra, 'ciclo_de_vida').includes('data-plugin="ciclo_de_vida">Activar</button>') && tile(extra, 'query_insights').includes('Lista'), extra);
+check('cuántas listas', h.includes('<span class="fn-cab__n">2 de 5 listas</span>'), h);
+check('el panel, cerrado', h.includes('<div class="fn-panel" hidden></div>') && h.includes('aria-expanded="false"'), h);
 const sinTableros = funcionesHTML({ ...data, plugins: {} });
 check('los tableros aplican siempre: sin tarjetas, sin activar (y sin botón: van en el paso 1)',
-  /data-fn="dashboard"[\s\S]*?sin activar · 2 casos/.test(sinTableros) && !sinTableros.includes('data-plugin="dashboard"'), sinTableros);
-check('lo opcional, en secundario y dicho', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="ciclo_de_vida">Activar</button>')
-  && h.includes('Index State Management · opcional: se nota con meses de datos'), h);
-check('Security Analytics no se activa desde acá', !h.includes('data-plugin="security_analytics"') && h.includes('data-fn="security_analytics"'), h);
-check('los tableros, de las tarjetas', h.includes('class="fn fn--ok" data-fn="dashboard"') && /data-fn="dashboard"[\s\S]*?en los 2 casos/.test(h), h);
-check('Query Insights, de todo el cluster', /data-fn="query_insights"[\s\S]*?todo el cluster/.test(h), h);
-check('lo que no aplica, en una línea al final', h.includes('No aplican a estos datos:') && h.includes('guardar un resumen histórico')
-  && !h.includes('data-fn="rollup"'), h);
-check('cuántas listas', h.includes('de 7 listas') || /\d de \d+ listas/.test(h), h);
-check('cerradas', h.includes('aria-expanded="false" aria-controls="fn-det-forecasting"') && h.includes('id="fn-det-forecasting" hidden>'), h);
+  tile(sinTableros, 'dashboard').includes('Sin activar') && !sinTableros.includes('data-plugin="dashboard"'), tile(sinTableros, 'dashboard'));
 state.provisionandoPlugins = true; state.aplicandoPlugin = 'forecasting';
 const activando = funcionesHTML(data);
 check('activando: lo dice y no deja lanzar otro', activando.includes('data-plugin="forecasting" disabled>Activando…')
   && activando.includes('data-plugin="anomalias" disabled>Activar'), activando);
 state.provisionandoPlugins = false; state.aplicandoPlugin = '';
+state.funcionAbierta = 'forecasting';
+const abierta = funcionesHTML(data);
+check('abierta: marcada y con su panel a la vista', abierta.includes('<div class="fn-tile fn--parcial is-abierta" data-fn="forecasting">')
+  && abierta.includes('<div class="fn-panel"></div>') && funcionesHTML(data, { extra: true }).includes('<div class="fn-panel" hidden></div>'), abierta);
+state.funcionAbierta = null;
 // El detalle.
 const d = detalleDeFuncionHTML(funcionDe('forecasting', data));
 check('qué hace y para el negocio', d.includes('<strong>Qué hace.</strong>') && d.includes('<strong>Para el negocio.</strong>'), d);
@@ -215,7 +225,8 @@ check('el link a Dashboards de cada caso', tab.includes('href="https://d/siem" t
 check('sin catálogo, sin comandos', !tab.includes('fn__comandos'), tab);
 const bus = funcionDe('busqueda', data);
 check('lo del cluster va con su función', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
-check('escapado', funcionesHTML({ ...data, catalogo: [C('agente', ['<x>'], [])] }).includes('&lt;x&gt;'));
+const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
+check('escapado', conX.includes('&lt;x&gt;') && !conX.includes('<x>'), conX);
 // Dev Tools, desde la URL de Dashboards.
 check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
 check('sin dashboards, sin link', devToolsDe('') === '');
