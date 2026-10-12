@@ -53,8 +53,8 @@ PIPELINE_DE_BUSQUEDA = "plataforma-hibrida"
 # exacta, pero lo literal sigue sumando.
 PESOS = (0.3, 0.7)
 # Cuántos textos distintos tiene que tener el campo: con menos es una
-# categoría (no hace falta buscar), con más el modelo tardaría demasiado en
-# un nodo sin GPU.
+# categoría (no hace falta buscar), con más vectorizarlos tardaría demasiado
+# (el tier gratis de NVIDIA: ~40 pedidos por minuto).
 MIN_TEXTOS, MAX_TEXTOS = 5, 20000
 
 # Nombres que dicen "texto libre", en orden de preferencia: un mensaje, una
@@ -70,22 +70,33 @@ _PISTAS = (
 _NO_ES_TEXTO = re.compile(r"(^|[._])(id|ids|code|codigo|cod|uuid|hash|key|ref)([._]|$)|_id$|_code$", re.I)
 
 
-def campo_de_texto_libre(fields: list[dict[str, Any]]) -> str:
-    """El campo donde buscar por significado: el de tipo `text` si hay; si
-    no, el de texto (string/keyword) cuyo nombre dice mensaje, descripción,
-    motivo o título, en ese orden. '' si el caso no tiene texto libre."""
+def campos_de_texto_libre(fields: list[dict[str, Any]]) -> list[str]:
+    """Los campos donde se podría buscar por significado, en orden: los de tipo
+    `text` y después los de texto cuyo nombre dice mensaje, descripción, título
+    o motivo. Al provisionar se queda con el primero que tiene frases (en
+    FortiAnalyzer, `logdesc` es una categoría y `msg` no)."""
     textos = [f for f in fields or [] if (f.get("field_path") or "").strip()
               and (f.get("type") or "") in ("text", "string", "keyword")
               and not _NO_ES_TEXTO.search(f.get("field_path") or "")
               and f.get("role") not in ("entity_id", "timestamp")]
-    for f in textos:
-        if f.get("type") == "text":
-            return f["field_path"].strip()
+    orden = [f["field_path"].strip() for f in textos if f.get("type") == "text"]
     for pista in _PISTAS:
-        for f in textos:
-            if pista.search(f["field_path"]):
-                return f["field_path"].strip()
-    return ""
+        orden += [f["field_path"].strip() for f in textos if pista.search(f["field_path"])]
+    return list(dict.fromkeys(orden))
+
+
+def campo_de_texto_libre(fields: list[dict[str, Any]]) -> str:
+    """El primer candidato; '' si el caso no tiene texto libre."""
+    candidatos = campos_de_texto_libre(fields)
+    return candidatos[0] if candidatos else ""
+
+
+def son_frases(valores: list[Any]) -> bool:
+    """Si al menos la mitad de los textos tienen dos palabras o más. Los códigos
+    ("sqli", "path_traversal", "Adobe.Flash.Execution") no: buscar por
+    significado sobre ellos no aporta. Sin muestra, no se descarta."""
+    valores = [str(v) for v in valores or [] if str(v).strip()]
+    return not valores or 2 * sum(1 for v in valores if len(v.split()) >= 2) >= len(valores)
 
 
 def campo_agrupable(campo: str, tipo: str) -> str:

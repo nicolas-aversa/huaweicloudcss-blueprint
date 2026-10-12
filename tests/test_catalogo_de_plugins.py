@@ -181,7 +181,9 @@ check('sin nada, nada', funcionesHTML({ pipelines: [], catalogo: [], plugins: {}
 const h = funcionesHTML(data);
 const tile = (html, id) => (html.match(new RegExp(`<div class="fn-tile[^"]*" data-fn="${id}">[\\s\\S]*?</div>`)) || [''])[0];
 check('una tarjeta con ícono, nombre corto y estado', tile(h, 'forecasting').includes('<span class="fn-tile__icono"><svg data-i="trending"></svg></span>'
-  + '<span class="fn-tile__titulo">Pronósticos</span><span class="fn-tile__estado">En 1 de 2 casos</span>'), tile(h, 'forecasting'));
+  + '<span class="fn-tile__titulo">Pronóstico</span><span class="fn-tile__estado">En 1 de 2 casos</span>'), tile(h, 'forecasting'));
+check('los nombres de OpenSearch, en castellano', ['Agente conversacional', 'Dashboards', 'Detección de anomalías', 'Analítica de seguridad']
+  .every(n => h.includes(`<span class="fn-tile__titulo">${n}</span>`)), h);
 check('el nombre técnico no va en la tarjeta (va en su panel)', !h.includes('Forecasting'), h);
 check('a medias, en amarillo, con su acción', tile(h, 'forecasting').startsWith('<div class="fn-tile fn--parcial" data-fn="forecasting">')
   && tile(h, 'forecasting').includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="forecasting">Completar</button>'), tile(h, 'forecasting'));

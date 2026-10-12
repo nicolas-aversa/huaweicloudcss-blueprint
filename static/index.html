@@ -6772,7 +6772,7 @@
       busqueda: ['Busca en el texto libre del caso por palabras y por significado a la vez: lo exacto sale arriba y "cobro rechazado" encuentra también "pago denegado". Los textos se vectorizan con NVIDIA: con datos de un cliente, avisale.',
         'Buscadores de tickets, motivos, productos o diagnósticos que entienden lo que el usuario quiso decir, sin perder las coincidencias exactas (un código, una IP).'],
       embeddings: ['El modelo multilingüe de NVIDIA que entiende el significado de los textos. El cluster le pide los vectores por API, sin instalar nada (el CSS no deja correr modelos propios).',
-        'Búsqueda por significado en castellano e inglés sin mandar los datos a un servicio externo.'],
+        'Búsqueda por significado en castellano e inglés con un modelo de primer nivel, sin instalar nada en el cluster.'],
       query_insights: ['Muestra las consultas más pesadas del cluster, con su latencia, CPU y memoria.',
         'Encontrar qué consulta o tablero frena al cluster antes de pagar por agrandarlo.'],
       canal: ['El destino de los avisos (Slack, Teams, webhook), probado al configurarlo.',
@@ -6864,10 +6864,10 @@
     // ciclo de vida y el rollup se notan con meses de datos) se arma si se
     // elige acá. El catálogo viene en /terraform/status (_catalogo_de_plugins).
     const _NOMBRE_DEL_PLUGIN = {
-      agente: 'Asistente en lenguaje natural', forecasting: 'Pronósticos', anomalias: 'Detección de anomalías',
-      alertas: 'Alertas de anomalías', security_analytics: 'Security Analytics', perfil: 'Perfil por entidad',
-      analista: 'Analista con datos enmascarados', busqueda: 'Búsqueda híbrida', reporte: 'Reporte en PDF',
-      ciclo_de_vida: 'Ciclo de vida de los índices', rollup: 'Resumen por hora (Rollup)',
+      agente: 'Agente conversacional', forecasting: 'Pronóstico', anomalias: 'Detección de anomalías',
+      alertas: 'Alertas', security_analytics: 'Analítica de seguridad', perfil: 'Transformaciones',
+      analista: 'Enmascaramiento de campos', busqueda: 'Búsqueda híbrida', reporte: 'Reportes',
+      ciclo_de_vida: 'Gestión del estado de índices', rollup: 'Rollups de índices',
     };
     // La consola de Dev Tools, a partir de la URL de Dashboards.
     function devToolsDe(dashUrl) {
@@ -6881,19 +6881,20 @@
     // con su link a Dashboards y cómo se hace en Dev Tools. Lo que se nota con
     // meses de datos o mira el cluster entero va en "Más opciones".
     const _FUNCIONES = [
-      ['agente', 'Preguntar en castellano', 'Asistente · ml-commons', 'chat'],
-      ['dashboard', 'Tableros', 'Dashboards', 'dashboard'],
-      ['forecasting', 'Pronósticos', 'Forecasting', 'trending'],
-      ['anomalias', 'Comportamientos raros', 'Anomaly Detection', 'activity'],
-      ['alertas', 'Avisos', 'Alerting', 'alert-triangle'],
-      ['security_analytics', 'Amenazas de seguridad', 'Security Analytics', 'shield'],
-      ['busqueda', 'Búsqueda por significado', 'Búsqueda híbrida', 'search'],
-      ['perfil', 'Ficha por cliente', 'Transform', 'layers'],
-      ['analista', 'Datos sensibles ocultos', 'Enmascarado de campos', 'key'],
-      ['reporte', 'Reporte en PDF', 'Reporting', 'file'],
-      ['ciclo_de_vida', 'Archivar datos viejos', 'Index State Management', 'clock'],
-      ['rollup', 'Resumen histórico', 'Rollup', 'database'],
-      ['query_insights', 'Consultas pesadas', 'Query Insights', 'queue'],
+      // El nombre de cada función en OpenSearch, en castellano; el original, en su panel.
+      ['agente', 'Agente conversacional', 'Agents · ML Commons', 'chat'],
+      ['dashboard', 'Dashboards', 'OpenSearch Dashboards', 'dashboard'],
+      ['forecasting', 'Pronóstico', 'Forecasting', 'trending'],
+      ['anomalias', 'Detección de anomalías', 'Anomaly Detection', 'activity'],
+      ['alertas', 'Alertas', 'Alerting', 'alert-triangle'],
+      ['security_analytics', 'Analítica de seguridad', 'Security Analytics', 'shield'],
+      ['busqueda', 'Búsqueda híbrida', 'Hybrid search · Neural search', 'search'],
+      ['perfil', 'Transformaciones', 'Index Transforms', 'layers'],
+      ['analista', 'Enmascaramiento de campos', 'Field masking · Security', 'key'],
+      ['reporte', 'Reportes', 'Reporting', 'file'],
+      ['ciclo_de_vida', 'Gestión del estado de índices', 'Index State Management (ISM)', 'clock'],
+      ['rollup', 'Rollups de índices', 'Index Rollups', 'database'],
+      ['query_insights', 'Información de consultas', 'Query Insights', 'queue'],
     ];
     const _FUNCIONES_EXTRA = new Set(['ciclo_de_vida', 'rollup', 'query_insights']);
     // Lo de todo el cluster que acompaña a una función: va en su detalle.

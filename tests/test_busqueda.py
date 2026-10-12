@@ -242,3 +242,59 @@ def test_el_cuidador_frena_el_que_crece_y_vectoriza_lo_que_falta(monkeypatch, tm
     ubq = next(b for m, u, b in pedidos if "_update_by_query" in u)
     assert ubq == {"query": busqueda.SIN_VECTOR}
     main._cuidados.clear()
+
+
+def test_se_queda_con_el_primer_candidato_con_frases(monkeypatch):
+    """En SIEM el campo eran códigos ("sqli", "xss") y en FortiAnalyzer el
+    primero, una categoría: buscar por significado sobre eso no aporta."""
+    muestras = {"logdesc": ["Admin login", "IPS"], "msg": ["Connection blocked by policy", "File download allowed", "Virus detected in"]}
+    cuentas = {"logdesc": 3, "msg": 40}
+    pedidos = []
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        pedidos.append((m, url, json_body))
+        if url.endswith("/_search") and json_body and "aggs" in json_body:
+            campo = json_body["aggs"]["n"]["cardinality"]["field"]
+            return _R(200, {"aggregations": {"n": {"value": cuentas[campo]},
+                                             "muestra": {"buckets": [{"key": k} for k in muestras[campo]]}}})
+        return _R(404) if m == "GET" else _R(200, {"acknowledged": True})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main, "_motivo_si_fallo", lambda ruta, u, p: None)
+    r = main._provisionar_busqueda("http://x", "a", "p", "f", "f-*", [F("logdesc"), F("msg")], "M1", force=False)
+    assert r["ok"] and r["campo"] == "msg", r
+    transform = next(b for m, u, b in pedidos if m == "PUT" and "/_transform/" in u)
+    assert transform["transform"]["groups"][0]["terms"]["source_field"] == "msg"
+    # Solo códigos: no aplica, y dice por qué.
+    muestras["msg"] = ["sqli", "xss", "path_traversal", "Adobe.Flash.Execution"]
+    r = main._provisionar_busqueda("http://x", "a", "p", "f", "f-*", [F("logdesc"), F("msg")], "M1", force=False)
+    assert r["no_aplica"] and "logdesc tiene 3 valores distintos" in r["reason"] and "msg son códigos cortos (sqli, xss" in r["reason"]
+
+
+def test_son_frases():
+    assert busqueda.son_frases(["Myocardial Infarction", "Cardiac Arrest", "Fever"])
+    assert not busqueda.son_frases(["sqli", "xss", "path_traversal", "Adobe.Flash.Execution"])
+    assert busqueda.son_frases([]), "sin muestra no se descarta"
+    assert busqueda.campos_de_texto_libre([F("logdesc"), F("msg"), F("reason"), F("codigo")]) == ["logdesc", "msg", "reason"]
+
+
+def test_el_catalogo_no_cuenta_donde_no_aplica(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {})
+    monkeypatch.setattr(main, "_read_security", lambda td: {})
+    monkeypatch.setattr(main, "_read_estados", lambda td: {
+        "a": {"busqueda": {"ok": True}}, "b": {"busqueda": {"ok": False, "no_aplica": True}}})
+    reg = {s: {"index": f"{s}-*", "fields": [F("@timestamp", "date", role="timestamp"), F("comentario", "text")]} for s in ("a", "b")}
+    cat = {c["plugin"]: c for c in main._catalogo_de_plugins(tmp_path, reg)}
+    assert cat["busqueda"]["aplica"] == ["a"] and cat["busqueda"]["aplicado"] == ["a"], "lista, no «1 de 2»"
+
+
+def test_si_deja_de_aplicar_se_va_lo_que_quedo(monkeypatch):
+    pedidos = _cluster(monkeypatch, distintos=3, transform_existe=True)
+    r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("msg")], "M1", force=True)
+    assert r["no_aplica"]
+    for esperado in (("POST", "/_plugins/_transform/s-busqueda/_stop"), ("DELETE", "/_plugins/_transform/s-busqueda"),
+                     ("DELETE", "/busqueda-s")):
+        assert esperado in [(m, u) for m, u, _ in pedidos], esperado
+    pedidos = _cluster(monkeypatch, distintos=3, transform_existe=False)
+    main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("msg")], "M1", force=True)
+    assert not [u for m, u, _ in pedidos if m == "DELETE"], "si no había nada, no borra"

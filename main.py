@@ -8151,27 +8151,47 @@ def _campos_del_caso(slug: str, entry: dict) -> list[dict]:
 def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_pattern: str,
                           fields: list[dict], model_id: str, force: bool) -> dict:
     """La búsqueda híbrida de un caso: sus textos distintos, vectorizados, en
-    `busqueda-<caso>`. Si el campo es una categoría (pocos valores) o tiene
-    demasiados textos para un nodo sin GPU, no aplica (y se dice)."""
-    campo = busqueda.campo_de_texto_libre(fields)
-    if not campo:
+    `busqueda-<caso>`. Prueba los candidatos en orden y se queda con el primero
+    que tiene frases: una categoría (pocos valores), demasiados textos o
+    códigos cortos no aplican (y se dice por qué)."""
+    candidatos = busqueda.campos_de_texto_libre(fields)
+    if not candidatos:
         return {"ok": False, "no_aplica": True, "reason": "no hay un campo de texto libre"}
-    tipo = busqueda.tipo_del_campo(fields, campo)
-    agrupable = busqueda.campo_agrupable(campo, tipo)
-    rc = _os_req("POST", f"{base}/{index_pattern}/_search", user, password, timeout=60,
-                 json_body={"size": 0, "aggs": {"n": {"cardinality": {"field": agrupable}}}})
-    try:
-        n = int(((rc.json() or {}).get("aggregations") or {}).get("n", {}).get("value")) if _resp_ok(rc) else None
-    except (ValueError, TypeError):
-        n = None
-    if n is None:
-        return {"ok": False, "campo": campo, "reason": f"no se pudieron contar los textos de {campo}: {_resp_motivo(rc)}"}
-    if n < busqueda.MIN_TEXTOS:
-        return {"ok": False, "no_aplica": True, "campo": campo,
-                "reason": f"{campo} tiene {n} valores distintos: es una categoría, no texto libre"}
-    if n > busqueda.MAX_TEXTOS:
-        return {"ok": False, "no_aplica": True, "campo": campo,
-                "reason": f"{campo} tiene {n} textos distintos: vectorizarlos en un nodo sin GPU tardaría demasiado"}
+    descartes = []
+    elegido = None
+    for campo in candidatos:
+        tipo = busqueda.tipo_del_campo(fields, campo)
+        agrupable = busqueda.campo_agrupable(campo, tipo)
+        rc = _os_req("POST", f"{base}/{index_pattern}/_search", user, password, timeout=60, json_body={
+            "size": 0, "aggs": {"n": {"cardinality": {"field": agrupable}},
+                                "muestra": {"terms": {"field": agrupable, "size": 50}}}})
+        try:
+            aggs = ((rc.json() or {}).get("aggregations") or {}) if _resp_ok(rc) else {}
+            n = int(aggs.get("n", {}).get("value")) if aggs else None
+        except (ValueError, TypeError):
+            n = None
+        if n is None:
+            return {"ok": False, "campo": campo, "reason": f"no se pudieron contar los textos de {campo}: {_resp_motivo(rc)}"}
+        muestra = [b.get("key") for b in (aggs.get("muestra") or {}).get("buckets") or []]
+        if n < busqueda.MIN_TEXTOS:
+            descartes.append(f"{campo} tiene {n} valores distintos: es una categoría, no texto libre")
+        elif n > busqueda.MAX_TEXTOS:
+            descartes.append(f"{campo} tiene {n} textos distintos: vectorizarlos tardaría demasiado")
+        elif not busqueda.son_frases(muestra):
+            descartes.append(f"{campo} son códigos cortos ({', '.join(map(str, muestra[:3]))}…), no frases")
+        else:
+            elegido = (campo, tipo, agrupable, n)
+            break
+    if not elegido:
+        # Si antes aplicaba (otro campo, otros datos), lo que quedó armado se
+        # va: el Transform seguía corriendo cada hora para nada.
+        tid = busqueda.nombre_del_transform(slug)
+        if _resp_ok(_os_req("GET", f"{base}/_plugins/_transform/{tid}", user, password, timeout=20)):
+            _os_req("POST", f"{base}/_plugins/_transform/{tid}/_stop", user, password, timeout=20)
+            _os_req("DELETE", f"{base}/_plugins/_transform/{tid}", user, password, timeout=20)
+            _os_req("DELETE", f"{base}/{busqueda.indice(slug)}", user, password, timeout=30)
+        return {"ok": False, "no_aplica": True, "campo": candidatos[0], "reason": "; ".join(descartes)}
+    campo, tipo, agrupable, n = elegido
     _os_req("PUT", f"{base}/_ingest/pipeline/{busqueda.PIPELINE_DE_INGESTA}", user, password, timeout=30,
             json_body=busqueda.pipeline_de_ingesta(model_id))
     _os_req("PUT", f"{base}/_search/pipeline/{busqueda.PIPELINE_DE_BUSQUEDA}", user, password, timeout=30,
@@ -10467,8 +10487,11 @@ def _catalogo_de_plugins(terraform_dir: Path, registry: dict) -> list[dict]:
                 **{p: bool((est.get(p) or {}).get("ok")) for p in ("perfil", "analista", "reporte", "busqueda",
                                                                     "ciclo_de_vida", "rollup")},
             }
+            # La búsqueda que al armarse resultó no aplicar (una categoría,
+            # códigos cortos) no cuenta: si no, quedaba "sin activar" para siempre.
+            busqueda_no_aplica = bool((est.get("busqueda") or {}).get("no_aplica"))
             for p in _ORDEN_DEL_CATALOGO:
-                if decide.get(p):
+                if decide.get(p) and not (p == "busqueda" and busqueda_no_aplica):
                     aplica[p].append(slug)
                 if hecho.get(p):
                     aplicado[p].append(slug)
