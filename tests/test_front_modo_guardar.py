@@ -177,7 +177,7 @@ def test_los_documentos_se_cuentan_recien_con_algo_ingestando():
     i = html.index("const ingestaArrancada = docs.arrancada;")
     bloque = html[i:html.index("const kpis = ", i)]
     assert 'id="infra-docs-refresh"' in bloque
-    assert "${kpi('', 'Documentos', docs.valor, docs.sub, actualizarDocs)}" in html
+    assert "${kpi('Documentos', docs.valor, docs.sub, actualizarDocs)}" in html
 
 
 def test_la_puesta_en_marcha_va_antes_que_las_pipelines():

@@ -148,46 +148,76 @@ def _catalogo_js() -> str:
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_el_catalogo_en_node(tmp_path):
-    js = tmp_path / "catalogo.mjs"
+def test_que_podes_mostrar_en_node(tmp_path):
+    js = tmp_path / "funciones.mjs"
     js.write_text(r"""
 const icon = (n) => `<svg data-i="${n}"></svg>`;
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const SLUG_LABELS = { siem: 'SIEM', 'produccion-pozos': 'Producción de pozos' };
 const state = {};
+const _ESTADO_PLUGIN = { ok: ['Listo', 'sev--ok'], parcial: ['Parcial', 'sev--high'], falla: ['Falló', 'sev--critical'],
+                         en_curso: ['En curso', 'sev--low'], excluido: ['Excluido', ''], sin_probar: ['Sin probar', 'sev--low'] };
+const _tarjetasDe = (plugins, slug) => (Array.isArray((plugins || {})[slug]) ? plugins[slug] : []);
+const pluginsDetalleHTML = (ts) => `<div class="plug-grid">${ts.map(t => t.plugin).join(',')}</div>`;
 """ + _catalogo_js() + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
 const C = (plugin, aplica, aplicado, recomendado = true) => ({ plugin, aplica, aplicado, recomendado });
-const cat = [C('rollup', [], [], false), C('forecasting', ['siem', 'produccion-pozos'], ['siem']),
-             C('agente', ['siem'], ['siem']), C('ciclo_de_vida', ['siem'], [], false),
-             C('security_analytics', ['siem'], []), C('no-existe', ['siem'], [])];
-check('sin catálogo, nada', catalogoHTML([]) === '' && catalogoHTML(null) === '');
-const h = catalogoHTML(cat);
-check('lo desconocido no va', !h.includes('no-existe'), h);
-check('lo que no aplica, al final', h.indexOf('Resumen por hora') > h.indexOf('Ciclo de vida'), h);
-check('a medias: cuántos y dónde falta', h.includes('title="Falta en: Producción de pozos">En 1 de 2 casos</span>'), h);
-check('a medias: completar', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="forecasting">Completar</button>'), h);
-check('listo: sin botón para aplicar', h.includes('<span class="sev sev--ok">Listo</span>') && !h.includes('data-plugin="agente">Aplicar'), h);
-check('lo opcional lo dice', (h.match(/>Opcional</g) || []).length === 2, h);
-check('Security Analytics, en el paso 1', h.includes('Se arma en el paso 1, antes que los datos.')
-  && !h.includes('cat__aplicar" data-plugin="security_analytics"'), h);
-check('sin casos, sin comandos', !h.includes('cat__ver" data-plugin="rollup"') && h.includes('No aplica a estos casos'), h);
-check('los comandos, cerrados', h.includes('aria-expanded="false" aria-controls="cat-det-forecasting"')
-  && h.includes('id="cat-det-forecasting" data-det="forecasting" hidden>'), h);
-check('cada uno con su ?', h.includes('Pronósticos<span class="ayuda"'), h);
-state.catalogoAbierto = 'forecasting';
-const abierto = catalogoHTML(cat);
-check('abierto, a todo el ancho y a la vista', abierto.includes('class="cat__item is-abierto"')
-  && abierto.includes('id="cat-det-forecasting" data-det="forecasting">'), abierto);
-state.catalogoAbierto = null;
-state.provisionandoPlugins = true; state.aplicandoPlugin = 'ciclo_de_vida';
-const aplicando = catalogoHTML(cat);
-check('aplicando: lo dice y no deja lanzar otro', aplicando.includes('data-plugin="ciclo_de_vida" disabled>Aplicando…')
-  && aplicando.includes('data-plugin="forecasting" disabled>Completar'), aplicando);
-check('escapado', catalogoHTML([C('agente', ['<x>'], [])]).includes('&lt;x&gt;'));
+const T = (plugin, estado, extra = {}) => ({ plugin, titulo: plugin, estado, motivo: '', filas: [], links: [], ...extra });
+const data = {
+  pipelines: [{ slug: 'siem' }, { slug: 'produccion-pozos' }],
+  catalogo: [C('agente', ['siem', 'produccion-pozos'], ['siem', 'produccion-pozos']),
+             C('forecasting', ['siem', 'produccion-pozos'], ['siem']),
+             C('security_analytics', ['siem'], []), C('rollup', [], [], false),
+             C('ciclo_de_vida', ['siem', 'produccion-pozos'], [], false), C('anomalias', ['siem'], [])],
+  plugins: {
+    siem: [T('dashboard', 'ok', { links: [{ texto: 'Abrir el tablero', url: 'https://d/siem' }] }),
+           T('forecasting', 'parcial', { motivo: 'backtest parcial' })],
+    'produccion-pozos': [T('dashboard', 'ok')],
+    _cluster: [T('query_insights', 'ok'), T('embeddings', 'falla')],
+  },
+};
+check('sin nada, nada', funcionesHTML({ pipelines: [], catalogo: [], plugins: {} }) === '');
+const h = funcionesHTML(data);
+check('en lenguaje de negocio, con el nombre técnico chico', h.includes('<span class="fn__titulo">Pronosticar lo que viene</span><span class="fn__sub">Forecasting</span>'), h);
+check('una acción: completar lo que falta', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="forecasting">Completar</button>'), h);
+check('a medias, con cuántos', /data-fn="forecasting"[\s\S]*?en 1 de 2 casos/.test(h) && h.includes('class="fn fn--parcial" data-fn="forecasting"'), h);
+check('el asistente se prueba', h.includes('<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>'), h);
+check('las acciones, en secundario (lo primario es el paso 3)', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="anomalias">Activar</button>')
+  && !h.includes('btn-primary'), h);
+const sinTableros = funcionesHTML({ ...data, plugins: {} });
+check('los tableros aplican siempre: sin tarjetas, sin activar (y sin botón: van en el paso 1)',
+  /data-fn="dashboard"[\s\S]*?sin activar · 2 casos/.test(sinTableros) && !sinTableros.includes('data-plugin="dashboard"'), sinTableros);
+check('lo opcional, en secundario y dicho', h.includes('class="btn btn-secondary btn-sm cat__aplicar" data-plugin="ciclo_de_vida">Activar</button>')
+  && h.includes('Index State Management · opcional: se nota con meses de datos'), h);
+check('Security Analytics no se activa desde acá', !h.includes('data-plugin="security_analytics"') && h.includes('data-fn="security_analytics"'), h);
+check('los tableros, de las tarjetas', h.includes('class="fn fn--ok" data-fn="dashboard"') && /data-fn="dashboard"[\s\S]*?en los 2 casos/.test(h), h);
+check('Query Insights, de todo el cluster', /data-fn="query_insights"[\s\S]*?todo el cluster/.test(h), h);
+check('lo que no aplica, en una línea al final', h.includes('No aplican a estos datos:') && h.includes('guardar un resumen histórico')
+  && !h.includes('data-fn="rollup"'), h);
+check('cuántas listas', h.includes('de 7 listas') || /\d de \d+ listas/.test(h), h);
+check('cerradas', h.includes('aria-expanded="false" aria-controls="fn-det-forecasting"') && h.includes('id="fn-det-forecasting" hidden>'), h);
+state.provisionandoPlugins = true; state.aplicandoPlugin = 'forecasting';
+const activando = funcionesHTML(data);
+check('activando: lo dice y no deja lanzar otro', activando.includes('data-plugin="forecasting" disabled>Activando…')
+  && activando.includes('data-plugin="anomalias" disabled>Activar'), activando);
+state.provisionandoPlugins = false; state.aplicandoPlugin = '';
+// El detalle.
+const d = detalleDeFuncionHTML(funcionDe('forecasting', data));
+check('qué hace y para el negocio', d.includes('<strong>Qué hace.</strong>') && d.includes('<strong>Para el negocio.</strong>'), d);
+check('cada caso con su estado y su motivo', d.includes('<span class="fn__caso-nombre">SIEM</span><span class="sev sev--high">Parcial</span>')
+  && d.includes('<span class="fn__motivo">backtest parcial</span>'), d);
+check('el que falta, sin activar', d.includes('<span class="fn__caso-nombre">Producción de pozos</span><span class="sev sev--low">Sin activar</span>'), d);
+check('sus comandos, a demanda', d.includes('class="btn btn-ghost btn-sm fn__comandos" data-plugin="forecasting"')
+  && d.includes('<div class="cat__det" data-det="forecasting" hidden></div>'), d);
+const tab = detalleDeFuncionHTML(funcionDe('dashboard', data));
+check('el link a Dashboards de cada caso', tab.includes('href="https://d/siem" target="_blank" rel="noopener">Abrir el tablero'), tab);
+check('sin catálogo, sin comandos', !tab.includes('fn__comandos'), tab);
+const bus = funcionDe('busqueda', data);
+check('lo del cluster va con su función', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
+check('escapado', funcionesHTML({ ...data, catalogo: [C('agente', ['<x>'], [])] }).includes('&lt;x&gt;'));
 // Dev Tools, desde la URL de Dashboards.
-check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console', devToolsDe('https://1.2.3.4:5601/app/home#/'));
+check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
 check('sin dashboards, sin link', devToolsDe('') === '');
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
@@ -196,14 +226,18 @@ process.exit(fallos.length ? 1 : 0);
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_el_catalogo_esta_conectado():
+def test_que_podes_mostrar_esta_conectado():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    function renderInfraView(data) {")
     vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    assert "${catalogoHTML(data.catalogo)}" in vista
+    assert "${funcionesHTML(data)}" in vista and "catalogoHTML" not in html and "verComandos" not in html
     assert "provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false, { recomendados: true })" in vista
     assert "if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);" in vista
-    assert "if (ver) return verComandos(ver);" in vista
+    assert "if (e.target.closest('.fn__probar')) return abrirAsistente();" in vista
+    assert "if (fila) return verFuncion(fila, data);" in vista
+    assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
+    assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
+    assert 'href="#infra-funciones" class="setup-paso__link"' in vista
     # Los pedidos llevan la lista o los recomendados.
     assert "...(plugins ? { plugins } : {})," in html and "...(recomendados ? { recomendados: true } : {})," in html
     # De a uno: dos a la vez se pisan.

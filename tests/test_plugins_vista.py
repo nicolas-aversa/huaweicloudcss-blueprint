@@ -531,8 +531,7 @@ check('y se explica con el asistente', an.includes('class="btn btn-secondary btn
 check('sin anomalías', numeroDePlugin('anomalias', { total: 0, estado: 'FINISHED' }, 's').includes('el análisis terminó'));
 check('un análisis que falló no "sigue corriendo"', numeroDePlugin('anomalias', { total: 0, estado: 'INIT_FAILURE' }, 's').includes('falló'));
 check('sin estado, se dice', numeroDePlugin('anomalias', { total: 0, estado: 'DESCONOCIDO' }, 's').includes('no se pudo leer'));
-check('tarjetas que no son una lista no rompen', _nPlugins('error') === 0
-  && !matrizDePluginsHTML(filas, { detail: 'No autenticado', 'produccion-pozos': 'error' }).includes('mtx__estado'));
+check('tarjetas que no son una lista no rompen', !matrizDePluginsHTML(filas, { detail: 'No autenticado', 'produccion-pozos': 'error' }).includes('mtx__estado'));
 check('eventos de seguridad', numeroDePlugin('seguridad:x', { eventos: 1842 }, 's').includes('<strong>1.842</strong> eventos detectados'));
 check('entidades del perfil', numeroDePlugin('perfil', { entidades: 1 }, 's').includes('<strong>1</strong> fila en el perfil'));
 check('la consulta más lenta', numeroDePlugin('insights', { latencia_ms: 1840 }, '').includes('<strong>1.840 ms</strong>'));

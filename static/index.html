@@ -2344,19 +2344,49 @@
     .mtx__llevar a:hover { text-decoration: underline; }
     .mtx__llevar .icon { width: 12px; height: 12px; }
     .mtx__vacio { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
-    /* Plugins para el cluster: uno por fila, en dos columnas si entra. El que
-       muestra sus comandos ocupa todo el ancho. */
-    .cat { list-style: none; margin: 10px 0 0; padding: 0; display: grid; column-gap: 28px; grid-auto-flow: row dense;
-           grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); }
-    .cat__item { min-width: 0; border-bottom: 1px solid var(--border-subtle); }
-    .cat__item.is-abierto { grid-column: 1 / -1; }
-    .cat__fila { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 8px 0; }
-    .cat__que { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-    .cat__nombre { display: inline-flex; align-items: center; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary); }
-    .cat__donde { font-size: var(--fs-xs); color: var(--text-muted); }
-    .cat__acciones { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
-    @media (max-width: 520px) { .cat__fila { flex-wrap: wrap; } }
-    .cat__nota { font-size: var(--fs-xs); color: var(--text-muted); }
+    /* Qué podés mostrar: una fila por función, con su estado y una acción. */
+    .fn-lista { list-style: none; margin: 8px 0 0; padding: 0; }
+    .fn { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px;
+          border-top: 1px solid var(--border-subtle); }
+    .fn:first-child { border-top: 0; }
+    .fn__fila { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 4px; border: 0; background: none;
+                cursor: pointer; text-align: left; font: inherit; color: inherit; }
+    .fn__fila:hover .fn__titulo { color: var(--accent-hover); }
+    .fn__fila:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+    .fn__fila > .icon { flex: none; width: 14px; height: 14px; color: var(--text-muted); transform: rotate(-90deg); transition: transform var(--t-base); }
+    .fn.is-abierta .fn__fila > .icon { transform: none; color: var(--accent); }
+    .fn__marca { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+                 background: var(--bg-tertiary); color: var(--text-muted); }
+    .fn__marca .icon { width: 14px; height: 14px; stroke-width: 2.5; }
+    .fn--ok .fn__marca { background: var(--accent-green-tint); color: var(--accent-green); }
+    .fn--parcial .fn__marca { background: var(--accent-yellow-tint); color: #8a6100; }
+    .fn__texto { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .fn__titulo { font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-primary); }
+    .fn__sub { font-size: var(--fs-xs); color: var(--text-muted); }
+    .fn__donde { font-size: var(--fs-sm); color: var(--text-secondary); white-space: nowrap; }
+    .fn__accion { display: flex; align-items: center; gap: 6px; }
+    .fn__accion:empty { display: none; }
+    .fn__det { grid-column: 1 / -1; padding: 0 4px 14px 42px; }
+    .fn__que p { margin: 0 0 6px; max-width: 780px; font-size: var(--fs-sm); color: var(--text-secondary); }
+    .fn__casos { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 0 20px;
+                 grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
+    .fn__caso { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle); font-size: var(--fs-sm); }
+    .fn__caso-nombre { font-weight: var(--fw-semi); }
+    .fn__motivo { flex: 1 1 100%; font-size: var(--fs-xs); color: var(--text-muted); }
+    .fn__ir { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--accent-hover); text-decoration: none; }
+    .fn__ir .icon { width: 12px; height: 12px; }
+    .fn__ir:hover { text-decoration: underline; }
+    .fn__cluster { margin-top: 10px; }
+    .fn__pie { margin-top: 10px; }
+    .fn-na { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+    @media (max-width: 560px) { .fn__donde { display: none; } .fn__det { padding-left: 4px; } }
+    /* Lo que no hace falta para la demo, plegado: el detalle por caso y "Más opciones". */
+    .env-plegable > summary { list-style: none; cursor: pointer; }
+    .env-plegable > summary::-webkit-details-marker { display: none; }
+    .env-plegable > summary .setup-card__chevron { margin-left: auto; align-self: center; }
+    .env-plegable[open] > summary .setup-card__chevron { transform: rotate(180deg); }
+    .env-plegable[open] > summary { margin-bottom: 12px; }
+    .env-mas .env-extras > .section-card { box-shadow: none; background: var(--bg-secondary); }
     .cat__det { padding: 2px 0 12px; }
     .cat__casos { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
     .cat__caso { padding: 2px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); cursor: pointer;
@@ -6646,7 +6676,6 @@
     // y el número de cada una se pide al elegir el caso.
     const _ESTADO_PLUGIN = { ok: ['Listo', 'sev--ok'], parcial: ['Parcial', 'sev--high'], falla: ['Falló', 'sev--critical'],
                              en_curso: ['En curso', 'sev--low'], excluido: ['Excluido', ''], sin_probar: ['Sin probar', 'sev--low'] };
-    const _nPlugins = (tarjetas) => (Array.isArray(tarjetas) ? tarjetas : []).filter(t => t.estado !== 'excluido').length;
     // Casos y plugins en una matriz: una fila por caso, una columna por plugin
     // con su estado de un vistazo. Al tocar el caso (o una celda) se abre
     // debajo, a todo el ancho, el detalle con las tarjetas. Antes eran dos
@@ -6752,21 +6781,24 @@
           }).join('')}</span></span></th><td colspan="${ancho - 1}"></td></tr>` + detalle('_cluster', '')
         : '';
       const sinPlugins = !presentes.size
-        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando los apliques: "Aplicar los recomendados" (paso 3 de la puesta en marcha) o uno por uno, en Plugins para el cluster.</p>` : '';
-      return `<div class="section-card" id="infra-plugins">
-          <div class="section-card__head">
+        ? `<p class="mtx__vacio">Los plugins aparecen acá cuando los apliques: "Aplicar los recomendados" (paso 3 de la puesta en marcha) o uno por uno, en Qué podés mostrar.</p>` : '';
+      // Plegada: para mostrar alcanza con "Qué podés mostrar"; acá, cada caso
+      // con sus tarjetas, sus números y "Explicarla con IA".
+      return `<details class="section-card env-plegable" id="infra-plugins"${state.casosAbiertos ? ' open' : ''}>
+          <summary class="section-card__head">
             <span class="section-card__tile">${icon('layers')}</span>
             <span class="section-card__titlewrap">
-              <span class="section-card__title">Casos y plugins</span>
-              <span class="section-card__hint">Qué quedó configurado en cada caso. Tocá un caso, o una celda, para ver el detalle y los links a OpenSearch Dashboards.${state.provisionandoPlugins ? ' Provisionando: los demás casos aparecen a medida que terminan.' : ''}</span>
+              <span class="section-card__title">Detalle por caso</span>
+              <span class="section-card__hint">Cada caso con lo que tiene, sus números y los links a OpenSearch Dashboards.${state.provisionandoPlugins ? ' Provisionando: los demás casos aparecen a medida que terminan.' : ''}</span>
             </span>
-          </div>
+            <svg class="icon setup-card__chevron"><use href="#ic-chevron"/></svg>
+          </summary>
           <div class="mtx-scroll"><table class="mtx">
             <thead><tr><th scope="col" class="mtx__th-caso">Caso</th>${columnas.map(([id, n], i) =>
               `<th scope="col" class="mtx__th">${escapeHtml(n)}${ayudaHTML(id, columnas.length <= 4 || i >= columnas.length / 2)}</th>`).join('')}</tr></thead>
             <tbody>${casos}${cluster}</tbody>
           </table></div>${sinPlugins}
-        </div>`;
+        </details>`;
     }
     // ── Plugins para el cluster: elegir qué armar ──────────────────────────────
     // Con el entorno ya desplegado, plugin por plugin: en qué casos aplica,
@@ -6785,47 +6817,155 @@
       const base = String(dashUrl || '').replace(/\/app\/.*$/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
       return base ? `${base}/app/dev_tools#/console` : '';
     }
-    function catalogoHTML(catalogo) {
-      // Los que no aplican a ningún caso, al final.
-      const items = (catalogo || []).filter(c => _NOMBRE_DEL_PLUGIN[c.plugin])
-        .sort((a, b) => (!a.aplica.length) - (!b.aplica.length));
-      if (!items.length) return '';
-      const nombres = (slugs) => slugs.map(s => SLUG_LABELS[s] || s).join(', ');
-      const fila = (c) => {
-        const p = c.plugin;
-        const n = c.aplica.length;
-        const faltan = c.aplica.filter(s => !c.aplicado.includes(s));
-        const hechos = n - faltan.length;
-        const abierto = n > 0 && state.catalogoAbierto === p;
-        const estado = !n ? '<span class="cat__donde">No aplica a estos casos</span>'
-          : !faltan.length ? `<span class="sev sev--ok">Listo</span><span class="cat__donde" title="${escapeHtml(nombres(c.aplica))}">en ${n === 1 ? 'su caso' : `los ${n} casos`}</span>`
-          : hechos ? `<span class="sev sev--high" title="${escapeHtml(`Falta en: ${nombres(faltan)}`)}">En ${hechos} de ${n} casos</span>`
-          : `<span class="cat__donde" title="${escapeHtml(nombres(c.aplica))}">aplica en ${n === 1 ? '1 caso' : `${n} casos`}</span>`;
-        const opcional = c.recomendado ? ''
-          : '<span class="sev" title="Se nota con meses de datos: en una demo no se ve. No entra en «Aplicar los recomendados».">Opcional</span>';
-        const ver = n ? `<button type="button" class="btn btn-ghost btn-sm cat__ver" data-plugin="${escapeHtml(p)}" `
-          + `aria-expanded="${abierto}" aria-controls="cat-det-${escapeHtml(p)}">${icon('code')} Comandos</button>` : '';
-        // Security Analytics se arma en el paso 1: sus detectores tienen que
-        // existir antes que los datos.
-        const aplicar = !faltan.length ? ''
-          : p === 'security_analytics' ? '<span class="cat__nota">Se arma en el paso 1, antes que los datos.</span>'
-          : `<button type="button" class="btn btn-secondary btn-sm cat__aplicar" data-plugin="${escapeHtml(p)}"${state.provisionandoPlugins ? ' disabled' : ''}>`
-            + `${state.aplicandoPlugin === p ? 'Aplicando…' : hechos ? 'Completar' : 'Aplicar'}</button>`;
-        return `<li class="cat__item${abierto ? ' is-abierto' : ''}">`
-          + `<div class="cat__fila"><span class="cat__que"><span class="cat__nombre">${escapeHtml(_NOMBRE_DEL_PLUGIN[p])}${ayudaHTML(p)}</span>`
-          + `${opcional}${estado}</span><span class="cat__acciones">${ver}${aplicar}</span></div>`
-          + `<div class="cat__det" id="cat-det-${escapeHtml(p)}" data-det="${escapeHtml(p)}"${abierto ? '' : ' hidden'}></div></li>`;
+    // ── Qué podés mostrar ──────────────────────────────────────────────────────
+    // Una fila por función, en lenguaje de negocio (el nombre técnico, chico):
+    // su estado en todos los casos y UNA acción (Activar, Completar o Probar).
+    // Al tocarla: qué hace, para qué le sirve al cliente, cada caso con su link
+    // a Dashboards y cómo se hace en Dev Tools. Junta lo que eran la matriz de
+    // casos × plugins y el catálogo, que decían casi lo mismo dos veces.
+    const _FUNCIONES = [
+      ['agente', 'Preguntarle a los datos en castellano', 'Asistente · ml-commons'],
+      ['dashboard', 'Tableros listos para mirar', 'Dashboards'],
+      ['forecasting', 'Pronosticar lo que viene', 'Forecasting'],
+      ['anomalias', 'Detectar comportamientos raros', 'Anomaly Detection'],
+      ['alertas', 'Avisar cuando pasa algo raro', 'Alerting'],
+      ['security_analytics', 'Detectar amenazas de seguridad', 'Security Analytics'],
+      ['busqueda', 'Buscar por significado', 'Búsqueda híbrida'],
+      ['perfil', 'Una ficha por cliente, usuario o equipo', 'Transform'],
+      ['analista', 'Mostrar los datos sin los sensibles', 'Enmascarado de campos'],
+      ['reporte', 'Reporte en PDF', 'Reporting'],
+      ['ciclo_de_vida', 'Archivar y borrar los datos viejos', 'Index State Management'],
+      ['rollup', 'Guardar un resumen histórico', 'Rollup'],
+      ['query_insights', 'Ver qué consultas cargan el cluster', 'Query Insights'],
+    ];
+    // Lo de todo el cluster que acompaña a una función: va en su detalle.
+    const _DEL_CLUSTER = { agente: ['agente', 'text2viz'], busqueda: ['embeddings'], alertas: ['canal'], query_insights: ['query_insights'] };
+    // Una función con su estado: `aplica` y `hechos` (slugs), sus tarjetas por
+    // caso, las del cluster y cuántas tienen un problema.
+    function funcionDe(id, data) {
+      const [, titulo, tecnico] = _FUNCIONES.find(([x]) => x === id) || [id, id, ''];
+      const slugs = (data.pipelines || []).map(p => p.slug);
+      const c = (data.catalogo || []).find(x => x.plugin === id);
+      const tarjetas = slugs.map(s => [s, _tarjetasDe(data.plugins, s).find(t => t.plugin === id)])
+        .filter(([, t]) => t && t.estado !== 'excluido');
+      const cluster = _tarjetasDe(data.plugins, '_cluster').filter(t => (_DEL_CLUSTER[id] || []).includes(t.plugin));
+      let aplica, hechos;
+      if (c) {
+        aplica = c.aplica;
+        hechos = c.aplica.filter(s => c.aplicado.includes(s));
+      } else if (id === 'query_insights') {
+        aplica = cluster.length ? ['_cluster'] : [];
+        hechos = cluster.some(t => t.estado === 'ok') ? aplica : [];
+      } else {
+        // Los tableros: en todos los casos (se importan en el paso 1).
+        aplica = id === 'dashboard' ? slugs : tarjetas.map(([s]) => s);
+        hechos = tarjetas.filter(([, t]) => t.estado === 'ok' || t.estado === 'parcial').map(([s]) => s);
+      }
+      const problemas = tarjetas.filter(([, t]) => t.estado === 'falla' || t.estado === 'parcial').length;
+      const enCurso = [...tarjetas.map(([, t]) => t), ...cluster].some(t => t.estado === 'en_curso');
+      const estado = !aplica.length ? 'na' : !hechos.length ? (enCurso ? 'en_curso' : 'off')
+        : (hechos.length < aplica.length || problemas) ? 'parcial' : 'ok';
+      return { id, titulo, tecnico, c, aplica, hechos, tarjetas, cluster, problemas, estado, recomendado: c ? c.recomendado : true };
+    }
+    function funcionesHTML(data) {
+      const filas = _FUNCIONES.map(([id]) => funcionDe(id, data));
+      const visibles = filas.filter(f => f.estado !== 'na');
+      if (!visibles.length) return '';
+      const noAplican = filas.filter(f => f.estado === 'na' && f.id !== 'query_insights');
+      const nombres = (ss) => ss.filter(s => s !== '_cluster').map(s => SLUG_LABELS[s] || s).join(', ');
+      const minuscula = (t) => t.charAt(0).toLowerCase() + t.slice(1);
+      const fila = (f) => {
+        const n = f.aplica.filter(s => s !== '_cluster').length;
+        const abierta = state.funcionAbierta === f.id;
+        const [marca, dice] = { ok: ['check', 'Lista'], parcial: ['alert-triangle', 'A medias o con avisos'],
+                                off: ['plus', 'Sin activar'], en_curso: ['clock', 'En curso'] }[f.estado];
+        const donde = f.id === 'query_insights' ? 'todo el cluster'
+          : !f.hechos.length ? `${f.estado === 'en_curso' ? 'preparándose' : 'sin activar'} · ${n === 1 ? '1 caso' : `${n} casos`}`
+          : f.hechos.length < n ? `en ${f.hechos.length} de ${n} casos`
+          : `en ${n === 1 ? 'su caso' : `los ${n} casos`}${f.problemas ? ` · ${f.problemas} con avisos` : ''}`;
+        // Una sola acción. Security Analytics y los tableros se arman en el
+        // paso 1 (antes que los datos): no se activan desde acá.
+        const falta = f.c && f.hechos.length < f.aplica.length && f.id !== 'security_analytics';
+        const accion = f.id === 'agente' && f.hechos.length
+          ? '<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>'
+          // Secundario: lo primario es "Aplicar los recomendados" (paso 3).
+          : falta ? '<button type="button" class="btn btn-secondary btn-sm cat__aplicar" '
+            + `data-plugin="${escapeHtml(f.id)}"${state.provisionandoPlugins ? ' disabled' : ''}>`
+            + `${state.aplicandoPlugin === f.id ? 'Activando…' : f.hechos.length ? 'Completar' : 'Activar'}</button>`
+          : '';
+        return `<li class="fn fn--${f.estado}${abierta ? ' is-abierta' : ''}" data-fn="${escapeHtml(f.id)}">`
+          + `<button type="button" class="fn__fila" aria-expanded="${abierta}" aria-controls="fn-det-${escapeHtml(f.id)}">`
+          + `<span class="fn__marca" title="${dice}">${icon(marca)}</span>`
+          + `<span class="fn__texto"><span class="fn__titulo">${escapeHtml(f.titulo)}</span>`
+          + `<span class="fn__sub">${escapeHtml(f.tecnico)}${f.recomendado ? '' : ' · opcional: se nota con meses de datos'}</span></span>`
+          + `<span class="fn__donde"${n ? ` title="${escapeHtml(nombres(f.aplica))}"` : ''}>${escapeHtml(donde)}</span>${icon('chevron')}</button>`
+          + `<span class="fn__accion">${accion}</span>`
+          + `<div class="fn__det" id="fn-det-${escapeHtml(f.id)}"${abierta ? '' : ' hidden'}></div></li>`;
       };
-      return `<div class="section-card" id="infra-catalogo">
+      const listas = visibles.filter(f => f.estado === 'ok').length;
+      return `<div class="section-card" id="infra-funciones">
           <div class="section-card__head">
-            <span class="section-card__tile">${icon('plus')}</span>
+            <span class="section-card__tile">${icon('spark')}</span>
             <span class="section-card__titlewrap">
-              <span class="section-card__title">Plugins para el cluster</span>
-              <span class="section-card__hint">Elegí qué armar. Cada uno muestra sus comandos de Dev Tools, caso por caso, y se aplica solo, sin tocar los demás.</span>
+              <span class="section-card__title">Qué podés mostrar</span>
+              <span class="section-card__hint">${listas} de ${visibles.length} listas. Tocá una para ver qué hace, para qué le sirve al cliente y dónde verla.</span>
             </span>
           </div>
-          <ul class="cat">${items.map(fila).join('')}</ul>
+          <ul class="fn-lista">${visibles.map(fila).join('')}</ul>
+          ${noAplican.length ? `<p class="fn-na">No aplican a estos datos: ${noAplican.map(f => escapeHtml(minuscula(f.titulo))).join(' · ')}.</p>` : ''}
         </div>`;
+    }
+    // El detalle de una función: qué hace, cada caso con su estado y su link,
+    // lo del cluster que la acompaña y sus comandos de Dev Tools (a demanda).
+    function detalleDeFuncionHTML(f) {
+      const [que, negocio] = _PARA_QUE_SIRVE[f.id] || [];
+      const caso = (s, t) => {
+        const [texto, clase] = t ? (_ESTADO_PLUGIN[t.estado] || [t.estado, '']) : ['Sin activar', 'sev--low'];
+        const link = t && ((t.links || []).find(l => l.url) || (t.filas || []).find(x => x.url));
+        return `<li class="fn__caso"><span class="fn__caso-nombre">${escapeHtml(SLUG_LABELS[s] || s)}</span>`
+          + `<span class="sev ${clase}">${escapeHtml(texto)}</span>`
+          + (link ? `<a class="fn__ir" href="${escapeHtml(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.texto || 'Ver en Dashboards')} ${icon('arrow-right')}</a>` : '')
+          + (t && t.motivo && t.estado !== 'ok' ? `<span class="fn__motivo">${escapeHtml(t.motivo)}</span>` : '')
+          + '</li>';
+      };
+      const conTarjeta = f.tarjetas.map(([s, t]) => caso(s, t));
+      const sinTarjeta = f.aplica.filter(s => s !== '_cluster' && !f.tarjetas.some(([x]) => x === s)).map(s => caso(s, null));
+      const casos = [...conTarjeta, ...sinTarjeta].join('');
+      return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
+                  + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
+        + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
+        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
+        + (f.c && f.aplica.length ? `<div class="fn__pie"><button type="button" class="btn btn-ghost btn-sm fn__comandos" data-plugin="${escapeHtml(f.id)}" `
+          + `aria-expanded="false">${icon('code')} Ver cómo se hace en Dev Tools</button></div>`
+          + `<div class="cat__det" data-det="${escapeHtml(f.id)}" hidden></div>` : '');
+    }
+    function pintarFuncion(li, data) {
+      const det = li && li.querySelector('.fn__det');
+      if (!det) return;
+      det.innerHTML = detalleDeFuncionHTML(funcionDe(li.dataset.fn, data));
+      det.querySelectorAll('.plug-grid').forEach(repartirTarjetas);
+    }
+    function verFuncion(fila, data) {
+      const li = fila.closest('.fn');
+      const abrir = !li.classList.contains('is-abierta');
+      document.querySelectorAll('#infra-funciones .fn').forEach(x => {
+        x.classList.remove('is-abierta');
+        x.querySelector('.fn__fila')?.setAttribute('aria-expanded', 'false');
+        const d = x.querySelector('.fn__det');
+        if (d) d.hidden = true;
+      });
+      state.funcionAbierta = abrir ? li.dataset.fn : null;
+      if (!abrir) return;
+      li.classList.add('is-abierta');
+      fila.setAttribute('aria-expanded', 'true');
+      li.querySelector('.fn__det').hidden = false;
+      pintarFuncion(li, data);
+    }
+    // "Probar" y "Preguntarle a los datos": abren el asistente.
+    function abrirAsistente() {
+      const lanzador = document.getElementById('cap-lanzador');
+      if (!lanzador) { toast('El asistente aparece cuando está activado.', 'info'); return; }
+      if (!capChatAbierto) lanzador.click();
     }
     // Los comandos de un plugin, caso por caso. Se piden una vez por entorno
     // (cambian si cambian los casos).
@@ -6859,24 +6999,6 @@
         + '<div class="cat__pie"><button type="button" class="btn btn-secondary btn-sm cat__copiar">Copiar</button>'
         + (consola ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(consola)}" target="_blank" rel="noopener">Abrir Dev Tools</a>` : '')
         + '<span>Van en orden. Lo que está entre &lt; &gt; (el id que devuelve una respuesta, una contraseña) se reemplaza antes de mandarlo.</span></div>';
-    }
-    function verComandos(btn) {
-      const plugin = btn.dataset.plugin;
-      const det = document.getElementById(`cat-det-${plugin}`);
-      if (!det) return;
-      const abrir = det.hidden;
-      // De a uno: los comandos son largos.
-      document.querySelectorAll('#infra-catalogo .cat__det').forEach(d => {
-        d.hidden = true;
-        d.closest('.cat__item')?.classList.remove('is-abierto');
-      });
-      document.querySelectorAll('#infra-catalogo .cat__ver').forEach(b => b.setAttribute('aria-expanded', 'false'));
-      state.catalogoAbierto = abrir ? plugin : null;
-      if (!abrir) return;
-      det.hidden = false;
-      det.closest('.cat__item')?.classList.add('is-abierto');
-      btn.setAttribute('aria-expanded', 'true');
-      pintarComandos(det, plugin);
     }
     // Aplica un plugin donde falta. La alerta vigila al detector de anomalías:
     // donde todavía no hay, se arman los dos.
@@ -7784,7 +7906,7 @@
       // refrescarPluginsEnCurso): sin esto la vista era una foto a mitad de camino.
       state.provisionandoPlugins = true;
       state.aplicandoPlugin = clave;
-      document.querySelectorAll('#infra-catalogo .cat__aplicar').forEach(b => { b.disabled = true; });
+      document.querySelectorAll('#infra-funciones .cat__aplicar').forEach(b => { b.disabled = true; });
       const refresco = setInterval(refrescarPluginsEnCurso, _REFRESCO_PLUGINS_MS);
       let listo = false;
       try {
@@ -7818,7 +7940,7 @@
         }
         if (plugins) {
           const nombre = _NOMBRE_DEL_PLUGIN[clave] || 'El plugin';
-          toast(data.status === 'success' ? `${nombre}: aplicado. Su estado, en Casos y plugins.`
+          toast(data.status === 'success' ? `${nombre}: activado. Tocalo en Qué podés mostrar para verlo.`
                                           : `${nombre}: no se aplicó. El motivo está en Actividad.`,
                 data.status === 'success' ? 'success' : 'error');
         }
@@ -8600,6 +8722,8 @@
       const dashUrl = data.dashboards_url || '';
       const pipelines = Array.isArray(data.pipelines) ? data.pipelines : [];
       const hasCapabilitySlug = pipelines.some(p => p.has_capabilities);
+      // Con el asistente armado, "Preguntarle a los datos" va arriba de todo.
+      const conAsistente = Object.values(data.capabilities || {}).some(c => c && c.agent_id);
       // Con SIEM o FortiAnalyzer el paso 1 también crea los índices y los
       // detectores de Security Analytics: tienen que existir antes que los datos.
       const paso1 = pipelines.some(p => SECURITY_SLUGS.has(p.slug))
@@ -8651,15 +8775,11 @@
         };
       });
 
-      // Los números del entorno, arriba de todo; el de Plugins lleva a la matriz.
+      // Los números del entorno, arriba de todo.
       const docs = resumenDeDocumentos(pipelines);
       const ingestando = pipelines.filter(p => p.active && !rota(p)).length;
-      const nPlugins = Object.values(data.plugins || {}).reduce((t, ts) => t + _nPlugins(ts), 0);
-      // Los que no quedaron bien (parcial o falló): lo primero que hay que mirar.
-      const nConProblemas = Object.values(data.plugins || {}).reduce((t, ts) =>
-        t + (Array.isArray(ts) ? ts : []).filter(x => x.estado === 'parcial' || x.estado === 'falla').length, 0);
-      const kpi = (ir, etiqueta, valor, sub, extra = '') => `
-        <div class="env-kpi${ir ? ' is-link' : ''}"${ir ? ` data-ir="${ir}" role="button" tabindex="0"` : ''}>
+      const kpi = (etiqueta, valor, sub, extra = '') => `
+        <div class="env-kpi">
           <span class="env-kpi__lbl">${etiqueta}</span>
           <span class="env-kpi__valor">${valor}</span>
           <span class="env-kpi__sub">${sub}</span>${extra}
@@ -8671,10 +8791,8 @@
         : '';
       const kpis = `
         <div class="env-kpis">
-          ${kpi('', 'Casos', pipelines.length, `${ingestando} ingestando${pipelines.length - ingestando ? ` · ${pipelines.length - ingestando} sin ingestar` : ''}`)}
-          ${kpi('', 'Documentos', docs.valor, docs.sub, actualizarDocs)}
-          ${nPlugins ? kpi('plugins', 'Plugins', nPlugins, nConProblemas
-            ? `${nConProblemas} con problemas: mirá su motivo` : 'todos listos · cada uno con su link a Dashboards') : ''}
+          ${kpi('Casos', pipelines.length, `${ingestando} ingestando${pipelines.length - ingestando ? ` · ${pipelines.length - ingestando} sin ingestar` : ''}`)}
+          ${kpi('Documentos', docs.valor, docs.sub, actualizarDocs)}
         </div>`;
 
       // Un paso de la secuencia de puesta en marcha: los tres van lado a lado.
@@ -8721,7 +8839,7 @@
               ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
                 (ingestDone ? 'Asistente, pronósticos, anomalías, alertas, perfiles, búsqueda y reporte. Esperá ~1-2 min a que carguen datos.'
                             : 'Iniciá la ingesta y esperá que entren documentos.')
-                  + ((data.catalogo || []).length ? ' <a href="#infra-catalogo" class="setup-paso__link">O elegí cuáles, uno por uno</a>' : ''),
+                  + ((data.catalogo || []).length ? ' <a href="#infra-funciones" class="setup-paso__link">O elegí cuáles, una por una</a>' : ''),
                 // "Volver a aplicar" completa lo que falta o quedó fallado.
                 'infra-capabilities-btn', 'Aplicar los recomendados', 'Volver a aplicar los recomendados') : ''}
             </div>
@@ -8746,29 +8864,35 @@
             </span>
           </div>
           <div class="env-bar__acciones">
+            ${conAsistente ? `<button type="button" class="btn btn-primary btn-sm" id="infra-preguntar">${icon('chat')} Preguntarle a los datos</button>` : ''}
             <a class="btn btn-secondary btn-sm ${dashUrl ? '' : 'hidden'}" id="infra-dashboards-btn"
                href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>
-            <button class="btn btn-primary btn-sm" id="infra-new-pipeline-btn"
+            <button class="btn btn-secondary btn-sm" id="infra-new-pipeline-btn"
                     title="Otro log en paralelo, en este mismo entorno: su propio índice y prefijo OBS, sin tocar las pipelines que ya corren ni re-provisionar.">${icon('spark')} Nuevo pipeline</button>
             <button class="btn btn-ghost btn-sm env-bar__destruir" id="infra-destroy-btn">${icon('trash')} Destruir entorno</button>
           </div>
         </section>
         ${setupPanel}
         ${kpis}
+        ${funcionesHTML(data)}
         ${matrizDePluginsHTML(filas, data.plugins)}
-        ${catalogoHTML(data.catalogo)}
-        <div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>
+        ${/* Lo que no hace falta para mostrar, plegado. */ ''}
+        <details class="section-card env-plegable env-mas" id="infra-mas"${state.masAbierto ? ' open' : ''}>
+          <summary class="section-card__head">
+            <span class="section-card__tile">${icon('settings')}</span>
+            <span class="section-card__titlewrap">
+              <span class="section-card__title">Más opciones</span>
+              <span class="section-card__hint">Accesos de demo con los datos sensibles ocultos, y guardar los datos de esta demo para el próximo entorno.</span>
+            </span>
+            <svg class="icon setup-card__chevron"><use href="#ic-chevron"/></svg>
+          </summary>
+          <div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>
+        </details>
         </div>`;
-      const env = body.querySelector('.env');
-      // El número de Plugins lleva a la matriz.
-      const irALaMatriz = () => body.querySelector('#infra-plugins')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      env?.addEventListener('click', (e) => {
-        if (e.target.closest('[data-ir]') && !e.target.closest('#infra-docs-refresh')) irALaMatriz();
-      });
-      env?.addEventListener('keydown', (e) => {
-        const k = e.target.closest('.env-kpi[data-ir]');
-        if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irALaMatriz(); }
-      });
+      // Lo plegado sigue como estaba después de un repintado.
+      body.querySelector('#infra-plugins')?.addEventListener('toggle', (e) => { state.casosAbiertos = e.currentTarget.open; });
+      body.querySelector('#infra-mas')?.addEventListener('toggle', (e) => { state.masAbierto = e.currentTarget.open; });
+      body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);
 
       // Datos de la demo: guardar, ver y restaurar.
       body.querySelector('#infra-snapshots-ver')?.addEventListener('click', verSnapshots);
@@ -8814,12 +8938,22 @@
         provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false, { recomendados: true }));
       body.querySelector('.setup-paso__link')?.addEventListener('click', (e) => {
         e.preventDefault();
-        body.querySelector('#infra-catalogo')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        body.querySelector('#infra-funciones')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
       });
-      // Plugins para el cluster: los comandos de cada uno y aplicarlo.
-      body.querySelector('#infra-catalogo')?.addEventListener('click', (e) => {
-        const ver = e.target.closest('.cat__ver');
-        if (ver) return verComandos(ver);
+      // Qué podés mostrar: abrir una función, activarla, probarla y sus comandos.
+      body.querySelector('#infra-funciones')?.addEventListener('click', (e) => {
+        const aplicar = e.target.closest('.cat__aplicar');
+        if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);
+        if (e.target.closest('.fn__probar')) return abrirAsistente();
+        const comandos = e.target.closest('.fn__comandos');
+        if (comandos) {
+          const det = comandos.closest('.fn__det')?.querySelector('.cat__det');
+          if (!det) return;
+          det.hidden = !det.hidden;
+          comandos.setAttribute('aria-expanded', String(!det.hidden));
+          if (!det.hidden) pintarComandos(det, det.dataset.det);
+          return;
+        }
         const caso = e.target.closest('.cat__caso');
         if (caso) {
           const det = caso.closest('.cat__det');
@@ -8828,12 +8962,14 @@
         }
         const copiar = e.target.closest('.cat__copiar');
         if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
-        const aplicar = e.target.closest('.cat__aplicar');
-        if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);
+        const preparar = e.target.closest('.plug__accion[data-accion="probar_embeddings"]');
+        if (preparar) return probarEmbeddings(preparar);
+        const fila = e.target.closest('.fn__fila');
+        if (fila) return verFuncion(fila, data);
       });
-      // Un repintado deja a la vista los comandos que se estaban mirando.
-      const comandosAbiertos = state.catalogoAbierto && body.querySelector(`#cat-det-${state.catalogoAbierto}`);
-      if (comandosAbiertos && !comandosAbiertos.hidden) pintarComandos(comandosAbiertos, state.catalogoAbierto);
+      // Un repintado deja abierta la función que se estaba mirando.
+      const funcionAbierta = state.funcionAbierta && body.querySelector(`#infra-funciones .fn[data-fn="${state.funcionAbierta}"]`);
+      if (funcionAbierta) pintarFuncion(funcionAbierta, data);
       body.querySelector('#infra-docs-refresh')?.addEventListener('click', (e) => {
         e.currentTarget.disabled = true;
         e.currentTarget.classList.add('is-girando');
@@ -9086,8 +9222,8 @@
       };
       state.previewMode = true;
       if (params.get('chat') === '1') capChatAbierto = true;   // entra con el asistente abierto
-      // `&comandos=forecasting`: entra con los comandos de ese plugin a la vista.
-      if (params.get('comandos')) state.catalogoAbierto = params.get('comandos');
+      // `&funcion=forecasting`: entra con esa función abierta en "Qué podés mostrar".
+      if (params.get('funcion')) state.funcionAbierta = params.get('funcion');
       showView('infra');
       hydrateActiveEnv();
     }

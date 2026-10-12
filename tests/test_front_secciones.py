@@ -104,7 +104,7 @@ def test_la_vista_va_sin_pestanas():
     # La franja del entorno con sus acciones y la puesta en marcha arriba;
     # después los números, la matriz, y accesos y snapshot lado a lado.
     orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${setupPanel}", "${kpis}",
-             "${matrizDePluginsHTML(filas, data.plugins)}",
+             "${funcionesHTML(data)}", "${matrizDePluginsHTML(filas, data.plugins)}",
              '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>']
     posiciones = [vista.index(p) for p in orden]
     assert posiciones == sorted(posiciones), orden
@@ -122,11 +122,18 @@ def test_no_se_guarda_nada_en_el_navegador():
     assert "localStorage" not in vista and "infra-seccion" not in vista
 
 
-def test_el_numero_de_plugins_lleva_a_la_matriz():
-    vista = _vista(_INDEX.read_text(encoding="utf-8"))
-    assert "kpi('plugins', 'Plugins', nPlugins," in vista
-    assert "const irALaMatriz = () => body.querySelector('#infra-plugins')?.scrollIntoView({ block: 'start', behavior: 'smooth' });" in vista
-    assert "if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); irALaMatriz(); }" in vista, "con teclado también"
+def test_lo_que_no_hace_falta_para_mostrar_va_plegado():
+    """Un SA que no conoce el CSS veía una matriz de 9 casos × 10 columnas con
+    nombres técnicos, un catálogo que repetía lo mismo, y accesos y snapshot,
+    todo a la vez. Arriba queda "Qué podés mostrar"; el detalle por caso y
+    "Más opciones", plegados (y siguen como estaban al repintar)."""
+    html = _INDEX.read_text(encoding="utf-8")
+    vista = _vista(html)
+    assert "kpi('plugins'" not in vista and "irALaMatriz" not in vista, "el número de plugins lo dice la lista"
+    assert '<details class="section-card env-plegable" id="infra-plugins"${state.casosAbiertos ? \' open\' : \'\'}>' in html
+    assert '<details class="section-card env-plegable env-mas" id="infra-mas"${state.masAbierto ? \' open\' : \'\'}>' in vista
+    assert "state.casosAbiertos = e.currentTarget.open;" in vista and "state.masAbierto = e.currentTarget.open;" in vista
+    assert ">Detalle por caso</span>" in html and ">Más opciones</span>" in vista
 
 
 _ARNES_REPARTO = r"""
