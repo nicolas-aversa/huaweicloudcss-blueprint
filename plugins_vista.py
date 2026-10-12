@@ -375,9 +375,10 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
         fuera.append(_tarjeta("text2viz", "Text to visualization",
                               "Arma el gráfico de cada respuesta del asistente a partir de su consulta.",
                               OK if ok else FALLA, "" if ok else text2viz.get("motivo", "")))
-    # El modelo de la búsqueda híbrida. El CSS no sale a internet: lo sube la
-    # plataforma al bucket de demos y el cluster lo carga desde ahí.
-    preparar = {"id": "probar_embeddings", "texto": "Volver a prepararlo" if embeddings else "Prepararlo ahora"}
+    # El modelo de la búsqueda híbrida. El CSS no sale a internet: "Preparar
+    # bucket" lo sube al bucket de demos y el cluster lo carga desde ahí al
+    # activar la búsqueda. Sin botón propio: activar la búsqueda lo prepara.
+    reintentar = "se reintenta con «Completar» en Búsqueda por significado"
     que = ("El modelo multilingüe que entiende el significado de los textos, para la búsqueda híbrida. "
            "El CSS no sale a internet: se carga desde el bucket de demos.")
     desde = int((embeddings or {}).get("en_curso") or 0)
@@ -387,16 +388,16 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
                               "demos, unos minutos"))
     elif desde:   # el pedido que lo preparaba no terminó (al terminar, lo borra)
         fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que, FALLA,
-                              "la preparación se interrumpió (¿se reinició la plataforma?)", accion=preparar))
+                              f"la preparación se interrumpió (¿se reinició la plataforma?): {reintentar}"))
     elif embeddings is None:
-        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " Lo sube al bucket «Preparar bucket» "
-                              "(⚙ Configuración) y el cluster lo carga al aplicar la búsqueda híbrida.",
-                              SIN_PROBAR, accion=preparar))
+        fuera.append(_tarjeta("embeddings", "Modelo de embeddings", que + " El cluster lo carga al activar la búsqueda.",
+                              SIN_PROBAR))
     else:
         ok = bool(embeddings.get("ok"))
+        motivo = embeddings.get("motivo", "")
         fuera.append(_tarjeta("embeddings", "Modelo de embeddings",
                               que + (f" Desplegado ({embeddings.get('dimensiones')} dimensiones)." if ok else ""),
-                              OK if ok else FALLA, "" if ok else embeddings.get("motivo", ""), accion=preparar))
+                              OK if ok else FALLA, "" if ok else (f"{motivo}: {reintentar}" if motivo else reintentar)))
     fuera.append(_tarjeta("query_insights", "Query Insights",
                           "Las consultas más pesadas del cluster (latencia, CPU, memoria), sin configurar nada.", OK,
                           links=[{"texto": "Ver las consultas", "url": link(base, APP_INSIGHTS, "/queryInsights")}],

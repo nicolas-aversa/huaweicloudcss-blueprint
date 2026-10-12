@@ -8260,26 +8260,6 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
             "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}})
 
 
-@app.post("/api/v1/plugins/probar-embeddings", tags=["capabilities"],
-          summary="Prepara el modelo de embeddings (desde el bucket de demos): puede tardar unos minutos")
-def probar_embeddings() -> dict:
-    terraform_dir = _active_terraform_dir()
-    base, user, password = _cluster_del_entorno("embeddings")
-    conocido = ((_read_estados(terraform_dir).get("_cluster") or {}).get("embeddings") or {}).get("model_id") or ""
-    model_id, motivo = _asegurar_modelo_de_embeddings(base, user, password, terraform_dir)
-    if motivo == MODELO_OCUPADO:
-        # El otro pedido deja el resultado; este no lo pisa con un fallo.
-        return {"ok": False, "en_curso": True, "model_id": "", "dimensiones": 0, "reason": motivo}
-    res = {"ok": bool(model_id), "model_id": model_id, "dimensiones": busqueda.DIMENSION if model_id else 0,
-           "reason": "el modelo de embeddings quedó desplegado: aplicá la búsqueda híbrida para armarla"
-           if model_id else motivo}
-    audit.record("preparar_embeddings", res["reason"][:200])
-    _guardar_estados(terraform_dir, "_cluster", {"embeddings": {"ok": res["ok"], "motivo": motivo,
-                                                                "model_id": model_id or conocido,
-                                                                "dimensiones": res["dimensiones"]}})
-    return res
-
-
 @app.get("/api/v1/plugins/buscar", tags=["capabilities"],
          summary="La búsqueda de un caso: por palabras y la híbrida, lado a lado")
 def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict:
@@ -8289,7 +8269,7 @@ def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict
     caso = (estados.get(slug) or {}).get("busqueda") or {}
     if not (model_id and caso.get("ok")):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: aplicala en Plugins para el cluster."})
+            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: activala con «Completar» en Búsqueda por significado."})
     base, user, password = _cluster_del_entorno("busqueda")
     idx = busqueda.indice(slug)
     rl = _os_req("POST", f"{base}/{idx}/_search", user, password, json_body=busqueda.consulta_lexica(q), timeout=30)
@@ -9835,7 +9815,7 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     if not ppl_model or not llm_model:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "ppl_chat",
-                                    "message": "El chatbot no está provisionado para este tipo: aplicá el asistente (paso 3 o Plugins para el cluster)."})
+                                    "message": "El chatbot no está provisionado para este tipo: activalo con «Activar los plugins» (paso 3)."})
 
     # 1) NL → PPL. Pasamos el system_prompt del SLUG elegido (índice + campos + reglas)
     # para que el modelo apunte al vertical correcto. Sin esto, el _predict directo usa

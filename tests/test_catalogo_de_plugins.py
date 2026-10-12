@@ -224,7 +224,10 @@ const tab = detalleDeFuncionHTML(funcionDe('dashboard', data));
 check('el link a Dashboards de cada caso', tab.includes('href="https://d/siem" target="_blank" rel="noopener">Abrir el tablero'), tab);
 check('sin catálogo, sin comandos', !tab.includes('fn__comandos'), tab);
 const bus = funcionDe('busqueda', data);
-check('lo del cluster va con su función', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
+check('lo del cluster va con su función, si tiene algo que decir', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
+const busOk = funcionDe('busqueda', { ...data, plugins: { ...data.plugins, _cluster: [T('embeddings', 'ok')] } });
+check('el modelo listo no se muestra', busOk.cluster.length === 0, JSON.stringify(busOk.cluster));
+check('Query Insights, siempre (es la función)', funcionDe('query_insights', data).cluster.map(t => t.plugin).join() === 'query_insights');
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
 check('escapado', conX.includes('&lt;x&gt;') && !conX.includes('<x>'), conX);
 // Dev Tools, desde la URL de Dashboards.

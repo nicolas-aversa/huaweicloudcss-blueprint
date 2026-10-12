@@ -6881,7 +6881,10 @@
       const c = (data.catalogo || []).find(x => x.plugin === id);
       const tarjetas = slugs.map(s => [s, _tarjetasDe(data.plugins, s).find(t => t.plugin === id)])
         .filter(([, t]) => t && t.estado !== 'excluido');
-      const cluster = _tarjetasDe(data.plugins, '_cluster').filter(t => (_DEL_CLUSTER[id] || []).includes(t.plugin));
+      // Lo del cluster que la acompaña, solo si tiene algo que decir (se está
+      // preparando o falló); Query Insights siempre: es la función misma.
+      const cluster = _tarjetasDe(data.plugins, '_cluster').filter(t => (_DEL_CLUSTER[id] || []).includes(t.plugin)
+        && (t.estado !== 'ok' || t.plugin === 'query_insights'));
       let aplica, hechos;
       if (c) {
         aplica = c.aplica;
@@ -7149,24 +7152,6 @@
         el.classList.toggle('plug__verif--mal', !!(v && !v.ok));
       });
     }
-    // ¿Corre embeddings el cluster? Tarda: baja un modelo, lo usa y lo borra.
-    async function probarEmbeddings(btn) {
-      const tarjeta = btn.closest('.plug');
-      btn.disabled = true;
-      const original = btn.innerHTML;
-      btn.innerHTML = `${icon('clock')} Preparándolo… (la primera vez sube el modelo a tu bucket: unos minutos)`;
-      try {
-        const res = await fetch('/api/v1/plugins/probar-embeddings', { method: 'POST' });
-        const d = await res.json();
-        if (!res.ok) throw detailError(d);
-        toast(d.reason, d.ok ? 'success' : 'info');
-        await hydrateActiveEnv();   // la tarjeta, con el resultado
-      } catch (err) {
-        if (tarjeta) toast(`No se pudo preparar el modelo: ${err.message}`, 'error');
-        btn.disabled = false;
-        btn.innerHTML = original;
-      }
-    }
     // Las tarjetas de un caso, en columnas FIJAS: se reparten una vez, por la
     // altura que tienen al pintarse, y después cada una crece en su columna.
     // En columnas CSS (mampostería) el navegador las rebalanceaba cuando
@@ -7336,7 +7321,7 @@
         + `Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.`,
         // El intervalo: el backend mide qué cambió contra el período anterior.
         { desde: inicio, hasta: fin }));
-      if (!tomada) toast('Para explicarla hace falta el asistente: aplicalo en el paso 3 o en Plugins para el cluster.', 'info');
+      if (!tomada) toast('Para explicarla hace falta el asistente: activalo con «Activar los plugins» (paso 3).', 'info');
       return tomada;
     }
 
@@ -8944,8 +8929,6 @@
         if (caso) return verPlugins(caso);
         const explicar = e.target.closest('.anomalia__explicar');
         if (explicar) return explicarAnomalia(explicar);
-        const accion = e.target.closest('.plug__accion[data-accion="probar_embeddings"]');
-        if (accion) return probarEmbeddings(accion);
         const probar = e.target.closest('.plug__accion[data-accion="probar_busqueda"]');
         if (probar) return probarBusqueda(probar);
       });
@@ -8993,8 +8976,6 @@
         }
         const copiar = e.target.closest('.cat__copiar');
         if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
-        const preparar = e.target.closest('.plug__accion[data-accion="probar_embeddings"]');
-        if (preparar) return probarEmbeddings(preparar);
         const fila = e.target.closest('.fn__fila');
         if (fila) return verFuncion(fila, data);
       }));

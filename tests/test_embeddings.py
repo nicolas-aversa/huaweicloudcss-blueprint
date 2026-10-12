@@ -208,36 +208,29 @@ def test_la_subida_grande_reintenta_desde_donde_quedo(monkeypatch, tmp_path):
         c.put_file_grande("k", str(tmp_path / "m.zip"), espera_s=0)
 
 
-def test_el_endpoint_lo_prepara_y_guarda_el_estado(monkeypatch, tmp_path):
-    from fastapi.testclient import TestClient
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
-    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda b, u, p, td: ("", "sin salida a OBS"))
-    r = TestClient(main.app).post("/api/v1/plugins/probar-embeddings").json()
-    assert not r["ok"] and r["reason"] == "sin salida a OBS"
-    assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"ok": False, "motivo": "sin salida a OBS",
-                                                                     "model_id": "", "dimensiones": 0}
-
-
 def test_la_tarjeta_del_modelo():
     sin = {t["plugin"]: t for t in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="")}["embeddings"]
     assert sin["titulo"] == "Modelo de embeddings" and sin["estado"] == pv.SIN_PROBAR
-    assert sin["accion"] == {"id": "probar_embeddings", "texto": "Prepararlo ahora"}
     ok = {t["plugin"]: t for t in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="",
                                                           embeddings={"ok": True, "dimensiones": 384})}["embeddings"]
-    assert ok["estado"] == pv.OK and "384 dimensiones" in ok["que"] and ok["accion"]["texto"] == "Volver a prepararlo"
+    assert ok["estado"] == pv.OK and "384 dimensiones" in ok["que"]
     mal = {t["plugin"]: t for t in pv.tarjetas_del_cluster(agente=False, text2viz={}, base="",
                                                            embeddings={"ok": False, "motivo": "sin salida"})}["embeddings"]
-    assert (mal["estado"], mal["motivo"]) == (pv.FALLA, "sin salida")
+    assert mal["estado"] == pv.FALLA and mal["motivo"].startswith("sin salida: se reintenta con «Completar»")
+    # Sin botón propio: activar la búsqueda prepara el modelo.
+    assert not sin.get("accion") and not ok.get("accion") and not mal.get("accion")
 
 
-def test_el_boton_en_la_tarjeta():
+def test_el_modelo_no_tiene_boton_propio():
+    """"Prepararlo ahora" quedó de cuando el modelo se preparaba aparte: hoy lo
+    sube "Preparar bucket" y lo carga activar la búsqueda (paso 3 o
+    «Completar»). En el panel de la búsqueda solo aparece si tiene algo que
+    decir."""
     import pathlib
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert "sin_probar: ['Sin probar', 'sev--low']" in html
-    assert 'class="btn btn-secondary btn-sm plug__accion" data-accion="${escapeHtml(t.accion.id)}"' in html
-    assert "if (accion) return probarEmbeddings(accion);" in html
-    assert "fetch('/api/v1/plugins/probar-embeddings', { method: 'POST' })" in html
+    assert "probarEmbeddings" not in html and "probar-embeddings" not in html
+    assert "probar-embeddings" not in pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    assert "&& (t.estado !== 'ok' || t.plugin === 'query_insights'));" in html
 
 
 def test_si_no_se_puede_leer_o_se_esta_cargando_no_registra_otro(monkeypatch, tmp_path):
@@ -306,18 +299,12 @@ def test_mientras_se_prepara_la_tarjeta_dice_en_curso(monkeypatch, tmp_path):
     en_curso = cluster({"ok": False, "motivo": "lo de antes", "en_curso": int(main.time.time())})
     assert en_curso["estado"] == pv.EN_CURSO and "se está preparando" in en_curso["motivo"] and not en_curso.get("accion")
     cortada = cluster({"ok": True, "en_curso": int(main.time.time()) - 3 * 3600})
-    assert cortada["estado"] == pv.FALLA and "se interrumpió" in cortada["motivo"] and cortada["accion"]
+    assert cortada["estado"] == pv.FALLA and "se interrumpió" in cortada["motivo"] and "«Completar»" in cortada["motivo"]
 
 
 def test_ocupado_no_pisa_el_estado_con_un_fallo(monkeypatch, tmp_path):
-    from fastapi.testclient import TestClient
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
     monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a, **k: ("", main.MODELO_OCUPADO))
     main._guardar_estados(tmp_path, "_cluster", {"embeddings": {"en_curso": 123}})
-    r = TestClient(main.app).post("/api/v1/plugins/probar-embeddings").json()
-    assert r["en_curso"] and not r["ok"]
-    assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"en_curso": 123}, "lo deja el otro pedido"
     # La provisión, si después de esperar sigue ocupado: ni el modelo ni la búsqueda fallaron.
     pasos = main.runs.start("capabilities")
     pipe = {"a": {"fields": [{"field_path": "msg", "type": "text"}]}}

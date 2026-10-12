@@ -112,7 +112,7 @@ def test_capabilities_se_llama_plugins_en_lo_que_se_ve():
     assert not [v for v in visibles if v in HTML]
     assert "'Plugins de OpenSearch'" in _vista() and "label: 'Plugins'" in HTML
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
-    assert "aplicá el asistente (paso 3 o Plugins para el cluster)" in src and "Plugins provisionados" in src
+    assert "activalo con «Activar los plugins» (paso 3)" in src and "Plugins provisionados" in src
 
 
 # ── El conteo de documentos ─────────────────────────────────────────────────
