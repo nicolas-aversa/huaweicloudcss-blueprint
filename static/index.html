@@ -6899,7 +6899,12 @@
       }
       const problemas = tarjetas.filter(([, t]) => t.estado === 'falla' || t.estado === 'parcial').length;
       const enCurso = [...tarjetas.map(([, t]) => t), ...cluster].some(t => t.estado === 'en_curso');
-      const estado = !aplica.length ? 'na' : !hechos.length ? (enCurso ? 'en_curso' : 'off')
+      // Con una activación corriendo, lo que falta de lo que arma está en cola:
+      // todo lo del paso 3, o lo que se eligió de a uno.
+      const act = data.activando;
+      const enCola = !!act && !!c && hechos.length < aplica.length && id !== 'security_analytics'
+        && (act.plugins ? act.plugins.includes(id) : c.recomendado);
+      const estado = !aplica.length ? 'na' : (enCola || (!hechos.length && enCurso)) ? 'en_curso' : !hechos.length ? 'off'
         : (hechos.length < aplica.length || problemas) ? 'parcial' : 'ok';
       return { id, titulo, tecnico, icono, c, aplica, hechos, tarjetas, cluster, problemas, estado, recomendado: c ? c.recomendado : true };
     }
@@ -6907,13 +6912,14 @@
       const n = f.aplica.filter(s => s !== '_cluster').length;
       const abierta = state.funcionAbierta === f.id;
       const estado = f.id === 'query_insights' ? (f.estado === 'ok' ? 'Lista' : 'Sin activar')
-        : f.estado === 'off' ? 'Sin activar' : f.estado === 'en_curso' ? 'Preparándose'
+        : f.estado === 'off' ? 'Sin activar'
+        : f.estado === 'en_curso' ? `Activando…${f.hechos.length ? ` ${f.hechos.length} de ${n}` : ''}`
         : f.hechos.length < n ? `En ${f.hechos.length} de ${n} casos`
         : `${f.problemas ? 'Con avisos' : 'Lista'} · ${n === 1 ? '1 caso' : `${n} casos`}`;
       // Una sola acción. Security Analytics y los tableros se arman en el
       // paso 1 (antes que los datos): no se activan desde acá. Secundaria: lo
       // primario es "Activar los plugins" (paso 3).
-      const falta = f.c && f.hechos.length < f.aplica.length && f.id !== 'security_analytics';
+      const falta = f.c && f.hechos.length < f.aplica.length && f.id !== 'security_analytics' && f.estado !== 'en_curso';
       const accion = f.id === 'agente' && f.hechos.length
         ? '<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>'
         : falta ? '<button type="button" class="btn btn-secondary btn-sm cat__aplicar" '
@@ -6939,6 +6945,7 @@
           <div class="fn-cab"><span class="section-card__title">${extra ? 'Otras funciones' : 'Qué podés mostrar'}</span>`
         + `<span class="fn-cab__n">${listas} de ${visibles.length} listas</span></div>
           <p class="fn-cab__hint">${extra ? 'Se notan con meses de datos, o miran el cluster entero.'
+            : (data.activando && !data.activando.plugins) ? 'Activando: se completan solas a medida que termina cada caso. Tocá una para ver qué es y dónde mostrarla.'
             : 'Tocá una para ver qué es, para qué le sirve al cliente y dónde mostrarla.'}</p>
           <div class="fn-grid">${visibles.map(tarjetaDeFuncionHTML).join('')}</div>
           <div class="fn-panel"${abierta ? '' : ' hidden'}></div>
@@ -7991,10 +7998,20 @@
         const res = await fetch('/api/v1/terraform/status');
         if (!res.ok) return;
         const data = await res.json();
-        if (firmaDePlugins(data.plugins) !== firmaDePlugins((state.lastStatus || {}).plugins)) {
+        const antes = state.lastStatus || {};
+        if (firmaDePlugins(data.plugins) !== firmaDePlugins(antes.plugins)
+            || JSON.stringify(data.catalogo || []) !== JSON.stringify(antes.catalogo || [])
+            || !!data.activando !== !!antes.activando) {
           renderInfraView(data);
         }
       } catch (_err) { /* el próximo intento */ }
+    }
+    // Con una activación corriendo que no lanzó esta pestaña (se recargó la
+    // página, u otra pestaña), la vista se actualiza sola hasta que termina.
+    let _vigiaDeActivacion = null;
+    function vigilarActivacion(activo) {
+      if (activo && !_vigiaDeActivacion) _vigiaDeActivacion = setInterval(refrescarPluginsEnCurso, 20000);
+      if (!activo && _vigiaDeActivacion) { clearInterval(_vigiaDeActivacion); _vigiaDeActivacion = null; }
     }
 
     // Paso 4 del wizard (post-ingesta): provisiona las capabilities del tipo sobre
@@ -8756,7 +8773,13 @@
       const schemaDone = pipelines.length > 0 && pipelines.every(p => p.dashboards_imported);
       const ingestDone = pipelines.length > 0 && pipelines.every(p => p.active);
       const rechazadas = pipelines.filter(p => p.config_status === 'rechazada');
-      const capsDone = !!(data.capabilities && Object.keys(data.capabilities).length);
+      // Mientras "Activar los plugins" corre, el paso 3 no está hecho: arma los
+      // casos de a uno y el primero ya deja algo en `capabilities`. (Activar
+      // una sola tarjeta no cuenta: es otra cosa.)
+      const activando = !!((data.activando && !data.activando.plugins) || (state.provisionandoPlugins && !state.aplicandoPlugin));
+      const haceMin = data.activando && data.activando.desde
+        ? Math.max(1, Math.round((Date.now() / 1000 - data.activando.desde) / 60)) : 0;
+      const capsDone = !activando && !!(data.capabilities && Object.keys(data.capabilities).length);
       // Todo listo → la puesta en marcha queda plegada.
       const allDone = pipelines.length > 0 && schemaDone && ingestDone && (capsDone || !hasCapabilitySlug);
       const showSetup = pipelines.length > 0;
@@ -8843,12 +8866,14 @@
                   : rechazadas.length ? `CSS rechazó el configuration file de ${rechazadas.map(p => escapeHtml(p.slug)).join(', ')}: al reintentar se manda de nuevo.`
                   : 'Arranca Logstash: recién acá empiezan a entrar los datos.',
                 'infra-ingest-btn', 'Iniciar ingesta con Logstash', 'Reiniciar ingesta')}
-              ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone, 'Plugins de OpenSearch',
-                ingestDone ? 'Arma todo lo que estos datos permiten mostrar: el asistente, los pronósticos, las anomalías y sus avisos, '
+              ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone && !activando, 'Plugins de OpenSearch',
+                activando ? `<strong>Activando${haceMin ? ` (empezó hace ${haceMin} min)` : ''}.</strong> Arma los casos de a uno: `
+                             + 'tarda unos minutos. Las tarjetas de abajo se completan solas a medida que terminan.'
+                : ingestDone ? 'Arma todo lo que estos datos permiten mostrar: el asistente, los pronósticos, las anomalías y sus avisos, '
                              + 'la búsqueda por significado, las fichas y el reporte. Esperá ~1-2 min a que carguen datos.'
                            : 'Iniciá la ingesta y esperá que entren documentos.',
                 // "Volver a activar" completa lo que falta o quedó fallado.
-                'infra-capabilities-btn', 'Activar los plugins', 'Volver a activar los plugins') : ''}
+                'infra-capabilities-btn', activando ? 'Activando…' : 'Activar los plugins', 'Volver a activar los plugins') : ''}
             </div>
             <div id="infra-capabilities-result" class="setup-card__plugins"></div>
           </div>
@@ -8902,6 +8927,7 @@
       body.querySelector('#infra-plugins')?.addEventListener('toggle', (e) => { state.casosAbiertos = e.currentTarget.open; });
       body.querySelector('#infra-mas')?.addEventListener('toggle', (e) => { state.masAbierto = e.currentTarget.open; });
       body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);
+      vigilarActivacion(!!data.activando && !state.provisionandoPlugins);
       // El menú del entorno se cierra al tocar afuera (una vez, para todo).
       if (!state.menuDelEntorno) {
         state.menuDelEntorno = true;

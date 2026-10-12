@@ -580,7 +580,8 @@ process.exit(fallos.length ? 1 : 0);
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "if (firmaDePlugins(data.plugins) !== firmaDePlugins((state.lastStatus || {}).plugins)) {" in html
+    assert "if (firmaDePlugins(data.plugins) !== firmaDePlugins(antes.plugins)" in html
+    assert "|| !!data.activando !== !!antes.activando) {" in html, "y al terminar la activación"
 
 
 def test_la_matriz_esta_conectada():

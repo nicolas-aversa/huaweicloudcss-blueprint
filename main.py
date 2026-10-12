@@ -2411,6 +2411,10 @@ class TerraformStatusResponse(BaseModel):
     # el cluster con su link a Dashboards (ver plugins_vista.py).
     plugins: dict = Field(default_factory=dict)
     catalogo: list = Field(default_factory=list)
+    # "Activar los plugins" corriendo (`{"desde": epoch}`): arma los casos de a
+    # uno y tarda minutos. Sin esto, a mitad de camino la vista decía "3 de 3"
+    # y "Sin activar" de lo que estaba en cola.
+    activando: dict | None = None
     https_enabled: bool = False
     # Por qué no hay entorno que mostrar, cuando `active` es False y la respuesta
     # honesta no es "no tenés ninguno". Hoy: hay un deploy registrado pero el
@@ -9202,6 +9206,8 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
     # cuanto el browser cerraba la pestaña.
     run = runs.start("capabilities", detail=", ".join(slugs))
+    # Qué se está activando: los elegidos de a uno, o todos (la vista lo usa).
+    run["plugins"] = sorted(solo) if request.plugins and not request.recomendados else None
     _asegurar_ppl_v3(cluster, user, password, request.https_enabled, terraform_dir, run,
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
@@ -10402,6 +10408,7 @@ def terraform_status() -> TerraformStatusResponse:
         security_analytics=_resumen_de_seguridad(terraform_dir),
         plugins=_plugins_de_la_vista(terraform_dir, registry, dashboards_url),
         catalogo=_catalogo_de_plugins(terraform_dir, registry),
+        activando=_activando(),
         https_enabled=_read_https_enabled_from_state(terraform_dir),
     )
 
@@ -10440,6 +10447,14 @@ def _lo_que_aplica(slug: str, entry: dict, terraform_dir: Path) -> dict:
         "security_analytics": sa, "perfil": bool(perfil), "analista": bool(enmascarados),
         "busqueda": bool(busqueda.campo_de_texto_libre(fields)), "reporte": bool((entry or {}).get("dashboard_id")),
         "ciclo_de_vida": True, "rollup": bool(medidas)}}
+
+
+def _activando() -> "dict | None":
+    """La activación de plugins en curso del usuario, si hay una: desde
+    cuándo y cuáles (`plugins`: los elegidos de a uno; None, todos)."""
+    rid = runs.running_id("capabilities")
+    run = runs.get(rid) if rid else None
+    return {"desde": run.get("created"), "plugins": run.get("plugins")} if run else None
 
 
 def _catalogo_de_plugins(terraform_dir: Path, registry: dict) -> list[dict]:

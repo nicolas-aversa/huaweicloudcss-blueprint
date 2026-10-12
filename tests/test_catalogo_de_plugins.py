@@ -207,6 +207,16 @@ const activando = funcionesHTML(data);
 check('activando: lo dice y no deja lanzar otro', activando.includes('data-plugin="forecasting" disabled>Activando…')
   && activando.includes('data-plugin="anomalias" disabled>Activar'), activando);
 state.provisionandoPlugins = false; state.aplicandoPlugin = '';
+// Con "Activar los plugins" corriendo: lo que falta está en cola, no "sin activar".
+const enCurso = funcionesHTML({ ...data, activando: { desde: 1 } });
+check('activando: en cola, sin botón', tile(enCurso, 'forecasting').includes('Activando… 1 de 2')
+  && tile(enCurso, 'anomalias').includes('<span class="fn-tile__estado">Activando…</span>')
+  && !enCurso.includes('cat__aplicar" data-plugin="forecasting"') && !enCurso.includes('cat__aplicar" data-plugin="anomalias"'), enCurso);
+check('activando: lo que no arma el paso 3 sigue como está', tile(funcionesHTML({ ...data, activando: { desde: 1 } }, { extra: true }), 'ciclo_de_vida').includes('Sin activar'));
+check('activando: lo dice arriba', enCurso.includes('Activando: se completan solas'), enCurso);
+const unaSola = funcionesHTML({ ...data, activando: { desde: 1, plugins: ['forecasting'] } });
+check('activando una sola: solo esa en cola', tile(unaSola, 'forecasting').includes('Activando… 1 de 2')
+  && tile(unaSola, 'anomalias').includes('data-plugin="anomalias">Activar</button>') && !unaSola.includes('Activando: se completan solas'), unaSola);
 state.funcionAbierta = 'forecasting';
 const abierta = funcionesHTML(data);
 check('abierta: marcada y con su panel a la vista', abierta.includes('<div class="fn-tile fn--parcial is-abierta" data-fn="forecasting">')
@@ -252,7 +262,7 @@ def test_que_podes_mostrar_esta_conectado():
     assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
     # El paso 3 activa todo lo que hace falta: sin "recomendados" ni "elegí cuáles" (traían dudas).
-    assert "'infra-capabilities-btn', 'Activar los plugins', 'Volver a activar los plugins'" in vista
+    assert "'infra-capabilities-btn', activando ? 'Activando…' : 'Activar los plugins', 'Volver a activar los plugins'" in vista
     assert "recomendados" not in vista.replace("{ recomendados: true }", "") and "setup-paso__link" not in html
     assert "la búsqueda por significado" in vista
     # Los pedidos llevan la lista o los recomendados.
@@ -262,3 +272,16 @@ def test_que_podes_mostrar_esta_conectado():
     assert "fetch(`/api/v1/plugins/comandos?plugin=${encodeURIComponent(plugin)}`)" in html
     # La alerta sin detector, con el detector.
     assert "? ['anomalias', 'alertas'] : [c.plugin];" in html
+
+
+def test_el_estado_dice_si_hay_una_activacion_en_curso(monkeypatch):
+    """"Activar los plugins" arma los casos de a uno: a mitad de camino la
+    vista decía "3 de 3 · Todo hecho" y "Sin activar" de lo que estaba en cola."""
+    monkeypatch.setattr(main.runs, "running_id", lambda kind=None: "R1" if kind == "capabilities" else None)
+    monkeypatch.setattr(main.runs, "get", lambda rid: {"id": rid, "created": 1700000000, "plugins": ["perfil"]})
+    assert main._activando() == {"desde": 1700000000, "plugins": ["perfil"]}
+    monkeypatch.setattr(main.runs, "running_id", lambda kind=None: None)
+    assert main._activando() is None
+    html = _INDEX.read_text(encoding="utf-8")
+    assert "const capsDone = !activando && !!(data.capabilities && Object.keys(data.capabilities).length);" in html
+    assert "vigilarActivacion(!!data.activando && !state.provisionandoPlugins);" in html

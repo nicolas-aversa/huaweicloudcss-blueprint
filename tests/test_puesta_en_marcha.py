@@ -52,7 +52,7 @@ def test_cada_paso_hecho_se_puede_rehacer():
     assert "'infra-apply-schema-btn', paso1.boton, 'Volver a aplicar')" in vista
     for boton, texto, rehacer in (("infra-ingest-btn", "Iniciar ingesta con Logstash", "Reiniciar ingesta"),
                                   ("infra-capabilities-btn", "Activar los plugins", "Volver a activar los plugins")):
-        assert f"'{boton}', '{texto}', '{rehacer}'" in vista, boton
+        assert f"'{boton}', '{texto}', '{rehacer}'" in vista or f"'{boton}', activando ? 'Activando…' : '{texto}', '{rehacer}'" in vista, boton
 
 
 def test_los_botones_son_solo_texto_y_a_su_medida():
