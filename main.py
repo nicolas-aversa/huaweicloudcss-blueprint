@@ -8435,9 +8435,11 @@ def _campos_del_caso(slug: str, entry: dict) -> list[dict]:
 def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_pattern: str,
                           fields: list[dict], model_id: str, force: bool) -> dict:
     """La búsqueda híbrida de un caso: sus textos distintos, vectorizados, en
-    `busqueda-<caso>`. Prueba los candidatos en orden y se queda con el primero
-    que tiene frases: una categoría (pocos valores), demasiados textos o
-    códigos cortos no aplican (y se dice por qué)."""
+    `busqueda-<caso>`. Mide todos los candidatos y, de los que tienen frases, se
+    queda con el de más textos distintos (a igual cantidad, el primero): una
+    categoría (pocos valores), demasiados textos o códigos cortos no aplican (y
+    se dice por qué). Quedarse con el primero que calificaba elegía, en la
+    prepaga, la observación del auditor (13 textos) antes que el diagnóstico (375)."""
     candidatos = busqueda.campos_de_texto_libre(fields)
     if not candidatos:
         return {"ok": False, "no_aplica": True, "reason": "no hay un campo de texto libre"}
@@ -8463,9 +8465,8 @@ def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_
             descartes.append(f"{campo} tiene {n} textos distintos: vectorizarlos tardaría demasiado")
         elif not busqueda.son_frases(muestra):
             descartes.append(f"{campo} son códigos cortos ({', '.join(map(str, muestra[:3]))}…), no frases")
-        else:
+        elif elegido is None or n > elegido[3]:
             elegido = (campo, tipo, agrupable, n)
-            break
     if not elegido:
         # Si antes aplicaba (otro campo, otros datos), lo que quedó armado se
         # va: el Transform seguía corriendo cada hora para nada.

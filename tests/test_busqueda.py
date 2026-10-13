@@ -687,3 +687,26 @@ def test_la_evaluacion_espera_textos_vectorizados(monkeypatch):
     monkeypatch.setattr(main, "_os_req", lambda *a, **k: _R(200, {"acknowledged": True}))
     sondeos.clear()
     assert main._esperar_textos_vectorizados("http://x", "a", "p", "s") is None and not sondeos
+
+
+
+def test_gana_el_texto_libre_con_mas_textos(monkeypatch):
+    """Prepaga (visto en la ECS): con «observación» como pista, la búsqueda pasó
+    de `diagnostico` (375 textos) a `observacion_auditor` (13). De los que
+    califican, gana el de más textos distintos."""
+    distintos = {"observacion_auditor": 13, "diagnostico": 375}
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        if url.endswith("/_search") and json_body and "aggs" in json_body:
+            campo = json_body["aggs"]["n"]["cardinality"]["field"]
+            return _R(200, {"aggregations": {"n": {"value": distintos[campo]}, "muestra": {"buckets": [
+                {"key": "dolor lumbar con irradiación"}, {"key": "se autoriza con la documentación"}]}}})
+        if m == "GET" and "/_transform/" in url:
+            return _R(404)
+        return _R(200, {"acknowledged": True})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    campos = [F("observacion_auditor"), F("diagnostico")]
+    assert busqueda.campos_de_texto_libre(campos)[0] == "observacion_auditor", "la pista la pone primera..."
+    r = main._provisionar_busqueda("http://x", "a", "p", "prepaga", "prepaga-*", campos, "M1", force=False)
+    assert r["ok"] and r["campo"] == "diagnostico" and r["textos"] == 375, "...pero gana la de más textos"
