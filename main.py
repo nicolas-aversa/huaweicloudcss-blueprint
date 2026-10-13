@@ -6742,6 +6742,56 @@ def _epoch_ms_to_iso(ms: float) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
+def _timepicker_global(base: str, user: str, password: str, t_from: str, t_to: str) -> bool:
+    """El rango por defecto de Dashboards (Discover y los tableros sin rango
+    propio). True si quedó escrito."""
+    cfg = _os_req("GET", f"{base}/.kibana/_search?q=type:config+AND+config.buildNum:*&size=1", user, password, timeout=15)
+    cfg_id = ""
+    if cfg is not None and cfg.status_code == 200:
+        hits = ((cfg.json() or {}).get("hits", {}) or {}).get("hits", [])
+        cfg_id = hits[0].get("_id", "") if hits else ""
+    if not cfg_id:
+        return False
+    r = _os_req("POST", f"{base}/.kibana/_update/{cfg_id}", user, password, timeout=15,
+                json_body={"doc": {"config": {"timepicker:timeDefaults": f'{{"from":"{t_from}","to":"{t_to}","mode":"absolute"}}',
+                                              # La tabla del perfil (índice `perfil-<slug>`) comparte el
+                                              # dashboard con los controles: un filtro sobre un campo que
+                                              # ese índice no tiene la dejaba vacía.
+                                              "courier:ignoreFilterIfFieldNotInIndex": True}}})
+    return _resp_ok(r)
+
+
+def _ajustar_tiempo_de_dashboards(base: str, user: str, password: str, terraform_dir: Path,
+                                  slugs: list[str]) -> str:
+    """Con los datos ya ingestados, el dashboard de cada caso y el time picker
+    global abren sobre el rango REAL de los datos. En la puesta en marcha
+    todavía no hay datos y queda una ventana por defecto (2025-07…2026-07): un
+    dataset con fechas posteriores se veía cortado. "" si no había nada que
+    ajustar; si no, qué se ajustó."""
+    registro = _read_pipelines_registry(terraform_dir)
+    gmin = gmax = None
+    ajustados = []
+    for slug in slugs:
+        entrada = registro.get(slug) or {}
+        bounds = _index_time_bounds(base, user, password,
+                                    index_pattern_from_name(entrada.get("index") or f"{slug}-%{{+YYYY.MM}}"))
+        if not bounds:
+            continue
+        gmin = bounds[0] if gmin is None else min(gmin, bounds[0])
+        gmax = bounds[1] if gmax is None else max(gmax, bounds[1])
+        if entrada.get("dashboard_id"):
+            r = _os_req("POST", f"{base}/.kibana/_update/dashboard:{entrada['dashboard_id']}", user, password, timeout=15,
+                        json_body={"doc": {"dashboard": {"timeRestore": True, "timeFrom": _epoch_ms_to_iso(bounds[0]),
+                                                         "timeTo": _epoch_ms_to_iso(bounds[1])}}})
+            if _resp_ok(r):
+                ajustados.append(slug)
+    if gmin is None:
+        return ""
+    t_from, t_to = _epoch_ms_to_iso(gmin), _epoch_ms_to_iso(gmax)
+    _timepicker_global(base, user, password, t_from, t_to)
+    return f"{t_from[:10]} a {t_to[:10]}" + (f" ({len(ajustados)} dashboard{'s' if len(ajustados) != 1 else ''})" if ajustados else "")
+
+
 def _patch_dashboard_time_range(ndjson: str, from_iso: str, to_iso: str) -> str:
     """Reescribe el `timeFrom`/`timeTo` (+ `timeRestore`) del objeto dashboard del
     NDJSON, para que abra en el rango real de sus datos. Deja el resto intacto."""
@@ -9461,24 +9511,10 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
             if gmin is not None and gmax is not None:
                 t_from, t_to = _epoch_ms_to_iso(gmin), _epoch_ms_to_iso(gmax)
             else:
+                # Todavía sin datos (la ingesta es el paso siguiente): una ventana
+                # por defecto. "Activar los plugins" la reajusta con los datos reales.
                 t_from, t_to = "2025-07-01T00:00:00.000Z", "2026-07-02T00:00:00.000Z"
-            # Buscar el ID del config doc de Dashboards (config:<version>).
-            cfg = _os_req("GET", f"{os_base}/.kibana/_search?q=type:config+AND+config.buildNum:*&size=1",
-                          os_user, request.opensearch_password, timeout=15)
-            cfg_id = ""
-            if cfg is not None and cfg.status_code == 200:
-                hits = ((cfg.json() or {}).get("hits", {}) or {}).get("hits", [])
-                cfg_id = hits[0].get("_id", "") if hits else ""
-            if cfg_id:
-                _os_req("POST", f"{os_base}/.kibana/_update/{cfg_id}", os_user,
-                        request.opensearch_password,
-                        json_body={"doc": {"config": {"timepicker:timeDefaults":
-                            f'{{"from":"{t_from}","to":"{t_to}","mode":"absolute"}}',
-                            # La tabla del perfil (índice `perfil-<slug>`) comparte el
-                            # dashboard con los controles: un filtro sobre un campo que
-                            # ese índice no tiene la dejaba vacía.
-                            "courier:ignoreFilterIfFieldNotInIndex": True}}},
-                        timeout=15)
+            if _timepicker_global(os_base, os_user, request.opensearch_password, t_from, t_to):
                 print(f"[apply-schema] timepicker global → {t_from} .. {t_to}")
         except Exception as exc:  # noqa: BLE001
             print(f"[apply-schema] timepicker global no se pudo setear (best-effort): {exc!r}")
@@ -9681,6 +9717,14 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     _asegurar_ppl_v3(cluster, user, password, request.https_enabled, terraform_dir, run,
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
+    # Los datos ya están: los dashboards abren sobre su rango real (en la
+    # puesta en marcha todavía no había datos y quedaba una ventana fija).
+    try:
+        rango = _ajustar_tiempo_de_dashboards(_os_base(cluster, request.https_enabled), user, password, terraform_dir, slugs)
+        if rango:
+            runs.step(run, "Rango de los dashboards", True, f"del {rango}")
+    except Exception as exc:  # noqa: BLE001 — los dashboards igual andan, con la ventana de antes
+        runs.step(run, "Rango de los dashboards", False, repr(exc)[:300])
     try:
         if pide("alertas"):
             _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)

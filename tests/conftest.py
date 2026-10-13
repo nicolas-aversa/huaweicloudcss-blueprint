@@ -49,6 +49,10 @@ def _settings_aislados(tmp_path, monkeypatch):
     # prueban usan el original (`_paso_del_tiempo_original`).
     monkeypatch.setattr(_main, "_paso_del_tiempo_original", _main._provisionar_el_paso_del_tiempo, raising=False)
     monkeypatch.setattr(_main, "_provisionar_el_paso_del_tiempo", lambda *a, **k: None)
+    # El rango de los dashboards va al cluster (con reintentos): los que lo
+    # prueban usan el original (`_tiempo_original`).
+    monkeypatch.setattr(_main, "_tiempo_original", _main._ajustar_tiempo_de_dashboards, raising=False)
+    monkeypatch.setattr(_main, "_ajustar_tiempo_de_dashboards", lambda *a, **k: "")
     # La búsqueda híbrida baja el modelo y va a OBS: los que la prueban usan
     # el original (`_busqueda_original`).
     monkeypatch.setattr(_main, "_busqueda_original", _main._provisionar_la_busqueda, raising=False)

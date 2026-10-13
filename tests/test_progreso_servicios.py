@@ -248,3 +248,30 @@ def test_preview_deploy_arranca_la_reproduccion():
     html = (_STATIC / "index.html").read_text(encoding="utf-8")
     i = html.index("(function maybePreviewDeployAnim()")
     assert "_vistaPreviaDeploy(params.get('paso')" in html[i:html.index("})();", i)]
+
+
+def test_al_activar_los_plugins_los_dashboards_abren_sobre_sus_datos(monkeypatch, tmp_path):
+    """En la puesta en marcha todavía no hay datos: quedaba la ventana fija
+    (2025-07…2026-07) y un dataset hasta octubre de 2026 se veía cortado."""
+    main._write_pipelines_registry(tmp_path, {"emerg": {"index": "emerg-%{+YYYY.MM}", "dashboard_id": "D1"},
+                                              "vacio": {"index": "vacio-%{+YYYY.MM}", "dashboard_id": "D2"}})
+    rangos = {"emerg-*": (1767225600000, 1791849600000, 66000)}       # 2026-01-01 … 2026-10-13
+    monkeypatch.setattr(main, "_index_time_bounds", lambda b, u, p, patron: rangos.get(patron))
+    pedidos = []
+
+    class _R:
+        status_code = 200
+
+        def json(self):
+            return {"hits": {"hits": [{"_id": "config:3.4.0"}]}}
+
+    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, json_body=None, **k: pedidos.append((m, url.replace("http://x", ""), json_body)) or _R())
+    assert main._tiempo_original("http://x", "a", "p", tmp_path, ["emerg", "vacio"]) == "2026-01-01 a 2026-10-13 (1 dashboard)"
+    dash = next(b for m, u, b in pedidos if u == "/.kibana/_update/dashboard:D1")
+    assert dash == {"doc": {"dashboard": {"timeRestore": True, "timeFrom": "2026-01-01T00:00:00.000Z", "timeTo": "2026-10-13T00:00:00.000Z"}}}
+    assert not any(u.endswith("dashboard:D2") for _, u, _ in pedidos), "sin datos, no se toca"
+    cfg = next(b for m, u, b in pedidos if u == "/.kibana/_update/config:3.4.0")
+    assert cfg["doc"]["config"]["timepicker:timeDefaults"] == '{"from":"2026-01-01T00:00:00.000Z","to":"2026-10-13T00:00:00.000Z","mode":"absolute"}'
+    assert main._tiempo_original("http://x", "a", "p", tmp_path, ["vacio"]) == ""
+    import inspect
+    assert "rango = _ajustar_tiempo_de_dashboards(_os_base(cluster, request.https_enabled)" in inspect.getsource(main.provision_capabilities)
