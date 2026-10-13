@@ -113,7 +113,7 @@ def test_si_ya_estaba_lo_deja_y_si_fallo_lo_rehace(monkeypatch):
     assert r["reason"] == "ya estaba" and not [u for m, u, _ in pedidos if m == "DELETE"]
     pedidos = _cluster(monkeypatch, transform_existe=True, fallado="rejected execution")
     r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("msg")], "M1", force=False)
-    assert r["ok"] and ("DELETE", "/_plugins/_transform/s-busqueda", None) in pedidos
+    assert r["ok"] and ("DELETE", "/_plugins/_transform/s-busqueda?force=true", None) in pedidos
 
 
 def test_el_run_prepara_el_modelo_una_vez_y_cada_caso(monkeypatch, tmp_path):
@@ -292,9 +292,31 @@ def test_si_deja_de_aplicar_se_va_lo_que_quedo(monkeypatch):
     pedidos = _cluster(monkeypatch, distintos=3, transform_existe=True)
     r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("msg")], "M1", force=True)
     assert r["no_aplica"]
-    for esperado in (("POST", "/_plugins/_transform/s-busqueda/_stop"), ("DELETE", "/_plugins/_transform/s-busqueda"),
+    for esperado in (("POST", "/_plugins/_transform/s-busqueda/_stop"), ("DELETE", "/_plugins/_transform/s-busqueda?force=true"),
                      ("DELETE", "/busqueda-s")):
         assert esperado in [(m, u) for m, u, _ in pedidos], esperado
     pedidos = _cluster(monkeypatch, distintos=3, transform_existe=False)
     main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("msg")], "M1", force=True)
     assert not [u for m, u, _ in pedidos if m == "DELETE"], "si no había nada, no borra"
+
+
+def test_rehacer_espera_a_que_el_anterior_se_borre(monkeypatch):
+    """Visto: rehacer la de Streaming OTT dio 409 (version conflict): el PUT
+    del Transform nuevo llegaba antes de que terminara de borrarse el viejo."""
+    pedidos, gets = [], {"n": 0}
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        pedidos.append((m, url.replace("http://x", "")))
+        if m == "GET" and url.endswith("/_transform/s-busqueda"):
+            gets["n"] += 1
+            return _R(200, {"_id": "t"}) if gets["n"] < 4 else _R(404)   # tarda en irse
+        if url.endswith("/_search"):
+            return _R(200, {"aggregations": {"n": {"value": 50}}})
+        return _R(200, {"acknowledged": True})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main, "_motivo_si_fallo", lambda ruta, u, p: None)
+    assert main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("msg")], "M1", force=True)["ok"]
+    borrado = pedidos.index(("DELETE", "/_plugins/_transform/s-busqueda?force=true"))
+    ultimo_get = max(i for i, (m, u) in enumerate(pedidos) if m == "GET" and u.endswith("/_transform/s-busqueda"))
+    assert borrado < ultimo_get < pedidos.index(("PUT", "/_plugins/_transform/s-busqueda")), "crea recién cuando ya no está"

@@ -7498,8 +7498,7 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
             fallo = "el anterior era de una sola pasada y quedó con los datos de ese momento"
         if not force and fallo is None:
             return {"ok": True, "reason": "ya estaba"}
-        _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
-        _os_req("DELETE", ruta, user, password, timeout=20)
+        _borrar_transform(ruta, user, password)
         _os_req("DELETE", f"{base}/{perfiles.indice_destino(slug)}", user, password, timeout=20)
     rc = _os_req("PUT", ruta, user, password, json_body=perfiles.build_transform(slug, index_pattern, perfil), timeout=30)
     if not _resp_ok(rc):
@@ -7756,6 +7755,23 @@ def _provisionar_rollup(base: str, user: str, password: str, slug: str, index_pa
         return {"ok": False, "reason": f"no se pudo crear el rollup: {_resp_motivo(rc)}"}
     return {"ok": True, "reason": f"{rid} → {cdv.indice_del_rollup(slug)}: {', '.join(medidas)} por hora"
                                   + (f" y por {', '.join(dims)}" if dims else "") + rehecho}
+
+
+_BORRADO_INTENTOS, _BORRADO_ESPERA_S = 10, 1.0
+
+
+def _borrar_transform(ruta: str, user: str, password: str) -> None:
+    """Para y borra un Transform, y espera a que ya no esté. Crear el nuevo
+    enseguida daba 409 (version conflict): visto al rehacer la búsqueda de
+    Streaming OTT, el borrado del anterior todavía no había terminado."""
+    _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
+    _os_req("DELETE", f"{ruta}?force=true", user, password, timeout=20)
+    for i in range(_BORRADO_INTENTOS):
+        r = _os_req("GET", ruta, user, password, timeout=20)
+        if r is not None and r.status_code == 404:
+            return
+        if i < _BORRADO_INTENTOS - 1:
+            time.sleep(_BORRADO_ESPERA_S)
 
 
 def _motivo_si_fallo_el_rollup(base: str, user: str, password: str, rid: str) -> "str | None":
@@ -8185,10 +8201,9 @@ def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_
     if not elegido:
         # Si antes aplicaba (otro campo, otros datos), lo que quedó armado se
         # va: el Transform seguía corriendo cada hora para nada.
-        tid = busqueda.nombre_del_transform(slug)
-        if _resp_ok(_os_req("GET", f"{base}/_plugins/_transform/{tid}", user, password, timeout=20)):
-            _os_req("POST", f"{base}/_plugins/_transform/{tid}/_stop", user, password, timeout=20)
-            _os_req("DELETE", f"{base}/_plugins/_transform/{tid}", user, password, timeout=20)
+        ruta = f"{base}/_plugins/_transform/{busqueda.nombre_del_transform(slug)}"
+        if _resp_ok(_os_req("GET", ruta, user, password, timeout=20)):
+            _borrar_transform(ruta, user, password)
             _os_req("DELETE", f"{base}/{busqueda.indice(slug)}", user, password, timeout=30)
         return {"ok": False, "no_aplica": True, "campo": candidatos[0], "reason": "; ".join(descartes)}
     campo, tipo, agrupable, n = elegido
@@ -8202,8 +8217,7 @@ def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_
     if _resp_ok(ya):
         if not force and _motivo_si_fallo(ruta, user, password) is None:
             return {"ok": True, "reason": "ya estaba", "campo": campo, "textos": n}
-        _os_req("POST", f"{ruta}/_stop", user, password, timeout=20)
-        _os_req("DELETE", ruta, user, password, timeout=20)
+        _borrar_transform(ruta, user, password)
     _os_req("DELETE", f"{base}/{idx}", user, password, timeout=30)
     ri = _os_req("PUT", f"{base}/{idx}", user, password, json_body=busqueda.mapping_del_indice(), timeout=30)
     if not _resp_ok(ri):

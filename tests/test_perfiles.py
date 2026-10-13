@@ -76,7 +76,7 @@ def test_si_ya_estaba_se_deja_y_con_force_se_rehace(monkeypatch):
     assert [m for m, _ in pedidos] == ["GET", "GET"], "solo mira; no toca nada"
     pedidos = _cluster(monkeypatch, existe=True)
     main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=True)
-    assert ("DELETE", "/_plugins/_transform/siem-perfil") in pedidos and ("DELETE", "/perfil-siem") in pedidos
+    assert ("DELETE", "/_plugins/_transform/siem-perfil?force=true") in pedidos and ("DELETE", "/perfil-siem") in pedidos
     assert pedidos.index(("DELETE", "/perfil-siem")) < pedidos.index(("PUT", "/_plugins/_transform/siem-perfil"))
 
 
