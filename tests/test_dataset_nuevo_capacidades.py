@@ -93,12 +93,6 @@ check('propone la entidad', entidadPropuesta(campos) === 'data.customer_id');
 campos[0].entity = true;
 check('la marcada (por el descubrimiento) manda', entidadPropuesta(campos) === 'data.status');
 check('sin pistas, ninguna', entidadPropuesta([{ field_path: 'x', type: 'string' }]) === '');
-// Para producción: el volumen, la retención y la alta disponibilidad.
-const dim = dimensionamientoHTML();
-check('pide el volumen y la retención', dim.includes('class="plan-dim__eventos"') && dim.includes('class="plan-dim__dias" min="7" max="3650"')
-  && dim.includes('value="90"'), dim);
-state.planRetencion = 365;
-check('la retención elegida', dimensionamientoHTML().includes('value="365"'));
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -121,8 +115,8 @@ def test_la_tabla_del_paso_2_no_pide_marcas():
     for fuera in (">Rol</th>", ">Entidad</th>", ">Sensible</th>", "mapping-entidad", "mapping-sensible", "mapping-rol"):
         assert fuera not in html, fuera
     assert "selectorDeRol" not in html and "marcarRol" not in html and "marcarEntidad" not in html
-    assert '<td colspan="5">' in fn and '<div class="dimensionamiento" id="dimensionamiento"></div>' in fn
-    assert "pintarDimensionamiento();" in fn
+    assert '<td colspan="5">' in fn
+    assert "dimensionamiento" not in html.lower(), "sin «Para producción» en el paso 2"
     # La entidad propuesta queda marcada en el campo: viaja con el deploy.
     assert "if (!fields.some(f => f.entity)) {" in fn
 

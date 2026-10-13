@@ -111,10 +111,11 @@ def test_los_endpoints(monkeypatch, tmp_path):
     assert "_plugins/_transform/hotel-perfil" in r.text and "secreta" not in r.text
 
 
-def test_la_tarjeta_del_caso_ofrece_llevarselo():
+def test_llevarselo_es_el_runbook():
+    """Lo de Dev Tools ya no se ofrece en Entorno desplegado (es para el
+    cliente, no para la demo): va en el runbook, desde el ··· del caso."""
     import pathlib
 
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert "const base = `/api/v1/cases/${encodeURIComponent(slug)}`;" in html
-    assert '<a href="${base}/export" download>' in html
-    assert '<a href="${base}/export/dashboards" download>' in html
+    assert '<a href="${base}/export" download>' not in html and "Llevarse:" not in html
+    assert "fetch(`/api/v1/runbook?slugs=${encodeURIComponent(slugs.join(','))}&nombre=${encodeURIComponent(nombre)}`)" in html

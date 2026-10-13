@@ -1735,18 +1735,29 @@
       max-width: 100%; opacity: 0.85;
     }
     .example-card.is-disabled { opacity: 0.6; cursor: not-allowed; }
-    /* ✕ para borrar un caso creado desde el Builder. La card es position:static,
-       así que se ancla al grupo con un margin-left:auto en vez de absolute. */
-    .example-card { position: relative; }
-    .example-card__del {
-      position: absolute; top: 3px; right: 3px; width: 17px; height: 17px;
+    /* ··· de cada caso: sus acciones (exportar el runbook; borrar, si es propio). */
+    .example-card { position: relative; padding-right: 22px; }
+    .example-card__mas {
+      position: absolute; top: 3px; right: 3px; width: 20px; height: 17px;
       border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
-      color: var(--text-muted); background: transparent; opacity: 0;
-      transition: opacity var(--t-base), color var(--t-base), background var(--t-base);
+      color: var(--text-muted); background: transparent; font-size: var(--fs-xs); font-weight: 700; letter-spacing: 1px; line-height: 1;
+      opacity: 0; transition: opacity var(--t-base), color var(--t-base), background var(--t-base);
     }
-    .example-card__del .icon { width: 11px; height: 11px; }
-    .example-card:hover .example-card__del, .example-card__del:focus-visible { opacity: 1; }
-    .example-card__del:hover { color: var(--accent-red); background: var(--accent-red-tint); }
+    .example-card:hover .example-card__mas, .example-card__mas:focus-visible, .example-card__mas[aria-expanded="true"] { opacity: 1; }
+    .example-card__mas:hover, .example-card__mas[aria-expanded="true"] { color: var(--text-primary); background: var(--bg-tertiary); }
+    .card-menu {
+      position: absolute; z-index: 9000; min-width: 220px; max-width: 300px; padding: 4px;
+      background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+    }
+    .card-menu__item {
+      display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm);
+      background: none; font: inherit; font-size: var(--fs-sm); color: var(--text-primary); text-align: left; cursor: pointer;
+    }
+    .card-menu__item:hover, .card-menu__item:focus-visible { background: var(--bg-secondary); outline: none; }
+    .card-menu__item .icon { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; color: var(--text-muted); }
+    .card-menu__item span { display: flex; flex-direction: column; gap: 2px; }
+    .card-menu__item small { font-size: var(--fs-xs); color: var(--text-muted); }
+    .card-menu__item--peligro, .card-menu__item--peligro .icon { color: var(--accent-red); }
     /* Las tres vías de entrada del paso 1, al mismo nivel: antes eran dos tabs
        + una escondida en un <details>, y no se leían como alternativas. */
     /* Dos tarjetas, dos columnas: con tres quedaba un hueco a la derecha y las
@@ -1902,20 +1913,6 @@
     /* La tabla de campos se desplaza en pantallas angostas en vez de cortarse. */
     .mapping-table-scroll { overflow-x: auto; }
     .fuentes-tab__n { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 400; }
-    /* Para producción: el dimensionamiento, debajo de la tabla de campos. */
-    .dimensionamiento { border-top: 1px solid var(--border-subtle); padding: 2px 20px 16px; }
-    .plan-dim { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; padding: 10px 12px;
-                border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); font-size: var(--fs-sm); }
-    .plan-dim__titulo { display: inline-flex; align-items: center; gap: 6px; }
-    .plan-dim__titulo .icon { width: 14px; height: 14px; color: var(--accent); }
-    .plan-dim__campo { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--fs-xs); }
-    .plan-dim__eventos { width: 130px; padding: 3px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
-    .plan-dim__ha { accent-color: var(--accent); }
-    .plan-dim__resultado { flex: 1 1 100%; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text-muted); }
-    .plan-dim__reco { font-size: var(--fs-sm); color: var(--text-primary); font-weight: var(--fw-medium); }
-    .plan-dim__supuestos { display: inline-flex; align-items: center; gap: 4px; cursor: help; }
-    .plan-dim__supuestos .icon { width: 12px; height: 12px; }
-    .plan-dim__dias { width: 72px; padding: 2px 6px; font: inherit; font-size: var(--fs-xs); border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
     /* Accesos de demo: usuario y contraseña, copiables. */
     .acceso { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 8px; font-size: var(--fs-sm); align-items: center; }
     .acceso__lbl { color: var(--text-muted); }
@@ -2345,10 +2342,6 @@
     .mtx__det > td { padding: 12px 8px 4px; background: var(--bg-subtle); }
     .mtx__det-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 10px; }
     .mtx__det-head:empty { display: none; }
-    .mtx__llevar { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--fs-xs); color: var(--text-muted); }
-    .mtx__llevar a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-hover); text-decoration: none; }
-    .mtx__llevar a:hover { text-decoration: underline; }
-    .mtx__llevar .icon { width: 12px; height: 12px; }
     .mtx__vacio { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
     /* Qué podés mostrar: una tarjeta por función, con su ícono y su estado. */
     .fn-cab { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
@@ -2427,18 +2420,6 @@
     .env-plegable > summary .setup-card__chevron { margin-left: auto; align-self: center; }
     .env-plegable[open] > summary .setup-card__chevron { transform: rotate(180deg); }
     .env-plegable[open] > summary { margin-bottom: 12px; }
-    .cat__det { padding: 2px 0 12px; }
-    .cat__casos { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
-    .cat__caso { padding: 2px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); cursor: pointer;
-                 background: var(--bg-primary); color: var(--text-secondary); font-size: var(--fs-xs); font-weight: 600; }
-    .cat__caso[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-hover); }
-    .cat__caso:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .cat__cmd { margin: 0; max-height: 360px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border-subtle);
-                border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-primary);
-                font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5; white-space: pre; }
-    .cat__cmd:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .cat__pie a.btn { text-decoration: none; }
-    .cat__pie { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--fs-xs); color: var(--text-muted); }
     /* Probar la búsqueda: por palabras y la híbrida, lado a lado. */
     .busq { display: flex; flex-direction: column; gap: var(--sp-2); }
     .busq__fila { display: flex; gap: var(--sp-2); }
@@ -2562,10 +2543,6 @@
       .maestro__lista { flex-direction: row; overflow-x: auto; padding: 0 0 6px; border-right: none; border-bottom: 1px solid var(--border-subtle); }
       .maestro__item { width: auto; white-space: nowrap; }
     }
-    .cap-assistant__adv { margin-top: 12px; font-size: var(--fs-sm); }
-    .cap-assistant__adv > summary { cursor: pointer; color: var(--text-muted); }
-    .cap-assistant__adv-body { margin-top: 6px; color: var(--text-secondary); line-height: 1.6; }
-    .cap-assistant__code { display: block; margin-top: 6px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-all; }
 
     .cap-chat { margin-top: 14px; }
     .cap-chat__empty-title { font-size: var(--fs-base); font-weight: var(--fw-semi); color: var(--text-secondary); }
@@ -4126,71 +4103,6 @@
       return f ? ruta(f) : '';
     }
 
-    // Los plugins se eligen con el entorno desplegado (Plugins para el
-    // cluster), con sus comandos de Dev Tools a la vista. En el paso 2 queda
-    // solo el dimensionamiento para producción, que va al traspaso.
-    function pintarDimensionamiento() {
-      const lugar = document.getElementById('dimensionamiento');
-      if (!lugar) return;
-      lugar.innerHTML = dimensionamientoHTML();
-      const volumen = () => {
-        const eventos = Math.round(Number(lugar.querySelector('.plan-dim__eventos')?.value || 0));
-        state.planVolumen = { eventos_por_dia: eventos > 0 ? eventos : 0,
-                              alta_disponibilidad: !!lugar.querySelector('.plan-dim__ha')?.checked };
-        calcularDimensionamiento(lugar);
-      };
-      lugar.querySelector('.plan-dim__eventos')?.addEventListener('change', volumen);
-      lugar.querySelector('.plan-dim__ha')?.addEventListener('change', volumen);
-      lugar.querySelector('.plan-dim__dias')?.addEventListener('change', (e) => {
-        const dias = Math.round(Number(e.currentTarget.value));
-        state.planRetencion = dias >= 7 && dias <= 3650 ? dias : 0;
-        calcularDimensionamiento(lugar);
-      });
-      calcularDimensionamiento(lugar);
-    }
-    // Para producción: cuánto cluster hace falta con el volumen del cliente.
-    // Los bytes por evento salen de la muestra; el resto lo dice el cliente.
-    function bytesPorEvento() {
-      const lineas = String(state.logFileContent || state.rawLog || '').split(/\r?\n/).filter(l => l.trim()).slice(0, 2000);
-      if (!lineas.length) return 0;
-      const enc = new TextEncoder();
-      return Math.round(lineas.reduce((t, l) => t + enc.encode(l).length, 0) / lineas.length);
-    }
-    function dimensionamientoHTML() {
-      const v = state.planVolumen || {};
-      return `<div class="plan-dim">
-          <strong class="plan-dim__titulo">${icon('database')} Para producción</strong>
-          <label class="plan-dim__campo">Eventos por día
-            <input type="number" class="plan-dim__eventos" min="0" step="1000" placeholder="p. ej. 5000000"
-              value="${v.eventos_por_dia || ''}" aria-label="Eventos por día"></label>
-          <label class="plan-dim__campo">Retención
-            <input type="number" class="plan-dim__dias" min="7" max="3650" step="1"
-              value="${state.planRetencion || 90}" aria-label="Días de retención"> días</label>
-          <label class="plan-dim__campo"><input type="checkbox" class="plan-dim__ha" ${v.alta_disponibilidad === false ? '' : 'checked'}> Alta disponibilidad</label>
-          <div class="plan-dim__resultado" aria-live="polite">${v.eventos_por_dia ? '' : 'Con el volumen diario del cliente, la plataforma recomienda nodos, disco y shards.'}</div>
-        </div>`;
-    }
-    async function calcularDimensionamiento(lugar) {
-      const destino = lugar.querySelector('.plan-dim__resultado');
-      const v = state.planVolumen || {};
-      if (!destino || !v.eventos_por_dia) return;
-      try {
-        const res = await fetch('/api/v1/onboarding/dimensionar', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bytes_por_evento: bytesPorEvento(), eventos_por_dia: v.eventos_por_dia,
-                                 retencion_dias: state.planRetencion || 0, alta_disponibilidad: v.alta_disponibilidad !== false }),
-        });
-        if (!res.ok) throw new Error(String(res.status));
-        const d = await res.json();
-        destino.innerHTML = `<span class="plan-dim__reco">${escapeHtml(d.en_palabras)}</span>`
-          + `<span class="plan-dim__detalle">~${d.gb_por_dia.toLocaleString('es-AR')} GB por día · ${d.gb_de_disco.toLocaleString('es-AR')} GB de disco`
-          + `${d.replicas ? ' con la réplica' : ''} · pico de ~${d.eventos_por_seg_pico.toLocaleString('es-AR')} eventos/s · `
-          + `${d.bytes_por_evento.toLocaleString('es-AR')} bytes por evento (de la muestra)</span>`
-          + `<span class="plan-dim__supuestos" title="${escapeHtml(d.supuestos.join(' · '))}">${icon('info')} Es una estimación: supuestos</span>`;
-      } catch (_err) {
-        destino.textContent = 'No se pudo calcular.';
-      }
-    }
     function renderMappingTable(fields) {
       const container = document.getElementById('mapping-table');
       if (!container) return;
@@ -4318,7 +4230,6 @@
             </thead>
             <tbody>${tbodyHtml}</tbody>
           </table></div>
-          <div class="dimensionamiento" id="dimensionamiento"></div>
           ${bloquePreguntas(state.preguntas)}
         </div>`;
 
@@ -4329,8 +4240,6 @@
           toggleFieldEdit(idx);
         });
       });
-      pintarDimensionamiento();
-
       // Toggle de grupos colapsables (click en el header → mostrar/ocultar rows).
       container.querySelectorAll('.mapping-group-header').forEach(header => {
         header.addEventListener('click', () => {
@@ -6823,20 +6732,13 @@
         + `<span class="mtx__nombre">${escapeHtml(nombre)}</span></button>`;
       const detalle = (slug, cabeza) => `<tr class="mtx__det" id="mtx-det-${escapeHtml(slug)}" data-det="${escapeHtml(slug)}" hidden>`
         + `<td colspan="${ancho}">${cabeza}<div class="mtx__det-cuerpo" data-detalle="${escapeHtml(slug)}"></div></td></tr>`;
-      const llevarse = (slug) => {
-        const base = `/api/v1/cases/${encodeURIComponent(slug)}`;
-        return `<span class="mtx__llevar" title="Para aplicarlo en otro cluster, sin la plataforma"><span>Llevarse:</span>`
-          + `<a href="${base}/export" download>${icon('download')} Dev Tools</a>`
-          + `<a href="${base}/export/dashboards" download>${icon('download')} Dashboards</a>`
-          + `<a href="${base}/traspaso" download>${icon('download')} Traspaso</a></span>`;
-      };
       const casos = filas.map(f => {
         const ts = _tarjetasDe(plugins, f.slug);
         return `<tr class="mtx__fila" data-fila="${escapeHtml(f.slug)}">`
           + `<th scope="row" class="mtx__caso"><span class="mtx__caso-in">${abrir(f.slug, f.nombre, f.punto || '')}${f.aviso || ''}${f.docs || ''}</span></th>`
           + columnas.map(([id]) => celda(f.slug, ts.find(t => t.plugin === id))).join('') + '</tr>'
           + detalle(f.slug, `<div class="mtx__det-head"><code class="mtx__indice" title="Índice">${escapeHtml(f.indice || '')}</code>`
-            + `${f.prefijo ? `<span class="pipe-row__prefix" title="Prefijo en OBS">${icon('cloud')} ${escapeHtml(f.prefijo)}</span>` : ''}${llevarse(f.slug)}</div>`);
+            + `${f.prefijo ? `<span class="pipe-row__prefix" title="Prefijo en OBS">${icon('cloud')} ${escapeHtml(f.prefijo)}</span>` : ''}</div>`);
       }).join('');
       // Lo que es de todo el cluster (asistente, text2viz, Query Insights…): una fila más.
       const delCluster = _tarjetasDe(plugins, '_cluster').filter(t => t.estado !== 'excluido');
@@ -6869,9 +6771,9 @@
         </details>`;
     }
     // ── Plugins para el cluster: elegir qué armar ──────────────────────────────
-    // Con el entorno ya desplegado, plugin por plugin: en qué casos aplica,
-    // sus comandos de Dev Tools y un botón que arma solo ese, sin tocar los
-    // demás. El paso 3 activa todos los que hacen falta; lo que en una demo sobra (el
+    // Con el entorno ya desplegado, plugin por plugin: en qué casos aplica y
+    // un botón que arma solo ese, sin tocar los demás. Los comandos de Dev
+    // Tools son para el cliente: van en el runbook (··· del caso, en el paso 1). El paso 3 activa todos los que hacen falta; lo que en una demo sobra (el
     // ciclo de vida y el rollup se notan con meses de datos) se arma si se
     // elige acá. El catálogo viene en /terraform/status (_catalogo_de_plugins).
     const _NOMBRE_DEL_PLUGIN = {
@@ -6880,16 +6782,11 @@
       analista: 'Enmascaramiento de campos', busqueda: 'Búsqueda híbrida', reporte: 'Reportes',
       ciclo_de_vida: 'Gestión del estado de índices', rollup: 'Rollups de índices',
     };
-    // La consola de Dev Tools, a partir de la URL de Dashboards.
-    function devToolsDe(dashUrl) {
-      const base = String(dashUrl || '').replace(/\/app\/.*$/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
-      return base ? `${base}/app/dev_tools#/console` : '';
-    }
     // ── Qué podés mostrar ──────────────────────────────────────────────────────
     // Una tarjeta por función: un ícono, un nombre corto en lenguaje de negocio
     // y su estado (verde, lista; amarillo, a medias; gris, sin activar). Al
-    // tocarla, un panel con qué hace, para qué le sirve al cliente, cada caso
-    // con su link a Dashboards y cómo se hace en Dev Tools. Lo que se nota con
+    // tocarla, un panel con qué hace, para qué le sirve al cliente y cada caso
+    // con su link a Dashboards. Lo que se nota con
     // meses de datos o mira el cluster entero va en "Más opciones".
     const _FUNCIONES = [
       // El nombre de cada función en OpenSearch, en castellano; el original, en su panel.
@@ -7011,10 +6908,7 @@
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
         + (f.id === 'busqueda' ? comparadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
-        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
-        + (f.c && f.aplica.length ? `<div class="fn__pie"><button type="button" class="btn btn-ghost btn-sm fn__comandos" data-plugin="${escapeHtml(f.id)}" `
-          + `aria-expanded="false">${icon('code')} Ver cómo se hace en Dev Tools</button></div>`
-          + `<div class="cat__det" data-det="${escapeHtml(f.id)}" hidden></div>` : '');
+        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '');
     }
     // Comparar la búsqueda híbrida en Dashboards (Search Relevance), no acá: la
     // plataforma no replica las pantallas de OpenSearch. El panel da el link,
@@ -7142,39 +7036,6 @@
       const lanzador = document.getElementById('cap-lanzador');
       if (!lanzador) { toast('El asistente aparece cuando está activado.', 'info'); return; }
       if (!capChatAbierto) lanzador.click();
-    }
-    // Los comandos de un plugin, caso por caso. Se piden una vez por entorno
-    // (cambian si cambian los casos).
-    async function pintarComandos(det, plugin) {
-      const cache = state.comandos || (state.comandos = {});
-      const clave = `${plugin}|${((state.lastStatus || {}).pipelines || []).map(p => p.slug).join(',')}`;
-      if (!cache[clave]) {
-        det.innerHTML = '<div class="status status-loading">Armando los comandos…</div>';
-        try {
-          const res = await fetch(`/api/v1/plugins/comandos?plugin=${encodeURIComponent(plugin)}`);
-          const d = await res.json();
-          if (!res.ok) throw detailError(d);
-          cache[clave] = d.casos || [];
-        } catch (err) {
-          det.innerHTML = `<div class="status status-error">No se pudieron armar los comandos: ${escapeHtml(err.message)}</div>`;
-          return;
-        }
-      }
-      const casos = cache[clave];
-      if (!casos.length) {
-        det.innerHTML = '<div class="hallazgos__vacio">No aplica a ninguno de los casos de este entorno.</div>';
-        return;
-      }
-      const c = casos.find(x => x.slug === (state.comandoCaso || {})[plugin]) || casos[0];
-      const nombre = (x) => SLUG_LABELS[x.slug] || x.label || x.slug;
-      const consola = devToolsDe((state.lastStatus || {}).dashboards_url);
-      det.innerHTML = (casos.length > 1
-          ? `<div class="cat__casos" role="group" aria-label="Caso">${casos.map(x => `<button type="button" class="cat__caso" `
-            + `data-caso="${escapeHtml(x.slug)}" aria-pressed="${x === c}">${escapeHtml(nombre(x))}</button>`).join('')}</div>` : '')
-        + `<pre class="cat__cmd" tabindex="0" aria-label="${escapeHtml(`Comandos de Dev Tools: ${nombre(c)}`)}">${escapeHtml(c.texto)}</pre>`
-        + '<div class="cat__pie"><button type="button" class="btn btn-secondary btn-sm cat__copiar">Copiar</button>'
-        + (consola ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(consola)}" target="_blank" rel="noopener">Abrir Dev Tools</a>` : '')
-        + '<span>Van en orden. Lo que está entre &lt; &gt; (el id que devuelve una respuesta, una contraseña) se reemplaza antes de mandarlo.</span></div>';
     }
     // Aplica un plugin donde falta. La alerta vigila al detector de anomalías:
     // donde todavía no hay, se arman los dos.
@@ -7537,14 +7398,7 @@
         <div class="cap-resumen">
           <span class="cap-resumen__lbl">Plugins:</span> ${chips}
         </div>
-        ${hayChat && agentId ? `<details class="cap-assistant__adv">
-          <summary>Cómo demostrarlo en Dashboards · Dev Tools (avanzado)</summary>
-          <div class="cap-assistant__adv-body">
-            <strong>En OpenSearch Dashboards:</strong> los <strong>Dashboards</strong> del tipo (volumen, cuentas, funnel) y el <strong>Forecasting</strong> desde su plugin.
-            <code class="cap-assistant__code">POST /_plugins/_ml/agents/${escapeHtml(agentId)}/_execute
-{"parameters":{"question":"¿Cuántos eventos hay en total?"}}</code>
-          </div>
-        </details>` : ''}`;
+      `;
       if (!hayChat) return;
 
       host = document.createElement('div');
@@ -9083,23 +8937,6 @@
           const abierta = body.querySelector(`.fn-tile[data-fn="${state.funcionAbierta}"] .fn__fila`);
           return abierta && verFuncion(abierta, data);
         }
-        const comandos = e.target.closest('.fn__comandos');
-        if (comandos) {
-          const det = comandos.closest('.fn-panel')?.querySelector('.cat__det');
-          if (!det) return;
-          det.hidden = !det.hidden;
-          comandos.setAttribute('aria-expanded', String(!det.hidden));
-          if (!det.hidden) pintarComandos(det, det.dataset.det);
-          return;
-        }
-        const caso = e.target.closest('.cat__caso');
-        if (caso) {
-          const det = caso.closest('.cat__det');
-          (state.comandoCaso || (state.comandoCaso = {}))[det.dataset.det] = caso.dataset.caso;
-          return pintarComandos(det, det.dataset.det);
-        }
-        const copiar = e.target.closest('.cat__copiar');
-        if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
         const copiarDsl = e.target.closest('.fn__copiar');
         if (copiarDsl) return copyToClipboard(copiarDsl.closest('.fn__comparar')
           ?.querySelector(`.fn__consulta[data-cual="${copiarDsl.dataset.cual}"]`)?.textContent || '', copiarDsl);
@@ -9330,10 +9167,6 @@
         if (u.includes('/api/v1/onboarding/apply-schema')) {
           await espera(900);
           return json({ index_template_applied: true, dashboards_imported: true });
-        }
-        if (u.includes('/api/v1/plugins/comandos')) {
-          const plugin = new URL(u, location.href).searchParams.get('plugin') || '';
-          return real(`/api/v1/dev/comandos-preview?plugin=${encodeURIComponent(plugin)}&slugs=${encodeURIComponent(slugs.join(','))}`);
         }
         if (u.includes('/api/v1/onboarding/provision-capabilities')) {
           await espera(1500);
@@ -9730,12 +9563,13 @@
     function renderExampleCards() {
       const demoGrid = document.getElementById('example-grid-demo');
       if (!demoGrid) return;
-      // Los casos creados desde el Builder (e.custom) llevan un ✕ para borrarlos.
-      // Va dentro del <button> de la card, así que el handler del grid distingue
-      // primero el ✕ y solo después trata el click como selección.
+      // Cada caso lleva un ··· con sus acciones: exportar el runbook (para que el
+      // cliente lo despliegue sin la plataforma) y, en los creados desde el
+      // Builder, borrarlo. Va dentro del <button> de la card, así que el handler
+      // del grid distingue primero el ··· y solo después trata el click como selección.
       const cardHtml = (e) => `
         <button type="button" class="example-card${e.disabled ? ' is-disabled' : ''}" data-example-id="${e.id}"${e.disabled ? ' disabled' : ''} title="${escapeHtml(e.description || '')}">
-          ${e.custom ? `<span class="example-card__del" data-delete-case="${escapeHtml(e.id)}" role="button" tabindex="0" title="Borrar este dataset">${icon('x')}</span>` : ''}
+          ${e.disabled ? '' : `<span class="example-card__mas" data-menu-case="${escapeHtml(e.id)}" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" title="Más opciones" aria-label="Más opciones de ${escapeHtml(e.label)}">···</span>`}
           <span class="example-card__tile"><svg class="icon"><use href="#ic-${e.icon || 'box'}"/></svg></span>
           <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}${e.fuentes ? ` <span class="example-card__soon">${e.fuentes} fuentes</span>` : ''}</span>
         </button>`;
@@ -9771,14 +9605,82 @@
     }
     renderExampleCards();
 
+    // El menú ··· de una card. Uno solo, flotando sobre la página (dentro del
+    // <button> de la card no puede ir otro botón).
+    function cerrarMenuDeCard() {
+      document.getElementById('card-menu')?.remove();
+      document.querySelectorAll('[data-menu-case][aria-expanded="true"]').forEach(t => t.setAttribute('aria-expanded', 'false'));
+    }
+    function abrirMenuDeCard(boton) {
+      const abierto = boton.getAttribute('aria-expanded') === 'true';
+      cerrarMenuDeCard();
+      if (abierto) return;
+      const id = boton.dataset.menuCase;
+      const e = LOG_EXAMPLES.find(x => x.id === id);
+      const propio = !!FAMILIAS[id] || !!(e && e.custom);
+      const menu = document.createElement('div');
+      menu.id = 'card-menu';
+      menu.className = 'card-menu';
+      menu.setAttribute('role', 'menu');
+      menu.innerHTML = `<button type="button" role="menuitem" class="card-menu__item" data-accion="runbook" data-caso="${escapeHtml(id)}">`
+        + `${icon('download')}<span><strong>Exportar runbook</strong><small>Los pasos y los archivos para que el cliente lo despliegue en su cluster</small></span></button>`
+        + (propio ? `<button type="button" role="menuitem" class="card-menu__item card-menu__item--peligro" data-accion="borrar" data-caso="${escapeHtml(id)}">`
+          + `${icon('trash')}<span><strong>Borrar dataset</strong></span></button>` : '');
+      document.body.appendChild(menu);
+      const r = boton.getBoundingClientRect();
+      menu.style.top = `${r.bottom + window.scrollY + 4}px`;
+      menu.style.left = `${Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - menu.offsetWidth - 8))}px`;
+      boton.setAttribute('aria-expanded', 'true');
+      menu.querySelector('.card-menu__item')?.focus();
+    }
+    // El runbook (ZIP): lo arma el backend con lo guardado del caso, sin desplegar.
+    async function exportarRunbook(id) {
+      const slugs = FAMILIAS[id] ? FAMILIAS[id].miembros : [id];
+      const nombre = FAMILIAS[id] ? FAMILIAS[id].label : (LOG_EXAMPLES.find(x => x.id === id)?.label || id);
+      try {
+        const res = await fetch(`/api/v1/runbook?slugs=${encodeURIComponent(slugs.join(','))}&nombre=${encodeURIComponent(nombre)}`);
+        if (!res.ok) throw detailError(await res.json().catch(() => ({})));
+        const archivo = (res.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'runbook.zip';
+        const url = URL.createObjectURL(await res.blob());
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = archivo;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast(`Runbook de "${nombre}" descargado: ${archivo}.`, 'success');
+      } catch (err) {
+        toast(`No se pudo armar el runbook: ${err.message}`, 'error');
+      }
+    }
+    document.addEventListener('click', (e) => {
+      const item = e.target.closest('#card-menu [data-accion]');
+      if (item) {
+        const id = item.dataset.caso;
+        cerrarMenuDeCard();
+        if (item.dataset.accion === 'runbook') return exportarRunbook(id);
+        if (FAMILIAS[id]) return deleteCustomCase(FAMILIAS[id].miembros, FAMILIAS[id].label);
+        return deleteCustomCase(id, LOG_EXAMPLES.find(x => x.id === id)?.label || id);
+      }
+      if (!e.target.closest('#card-menu, [data-menu-case]')) cerrarMenuDeCard();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarMenuDeCard(); });
+    window.addEventListener('resize', cerrarMenuDeCard);
+    document.getElementById('example-grid-demo')?.addEventListener('keydown', (e) => {
+      const mas = e.target.closest('[data-menu-case]');
+      if (!mas || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      abrirMenuDeCard(mas);
+    });
+
     document.getElementById('example-grid-demo')?.addEventListener('click', (e) => {
-      const del = e.target.closest('[data-delete-case]');
-      if (del) {
+      const mas = e.target.closest('[data-menu-case]');
+      if (mas) {
         e.preventDefault();
         e.stopPropagation();
-        const slug = del.dataset.deleteCase;
-        if (FAMILIAS[slug]) deleteCustomCase(FAMILIAS[slug].miembros, FAMILIAS[slug].label);
-        else deleteCustomCase(slug, LOG_EXAMPLES.find(x => x.id === slug)?.label || slug);
+        abrirMenuDeCard(mas);
         return;
       }
       const card = e.target.closest('.example-card');

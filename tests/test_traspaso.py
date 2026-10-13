@@ -29,7 +29,7 @@ def test_el_plan_con_sus_motivos_y_lo_apagado():
     md = traspaso.documento("hotel", "Hotel", _plan(retencion_dias=30), excluir=["perfil"], ahora=AHORA)
     assert md.startswith("# Traspaso: Hotel\n") and "2026-10-07 12:00 UTC" in md
     assert "| Pronósticos (Forecasting) | sí |" in md
-    assert re.search(r"\| Perfil por entidad \(Transform\) \| apagado en el paso 2 \|", md)
+    assert re.search(r"\| Perfil por entidad \(Transform\) \| apagado \|", md)
     assert "| Ciclo de vida de los índices (ISM) | sí | solo lectura a los 35 días y borrado pasada la retención de 30 días |" in md
     assert "Y para todo el cluster:" in md, "lo del cluster, aparte"
     assert "Todavía no se desplegó" in md
@@ -83,7 +83,8 @@ def test_desplegado_lleva_como_quedo(monkeypatch, tmp_path):
     assert "- **Dashboard del caso**: listo." in r.text and "https://consola/x/app/dashboards#/view/D" in r.text
 
 
-def test_se_baja_desde_la_plataforma():
-    import pathlib
-    html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert '<a href="${base}/traspaso" download>${icon(\'download\')} Traspaso</a>' in html
+def test_se_aplica_con_el_runbook():
+    """El traspaso ya no nombra "Llevarse" (se fue de Entorno desplegado): los
+    pasos y los archivos están en el runbook, desde el paso 1."""
+    md = traspaso.documento("hotel", "Hotel", _plan(), ahora=AHORA)
+    assert "menú ··· de su tarjeta → **Exportar runbook**" in md and "Llevarse" not in md

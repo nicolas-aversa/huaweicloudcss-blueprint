@@ -51,11 +51,58 @@ def _linea(texto: str) -> str:
     return " ".join(str(texto or "").split())
 
 
+def tabla_del_plan(plan: list[dict], excluir: "list[str] | set[str] | None" = None) -> list[str]:
+    """Qué se configura y por qué: la tabla del plan (y lo de todo el cluster)."""
+    excluir = set(excluir or [])
+    l = ["Cada plugin se decidió a partir de los campos de los datos. Lo que no aplica dice por qué.",
+         "",
+         "| Plugin | ¿Se configura? | Por qué |",
+         "|---|---|---|"]
+    for i in plan:
+        if _del_cluster(i):
+            continue
+        si = "apagado" if i["plugin"] in excluir and i.get("aplica") else ("sí" if i.get("aplica") else "no")
+        l.append(f"| {_linea(i.get('titulo'))} | {si} | {_linea(i.get('motivo'))} |")
+    del_cluster = [i for i in plan if _del_cluster(i)]
+    if del_cluster:
+        l += ["", "Y para todo el cluster: " + "; ".join(f"{_linea(i['titulo'])} ({_linea(i['motivo'])})" for i in del_cluster) + "."]
+    return l
+
+
+def para_produccion(dimensionamiento: "dict | None") -> list[str]:
+    """Cuánto cluster hace falta, con el volumen diario del cliente."""
+    d = dimensionamiento
+    if not (d and d.get("eventos_por_dia")):
+        return ["Sin el volumen diario del cliente no se dimensionó."]
+    return [
+        f"Con **{_num(d['eventos_por_dia'])} eventos por día** ({_num(d['bytes_por_evento'])} bytes cada uno, de la muestra), "
+        f"**{d['retencion_dias']} días** de retención y "
+        f"{'alta disponibilidad' if d['alta_disponibilidad'] else 'un solo nodo, sin réplica'}:",
+        "",
+        f"- **{d['nodos']} nodo{'s' if d['nodos'] != 1 else ''} {d['flavor']}** "
+        f"({d['vcpu_por_nodo']} vCPU, {d['ram_por_nodo_gb']} GB de RAM) con **{d['disco_por_nodo_gb']} GB** de disco cada uno"
+        + (" — el volumen excede lo que dimensiona la plataforma: hace falta un diseño a medida." if d.get("excede") else "."),
+        f"- {d['shards_primarios']} shard{'s' if d['shards_primarios'] != 1 else ''} primario"
+        f"{'s' if d['shards_primarios'] != 1 else ''} por índice mensual y {d['replicas']} réplica{'s' if d['replicas'] != 1 else ''}.",
+        f"- {d['nodos_logstash']} nodo{'s' if d['nodos_logstash'] != 1 else ''} de Logstash.",
+        f"- ~{_num(d['gb_por_dia'])} GB por día; {_num(d['gb_de_disco'])} GB de disco en total.",
+        "",
+        "Es una estimación. Supuestos: " + "; ".join(d.get("supuestos") or []) + ". "
+        "El número fino sale de una prueba de carga en el cluster de la PoC.",
+    ]
+
+
+def como_se_opera(plan: list[dict], excluir: "list[str] | set[str] | None" = None) -> list[str]:
+    """Dónde se mira cada plugin configurado, en OpenSearch Dashboards."""
+    excluir = set(excluir or [])
+    return [f"- **{_linea(i['titulo'])}**: {_DONDE[i['plugin']]}" for i in plan
+            if i.get("aplica") and i["plugin"] not in excluir and i["plugin"] in _DONDE]
+
+
 def documento(slug: str, label: str, plan: list[dict], *, excluir: "list[str] | None" = None,
               tarjetas: "list[dict] | None" = None, dimensionamiento: "dict | None" = None,
               dashboards_url: str = "", ahora: "datetime | None" = None) -> str:
     """El Markdown de traspaso del dataset `slug`."""
-    excluir = set(excluir or [])
     ahora = ahora or datetime.now(timezone.utc)
     nombre = label or slug
     l: list[str] = [
@@ -66,19 +113,7 @@ def documento(slug: str, label: str, plan: list[dict], *, excluir: "list[str] | 
         "",
         "## Qué se configuró y por qué",
         "",
-        "Cada plugin se decidió a partir de los campos de los datos. Lo que no aplica dice por qué.",
-        "",
-        "| Plugin | ¿Se configura? | Por qué |",
-        "|---|---|---|",
-    ]
-    for i in plan:
-        if _del_cluster(i):
-            continue
-        si = "apagado en el paso 2" if i["plugin"] in excluir and i.get("aplica") else ("sí" if i.get("aplica") else "no")
-        l.append(f"| {_linea(i.get('titulo'))} | {si} | {_linea(i.get('motivo'))} |")
-    del_cluster = [i for i in plan if _del_cluster(i)]
-    if del_cluster:
-        l += ["", "Y para todo el cluster: " + "; ".join(f"{_linea(i['titulo'])} ({_linea(i['motivo'])})" for i in del_cluster) + "."]
+    ] + tabla_del_plan(plan, excluir)
 
     l += ["", "## Cómo quedó en el cluster", ""]
     if not tarjetas:
@@ -97,46 +132,15 @@ def documento(slug: str, label: str, plan: list[dict], *, excluir: "list[str] | 
             for enlace in t.get("links") or []:
                 l.append(f"  - {_linea(enlace['texto'])}: {enlace['url']}")
 
-    l += ["", "## Para producción", ""]
-    if dimensionamiento and dimensionamiento.get("eventos_por_dia"):
-        d = dimensionamiento
-        l += [
-            f"Con **{_num(d['eventos_por_dia'])} eventos por día** ({_num(d['bytes_por_evento'])} bytes cada uno, de la muestra), "
-            f"**{d['retencion_dias']} días** de retención y "
-            f"{'alta disponibilidad' if d['alta_disponibilidad'] else 'un solo nodo, sin réplica'}:",
-            "",
-            f"- **{d['nodos']} nodo{'s' if d['nodos'] != 1 else ''} {d['flavor']}** "
-            f"({d['vcpu_por_nodo']} vCPU, {d['ram_por_nodo_gb']} GB de RAM) con **{d['disco_por_nodo_gb']} GB** de disco cada uno"
-            + (" — el volumen excede lo que dimensiona la plataforma: hace falta un diseño a medida." if d.get("excede") else "."),
-            f"- {d['shards_primarios']} shard{'s' if d['shards_primarios'] != 1 else ''} primario"
-            f"{'s' if d['shards_primarios'] != 1 else ''} por índice mensual y {d['replicas']} réplica{'s' if d['replicas'] != 1 else ''}.",
-            f"- {d['nodos_logstash']} nodo{'s' if d['nodos_logstash'] != 1 else ''} de Logstash.",
-            f"- ~{_num(d['gb_por_dia'])} GB por día; {_num(d['gb_de_disco'])} GB de disco en total.",
-            "",
-            "Es una estimación. Supuestos: " + "; ".join(d.get("supuestos") or []) + ". "
-            "El número fino sale de una prueba de carga en el cluster de la PoC.",
-        ]
-    else:
-        l.append("Sin el volumen diario del cliente no se dimensionó: se completa en el paso 2 (\"Para producción\").")
-
-    l += ["", "## Cómo se opera", ""]
-    for i in plan:
-        if i.get("aplica") and i["plugin"] not in excluir and i["plugin"] in _DONDE:
-            l.append(f"- **{_linea(i['titulo'])}**: {_DONDE[i['plugin']]}")
-
+    l += ["", "## Para producción", ""] + para_produccion(dimensionamiento)
+    l += ["", "## Cómo se opera", ""] + como_se_opera(plan, excluir)
     l += [
         "",
         "## Cómo aplicarlo en otro cluster",
         "",
-        f"1. **Dev Tools**: `{slug}-devtools.txt` (\"Llevarse → Dev Tools\" en la plataforma). Se pega en Dev Tools y se "
-        "corre cada request en orden; lo que va entre `<>` se completa (la API key de MaaS, las contraseñas y los IDs "
-        "que devuelve cada respuesta).",
-        f"2. **Dashboards**: `{slug}-dashboards.ndjson` (\"Llevarse → Dashboards\"), en Dashboards → Dashboards "
-        "Management → Saved objects → Import.",
-        "3. **Logstash**: el filter del dataset está en el export de Dev Tools, como comentario; va en CSS → "
-        "Logstash → Configuration file, con output al índice del caso.",
-        "4. **Red**: el cluster tiene que poder salir a MaaS (asistente) y al canal de avisos. En CSS, una Cluster "
-        "Route a cada IP.",
+        "Con el runbook del dataset: en la plataforma, paso 1, el menú ··· de su tarjeta → **Exportar runbook**. "
+        "Trae los pasos en orden y los archivos que usan: el index template y los plugins (Dev Tools), el pipeline "
+        "de Logstash y los dashboards.",
         "",
     ]
     return "\n".join(l)

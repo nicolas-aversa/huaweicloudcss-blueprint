@@ -107,19 +107,6 @@ def test_sin_lista_todo_como_antes(monkeypatch):
     assert llamadas["reporte"] == ["siem", "ventas-ecommerce"] and not escrito
 
 
-def test_los_comandos_de_un_plugin(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    (tmp_path / main._PIPELINES_REGISTRY_NAME).write_text(json.dumps({
-        "siem": {"index": "siem-%{+YYYY_MM}"}, "produccion-pozos": {"index": "produccion-pozos-%{+YYYY.MM}"}}),
-        encoding="utf-8")
-    d = TestClient(main.app).get("/api/v1/plugins/comandos?plugin=forecasting").json()
-    assert [c["slug"] for c in d["casos"]] == ["siem", "produccion-pozos"]
-    assert all("POST _plugins/_forecast/forecasters" in c["texto"] for c in d["casos"])
-    assert "siem-*" in d["casos"][0]["texto"], "con el índice real del entorno"
-    busq = TestClient(main.app).get("/api/v1/plugins/comandos?plugin=busqueda").json()
-    assert [c["slug"] for c in busq["casos"]] == ["siem"], "pozos no tiene texto libre"
-
-
 def test_el_catalogo_dice_donde_aplica_y_donde_esta(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
     registro = {"siem": {"index": "siem-%{+YYYY_MM}", "dashboard_id": "D"}, "produccion-pozos": {"index": "pp-%{+YYYY.MM}"}}
@@ -230,11 +217,9 @@ check('qué hace y para el negocio', d.includes('<strong>Qué hace.</strong>') &
 check('cada caso con su estado y su motivo', d.includes('<span class="fn__caso-nombre">SIEM</span><span class="sev sev--high">Parcial</span>')
   && d.includes('<span class="fn__motivo">backtest parcial</span>'), d);
 check('el que falta, sin activar', d.includes('<span class="fn__caso-nombre">Producción de pozos</span><span class="sev sev--low">Sin activar</span>'), d);
-check('sus comandos, a demanda', d.includes('class="btn btn-ghost btn-sm fn__comandos" data-plugin="forecasting"')
-  && d.includes('<div class="cat__det" data-det="forecasting" hidden></div>'), d);
+check('sin comandos de Dev Tools (son para el cliente: van en el runbook)', !d.includes('fn__comandos') && !d.includes('Dev Tools'), d);
 const tab = detalleDeFuncionHTML(funcionDe('dashboard', data));
 check('el link a Dashboards de cada caso', tab.includes('href="https://d/siem" target="_blank" rel="noopener">Abrir el tablero'), tab);
-check('sin catálogo, sin comandos', !tab.includes('fn__comandos'), tab);
 const bus = funcionDe('busqueda', data);
 check('lo del cluster va con su función, si tiene algo que decir', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
 const busOk = funcionDe('busqueda', { ...data, plugins: { ...data.plugins, _cluster: [T('embeddings', 'ok')] } });
@@ -282,9 +267,6 @@ check('sin los links, la lista de Experiments', evaluacionHTML({ evaluacion: { o
 check('la evaluación que falló, con su motivo', evaluacionHTML({ evaluacion: { ok: false, motivo: 'sin el juez' } })
   .includes('No se pudo armar la comparación con números (sin el juez).'));
 check('sin evaluación, nada', evaluacionHTML({}) === '');
-// Dev Tools, desde la URL de Dashboards.
-check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
-check('sin dashboards, sin link', devToolsDe('') === '');
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """, encoding="utf-8")
@@ -308,7 +290,7 @@ def test_que_podes_mostrar_esta_conectado():
     assert "índice <code>${escapeHtml(d.indice)}</code> en los dos lados y, en Query 2, pipeline" in html
     assert "querySelector(`.fn__consulta[data-cual=\"${copiarDsl.dataset.cual}\"]`)" in vista, "Copiar Query 1/2: la consulta oculta"
     assert "busquedaHTML" not in html and "probarBusqueda" not in html and "/api/v1/plugins/buscar" not in html
-    assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
+    assert "pintarComandos" not in html and "cap-assistant__adv" not in html, "sin Dev Tools en Entorno desplegado"
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
     # El paso 3 activa todo lo que hace falta: sin "recomendados" ni "elegí cuáles" (traían dudas).
     assert "'infra-capabilities-btn', activando ? 'Activando…' : 'Activar los plugins', 'Volver a activar los plugins'" in vista
@@ -318,7 +300,7 @@ def test_que_podes_mostrar_esta_conectado():
     assert "...(plugins ? { plugins } : {})," in html and "...(recomendados ? { recomendados: true } : {})," in html
     # De a uno: dos a la vez se pisan.
     assert "if (state.provisionandoPlugins) {" in html
-    assert "fetch(`/api/v1/plugins/comandos?plugin=${encodeURIComponent(plugin)}`)" in html
+    assert "/api/v1/plugins/comandos" not in html
     # La alerta sin detector, con el detector.
     assert "? ['anomalias', 'alertas'] : [c.plugin];" in html
 

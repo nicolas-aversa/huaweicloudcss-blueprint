@@ -488,9 +488,9 @@ check('la celda con su estado, abre esa tarjeta', card.includes('class="mtx__est
 check('lo excluido no es un botón', card.includes('<span class="mtx__na" title="perfil: Excluido">excluido</span>'), card);
 check('lo que no aplica', card.includes('<span class="mtx__na" title="No aplica a este caso">·</span>'), card);
 check('un caso sin plugins igual tiene su fila', card.includes('data-fila="cts"'), card);
-check('el detalle, oculto, con el índice, el prefijo y para llevarse', card.includes('id="mtx-det-produccion-pozos" data-det="produccion-pozos" hidden><td colspan="4">')
+check('el detalle, oculto, con el índice y el prefijo (llevárselo es el runbook, en el paso 1)', card.includes('id="mtx-det-produccion-pozos" data-det="produccion-pozos" hidden><td colspan="4">')
   && card.includes('<code class="mtx__indice" title="Índice">produccion-pozos-*</code>') && card.includes('produccion-pozos-logs/')
-  && card.includes('href="/api/v1/cases/produccion-pozos/export" download') && card.includes('href="/api/v1/cases/produccion-pozos/traspaso" download'), card);
+  && !card.includes('/export') && !card.includes('/traspaso'), card);
 check('todo el cluster, al final, con lo suyo', card.includes('data-fila="_cluster"') && card.indexOf('data-fila="_cluster"') > card.indexOf('data-fila="cts"')
   && card.includes('class="mtx__global mtx__estado--ok" data-slug="_cluster" data-plugin="query_insights"'), card);
 check('sin provisionar, sin aviso', !card.includes('Provisionando'), card);

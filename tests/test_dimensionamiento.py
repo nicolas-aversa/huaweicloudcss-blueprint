@@ -51,14 +51,6 @@ def test_en_palabras():
     assert dm.en_palabras(dm.dimensionar(400, 0, 90)) == "sin volumen diario no se puede dimensionar"
 
 
-def test_el_endpoint_usa_la_retencion_del_ciclo_de_vida():
-    from fastapi.testclient import TestClient
-    r = TestClient(main.app).post("/api/v1/onboarding/dimensionar", json={
-        "bytes_por_evento": 400, "eventos_por_dia": 1_000_000, "retencion_dias": 0, "alta_disponibilidad": True})
-    d = r.json()
-    assert r.status_code == 200 and d["retencion_dias"] == 90 and d["en_palabras"].startswith("3 nodos")
-
-
 def test_el_volumen_se_guarda_con_el_caso():
     import custom_cases
     assert custom_cases._volumen({"eventos_por_dia": "5000000", "alta_disponibilidad": False}) == \
@@ -70,31 +62,10 @@ def test_el_volumen_se_guarda_con_el_caso():
     assert html.count("volumen: state.planVolumen || {}") == 2, "una fuente o varias"
 
 
-_ARNES = r"""
-globalThis.state = { logFileContent: 'abcd\nabcdefgh\n\n' };
-""" + "{FUNCION}" + r"""
-const f = [];
-if (bytesPorEvento() !== 6) f.push('bytes ' + bytesPorEvento());
-state.logFileContent = ''; state.rawLog = 'ñ';
-if (bytesPorEvento() !== 2) f.push('utf8 ' + bytesPorEvento());
-state.rawLog = '';
-if (bytesPorEvento() !== 0) f.push('vacío');
-console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
-"""
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_los_bytes_en_el_navegador(tmp_path):
+def test_el_paso_2_ya_no_lo_muestra():
+    """«Para producción» se fue del paso 2 (y su endpoint): el dimensionamiento
+    queda para el traspaso y el runbook, con el volumen guardado del caso."""
+    from fastapi.testclient import TestClient
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("    function bytesPorEvento() {")
-    js = tmp_path / "dim.mjs"
-    js.write_text(_ARNES.replace("{FUNCION}", html[i:html.index("    function dimensionamientoHTML() {", i)]), encoding="utf-8")
-    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
-    assert r.returncode == 0, r.stdout + r.stderr
-
-
-def test_el_paso_2_lo_muestra():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "lugar.innerHTML = dimensionamientoHTML();" in html and "pintarDimensionamiento();" in html
-    assert "lugar.querySelector('.plan-dim__eventos')?.addEventListener('change', volumen);" in html
-    assert "fetch('/api/v1/onboarding/dimensionar'" in html
+    assert "dimensionamientoHTML" not in html and "/api/v1/onboarding/dimensionar" not in html
+    assert TestClient(main.app).post("/api/v1/onboarding/dimensionar", json={}).status_code in (404, 405)

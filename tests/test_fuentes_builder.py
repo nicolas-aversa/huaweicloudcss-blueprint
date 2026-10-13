@@ -89,4 +89,4 @@ def test_el_front_cablea_las_fuentes():
         assert clave in guardar, clave
     assert "if ((state.fuentes || []).length > 1) {\n        try {\n          await guardarFamilia();" in html
     # Borrar una familia borra todas sus fuentes.
-    assert "deleteCustomCase(FAMILIAS[slug].miembros, FAMILIAS[slug].label)" in html
+    assert "return deleteCustomCase(FAMILIAS[id].miembros, FAMILIAS[id].label);" in html

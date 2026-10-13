@@ -45,6 +45,23 @@ def devtools(slug: str, fields: list[dict], **kw: Any) -> str:
     return "\n\n".join(bloques) + "\n"
 
 
+def partes(slug: str, fields: list[dict], **kw: Any) -> tuple[str, str]:
+    """El script en dos, para el runbook: el index template, que va antes de
+    que entren datos (fija los tipos), y los plugins, que van después (los
+    detectores, pronósticos y transforms arrancan sobre los datos). Sin
+    plugins, el segundo es ""."""
+    bloques, marcas = _armar(slug, fields, **kw)
+    corte = next((i for p, i in marcas if p not in ("template", "logstash")), len(bloques))
+    antes = "\n\n".join(bloques[:corte]) + "\n"
+    if corte >= len(bloques):
+        return antes, ""
+    encabezado = _comentario(
+        f"Plugins de OpenSearch para «{kw.get('label') or slug}». Corré cada request en orden,\n"
+        "cuando ya estén entrando datos. Lo que va entre <> lo completás vos: las API keys\n"
+        "y los IDs que devuelve cada respuesta (connector_id, model_id, _id…).")
+    return antes, "\n\n".join([encabezado] + bloques[corte:]) + "\n"
+
+
 def secciones(slug: str, fields: list[dict], **kw: Any) -> dict[str, str]:
     """Los requests de cada plugin por separado (`{plugin: texto}`), para la
     vista Plugins: "Comandos" muestra los de uno solo."""

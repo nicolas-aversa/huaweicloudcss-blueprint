@@ -1463,20 +1463,119 @@ def traspaso_del_caso(slug: str) -> Response:
 @app.get("/api/v1/cases/{slug}/export/dashboards", tags=["verticals"],
          summary="Los dashboards del dataset, para importar en Saved objects")
 def export_case_dashboards(slug: str) -> Response:
+    return Response(content=_ndjson_de_dashboards(slug, _datos_para_exportar(slug)), media_type="application/x-ndjson",
+                    headers={"Content-Disposition": f'attachment; filename="{slug}-dashboards.ndjson"'})
+
+
+def _ndjson_de_dashboards(slug: str, datos: dict) -> str:
+    """Los dashboards del dataset, como se importan al desplegar: con la tabla
+    del perfil y las búsquedas de Discover."""
     import dashboards
 
     import capabilities as caps
     from index_template import index_pattern_from_name
 
-    datos = _datos_para_exportar(slug)
     ndjson = dashboards.build_ndjson_from_fields(slug, datos["index_name"], datos["fields"])
-    # Lo mismo que se importa al desplegar: la tabla del perfil y las búsquedas de Discover.
     entrada = {"fields": datos["fields"], "excluir": datos["excluir"]}
     ndjson = dashboards.con_panel_de_perfil(ndjson, slug, _perfil_de(slug, entrada))
     spec = caps.build_spec_from_fields(slug, index_pattern_from_name(datos["index_name"]), datos["fields"], datos["label"])
-    ndjson = dashboards.con_busquedas_guardadas(ndjson, slug, spec, datos["fields"], datos["label"])
-    return Response(content=ndjson, media_type="application/x-ndjson",
-                    headers={"Content-Disposition": f'attachment; filename="{slug}-dashboards.ndjson"'})
+    return dashboards.con_busquedas_guardadas(ndjson, slug, spec, datos["fields"], datos["label"])
+
+
+# ── El runbook: para que el cliente lo despliegue, sin la plataforma ─────────
+# El despliegue productivo no lo hace el cliente con esta herramienta: se lleva
+# los pasos y los archivos (ver runbook.py). Sale de lo que ya está guardado
+# del caso (campos, filter, fuente): no hace falta desplegarlo antes.
+def _entrada_del_runbook(input_config: "dict | None") -> str:
+    """El `input {}` del runbook: de dónde lee Logstash, sin nada de la cuenta
+    del SA. Con un archivo (OBS) el origen es del cliente: bucket, prefijo,
+    región y credenciales van como <MARCADOR>. De una fuente en vivo quedan
+    los valores que no son secretos (servidores, tópicos, puerto) y los
+    secretos van como <MARCADOR>."""
+    raw = dict(input_config or {})
+    ui = raw.get("plugin_type") or "obs"
+    model_cls, gen_fn = _INPUT_DISPATCH.get(_canonical_input(ui), _INPUT_DISPATCH["s3"])
+    sub = raw.get(ui) if isinstance(raw.get(ui), dict) else {}
+    sub = {k: v for k, v in (sub or {}).items() if k in model_cls.model_fields}
+    for k in custom_cases._SECRET_FIELDS:
+        if k in model_cls.model_fields:
+            sub[k] = f"<{k.upper()}>"
+    if model_cls is S3InputConfig:
+        sub.update({"bucket": "<BUCKET>", "prefix": "<PREFIJO>/", "region": "<REGION>",
+                    "endpoint": "https://obs.<REGION>.myhuaweicloud.com", "backup_to_bucket": ""})
+    obligatorios = {KafkaInputConfig: ("bootstrap_servers",),
+                    JdbcInputConfig: ("jdbc_connection_string", "jdbc_user", "jdbc_driver_library",
+                                      "jdbc_driver_class", "statement")}.get(model_cls, ())
+    for k in obligatorios:
+        if not sub.get(k):
+            sub[k] = f"<{k.upper()}>"
+    try:
+        cfg = model_cls(**sub)
+    except ValueError:
+        cfg = model_cls()
+    return f"input {{\n{gen_fn(cfg)}\n}}"
+
+
+def _conf_del_runbook(input_config: "dict | None", filter_code: str, index_name: str) -> str:
+    """El pipeline de Logstash del runbook: el origen y tu cluster con
+    <MARCADORES>, y el filter que salió del análisis de la muestra."""
+    salida = gen_output_elasticsearch(ElasticsearchOutputConfig(
+        hosts=["<ENDPOINT_DEL_CLUSTER>:9200"], index=index_name, user="<USUARIO>", password="<CONTRASEÑA>", ssl=True))
+    return "\n\n".join([
+        "# Pipeline de Logstash del dataset: en la consola de CSS → Logstash → Configuration file.\n"
+        "# Completá lo que va entre <>: de dónde lee (input) y tu cluster (output).",
+        _entrada_del_runbook(input_config),
+        (filter_code or "").strip() or "filter {\n}",
+        f"output {{\n{salida}\n}}",
+    ]) + "\n"
+
+
+@app.get("/api/v1/runbook", tags=["verticals"],
+         summary="El runbook de uno o más datasets: los pasos y los archivos para desplegarlo sin la plataforma")
+def runbook_de_casos(slugs: str, nombre: str = "") -> Response:
+    """Un ZIP con `LEEME.md` (los pasos, en orden) y, por dataset, el index
+    template y los plugins (Dev Tools), el pipeline de Logstash y los
+    dashboards. Sin secretos: lo que el cliente completa va entre <>."""
+    import ciclo_de_vida as cdv
+    import dimensionamiento
+    import exportar
+    import plan_de_cluster
+    import runbook
+    from index_template import index_pattern_from_name
+
+    lista = [s for s in dict.fromkeys(x.strip() for x in slugs.split(",")) if s]
+    if not lista:
+        raise HTTPException(status_code=400, detail={"stage": "runbook", "message": "Falta el dataset."})
+    terraform_dir = _active_terraform_dir()
+    registro = _read_pipelines_registry(terraform_dir)
+    datasets, muestras, volumen, retencion = [], [], {}, 0
+    for slug in lista:
+        datos = _datos_para_exportar(slug)
+        caso = custom_cases.get_case(slug) or verticals.get_vertical(slug) or {}
+        sin_logstash = {**datos, "filter_code": ""}   # va en su propio archivo
+        if slug in registro:
+            sin_logstash["decidido"] = _lo_que_aplica(slug, registro[slug] or {}, terraform_dir)
+        template, plugins = exportar.partes(slug, **sin_logstash)
+        datasets.append({
+            "slug": slug, "label": datos["label"], "excluir": datos["excluir"],
+            "plan": plan_de_cluster.plan(slug, datos["fields"], datos["label"], seguridad=datos["seguridad_propuesta"],
+                                         retencion_dias=datos["retencion_dias"]),
+            "index_pattern": index_pattern_from_name(datos["index_name"]),
+            "template": template, "plugins": plugins,
+            "logstash": _conf_del_runbook(caso.get("input_config"), datos["filter_code"], datos["index_name"]),
+            "dashboards": _ndjson_de_dashboards(slug, datos),
+        })
+        muestras.append(caso.get("sample") or "")
+        volumen = volumen or caso.get("volumen") or {}
+        retencion = retencion or datos["retencion_dias"]
+    dim = None
+    if volumen.get("eventos_por_dia"):
+        dim = dimensionamiento.dimensionar(dimensionamiento.bytes_por_evento("\n".join(muestras)), volumen["eventos_por_dia"],
+                                           cdv.retencion(retencion), volumen.get("alta_disponibilidad", True))
+    nombre = nombre.strip() or (datasets[0]["label"] if len(datasets) == 1 else "datasets")
+    archivo = f"runbook-{custom_cases.slugify(nombre) or lista[0]}.zip"
+    return Response(content=runbook.paquete(nombre, datasets, dimensionamiento=dim), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{archivo}"'})
 
 
 @app.delete("/api/v1/cases/{slug}", tags=["verticals"], summary="Borra un caso de demo creado")
@@ -1728,26 +1827,6 @@ def generate_filter_endpoint(request: GenerateFilterRequest) -> GenerateFilterRe
         inicio_registro=(perfil.inicio_registro if perfil is not None else ""),
         seguridad=propuesta,
     )
-
-
-class DimensionarRequest(BaseModel):
-    bytes_por_evento: int = Field(default=0, ge=0, le=10_000_000)
-    eventos_por_dia: int = Field(default=0, ge=0, le=1_000_000_000_000)
-    retencion_dias: int = Field(default=0, ge=0, le=36500)
-    alta_disponibilidad: bool = True
-
-
-@app.post("/api/v1/onboarding/dimensionar", tags=["onboarding"],
-          summary="Cuánto cluster necesita este dataset en producción")
-def dimensionar_endpoint(request: DimensionarRequest) -> dict:
-    """Nodos, flavor, disco y shards para el volumen que diga el cliente, con
-    los supuestos a la vista (ver dimensionamiento.py)."""
-    import ciclo_de_vida as cdv
-    import dimensionamiento
-
-    d = dimensionamiento.dimensionar(request.bytes_por_evento, request.eventos_por_dia,
-                                     cdv.retencion(request.retencion_dias), request.alta_disponibilidad)
-    return {**d, "en_palabras": dimensionamiento.en_palabras(d)}
 
 
 @app.post(
@@ -10879,32 +10958,6 @@ def _catalogo_de_plugins(terraform_dir: Path, registry: dict) -> list[dict]:
         return []
 
 
-@app.get("/api/v1/plugins/comandos", tags=["capabilities"],
-         summary="Los requests de Dev Tools de un plugin, caso por caso")
-def comandos_del_plugin(plugin: str) -> dict:
-    """Lo que hace la plataforma al aplicar el plugin, escrito como se pega en
-    Dev Tools (sin secretos: lo que devuelve cada respuesta va como <ID>)."""
-    terraform_dir = _active_terraform_dir()
-    return {"plugin": plugin, "casos": _comandos(plugin, _read_pipelines_registry(terraform_dir), terraform_dir)}
-
-
-def _comandos(plugin: str, registry: dict, terraform_dir: Path) -> list[dict]:
-    import exportar
-
-    fuera = []
-    for slug, entry in registry.items():
-        try:
-            datos = _datos_para_exportar(slug)
-        except HTTPException:
-            continue
-        datos["excluir"] = []          # se ven aunque estén apagados
-        datos["filter_code"] = ""
-        texto = exportar.secciones(slug, **datos, decidido=_lo_que_aplica(slug, entry or {}, terraform_dir)).get(plugin)
-        if texto:
-            fuera.append({"slug": slug, "label": datos["label"], "texto": texto})
-    return fuera
-
-
 def _registro_de_ejemplo(slugs: str) -> dict:
     """Los casos de demo pedidos como si estuvieran desplegados (con su
     dashboard), para la vista previa."""
@@ -10919,15 +10972,6 @@ def catalogo_preview(slugs: str = "") -> dict:
 
     with tempfile.TemporaryDirectory() as vacio:
         return {"catalogo": _catalogo_de_plugins(Path(vacio), _registro_de_ejemplo(slugs))}
-
-
-@app.get("/api/v1/dev/comandos-preview", tags=["dev"],
-         summary="Vista previa de los comandos de un plugin (casos de demo, sin cluster)")
-def comandos_preview(plugin: str, slugs: str = "") -> dict:
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as vacio:
-        return {"plugin": plugin, "casos": _comandos(plugin, _registro_de_ejemplo(slugs), Path(vacio))}
 
 
 def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: str) -> dict:
