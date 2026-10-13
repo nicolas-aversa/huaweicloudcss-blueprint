@@ -415,3 +415,36 @@ def test_el_cuidador_arranca_con_el_servidor_y_no_en_los_tests():
     i = src.index('@app.on_event("startup")\ndef _arrancar_cuidador()')
     cuerpo = src[i:i + 1200]
     assert 'os.environ.get("PYTEST_CURRENT_TEST")' in cuerpo and "_t.sleep(_CUIDADOR_CADA_S)" in cuerpo
+
+
+def test_el_cuidador_pone_al_dia_la_tarjeta_del_pronostico(monkeypatch, tmp_path):
+    """Visto: los backtests de 7 casos quedaron "parcial: 0 de 601 pasos" al
+    activar (cluster saturado); el cuidador los rehízo (600 de 601) y la
+    tarjeta seguía en "Falló"."""
+    estados = {"ventas": {"forecasting": {"ok": False, "motivo": "fallaron", "ventana": {"interval_min": 30}, "forecasters": [
+        {"id": "F1", "nombre": "a", "estado": "parcial: 0 de 601 pasos"},
+        {"id": "F2", "nombre": "b", "estado": "parcial: 0 de 601 pasos"}]}}}
+    relanzados = []
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "x:9200"})
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
+    monkeypatch.setattr(main, "_read_https_enabled_from_state", lambda td: False)
+    monkeypatch.setattr(main, "_cola_de_busquedas", lambda *a: 0)
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {})
+    monkeypatch.setattr(main, "_read_estados", lambda td: estados)
+    monkeypatch.setattr(main, "_guardar_estados", lambda td, slug, nuevo: estados.setdefault(slug, {}).update(nuevo))
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"ventas": {"forecaster_ids": ["F1", "F2"]}})
+    monkeypatch.setattr(main, "_forecast_test_state", lambda *a, **k: (True, "TEST_COMPLETE"))
+    monkeypatch.setattr(main, "_lanzar_backtest", lambda b, u, p, f: relanzados.append(f) or "T")
+    # El cluster: F1 terminó completo; F2 quedó truncado.
+    monkeypatch.setattr(main, "_rejuzgar_backtests", lambda b, u, p, ids: {
+        "ok": True, "forecaster_ids": ids, "states": ["a=TEST_COMPLETE", "b=parcial: 12 de 601 pasos"], "note": "x"})
+    assert main._cuidar_plugins(tmp_path) == ["estado del pronóstico · ventas", "backtest · ventas"]
+    fcs = estados["ventas"]["forecasting"]["forecasters"]
+    assert [f["estado"] for f in fcs] == ["TEST_COMPLETE", "parcial: 12 de 601 pasos"] and estados["ventas"]["forecasting"]["ventana"]
+    assert relanzados == ["F2"], "el truncado se relanza; el completo no"
+    # Todo completo: no se vuelve a pedir nada.
+    estados["ventas"]["forecasting"]["forecasters"] = [{"id": "F1", "estado": "TEST_COMPLETE"}, {"id": "F2", "estado": "TEST_COMPLETE"}]
+    monkeypatch.setattr(main, "_rejuzgar_backtests", lambda *a: (_ for _ in ()).throw(AssertionError("no")))
+    main._cuidados.clear()
+    assert main._cuidar_plugins(tmp_path) == []
+    main._cuidados.clear()

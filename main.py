@@ -4868,9 +4868,22 @@ def _cuidar_plugins(terraform_dir: Path) -> list[str]:
                     and _rearrancar(base, user, password, f"{ruta}/{jid}"):
                 hecho.append(f"{nombre} · {slug}")
     for slug, ids in _read_capabilities(terraform_dir).items():
-        for fc_id in ids.get("forecaster_ids") or []:
+        fc_ids = ids.get("forecaster_ids") or []
+        for fc_id in fc_ids:
             _, estado = _forecast_test_state(base, user, password, fc_id, tries=1)
             if estado.startswith("INIT_TEST_FAILED") and toca(fc_id) and _lanzar_backtest(base, user, password, fc_id):
+                hecho.append(f"backtest · {slug}")
+        # Lo que muestra la tarjeta, al día: sin abrir el caso, un backtest que
+        # terminó bien después seguía diciendo "Falló".
+        try:
+            if _rejuzgar_pronostico(base, user, password, terraform_dir, slug, fc_ids):
+                hecho.append(f"estado del pronóstico · {slug}")
+        except Exception as exc:  # noqa: BLE001 — el próximo turno
+            print(f"[cuidador] no se pudo rejuzgar el pronóstico de '{slug}': {exc!r}")
+        # Uno que terminó con pocos pasos (el cluster rechazó búsquedas) se relanza.
+        for f in ((_read_estados(terraform_dir).get(slug) or {}).get("forecasting") or {}).get("forecasters") or []:
+            if str(f.get("estado") or "").startswith("parcial") and f.get("id") in fc_ids \
+                    and toca(f"{f['id']}|parcial") and _lanzar_backtest(base, user, password, f["id"]):
                 hecho.append(f"backtest · {slug}")
     return hecho
 
@@ -6575,6 +6588,28 @@ def _rejuzgar_backtests(base: str, user: str, password: str, forecaster_ids: lis
     ok = n_ok > 0 or (bool(en_curso) and not fallidos)
     return {"ok": ok, "forecaster_ids": forecaster_ids, "states": states,
             ("note" if ok else "reason"): " · ".join(partes) or "ya provisionado"}
+
+
+def _rejuzgar_pronostico(base: str, user: str, password: str, terraform_dir: Path, slug: str,
+                         fc_ids: list[str]) -> bool:
+    """Pone al día lo que muestra la tarjeta del pronóstico: si algún backtest
+    guardado no está completo (en curso, sin arrancar, parcial o fallido), se
+    vuelve a juzgar con lo que hay en el cluster y se guarda si cambió. True si
+    cambió. Visto: al activar 9 casos a la vez, los primeros backtests quedaron
+    vacíos ("parcial: 0 de 601 pasos"); el cuidador los rehízo bien (600 de 601)
+    y la tarjeta seguía diciendo "Falló"."""
+    est_fc = (_read_estados(terraform_dir).get(slug) or {}).get("forecasting") or {}
+    guardados = est_fc.get("forecasters") or []
+    if not fc_ids or not guardados or all(str(f.get("estado") or "") == "TEST_COMPLETE" for f in guardados):
+        return False
+    res = _rejuzgar_backtests(base, user, password, fc_ids)
+    nuevo = plugins_vista.estados_desde_resultado({"forecast": res}).get("forecasting")
+    if not nuevo or [f.get("estado") for f in nuevo.get("forecasters") or []] == [f.get("estado") for f in guardados]:
+        return False
+    if est_fc.get("ventana"):
+        nuevo.setdefault("ventana", est_fc["ventana"])
+    _guardar_estados(terraform_dir, slug, {"forecasting": nuevo})
+    return True
 
 
 def _juzgar_backtests(base: str, user: str, password: str, lanzados: list[dict],
@@ -8448,25 +8483,15 @@ def numeros_de_plugins(slug: str = "") -> dict:
             fuera[f"forecast:{fc_id}"] = {"error_pct": p.get("error_pct"), "error": p.get("error", "")}
         except Exception as exc:  # noqa: BLE001
             fuera[f"forecast:{fc_id}"] = {"error_pct": None, "error": repr(exc)[:200]}
-    # Un backtest que la provisión dejó "en curso" (o sin arrancar) se vuelve a
-    # juzgar al mirar el caso: si terminó, la tarjeta deja de decir "en curso"
-    # (antes se quedaba así hasta volver a provisionar). Solo si cambió, se
-    # guarda y la vista se repinta (`actualizado`).
-    est_fc = (_read_estados(terraform_dir).get(slug) or {}).get("forecasting") or {}
+    # Un backtest que no quedó completo se vuelve a juzgar al mirar el caso:
+    # si terminó, la tarjeta deja de decir "en curso" o "falló". Solo si
+    # cambió, se guarda y la vista se repinta (`actualizado`).
     fc_ids = ids.get("forecaster_ids") or ([ids["forecaster_id"]] if ids.get("forecaster_id") else [])
-    if fc_ids and any(str(f.get("estado") or "").startswith((FORECAST_EN_CURSO, "no arrancó"))
-                      for f in est_fc.get("forecasters") or []):
-        try:
-            res = _rejuzgar_backtests(base, user, password, fc_ids)
-            nuevo = plugins_vista.estados_desde_resultado({"forecast": res}).get("forecasting")
-            if nuevo and [f.get("estado") for f in nuevo.get("forecasters") or []] \
-                    != [f.get("estado") for f in est_fc.get("forecasters") or []]:
-                if est_fc.get("ventana"):
-                    nuevo.setdefault("ventana", est_fc["ventana"])
-                _guardar_estados(terraform_dir, slug, {"forecasting": nuevo})
-                fuera["actualizado"] = True
-        except Exception as exc:  # noqa: BLE001 — sin rejuzgar, los números igual llegan
-            print(f"[plugins] no se pudieron rejuzgar los backtests de '{slug}': {exc!r}")
+    try:
+        if _rejuzgar_pronostico(base, user, password, terraform_dir, slug, fc_ids):
+            fuera["actualizado"] = True
+    except Exception as exc:  # noqa: BLE001 — sin rejuzgar, los números igual llegan
+        print(f"[plugins] no se pudieron rejuzgar los backtests de '{slug}': {exc!r}")
     if ids.get("detector_id"):
         total, top, error = _top_anomalias(base, user, password, ids["detector_id"], 1)
         fuera["anomalias"] = {"total": total, "top": top[0] if top else None, "error": error,

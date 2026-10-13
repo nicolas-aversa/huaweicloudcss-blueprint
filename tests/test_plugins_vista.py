@@ -641,4 +641,9 @@ def test_un_backtest_en_curso_se_rejuzga_al_mirar_el_caso(monkeypatch, tmp_path)
     monkeypatch.setattr(main, "_rejuzgar_backtests", lambda *a: (_ for _ in ()).throw(AssertionError("no")))
     d = TestClient(main.app).get("/api/v1/plugins/numeros?slug=ventas").json()
     assert "actualizado" not in d and not escrito
+    # Uno que la provisión dio por fallido ("parcial") y después terminó bien, también.
+    guardado["forecasting"]["forecasters"][0]["estado"] = "parcial: 0 de 601 pasos"
+    monkeypatch.setattr(main, "_rejuzgar_backtests", lambda b, u, p, ids: {"ok": True, "forecaster_ids": ids,
+                                                                            "states": ["a=TEST_COMPLETE"], "note": "ok"})
+    assert TestClient(main.app).get("/api/v1/plugins/numeros?slug=ventas").json()["actualizado"] is True
     assert pv  # el módulo de la vista, el mismo que usa el endpoint
