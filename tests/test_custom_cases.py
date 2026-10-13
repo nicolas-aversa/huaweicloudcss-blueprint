@@ -875,3 +875,29 @@ def test_el_caso_guarda_lo_decidido_en_el_paso_2(store, client):
     custom_cases.save_case(_meta("Otro", seguridad="no es un dict", excluir=["security_analytics"]), LOG)
     otro = next(v for v in main._front_payload()["verticals"] if v["slug"] == "otro")
     assert otro["hasSecurity"] is False and custom_cases.get_case("otro")["seguridad"] is None
+
+
+
+# ── Grupos e íconos ─────────────────────────────────────────────────────────
+def test_logistics_es_un_grupo_para_los_casos_del_builder(store):
+    """Logistics no tiene caso curado: aparece cuando alguien guarda un caso ahí."""
+    grupo = next(g for g in verticals.GROUPS if g["id"] == "logistica")
+    assert grupo == {"id": "logistica", "label": "Logistics", "icon": "truck"}
+    case = custom_cases.save_case(_meta("Seguimiento de envíos", group="logistica", icon="truck"), LOG)
+    assert (case["group"], case["icon"]) == ("logistica", "truck")
+    logistica = next(g for g in main._front_payload()["groups"] if g["id"] == "logistica")
+    assert logistica["members"] == ["seguimiento-de-envios"]
+
+
+def test_todo_icono_tiene_su_dibujo():
+    """Un ícono sin <symbol> se ve vacío: los de los grupos y los que se eligen
+    al guardar un caso tienen que estar en el sprite, y el front ofrece los
+    mismos que acepta el backend."""
+    import pathlib
+    import re
+    html = (pathlib.Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
+    dibujos = set(re.findall(r'<symbol id="ic-([a-z-]+)"', html))
+    assert {g["icon"] for g in verticals.GROUPS} <= dibujos
+    assert set(custom_cases.ICONS) <= dibujos
+    front = re.search(r"const SAVE_CASE_ICONS = \[([^\]]*)\]", html).group(1)
+    assert re.findall(r"'([a-z-]+)'", front) == custom_cases.ICONS

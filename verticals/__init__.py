@@ -42,6 +42,9 @@ GROUPS: list[dict] = [
     {"id": "media", "label": "Media", "icon": "play"},
     {"id": "energia", "label": "Oil & Gas", "icon": "droplet"},
     {"id": "salud", "label": "Salud", "icon": "heart"},
+    # Sin caso curado: los casos de logística se crean con el Builder (Dataset
+    # nuevo) y eligen este grupo al guardarse.
+    {"id": "logistica", "label": "Logistics", "icon": "truck"},
 ]
 
 # Orden canónico (= orden del grid y de LOG_EXAMPLES). Los hidden van al final y

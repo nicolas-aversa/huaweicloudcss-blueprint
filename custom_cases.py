@@ -46,7 +46,7 @@ GROUP = {"id": "mis-casos", "label": "Mis casos", "icon": "plus"}
 
 # Iconos ofrecidos en la UI: sprites que YA existen en el <svg> de index.html.
 ICONS = ["shield", "activity", "shopping-cart", "play", "droplet", "heart",
-         "database", "cloud", "code", "box"]
+         "truck", "database", "cloud", "code", "box"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SLUG_MIN, _SLUG_MAX = 3, 40

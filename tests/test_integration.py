@@ -5349,8 +5349,9 @@ def test_index_inyecta_verticals_y_endpoint():
     assert m and m.group(1).strip() != "null"
     import json as _json
     injected = _json.loads(m.group(1))
-    assert len(injected["groups"]) == 6
-    visible = [v for v in injected["verticals"] if not v["hidden"]]
+    # Logistics no tiene caso curado: sus casos salen del Builder.
+    assert [g["id"] for g in injected["groups"]] == ["seguridad", "fintech", "retail", "media", "energia", "salud", "logistica"]
+    visible =[v for v in injected["verticals"] if not v["hidden"]]
     assert len(visible) == 9
     assert {v["slug"] for v in visible} >= {"siem", "transacciones-alyc", "fortianalyzer", "cts"}
 
