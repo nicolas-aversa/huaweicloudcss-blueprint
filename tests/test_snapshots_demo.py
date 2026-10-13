@@ -94,7 +94,8 @@ def test_la_tarjeta_en_el_resumen():
     assert '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>' in html
     assert "body.querySelector('#infra-snapshots-guardar')?.addEventListener('click', (e) => guardarSnapshot(e.currentTarget));" in html
     assert "confirmLabel: 'Restaurar' });" in html, "restaurar pide confirmación"
-    assert "css_agency: 'settings-hw-agency'" in html
+    assert "settings-hw-agency" not in html and "Agencia de CSS para OBS" not in html, "sin el campo: va la de siempre"
+    assert "const body = { ..._hwSinCampo };" in html, "guardar la infra no borra la agencia que hubiera"
 
 
 _ARNES = r"""

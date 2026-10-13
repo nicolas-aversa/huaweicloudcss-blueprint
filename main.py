@@ -4455,7 +4455,7 @@ def _check_conf_reads_from_a_bucket(request: "TerraformDeployRequest") -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"stage": "pipeline_conf",
                     "message": (f"No sé de qué bucket leer los datos de {', '.join(sin_bucket)}: "
-                                "falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.")})
+                                "falta el bucket de demos en ⚙ Configuración → Credenciales.")})
 
 
 def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
@@ -8693,7 +8693,7 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
 # Armar una demo es deploy + ingesta + plugins. Con los datos ya ingestados en
 # un snapshot (en el bucket de demos), el próximo cluster los restaura en vez
 # de ingerirlos. Usa la API de snapshots del CSS: el cluster escribe en OBS con
-# una agencia de IAM (⚙ Infraestructura general).
+# una agencia de IAM (`css_obs_agency`; ya no se configura en la pantalla).
 RUTA_DE_SNAPSHOTS = "css-demos/snapshots"
 
 

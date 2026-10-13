@@ -3156,7 +3156,7 @@
                 <span class="guide-block__once">una sola vez</span>
               </div>
               <ol class="guide-list">
-                <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales de la cuenta</strong> (AK/SK de OBS, MaaS API key, bucket) e <strong>Infraestructura general</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
+                <li><strong>⚙ Configuración</strong> → cargá las dos cards: <strong>Credenciales</strong> (AK/SK de OBS, MaaS y NVIDIA API keys, bucket) e <strong>Infraestructura general</strong> (project ID, región, AZ, VPC/subnet/SG). Cada una valida al guardar.</li>
                 <li><strong>Preparar bucket</strong> → sube los datasets a tu bucket, incluidos los casos que hayan creado otros. Si te lo salteás, el deploy corta antes de empezar y te ofrece subirlos ahí mismo. Ese bucket guarda además el estado de Terraform en <code>tfstate/</code>: no lo vacíes a mano o el entorno queda sin forma de destruirse.</li>
               </ol>
             </section>
@@ -3269,14 +3269,14 @@
              (entra en una pantalla), igual que el Home. -->
         <div class="app-view is-settings" id="view-settings">
           <div class="settings-grid">
-            <!-- Card 1: Credenciales de la cuenta — AK/SK arriba; MaaS key + bucket
+            <!-- Card 1: Credenciales — AK/SK arriba; MaaS y NVIDIA keys + bucket
                  de demos abajo. "Preparar bucket" sube los datasets. -->
             <div class="settings-card">
               <div class="settings-card__head">
                 <span class="settings-card__tile"><svg class="icon"><use href="#ic-key"/></svg></span>
                 <div>
-                  <div class="settings-card__title">Credenciales de la cuenta</div>
-                  <div class="settings-card__hint">Las claves se guardan cifradas. <strong>Probar</strong> llama a MaaS con la key y te dice si sirve. <strong>Preparar</strong> sube los datasets de demo al bucket de tu cuenta.</div>
+                  <div class="settings-card__title">Credenciales</div>
+                  <div class="settings-card__hint">Las claves se guardan cifradas. <strong>Probar</strong> llama a MaaS o a NVIDIA con la key y te dice si sirve. <strong>Preparar</strong> sube los datasets de demo al bucket de tu cuenta.</div>
                 </div>
               </div>
               <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
@@ -3293,6 +3293,17 @@
                             title="Llama a MaaS con esta API key y te dice si funciona">Probar</button>
                   </div>
                 </div>
+                <!-- La de NVIDIA: los vectores de la búsqueda por significado. Opcional:
+                     sin ella, la búsqueda híbrida no se activa (el resto, sí). -->
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-nvidia-key">NVIDIA API Key</label>
+                  <div class="settings-field__row">
+                    <input type="password" class="form-input" id="settings-nvidia-key" autocomplete="off" placeholder="nvapi-…"
+                           title="Para la búsqueda por significado (NVIDIA NIM): los textos del campo de búsqueda viajan a NVIDIA. Opcional; se crea gratis en build.nvidia.com">
+                    <button class="btn btn-muted" type="button" id="settings-nvidia-test"
+                            title="Pide un vector a NVIDIA con esta API key y te dice si funciona">Probar</button>
+                  </div>
+                </div>
                 <div class="form-group settings-field">
                   <label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label>
                   <div class="settings-field__row">
@@ -3307,8 +3318,8 @@
               <div id="settings-maas-test-status" style="font-size:var(--fs-sm);"></div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
               <!-- Al pie queda sola la acción de la card. Guardar no es de la AK/SK:
-                   postea los cuatro campos (OBS, MaaS y el bucket) y los cuatro son
-                   obligatorios. -->
+                   postea todos los campos (OBS, MaaS, NVIDIA y el bucket); la de
+                   NVIDIA es la única opcional. -->
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-obs-save">Guardar</button>
                 <span id="settings-obs-status" class="settings-status"></span>
@@ -3332,36 +3343,10 @@
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-vpc">VPC ID</label><input class="form-input" id="settings-hw-vpc" autocomplete="off" placeholder="uuid"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-subnet">Subnet ID</label><input class="form-input" id="settings-hw-subnet" autocomplete="off" placeholder="uuid"></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-hw-sg">Security Group ID</label><input class="form-input" id="settings-hw-sg" autocomplete="off" placeholder="uuid"></div>
-                <div class="form-group settings-field"><label class="form-label" for="settings-hw-agency">Agencia de CSS para OBS</label><input class="form-input" id="settings-hw-agency" autocomplete="off" placeholder="css_obs_agency" title="La agencia de IAM que deja al CSS escribir en el bucket: la usan los snapshots de datos de demo"></div>
               </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" id="settings-hw-save">Guardar</button>
                 <span id="settings-hw-status" class="settings-status"></span>
-              </div>
-            </div>
-
-            <!-- Card 4: la API key de NVIDIA, para los vectores de la búsqueda por
-                 significado. La key no vuelve al navegador. -->
-            <div class="settings-card">
-              <div class="settings-card__head">
-                <span class="settings-card__tile"><svg class="icon"><use href="#ic-search"/></svg></span>
-                <div>
-                  <div class="settings-card__title">Búsqueda por significado (NVIDIA)</div>
-                  <div class="settings-card__hint">El cluster le pide los vectores a NVIDIA NIM (nemotron-3-embed-1b): los textos del campo de búsqueda viajan a NVIDIA. La key se crea gratis en build.nvidia.com y se guarda cifrada. Sin key, la búsqueda por significado no se activa.</div>
-                </div>
-              </div>
-              <div class="settings-fields" style="display:grid; grid-template-columns:minmax(0,1fr); gap:14px;">
-                <div class="form-group settings-field">
-                  <label class="form-label" for="settings-nvidia-key">API key de NVIDIA</label>
-                  <div class="settings-field__row">
-                    <input type="password" class="form-input" id="settings-nvidia-key" autocomplete="off" placeholder="nvapi-…">
-                    <button class="btn btn-muted" type="button" id="settings-nvidia-test" title="Pide un vector a NVIDIA con esta key">Probar</button>
-                  </div>
-                </div>
-              </div>
-              <div class="settings-actions">
-                <button class="btn btn-primary" id="settings-nvidia-save">Guardar</button>
-                <span id="settings-nvidia-status" class="settings-status"></span>
               </div>
             </div>
 
@@ -4622,7 +4607,7 @@
               <code class="how-sample__cmd">obs://${escapeHtml(bucket || '‹bucket de demos›')}/‹slug›-logs/${escapeHtml(archivo)}</code>
               <div class="how-sample__note">${bucket
                 ? 'Se sube al guardar el caso, con ese nombre, y Logstash lee de ahí. El ‹slug› sale del nombre que le pongas al caso. La ubicación no se elige a mano: es la convención con la que el resto del equipo lo prepara en su propio bucket (⚙ Configuración → Preparar).'
-                : '<span style="color:var(--accent-hover);font-weight:var(--fw-semi);">Falta el bucket de demos en ⚙ Configuración → Credenciales de la cuenta.</span> Sin él, el caso se guarda pero el archivo no sube.'}</div>
+                : '<span style="color:var(--accent-hover);font-weight:var(--fw-semi);">Falta el bucket de demos en ⚙ Configuración → Credenciales.</span> Sin él, el caso se guarda pero el archivo no sube.'}</div>
             </div>
           </div>`;
         return;
@@ -7060,15 +7045,18 @@
     function evaluacionHTML(d) {
       const ev = d.evaluacion;
       if (!ev) return '';
-      if (!ev.ok) return `<p class="fn__eval busq__vacio">Números: no se armaron (${escapeHtml(ev.motivo || 'sin motivo')}).</p>`;
+      if (!ev.ok) return `<p class="fn__eval busq__vacio">No se pudo armar la comparación con números (${escapeHtml(ev.motivo || 'sin motivo')}).</p>`;
       const ex = d.experimentos || {};
       const a = (url, texto) => (url ? `<a href="${_attr(url)}" target="_blank" rel="noopener">${texto}</a>` : '');
-      const links = [a(ex.hibrida, 'híbrida'), a(ex.palabras, 'por palabras'), a(ex.comparacion, 'comparación')].filter(Boolean);
-      const ayuda = 'NDCG: 1 es que lo relevante sale primero. La precisión engaña cuando hay una sola respuesta correcta, '
-        + 'y por palabras las búsquedas sin resultados no entran en el promedio.';
-      return `<p class="fn__eval"><strong>Números</strong> de ${escapeHtml(String(ev.consultas || ''))} búsquedas calificadas por un LLM: `
-        + `${links.length ? links.join(' · ') : a(d.url_experimentos, 'Experiments') || 'en Experiments'}`
-        + ` <span class="fn__eval-ayuda" title="${_attr(ayuda)}">${icon('info')} mirá NDCG</span></p>`;
+      const ayuda = 'La precisión engaña cuando hay una sola respuesta correcta, y las búsquedas que por palabras '
+        + 'no traen nada no entran en su promedio: contalas aparte.';
+      const comparar = ex.hibrida && ex.palabras
+        ? `Compará la nota de la ${a(ex.hibrida, 'búsqueda híbrida')} con la de la ${a(ex.palabras, 'búsqueda por palabras')}`
+          + `${ex.comparacion ? ` o mirá ${a(ex.comparacion, 'en qué cambian los resultados')}` : ''}.`
+        : `Las notas están en Search Relevance → ${a(d.url_experimentos, 'Experiments') || 'Experiments'}.`;
+      return `<p class="fn__eval" title="${_attr(ayuda)}"><strong>¿Cuál encuentra mejor?</strong>`
+        + ` Un LLM calificó los resultados de ${escapeHtml(String(ev.consultas || ''))} búsquedas de este caso. ${comparar}`
+        + ' La nota es el NDCG: de 0 a 1, más alto es mejor.</p>';
     }
     async function llenarSugerencias(caja, slug, nuevas = false) {
       const lugar = caja.querySelector('.fn__sugerencias');
@@ -10190,7 +10178,7 @@
         // bucket de demos), pero sin ese bucket el .conf sale sin de dónde leer.
         if (state.deployMode === 'custom' && state.sourceMode === 'file' && plugin === 'obs') {
           if (!demoBucket()) {
-            toast('Falta el bucket de demos: cargalo en ⚙ Configuración → Credenciales de la cuenta.', 'error');
+            toast('Falta el bucket de demos: cargalo en ⚙ Configuración → Credenciales.', 'error');
             return false;
           }
         } else if (plugin === 'obs') {
@@ -10584,6 +10572,7 @@
       // campo se vacía al hacer foco para poder reemplazarla sin concatenar.
       wireSecretField(skIn, !!(state.obsCreds || {}).skConfigured);
       refreshMaasKeyStatus();   // rellena el campo con puntitos si ya está guardada
+      refreshNvidiaKeyStatus();
       refreshHuaweiSettings();
       renderConfigChecklist();
     }
@@ -10619,12 +10608,17 @@
       project_id: 'settings-hw-project', region: 'settings-hw-region',
       availability_zone: 'settings-hw-az', vpc_id: 'settings-hw-vpc',
       subnet_id: 'settings-hw-subnet', security_group_id: 'settings-hw-sg',
-      demo_bucket: 'settings-hw-bucket', css_agency: 'settings-hw-agency',
+      demo_bucket: 'settings-hw-bucket',
     };
+    // Lo guardado que no tiene campo en la pantalla (p. ej. `css_agency`, que ya
+    // no se muestra: los snapshots usan `css_obs_agency` si no hay otra). El
+    // backend reemplaza el bloque entero: sin esto, guardar lo borraría.
+    let _hwSinCampo = {};
     async function refreshHuaweiSettings() {
       try {
         const res = await fetch('/api/v1/settings/huawei');
         const d = await res.json();
+        _hwSinCampo = Object.fromEntries(Object.entries(d.values || {}).filter(([f]) => !(f in HW_FIELD_IDS)));
         Object.entries(HW_FIELD_IDS).forEach(([field, id]) => {
           const input = document.getElementById(id);
           if (input) input.value = (d.values || {})[field] || '';
@@ -10638,7 +10632,7 @@
     // y su botón también persiste acá: si mandara sólo el bucket, borraría la
     // VPC, la subnet y el resto. Por eso los dos botones usan esta función.
     async function saveHuaweiSettings(statusEl) {
-      const body = {};
+      const body = { ..._hwSinCampo };
       Object.entries(HW_FIELD_IDS).forEach(([field, id]) => {
         body[field] = document.getElementById(id)?.value.trim() || '';
       });
@@ -10700,45 +10694,60 @@
       }
     });
     cargarCanalDeAlertas();
-    // La key de NVIDIA (búsqueda por significado): no vuelve; se muestra si está.
-    async function cargarClaveDeNvidia() {
-      const estado = document.getElementById('settings-nvidia-status');
+    // La NVIDIA API key (búsqueda por significado), en Credenciales: el mismo
+    // trato que la de MaaS —puntitos si está guardada, el foco la vacía, Probar
+    // guarda antes de probar—, pero opcional. La key no vuelve al navegador.
+    function _nvidiaField() { return document.getElementById('settings-nvidia-key'); }
+    async function refreshNvidiaKeyStatus({ forzar = false } = {}) {
+      const el = _nvidiaField();
+      if (!el) return;
+      if (forzar) el.dataset.dirty = '';
       try {
         const c = await (await fetch('/api/v1/settings/nvidia')).json();
-        if (estado) estado.textContent = c.configured ? `Configurada (${c.masked})` : 'Sin key: la búsqueda por significado no se activa.';
-      } catch (_err) { /* sin datos, la tarjeta queda vacía */ }
-    }
-    document.getElementById('settings-nvidia-save')?.addEventListener('click', async () => {
-      const estado = document.getElementById('settings-nvidia-status');
-      const campo = document.getElementById('settings-nvidia-key');
-      try {
-        const res = await fetch('/api/v1/settings/nvidia', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: campo.value.trim() }),
-        });
-        const d = await res.json();
-        if (!res.ok) throw detailError(d);
-        campo.value = '';
-        estado.textContent = d.configured ? 'Guardada. Se usa al activar la búsqueda.' : 'Key borrada.';
-      } catch (err) {
-        estado.textContent = `Error: ${err.message}`;
+        wireSecretField(el, !!c.configured);
+      } catch (_e) {
+        wireSecretField(el, false);
       }
-    });
+    }
+    // '' si se guardó; si no, el motivo.
+    async function guardarClaveDeNvidia(valor) {
+      try {
+        const r = await fetch('/api/v1/settings/nvidia', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ api_key: valor }),
+        });
+        if (r.ok) return '';
+        const d = await r.json().catch(() => ({}));
+        return (d.detail && d.detail.message) || 'No se pudo guardar la NVIDIA API key.';
+      } catch (err) {
+        return 'No se pudo guardar la NVIDIA API key: ' + err.message;
+      }
+    }
     document.getElementById('settings-nvidia-test')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
-      const estado = document.getElementById('settings-nvidia-status');
+      const out = document.getElementById('settings-maas-test-status');
+      const pintar = (texto, ok) => {
+        if (!out) return;
+        out.textContent = texto;
+        out.style.color = ok === null ? 'var(--text-muted)' : ok ? 'var(--accent-green)' : 'var(--accent-hover)';
+      };
       btn.disabled = true;
-      estado.textContent = 'Probando…';
+      pintar('Probando NVIDIA…', null);
       try {
-        const d = await (await fetch('/api/v1/settings/nvidia/test', { method: 'POST' })).json();
-        estado.textContent = d.detail;
+        const edit = secretFieldEdit(_nvidiaField());
+        if (edit.changed) {
+          const error = await guardarClaveDeNvidia(edit.value);
+          if (error) { pintar('✗ ' + error, false); return; }
+          await refreshNvidiaKeyStatus({ forzar: true });
+        }
+        const d = await (await fetch('/api/v1/settings/nvidia/test', { method: 'POST', credentials: 'same-origin' })).json();
+        pintar((d.ok ? '✓ ' : '✗ ') + d.detail, !!d.ok);
       } catch (err) {
-        estado.textContent = `Error: ${err.message}`;
+        pintar('✗ No se pudo probar: ' + err.message, false);
       } finally {
         btn.disabled = false;
       }
     });
-    cargarClaveDeNvidia();
     document.getElementById('settings-hw-save')?.addEventListener('click', async () => {
       const st = document.getElementById('settings-hw-status');
       // Todos los campos de infra son obligatorios para desplegar.
@@ -10855,6 +10864,7 @@
       // tener que volver a escribir un secreto que el navegador no tiene.
       const skEdit = secretFieldEdit(document.getElementById('settings-obs-sk'));
       const maasEdit = maasKeyEdit();   // changed=false si no tocó el campo
+      const nvidiaEdit = secretFieldEdit(_nvidiaField());
       state.obsCreds.ak = ak;
       let okObs = true;
       try {
@@ -10893,8 +10903,14 @@
           maasError = 'No se pudo guardar la MaaS API key: ' + err.message;
         }
       }
+      let nvidiaError = '';
+      if (nvidiaEdit.changed) {
+        nvidiaError = await guardarClaveDeNvidia(nvidiaEdit.value);
+        if (nvidiaError) setFieldError(_nvidiaField(), nvidiaError); else clearFieldError(_nvidiaField());
+      }
       if (state.inputPlugin) renderInputConfig(state.inputPlugin);
       refreshMaasKeyStatus({ forzar: true });   // recién guardada: volver a los puntitos
+      if (!nvidiaError) refreshNvidiaKeyStatus({ forzar: true });
       // El bucket de demos vive en esta card: persistirlo (saveHuaweiSettings manda
       // todos los campos huawei por id, así no pisa la infra de la otra card).
       await saveHuaweiSettings(null);
@@ -10903,8 +10919,9 @@
       if (st) {
         // El fallo de la MaaS key manda: guardar OBS bien pero la key mal no es
         // un "✓ guardado".
-        st.style.color = maasError ? 'var(--accent-red)' : '';
-        st.textContent = maasError ? '⚠ ' + maasError
+        const error = maasError || nvidiaError;
+        st.style.color = error ? 'var(--accent-red)' : '';
+        st.textContent = error ? '⚠ ' + error
           : (!ak || !state.obsCreds.skConfigured) ? '⚠ Falta AK o SK.'
           : '✓ Credenciales guardadas.';
       }

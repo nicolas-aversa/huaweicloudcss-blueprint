@@ -268,16 +268,19 @@ check('se pueden pedir otras', sug.includes('class="fn__otras"'));
 const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó', 'tercero'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
 check('sin sugerencias, textos que hay', sinSug.includes('algo como «llegó roto» o «tardó», dicho con otras palabras')
   && !sinSug.includes('tercero') && sinSug.includes('title="El LLM no propuso búsquedas (RuntimeError)"'), sinSug);
-// Los números: un link a cada experimento, en una línea.
+// Los números: una frase que se entiende, con un link a cada experimento.
 const ev = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, url_experimentos: 'https://d/app/searchRelevance#/experiment',
-  experimentos: { hibrida: 'https://d/app/searchRelevance#/experiment/view/H', palabras: 'https://d/app/searchRelevance#/experiment/view/P' } });
-check('los números, un link a cada experimento', ev.includes('<strong>Números</strong> de 10 búsquedas calificadas por un LLM: '
-  + '<a href="https://d/app/searchRelevance#/experiment/view/H" target="_blank" rel="noopener">híbrida</a> · <a href="https://d/app/searchRelevance#/experiment/view/P"')
-  && !ev.includes('comparación</a>') && ev.includes('mirá NDCG'), ev);
+  experimentos: { hibrida: 'https://d/app/searchRelevance#/experiment/view/H', palabras: 'https://d/app/searchRelevance#/experiment/view/P',
+                  comparacion: 'https://d/app/searchRelevance#/experiment/view/C' } });
+check('los números, en una frase', ev.includes('<strong>¿Cuál encuentra mejor?</strong> Un LLM calificó los resultados de 10 búsquedas de este caso.')
+  && ev.includes('Compará la nota de la <a href="https://d/app/searchRelevance#/experiment/view/H" target="_blank" rel="noopener">búsqueda híbrida</a>'
+                 + ' con la de la <a href="https://d/app/searchRelevance#/experiment/view/P" target="_blank" rel="noopener">búsqueda por palabras</a>'
+                 + ' o mirá <a href="https://d/app/searchRelevance#/experiment/view/C" target="_blank" rel="noopener">en qué cambian los resultados</a>.')
+  && ev.includes('La nota es el NDCG: de 0 a 1, más alto es mejor.'), ev);
 check('sin los links, la lista de Experiments', evaluacionHTML({ evaluacion: { ok: true, consultas: 10 },
   url_experimentos: 'https://d/app/searchRelevance#/experiment' }).includes('#/experiment" target="_blank" rel="noopener">Experiments</a>'));
 check('la evaluación que falló, con su motivo', evaluacionHTML({ evaluacion: { ok: false, motivo: 'sin el juez' } })
-  .includes('no se armaron (sin el juez)'));
+  .includes('No se pudo armar la comparación con números (sin el juez).'));
 check('sin evaluación, nada', evaluacionHTML({}) === '');
 // Dev Tools, desde la URL de Dashboards.
 check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
