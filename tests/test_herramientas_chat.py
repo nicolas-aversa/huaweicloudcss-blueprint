@@ -228,3 +228,13 @@ def test_siem_y_cts_declaran_su_campo_de_patrones():
     specs = verticals.capability_specs()
     assert specs["siem"]["pattern_field"] == "event.action"
     assert specs["cts"]["pattern_field"] == "trace_name"
+
+
+def test_explicar_no_cuenta_coordenadas_ni_repite_el_indicador_derivado():
+    """Emergencias médicas: la explicación nombraba "longitud -58.7--58.5" y
+    decía lo mismo con cumple_sla y cumple_sla_falla."""
+    def campo(nombre, div):
+        return {"field": nombre, "divergence": div, "topChanges": [{"value": "x", "selectionPercentage": 0.5, "baselinePercentage": 0.2}]}
+    analisis = {"comparisonAnalysis": [campo("longitud", 0.9), campo("geo_location", 0.8), campo("cumple_sla_falla", 0.7),
+                                       campo("cumple_sla", 0.6), campo("zona", 0.5), campo("otro_falla", 0.4)]}
+    assert [c["campo"] for c in hc.cambios_de_distribucion(analisis)] == ["cumple_sla", "zona", "otro_falla"]

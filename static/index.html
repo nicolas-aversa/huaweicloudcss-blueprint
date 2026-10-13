@@ -2412,6 +2412,10 @@
     .fn__numero { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
                   font-size: var(--fs-xs); color: var(--text-secondary); }
     .fn__numero:empty { display: none; }
+    .anomalias { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; width: 100%; }
+    .anomalia { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+    .anomalia__cuando { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+    .anomalia__grado { color: var(--text-muted); min-width: 80px; }
     .fn-panel #infra-accesos { margin: 12px 0 0; }
     .fn__ir { justify-self: end; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--accent-hover); text-decoration: none; }
     .fn__ir .icon { width: 12px; height: 12px; }
@@ -7065,13 +7069,21 @@
             || 'no se pudo leer el estado del análisis';
           return `<span>Sin anomalías: ${estado}.</span>`;
         }
-        const a = n.top || {};
-        const grado = Math.round((a.grado || 0) * 100);
-        const valores = (a.valores || []).map(v => `${v.nombre}: ${typeof v.valor === 'number' ? v.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : v.valor}`).join(' · ');
-        return `<span><strong>${_fmtN(n.total)}</strong> anomalía${n.total === 1 ? '' : 's'} · la más fuerte, grado ${grado} %, el ${escapeHtml(a.inicio || '')}</span>`
-          + (a.inicio ? `<button type="button" class="btn btn-secondary btn-sm anomalia__explicar" data-slug="${escapeHtml(slug)}" `
+        // Las más fuertes, cada una con su fecha, su grado y su botón: con una
+        // sola no se sabía de cuál hablaba la explicación.
+        const lista = ((n.todas || []).length ? n.todas : [n.top]).filter(a => a && a.inicio);
+        const fila = (a) => {
+          const grado = Math.round((a.grado || 0) * 100);
+          const valores = (a.valores || []).map(v => `${v.nombre}: ${typeof v.valor === 'number' ? v.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : v.valor}`).join(' · ');
+          return `<li class="anomalia"><span class="anomalia__cuando">${escapeHtml(String(a.inicio).slice(0, 16))} UTC</span>`
+            + `<span class="anomalia__grado">grado ${grado} %</span>`
+            + `<button type="button" class="btn btn-secondary btn-sm anomalia__explicar" data-slug="${escapeHtml(slug)}" `
             + `data-inicio="${escapeHtml(a.inicio)}" data-fin="${escapeHtml(a.fin || '')}" data-grado="${grado}" `
-            + `data-valores="${escapeHtml(valores)}">${icon('spark')} Explicarla con IA</button>` : '');
+            + `data-valores="${escapeHtml(valores)}">${icon('spark')} Explicarla con IA</button></li>`;
+        };
+        return `<span><strong>${_fmtN(n.total)}</strong> anomalía${n.total === 1 ? '' : 's'}`
+          + `${n.total > lista.length ? (lista.length === 1 ? ' · la más fuerte' : ` · las ${lista.length} más fuertes`) : ''}:</span>`
+          + `<ul class="anomalias">${lista.map(fila).join('')}</ul>`;
       }
       if (clave.startsWith('seguridad:')) {
         return n.eventos === null || n.eventos === undefined ? '' : `<span><strong>${_fmtN(n.eventos)}</strong> evento${n.eventos === 1 ? '' : 's'} detectado${n.eventos === 1 ? '' : 's'}</span>`;
@@ -7240,7 +7252,7 @@
     function explicarAnomalia(b) {
       const { slug, inicio, fin, grado, valores } = b.dataset;
       const tomada = !!(capChatPreguntar && capChatPreguntar(slug,
-        '¿Qué pasó en ese intervalo? ¿Por qué es una anomalía?',
+        `¿Qué pasó el ${String(inicio).slice(0, 16)} UTC (grado ${grado} %)? ¿Por qué es una anomalía?`,
         `Anomalía detectada entre ${inicio} y ${fin} (UTC), grado ${grado} %${valores ? `; valores: ${valores}` : ''}. `
         + `Compará ese intervalo con el resto, filtrando @timestamp entre esas dos fechas.`,
         // El intervalo: el backend mide qué cambió contra el período anterior.

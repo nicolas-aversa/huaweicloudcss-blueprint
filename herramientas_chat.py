@@ -68,12 +68,24 @@ def _pct(x: Any) -> str:
     return "—" if x is None else f"{round(float(x) * 100)} %"
 
 
+# Lo que no explica nada aunque cambie: coordenadas (un rango de longitud no
+# dice qué pasó; visto en emergencias médicas: "-58.7--58.5").
+_COORDENADA = re.compile(r"(^|[._])(lat|latitud|latitude|lon|lng|long|longitud|longitude|geo|geo_location|location|"
+                         r"coordenadas)($|[._])", re.I)
+
+
 def cambios_de_distribucion(analisis: Any, n: int = 6) -> list[dict]:
     """Los campos que más cambiaron (mayor divergencia), con el valor que más se
-    movió de cada uno. Ignora los campos sin referencia comparable."""
+    movió de cada uno. Ignora los campos sin referencia comparable, las
+    coordenadas y el indicador derivado `<campo>_falla` cuando está su campo
+    (dice lo mismo dos veces)."""
     filas = (analisis or {}).get("comparisonAnalysis") if isinstance(analisis, dict) else None
+    campos = {f.get("field", "") for f in filas or [] if isinstance(f, dict)}
     fuera = []
     for f in sorted(filas or [], key=lambda f: -(f.get("divergence") or 0)):
+        campo = f.get("field", "")
+        if _COORDENADA.search(campo) or (campo.endswith("_falla") and campo[:-len("_falla")] in campos):
+            continue
         cambios = [c for c in f.get("topChanges") or [] if c.get("baselinePercentage") is not None]
         if not cambios or not f.get("divergence"):
             continue

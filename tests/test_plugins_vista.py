@@ -343,7 +343,7 @@ def test_los_numeros_de_un_caso(monkeypatch, tmp_path):
     d = TestClient(main.app).get("/api/v1/plugins/numeros?slug=produccion-pozos").json()
     assert d["forecast:F1"] == {"error_pct": 4.3, "error": ""}
     assert d["forecast:F2"]["error_pct"] is None and "se cayó" in d["forecast:F2"]["error"], "uno que falla no tira el resto"
-    assert d["anomalias"] == {"total": 37, "top": anomalia, "error": "", "estado": "FINISHED"}
+    assert d["anomalias"] == {"total": 37, "top": anomalia, "todas": [anomalia], "error": "", "estado": "FINISHED"}
     assert d["perfil"] == {"entidades": 412}
 
 
@@ -526,7 +526,11 @@ check('el motivo si la fila estaba bien', numeroDePlugin('forecast:F', { error_p
 check('no se repite si la fila ya dice que es parcial', numeroDePlugin('forecast:F', { error_pct: null, error: 'backtest parcial' }, 's', 'parcial') === '');
 const an = numeroDePlugin('anomalias', { total: 37, estado: 'FINISHED', top: { inicio: '2025-07-12 09:45:00', fin: '2025-07-12 10:15:00', grado: 0.93,
   valores: [{ nombre: 'oil', valor: 1840.5 }] } }, 'produccion-pozos');
-check('cuántas y la más fuerte', an.includes('<strong>37</strong> anomalías · la más fuerte, grado 93 %, el 2025-07-12 09:45:00'), an);
+check('cuántas y cuál, con su fecha y su grado', an.includes('<strong>37</strong> anomalías · la más fuerte:</span>')
+  && an.includes('<span class="anomalia__cuando">2025-07-12 09:45 UTC</span><span class="anomalia__grado">grado 93 %</span>'), an);
+const varias = numeroDePlugin('anomalias', { total: 9, todas: [{ inicio: '2026-02-09 17:40:00', grado: 1 }, { inicio: '2026-05-20 18:00:00', grado: 0.8 }] }, 's');
+check('varias, cada una con su botón', varias.includes('las 2 más fuertes:') && (varias.match(/anomalia__explicar/g) || []).length === 2
+  && varias.indexOf('2026-02-09 17:40') < varias.indexOf('2026-05-20 18:00'), varias);
 check('y se explica con el asistente', an.includes('class="btn btn-secondary btn-sm anomalia__explicar" data-slug="produccion-pozos" data-inicio="2025-07-12 09:45:00" data-fin="2025-07-12 10:15:00" data-grado="93" data-valores="oil: 1.840,5"'), an);
 check('sin anomalías', numeroDePlugin('anomalias', { total: 0, estado: 'FINISHED' }, 's').includes('el análisis terminó'));
 check('un análisis que falló no "sigue corriendo"', numeroDePlugin('anomalias', { total: 0, estado: 'INIT_FAILURE' }, 's').includes('falló'));

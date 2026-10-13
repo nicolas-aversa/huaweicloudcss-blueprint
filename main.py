@@ -8963,8 +8963,10 @@ def numeros_de_plugins(slug: str = "") -> dict:
     except Exception as exc:  # noqa: BLE001 — sin rejuzgar, los números igual llegan
         print(f"[plugins] no se pudieron rejuzgar los backtests de '{slug}': {exc!r}")
     if ids.get("detector_id"):
-        total, top, error = _top_anomalias(base, user, password, ids["detector_id"], 1)
-        fuera["anomalias"] = {"total": total, "top": top[0] if top else None, "error": error,
+        # Las más fuertes, cada una con su "Explicarla con IA" (con una sola, no
+        # se sabía de cuál de las anomalías hablaba la explicación).
+        total, top, error = _top_anomalias(base, user, password, ids["detector_id"], _ANOMALIAS_EN_EL_PANEL)
+        fuera["anomalias"] = {"total": total, "top": top[0] if top else None, "todas": top, "error": error,
                               "estado": _estado_historico(base, user, password, ids["detector_id"], intentos=1)}
     reg = _read_security(terraform_dir).get(slug) or {}
     if reg.get("detectores"):
@@ -9152,6 +9154,9 @@ def _verificar_en_el_cluster(base: str, user: str, password: str, slug: str, ids
             detalle += ", con su reporte en Reporting" if reporte_ok else f"; el reporte {motivo_rep}"
         marcar("dashboard", bool(encontrado) and reporte_ok, detalle)
     return fuera
+
+
+_ANOMALIAS_EN_EL_PANEL = 5
 
 
 def _top_anomalias(base: str, user: str, password: str, detector_id: str, n: int) -> tuple[int, list[dict], str]:

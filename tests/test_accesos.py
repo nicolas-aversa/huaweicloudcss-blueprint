@@ -155,3 +155,8 @@ def test_va_en_el_panel_de_enmascaramiento():
     # "Explicarla con IA", desde el panel de Detección de anomalías (antes, solo en «Detalle por caso»).
     assert "const explicar = e.target.closest('.anomalia__explicar');\n        if (explicar) return explicarAnomalia(explicar);" in html
     assert "const _NUMERO_EN_EL_PANEL = new Set(['anomalias', 'perfil']);" in html and "llenarNumerosDeFuncion(panel);" in html
+    # Cada anomalía con su fecha y su botón; la pregunta dice cuál es.
+    assert "const lista = ((n.todas || []).length ? n.todas : [n.top]).filter(a => a && a.inicio);" in html
+    assert "`¿Qué pasó el ${String(inicio).slice(0, 16)} UTC (grado ${grado} %)? ¿Por qué es una anomalía?`" in html
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    assert '"todas": top' in src and "_ANOMALIAS_EN_EL_PANEL = 5" in src
