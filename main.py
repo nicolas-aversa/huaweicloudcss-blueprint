@@ -7667,9 +7667,6 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
             return {"ok": True, "reason": "ya estaba"}
         _borrar_transform(ruta, user, password)
         _os_req("DELETE", f"{base}/{perfiles.indice_destino(slug)}", user, password, timeout=20)
-    # El índice destino con sus tipos (la fecha, como fecha); si ya existe, queda.
-    _os_req("PUT", f"{base}/{perfiles.indice_destino(slug)}", user, password,
-            json_body=perfiles.mapping_del_destino(perfil), timeout=20)
     rc = _os_req("PUT", ruta, user, password, json_body=perfiles.build_transform(slug, index_pattern, perfil), timeout=30)
     if not _resp_ok(rc):
         return {"ok": False, "reason": _resp_motivo(rc)}

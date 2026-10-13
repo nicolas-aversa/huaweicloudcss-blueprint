@@ -127,15 +127,6 @@ def medidas_de_la_entidad(fields: list[dict], entidad: str = "") -> list[tuple[d
     return ([(f, "sum") for f in elegidas if not duracion(f)] + [(f, "avg") for f in elegidas if duracion(f)])[:3]
 
 
-def mapping_del_destino(perfil: dict) -> dict[str, Any]:
-    """El índice del perfil, creado antes del Transform: la entidad como keyword
-    y las fechas como fecha (si no, el último evento se veía como milisegundos)."""
-    props: dict[str, Any] = {"entidad": {"type": "keyword"}}
-    for nombre in perfil.get("fechas") or []:
-        props[nombre] = {"type": "date"}
-    return {"mappings": {"properties": props}}
-
-
 def perfil_desde_campos(fields: list[dict]) -> "dict | None":
     """El perfil de un dataset nuevo: agrupado por su entidad, con los eventos,
     hasta tres medidas (montos sumados, duraciones promediadas) y el último

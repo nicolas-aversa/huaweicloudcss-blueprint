@@ -63,8 +63,7 @@ def test_el_perfil_no_suma_coordenadas_ni_edades_y_promedia_los_tiempos():
     sin_roles = [dict(f, role=None) for f in campos]
     assert [f["field_path"] for f, _ in perfiles.medidas_de_la_entidad(sin_roles, "afiliado_id")] == \
         ["costo_servicio_ars", "satisfaccion", "tiempo_respuesta_min"]
-    assert perfiles.mapping_del_destino(p) == {"mappings": {"properties": {"entidad": {"type": "keyword"},
-                                                                          "ultimo": {"type": "date"}}}}
+
 
 
 def test_los_sensibles_son_los_marcados():
