@@ -158,6 +158,7 @@ def test_la_comparacion_va_en_search_relevance(monkeypatch, tmp_path):
     assert d["indice"] == "busqueda-ventas" and d["pipeline"] == "plataforma-hibrida" and d["campo"] == "comentario"
     assert d["configuraciones"] == ["ventas · por palabras", "ventas · híbrida"], "las que se eligen en Single Query Comparison"
     assert d["query_set"] == "ventas · búsquedas" and d["evaluacion"] is None, "sin evaluación todavía"
+    assert d["experimentos"] == {} and d["url_experimentos"] == "https://dash.example/app/searchRelevance#/experiment"
     assert d["url"] == "https://dash.example/app/searchRelevance#/"
     assert _json.loads(d["palabras"]) == {"query": {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}},
                                           "_source": ["texto", "cuenta"]}
@@ -592,3 +593,34 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
     monkeypatch.setattr(main, "_provisionar_busqueda", lambda *a: {"ok": True, "campo": "msg", "reason": "ya estaba"})
     activar()
     assert estados["a"]["busqueda"]["motivo"] == "1234 textos" and estados["a"]["busqueda"]["evaluacion"]["ok"]
+
+
+def test_un_link_a_cada_experimento_del_caso(monkeypatch, tmp_path):
+    """En Search Relevance, la lista de Experiments tiene los de todos los
+    casos (y los ítems del menú son formularios): el panel lleva a cada uno."""
+    from fastapi.testclient import TestClient
+    sr = _SR(hay={
+        "query_sets": [("QS", {"name": "Ventas · búsquedas"}), ("QS-OTRO", {"name": "Otro · búsquedas"})],
+        "search_configurations": [("P", {"name": "Ventas · por palabras"}), ("H", {"name": "Ventas · híbrida"})],
+        "experiments": [
+            ("E1", {"querySetId": "QS", "type": "POINTWISE_EVALUATION", "searchConfigurationList": ["H"], "status": "COMPLETED", "timestamp": "2026-10-13T00:52"}),
+            ("E2", {"querySetId": "QS", "type": "POINTWISE_EVALUATION", "searchConfigurationList": ["H"], "status": "COMPLETED", "timestamp": "2026-10-13T09:00"}),
+            ("E3", {"querySetId": "QS", "type": "POINTWISE_EVALUATION", "searchConfigurationList": ["P"], "status": "COMPLETED", "timestamp": "2026-10-13T00:53"}),
+            ("E4", {"querySetId": "QS", "type": "PAIRWISE_COMPARISON", "searchConfigurationList": ["P", "H"], "status": "PROCESSING", "timestamp": "2026-10-13T00:54"}),
+            ("E5", {"querySetId": "QS-OTRO", "type": "PAIRWISE_COMPARISON", "searchConfigurationList": ["X", "Y"], "status": "COMPLETED"})]})
+    monkeypatch.setattr(main, "_os_req", sr)
+    assert main._experimentos_del_caso("http://x", "a", "p", "Ventas") == {"hibrida": "E2", "palabras": "E3"}, \
+        "el último de cada uno, terminado y del caso"
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "_read_estados", lambda td: {
+        "_cluster": {"embeddings": {"model_id_consulta": "Q"}},
+        "ventas": {"busqueda": {"ok": True, "evaluacion": {"ok": True, "consultas": 10}}}})
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "1.2.3.4:9200"})
+    monkeypatch.setattr(main, "_build_dashboards_url", lambda cluster, https: "https://dash.example/app/home")
+    monkeypatch.setattr(main, "_cluster_admin_password", lambda td: "pw")
+    monkeypatch.setattr(main, "_experimentos_del_caso", lambda b, u, p, label: {"hibrida": "E2"} if label == "ventas" else {})
+    d = TestClient(main.app).get("/api/v1/plugins/busqueda/comparar?slug=ventas").json()
+    assert d["experimentos"] == {"hibrida": "https://dash.example/app/searchRelevance#/experiment/view/E2"}
+    monkeypatch.setattr(main, "_experimentos_del_caso", lambda *a: (_ for _ in ()).throw(ConnectionError()))
+    d = TestClient(main.app).get("/api/v1/plugins/busqueda/comparar?slug=ventas").json()
+    assert d["experimentos"] == {} and d["url_experimentos"].endswith("#/experiment"), "sin cluster, queda la lista"

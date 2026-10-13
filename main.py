@@ -8568,6 +8568,30 @@ def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str
                       + (f"; {corriendo} experimento(s) siguen corriendo" if corriendo else "")}
 
 
+def _experimentos_del_caso(base: str, user: str, password: str, label: str) -> dict:
+    """Los experimentos terminados de la evaluación del caso, por lo que miden:
+    `{"hibrida", "palabras", "comparacion"}` → id (el último de cada uno: el
+    SA puede haber corrido otros desde Dashboards)."""
+    eval_ = busqueda.nombres_de_evaluacion(label)
+    cfg_ = busqueda.nombres_de_configuracion(label)
+    sets = {x["_id"] for x in _listar_sr(base, user, password, "query_sets") if x.get("name") == eval_["query_set"]}
+    if not sets:
+        return {}
+    configs = {x["_id"]: x.get("name") for x in _listar_sr(base, user, password, "search_configurations")}
+    fuera = {}
+    for x in sorted(_listar_sr(base, user, password, "experiments"), key=lambda x: str(x.get("timestamp") or "")):
+        if x.get("querySetId") not in sets or x.get("status") != "COMPLETED":
+            continue
+        if x.get("type") == "PAIRWISE_COMPARISON":
+            fuera["comparacion"] = x["_id"]
+        elif x.get("type") == "POINTWISE_EVALUATION":
+            nombre = configs.get(next(iter(x.get("searchConfigurationList") or []), ""))
+            for clave in ("hibrida", "palabras"):
+                if nombre == cfg_[clave]:
+                    fuera[clave] = x["_id"]
+    return fuera
+
+
 @app.get("/api/v1/plugins/busqueda/comparar", tags=["capabilities"],
          summary="Lo que hace falta para comparar la búsqueda de un caso en Search Relevance (Dashboards)")
 def comparar_busqueda(slug: str) -> dict:
@@ -8581,12 +8605,25 @@ def comparar_busqueda(slug: str) -> dict:
     cluster = _cluster_with_public_access(terraform_dir)
     base = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, _read_https_enabled_from_state(terraform_dir)))
     consultas = busqueda.consultas_para_comparar(model_id)
-    nombres = busqueda.nombres_de_configuracion(_label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
+    label = _label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {})
+    nombres = busqueda.nombres_de_configuracion(label)
+    # Un link a cada experimento de la evaluación (la lista de Experiments
+    # tiene los de todos los casos; los ítems de abajo son formularios).
+    evaluacion = caso.get("evaluacion") or None
+    experimentos = {}
+    if (evaluacion or {}).get("ok"):
+        try:
+            ids = _experimentos_del_caso(_os_base(cluster, _read_https_enabled_from_state(terraform_dir)), "admin",
+                                         _cluster_admin_password(terraform_dir), label)
+            experimentos = {k: plugins_vista.link(base, plugins_vista.APP_SEARCH_RELEVANCE, f"/experiment/view/{v}")
+                            for k, v in ids.items()}
+        except Exception as exc:  # noqa: BLE001 — queda el link a la lista
+            print(f"[busqueda] no se pudieron leer los experimentos de {slug}: {exc!r}")
     return {"indice": busqueda.indice(slug), "pipeline": busqueda.PIPELINE_DE_BUSQUEDA, "campo": caso.get("campo", ""),
             "configuraciones": [nombres["palabras"], nombres["hibrida"]],
-            "evaluacion": caso.get("evaluacion") or None,
-            "query_set": busqueda.nombres_de_evaluacion(
-                _label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))["query_set"],
+            "evaluacion": evaluacion, "query_set": busqueda.nombres_de_evaluacion(label)["query_set"],
+            "experimentos": {k: v for k, v in experimentos.items() if v},
+            "url_experimentos": plugins_vista.link(base, plugins_vista.APP_SEARCH_RELEVANCE, "/experiment"),
             # En una línea: se copian y se pegan, no se leen (con sangría, la
             # híbrida ocupaba media pantalla y quedaba con scroll).
             "palabras": _json.dumps(consultas["palabras"], ensure_ascii=False),

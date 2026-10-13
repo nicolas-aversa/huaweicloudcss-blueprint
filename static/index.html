@@ -2446,6 +2446,10 @@
     .fn__dsl-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: var(--fs-xs); }
     .fn__dsl .cat__cmd { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
     .fn__eval { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+    .fn__eval p { margin: 0 0 4px; }
+    .fn__eval a { color: var(--accent-hover); text-decoration: none; font-weight: 600; }
+    .fn__eval a:hover { text-decoration: underline; }
+    .fn__eval-ayuda { font-size: var(--fs-xs); color: var(--text-muted); }
     .fn__sugerencias { margin-top: 6px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
     .fn__sugs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     .fn__sug { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
@@ -7058,10 +7062,18 @@
       const ev = d.evaluacion;
       if (!ev) return '';
       if (!ev.ok) return `<p class="fn__eval busq__vacio">La evaluación con números no se armó: ${escapeHtml(ev.motivo || 'sin motivo')}.</p>`;
-      return `<p class="fn__eval"><strong>Con números.</strong> En Search Relevance → <strong>Search Evaluation</strong>`
-        + ` está la nota (NDCG, precisión) de ${escapeHtml(String(ev.consultas || ''))} búsquedas del caso, por palabras y la híbrida,`
-        + ` calificadas por un LLM; en <strong>Query Set Comparison</strong>, cuánto cambian los resultados entre una y otra.`
-        + ` Son los experimentos del query set <code>${escapeHtml(d.query_set || '')}</code>.</p>`;
+      const ex = d.experimentos || {};
+      const a = (url, texto) => (url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${texto}</a>` : '');
+      const links = [a(ex.hibrida, 'Search Evaluation · híbrida'), a(ex.palabras, 'Search Evaluation · por palabras'),
+                     a(ex.comparacion, 'Query Set Comparison')].filter(Boolean);
+      return `<div class="fn__eval"><p><strong>Con números.</strong> En Search Relevance → `
+        + `${a(d.url_experimentos, '<strong>Experiments</strong>') || '<strong>Experiments</strong>'}`
+        + ` (el título del menú: los ítems de abajo son formularios para crear otros) están los experimentos del caso,`
+        + ` ya corridos sobre ${escapeHtml(String(ev.consultas || ''))} búsquedas que calificó un LLM`
+        + `${links.length ? `: ${links.join(' · ')}` : ` (query set <code>${escapeHtml(d.query_set || '')}</code>)`}.</p>`
+        + '<p class="fn__eval-ayuda">Mirá <strong>NDCG</strong>: 1 es que lo relevante sale primero. La precisión engaña cuando'
+        + ' cada búsqueda tiene una sola respuesta correcta, y por palabras las búsquedas que no traen nada no entran en la tabla'
+        + ' ni en el promedio: contalas aparte.</p></div>';
     }
     async function llenarSugerencias(caja, slug, nuevas = false) {
       const lugar = caja.querySelector('.fn__sugerencias');
@@ -9312,6 +9324,10 @@
           return json({ indice: `busqueda-${slug}`, pipeline: 'plataforma-hibrida', campo: 'msg', url: 'https://example.invalid/app/searchRelevance#/',
             configuraciones: [`${nombre} · por palabras`, `${nombre} · híbrida`],
             evaluacion: { ok: true, consultas: 10, motivo: '10 búsquedas juzgadas por el LLM' }, query_set: `${nombre} · búsquedas`,
+            url_experimentos: 'https://example.invalid/app/searchRelevance#/experiment',
+            experimentos: { hibrida: 'https://example.invalid/app/searchRelevance#/experiment/view/h',
+                            palabras: 'https://example.invalid/app/searchRelevance#/experiment/view/p',
+                            comparacion: 'https://example.invalid/app/searchRelevance#/experiment/view/c' },
             palabras: JSON.stringify({ query: palabras, _source: campos }),
             hibrida: JSON.stringify({ query: { hybrid: { queries: [palabras, { neural: { embedding: {
               query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } }, _source: campos }) });

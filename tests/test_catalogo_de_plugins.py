@@ -266,9 +266,14 @@ check('se pueden pedir otras', sug.includes('fn__otras'));
 const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
 check('sin sugerencias, los textos que hay', sinSug.includes('El LLM no propuso búsquedas (RuntimeError). Buscá alguno de estos textos dicho con otras palabras: «llegó roto» · «tardó»'), sinSug);
 // La evaluación con números: dónde verla, o por qué no está.
-const ev = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, query_set: 'SIEM · búsquedas' });
-check('la evaluación, dónde verla', ev.includes('<strong>Search Evaluation</strong>') && ev.includes('de 10 búsquedas')
-  && ev.includes('<code>SIEM · búsquedas</code>'), ev);
+const ev = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, query_set: 'SIEM · búsquedas',
+  url_experimentos: 'https://d/app/searchRelevance#/experiment',
+  experimentos: { hibrida: 'https://d/app/searchRelevance#/experiment/view/H', palabras: 'https://d/app/searchRelevance#/experiment/view/P' } });
+check('la evaluación, en Experiments y con un link a cada uno', ev.includes('<a href="https://d/app/searchRelevance#/experiment" target="_blank" rel="noopener"><strong>Experiments</strong></a>')
+  && ev.includes('sobre 10 búsquedas') && ev.includes('<a href="https://d/app/searchRelevance#/experiment/view/H" target="_blank" rel="noopener">Search Evaluation · híbrida</a> · <a')
+  && !ev.includes('Query Set Comparison</a>') && ev.includes('NDCG'), ev);
+const evSinLinks = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, query_set: 'SIEM · búsquedas' });
+check('sin los links, el nombre del query set', evSinLinks.includes('<strong>Experiments</strong> (el título') && evSinLinks.includes('<code>SIEM · búsquedas</code>'), evSinLinks);
 check('la evaluación que falló, con su motivo', evaluacionHTML({ evaluacion: { ok: false, motivo: 'sin el juez' } })
   .includes('no se armó: sin el juez.'));
 check('sin evaluación, nada', evaluacionHTML({}) === '');
