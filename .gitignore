@@ -46,6 +46,8 @@ terraform/.capabilities.json
 terraform/.cluster_features.json
 terraform/.security_analytics.json
 terraform/.estado_plugins.json
+# Las búsquedas sugeridas para Search Relevance (textos del caso).
+terraform/.busquedas_sugeridas.json
 # Usuarios de demo con su contraseña (analista con datos enmascarados).
 terraform/.analistas.json
 # Backend remoto del state (OBS): lo genera tfstate.prepare() por workspace y
