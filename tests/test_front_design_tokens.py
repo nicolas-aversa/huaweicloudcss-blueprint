@@ -337,7 +337,7 @@ def test_la_verificacion_se_lee_de_un_vistazo():
     html = _INDEX.read_text(encoding="utf-8")
 
     i = html.index("function chipVerificacion(v)")
-    fn = html[i:html.index("function bloquePreguntas(", i)]
+    fn = html[i:html.index("function entidadPropuesta(", i)]
     assert 'class="mapping-verify' in fn, "tiene su propia clase, no estilos inline"
     assert "style=" not in fn
     assert "Verificado con ${v.filas}" in fn, "con todas OK se dice cuántas, no la fracción"
@@ -404,22 +404,13 @@ def test_los_chips_de_la_nube_siguen_el_orden_de_la_tarjeta():
     assert '<div id="live-paste-pane" class="hidden">' in html
 
 
-def test_las_preguntas_del_paso_2_se_ven_como_en_el_chat():
-    """Eran una lista numerada —un documento—. Ahora son sugerencias con el
-    destello del chat, en una grilla, abiertas de entrada."""
+def test_el_paso_2_no_muestra_las_preguntas_pero_se_guardan():
+    """El panel "Preguntas para el asistente" del paso 2 se sacó: las preguntas
+    se ven en el chat del caso. Se siguen guardando con él."""
     html = _INDEX.read_text(encoding="utf-8")
-    css = html[:html.index("</style>")]
-
-    i = html.index("function bloquePreguntas(qs)")
-    fn = html[i:html.index("function renderMappingTable(", i)]
-    assert "style=" not in fn, "el estilo vive en .mapping-preguntas"
-    assert "<ol" not in fn, "no es una lista numerada"
-    assert '<details class="mapping-preguntas" open>' in fn
-    assert "icon('spark')" in fn, "el mismo destello que las sugerencias del chat"
-    assert 'class="mapping-preguntas__lista"' in fn
-
-    lista = css[css.index(".mapping-preguntas__lista {"):]
-    assert "repeat(2, minmax(0, 1fr))" in lista[:lista.index("}")]
+    assert "bloquePreguntas" not in html and "mapping-preguntas" not in html
+    assert "Preguntas para el asistente" not in html
+    assert "questions: state.preguntas || []," in html and "questions: f.preguntas || []," in html
 
 
 def test_crear_un_caso_solo_lo_guarda():

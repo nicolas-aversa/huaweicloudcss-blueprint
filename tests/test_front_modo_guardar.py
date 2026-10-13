@@ -122,7 +122,7 @@ def test_el_resumen_del_paso_4_declara_lo_que_usa():
 def test_el_chip_dice_quien_armo_el_conf():
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("function chipVerificacion(v)")
-    fn = html[i:html.index("function bloquePreguntas(", i)]
+    fn = html[i:html.index("function entidadPropuesta(", i)]
     for fuente in ("llm:", "catalogo:", "determinista:"):
         assert fuente in fn, fuente
     assert "Armado con GLM-5.3" in fn

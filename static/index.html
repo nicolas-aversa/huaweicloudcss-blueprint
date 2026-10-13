@@ -1141,71 +1141,6 @@
       display: flex;
       gap: 8px;
     }
-    /* Las preguntas que va a ofrecer el chat de este dataset, al pie de la
-       tabla. Se muestran como las va a ver el asistente —sugerencias con el
-       destello del chat, en tarjetas— y no como una lista numerada, que se
-       leía como un documento y no como algo para preguntar. */
-    .mapping-preguntas {
-      border-top: 1px solid var(--border-subtle);
-      background: var(--bg-subtle);
-      padding: 14px 20px 16px;
-    }
-    .mapping-preguntas > summary {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      list-style: none;
-    }
-    .mapping-preguntas > summary::-webkit-details-marker { display: none; }
-    .mapping-preguntas__tile {
-      width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
-      background: var(--accent-tint); color: var(--accent);
-      display: inline-flex; align-items: center; justify-content: center;
-    }
-    .mapping-preguntas__tile .icon { width: 15px; height: 15px; }
-    .mapping-preguntas__titulo { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-    .mapping-preguntas__titulo strong {
-      font-size: var(--fs-md); font-weight: var(--fw-semi); color: var(--text-primary);
-    }
-    .mapping-preguntas__titulo span { font-size: var(--fs-sm); color: var(--text-muted); }
-    .mapping-preguntas > summary::after {
-      content: '';
-      width: 7px; height: 7px; margin-left: auto; margin-right: 4px; flex: none;
-      border-right: 1.5px solid var(--text-muted);
-      border-bottom: 1.5px solid var(--text-muted);
-      transform: rotate(45deg);
-      transition: transform var(--t-fast);
-    }
-    .mapping-preguntas[open] > summary::after { transform: rotate(-135deg); }
-    .mapping-preguntas__lista {
-      list-style: none;
-      margin: 14px 0 0;
-      padding: 0;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .mapping-preguntas__lista li {
-      display: flex;
-      align-items: flex-start;
-      gap: 9px;
-      padding: 10px 12px;
-      background: var(--bg-primary);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-xs);
-      font-size: var(--fs-md);
-      line-height: 1.45;
-      color: var(--text-primary);
-    }
-    .mapping-preguntas__lista li .icon {
-      width: 13px; height: 13px; flex: none; margin-top: 3px;
-      color: var(--accent); opacity: .85;
-    }
-    @media (max-width: 720px) {
-      .mapping-preguntas__lista { grid-template-columns: 1fr; }
-    }
     /* ── Vista Configuración: dos columnas, todo en una pantalla (sin scroll) ── */
     /* Configuración entra entera en una pantalla: de acá en más los valores
        están dimensionados para eso (ver también .settings-fields).
@@ -4086,26 +4021,6 @@
         ${icon(completa ? 'check' : 'alert-triangle')}${escapeHtml(texto)}</span>`;
     }
 
-    // Las preguntas de ejemplo que va a ofrecer el chat de este dataset: se
-    // guardan con el caso, así que se muestran acá, antes de guardarlo.
-    function bloquePreguntas(qs) {
-      if (!qs || !qs.length) return '';
-      // Abierto de entrada: es lo primero que va a ver quien abra el chat del
-      // caso, y plegado nadie se enteraba de que existía.
-      return `<details class="mapping-preguntas" open>
-        <summary>
-          <span class="mapping-preguntas__tile">${icon('chat')}</span>
-          <span class="mapping-preguntas__titulo">
-            <strong>Preguntas para el asistente</strong>
-            <span>Así aparecen en el chat de este caso, listas para tocar.</span>
-          </span>
-        </summary>
-        <ul class="mapping-preguntas__lista">
-          ${qs.map(q => `<li>${icon('spark')}<span>${escapeHtml(q)}</span></li>`).join('')}
-        </ul>
-      </details>`;
-    }
-
     // Paso 2: qué campo identifica a la entidad (el perfil del caso: una fila
     // por cliente, usuario, IP…). La propone el descubrimiento, como el rol de
     // cada campo y cuáles son sensibles; no se marcan a mano.
@@ -4246,7 +4161,6 @@
             </thead>
             <tbody>${tbodyHtml}</tbody>
           </table></div>
-          ${bloquePreguntas(state.preguntas)}
         </div>`;
 
       document.querySelectorAll('.mapping-edit-btn').forEach(btn => {
