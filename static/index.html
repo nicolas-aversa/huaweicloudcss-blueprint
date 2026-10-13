@@ -7051,7 +7051,8 @@
         cuerpo.innerHTML = `<ol class="fn__pasos">
             <li>En Search Relevance → <strong>Single Query Comparison</strong>, en <strong>Query 1</strong> y en <strong>Query 2</strong> elegí el índice <code>${escapeHtml(d.indice)}</code>.</li>
             <li>En Query 1 dejá el pipeline vacío y pegá la consulta por palabras; en Query 2 elegí el pipeline <code>${escapeHtml(d.pipeline)}</code> y pegá la híbrida.</li>
-            <li>Arriba, escribí lo que buscás con tus palabras y tocá Search: a la derecha aparece lo que la búsqueda por palabras no encuentra.</li>
+            <li>Arriba, en la barra <strong>Search</strong>, escribí lo que buscás con tus palabras y tocá Search (con la barra vacía la híbrida da error: no tiene qué buscar).</li>
+            <li>Los resultados salen debajo de las consultas. Muestran el ID: cambiá el campo a <code>texto</code> y a la derecha aparece lo que la búsqueda por palabras no encuentra.</li>
           </ol>
           <div class="fn__dsls">${bloque('Query 1 · por palabras', d.palabras)}${bloque(`Query 2 · híbrida (pipeline ${escapeHtml(d.pipeline)})`, d.hibrida)}</div>`;
       } catch (err) {
@@ -9244,12 +9245,13 @@
           await espera(300);
           const slug = new URL(u, location.href).searchParams.get('slug') || '';
           const palabras = { multi_match: { query: '%SearchText%', fields: ['texto', 'texto.es'] } };
+          const campos = ['texto', 'cuenta'];
           const nombre = SLUG_LABELS[slug] || slug;
           return json({ indice: `busqueda-${slug}`, pipeline: 'plataforma-hibrida', campo: 'msg', url: 'https://example.invalid/app/searchRelevance#/',
             configuraciones: [`${nombre} · por palabras`, `${nombre} · híbrida`],
-            palabras: JSON.stringify({ query: palabras }),
+            palabras: JSON.stringify({ query: palabras, _source: campos }),
             hibrida: JSON.stringify({ query: { hybrid: { queries: [palabras, { neural: { embedding: {
-              query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } } }) });
+              query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } }, _source: campos }) });
         }
         // Una sesión de ejemplo, para ver la cuenta arriba como en el hosteado.
         if (u.includes('/auth/me')) return json({ auth: true, logged_in: true, email: 'demo@vista-previa.com', is_admin: false });

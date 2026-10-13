@@ -158,7 +158,9 @@ def test_la_comparacion_va_en_search_relevance(monkeypatch, tmp_path):
     assert d["indice"] == "busqueda-ventas" and d["pipeline"] == "plataforma-hibrida" and d["campo"] == "comentario"
     assert d["configuraciones"] == ["ventas · por palabras", "ventas · híbrida"], "las que se eligen en Single Query Comparison"
     assert d["url"] == "https://dash.example/app/searchRelevance#/"
-    assert _json.loads(d["palabras"]) == {"query": {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}}}
+    assert _json.loads(d["palabras"]) == {"query": {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}},
+                                          "_source": ["texto", "cuenta"]}
+    assert _json.loads(d["hibrida"])["_source"] == ["texto", "cuenta"], "sin el vector en los resultados"
     assert "\n" not in d["palabras"] and "\n" not in d["hibrida"], "en una línea: se copian, no se leen"
     neural = _json.loads(d["hibrida"])["query"]["hybrid"]["queries"][1]["neural"]["embedding"]
     assert neural == {"query_text": "%SearchText%", "model_id": "CONSULTAS", "k": 10}, "con el modelo de consultas"

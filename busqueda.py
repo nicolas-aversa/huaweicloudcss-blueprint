@@ -216,11 +216,14 @@ def consulta_hibrida(q: str, model_id: str, n: int = 5) -> dict[str, Any]:
 def consultas_para_comparar(model_id: str) -> dict[str, dict[str, Any]]:
     """Las dos consultas para comparar en Search Relevance (Dashboards), lado a
     lado: por palabras y la híbrida. `%SearchText%` es lo que escribe quien
-    prueba; la híbrida va con el pipeline `PIPELINE_DE_BUSQUEDA`."""
+    prueba; la híbrida va con el pipeline `PIPELINE_DE_BUSQUEDA`. Sin el vector
+    en los resultados: son 2048 números por fila que nadie lee (y pesan)."""
     palabras = {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}}
-    return {"palabras": {"query": palabras},
+    campos = ["texto", "cuenta"]
+    return {"palabras": {"query": palabras, "_source": campos},
             "hibrida": {"query": {"hybrid": {"queries": [
-                palabras, {"neural": {"embedding": {"query_text": "%SearchText%", "model_id": model_id, "k": 10}}}]}}}}
+                palabras, {"neural": {"embedding": {"query_text": "%SearchText%", "model_id": model_id, "k": 10}}}]}},
+                "_source": campos}}
 
 
 def nombres_de_configuracion(label: str) -> dict[str, str]:
