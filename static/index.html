@@ -2445,6 +2445,7 @@
     .fn__dsl { min-width: 0; }
     .fn__dsl-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: var(--fs-xs); }
     .fn__dsl .cat__cmd { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .fn__eval { margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-secondary); }
     .fn__sugerencias { margin-top: 6px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
     .fn__sugs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     .fn__sug { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
@@ -7052,6 +7053,16 @@
         + `<span class="fn__sug-por">la híbrida trae «${escapeHtml(_corto(s.encuentra))}»`
         + `${s.puesto > 1 ? ` (puesto ${s.puesto})` : ' primero'}; por palabras no aparece</span></li>`).join('')}</ul>${otras}`;
     }
+    // Con números: la evaluación que dejó armada la plataforma en Search Relevance.
+    function evaluacionHTML(d) {
+      const ev = d.evaluacion;
+      if (!ev) return '';
+      if (!ev.ok) return `<p class="fn__eval busq__vacio">La evaluación con números no se armó: ${escapeHtml(ev.motivo || 'sin motivo')}.</p>`;
+      return `<p class="fn__eval"><strong>Con números.</strong> En Search Relevance → <strong>Search Evaluation</strong>`
+        + ` está la nota (NDCG, precisión) de ${escapeHtml(String(ev.consultas || ''))} búsquedas del caso, por palabras y la híbrida,`
+        + ` calificadas por un LLM; en <strong>Query Set Comparison</strong>, cuánto cambian los resultados entre una y otra.`
+        + ` Son los experimentos del query set <code>${escapeHtml(d.query_set || '')}</code>.</p>`;
+    }
     async function llenarSugerencias(caja, slug, nuevas = false) {
       const lugar = caja.querySelector('.fn__sugerencias');
       if (!lugar || !slug) return;
@@ -7090,7 +7101,8 @@
               <div class="fn__sugerencias" aria-live="polite"></div></li>
             <li>Los resultados salen debajo de las consultas. Muestran el ID: cambiá el campo a <code>texto</code> y a la derecha aparece lo que la búsqueda por palabras no encuentra.</li>
           </ol>
-          <div class="fn__dsls">${bloque('Query 1 · por palabras', d.palabras)}${bloque(`Query 2 · híbrida (pipeline ${escapeHtml(d.pipeline)})`, d.hibrida)}</div>`;
+          <div class="fn__dsls">${bloque('Query 1 · por palabras', d.palabras)}${bloque(`Query 2 · híbrida (pipeline ${escapeHtml(d.pipeline)})`, d.hibrida)}</div>
+          ${evaluacionHTML(d)}`;
         llenarSugerencias(caja, slug);
       } catch (err) {
         cuerpo.innerHTML = `<span class="busq__vacio">No se pudieron armar: ${escapeHtml(err.message)}</span>`;
@@ -9299,6 +9311,7 @@
           const nombre = SLUG_LABELS[slug] || slug;
           return json({ indice: `busqueda-${slug}`, pipeline: 'plataforma-hibrida', campo: 'msg', url: 'https://example.invalid/app/searchRelevance#/',
             configuraciones: [`${nombre} · por palabras`, `${nombre} · híbrida`],
+            evaluacion: { ok: true, consultas: 10, motivo: '10 búsquedas juzgadas por el LLM' }, query_set: `${nombre} · búsquedas`,
             palabras: JSON.stringify({ query: palabras, _source: campos }),
             hibrida: JSON.stringify({ query: { hybrid: { queries: [palabras, { neural: { embedding: {
               query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } }, _source: campos }) });

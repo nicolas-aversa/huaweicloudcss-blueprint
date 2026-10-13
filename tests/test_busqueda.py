@@ -157,6 +157,7 @@ def test_la_comparacion_va_en_search_relevance(monkeypatch, tmp_path):
     d = c.get("/api/v1/plugins/busqueda/comparar", params={"slug": "ventas"}).json()
     assert d["indice"] == "busqueda-ventas" and d["pipeline"] == "plataforma-hibrida" and d["campo"] == "comentario"
     assert d["configuraciones"] == ["ventas · por palabras", "ventas · híbrida"], "las que se eligen en Single Query Comparison"
+    assert d["query_set"] == "ventas · búsquedas" and d["evaluacion"] is None, "sin evaluación todavía"
     assert d["url"] == "https://dash.example/app/searchRelevance#/"
     assert _json.loads(d["palabras"]) == {"query": {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}},
                                           "_source": ["texto", "cuenta"]}
@@ -439,3 +440,155 @@ def test_que_escribir_en_search(monkeypatch, tmp_path):
     monkeypatch.setattr(semantica, "_llamar_al_llm", lambda p: (_ for _ in ()).throw(RuntimeError("sin key")))
     d = c.get(url + "&nuevas=1").json()
     assert d["sugerencias"] == [] and d["ejemplos"] == textos and "RuntimeError" in d["motivo"]
+
+
+# ── La evaluación en Search Relevance ───────────────────────────────────────
+def test_el_juez_usa_el_formato_de_search_relevance():
+    import capabilities
+    c = capabilities.build_judge_connector("k-de-prueba", endpoint="maas.example")
+    accion = c["actions"][0]
+    assert '"messages": ${parameters.messages}' in accion["request_body"], "el plugin manda la conversación armada"
+    assert '"thinking": false' in accion["request_body"] and c["credential"] == {"maas_key": "k-de-prueba"}
+    assert "post_process_function" not in accion, "el plugin lee choices[0].message.content crudo"
+    assert accion["url"] == "https://${parameters.endpoint}/openai/v1/chat/completions"
+
+
+def test_las_busquedas_a_evaluar_y_los_pedidos():
+    assert busqueda.consultas_a_evaluar({"consultas": ["dolor  de cabeza", "Dolor de cabeza", "x", 3, "control de embarazo",
+                                                       "a" * 81]}) == ["dolor de cabeza", "control de embarazo"]
+    assert busqueda.consultas_a_evaluar({"consultas": [f"q{i}" for i in range(30)]}) == [f"q{i}" for i in range(10)]
+    assert busqueda.consultas_a_evaluar(None) == [] and busqueda.consultas_a_evaluar({"consultas": "no"}) == []
+    p = busqueda.prompt_de_consultas(["Prenatal visit"], "desc", "Encuentros clínicos")
+    assert "Escribí 10 búsquedas realistas" in p and "La mitad con palabras que aparecen en los textos" in p
+    assert "«desc» de «Encuentros clínicos»" in p and p.endswith("Prenatal visit\n")
+    largo = busqueda.nombres_de_evaluacion("x" * 60)
+    assert len(largo["query_set"]) == len(largo["juicios"]) == 50, "el tope de Search Relevance"
+    qs = busqueda.query_set("Ventas", ["a b", "c d"])
+    assert qs["name"] == "Ventas · búsquedas" and qs["sampling"] == "manual" and len(qs["description"]) <= 250
+    assert qs["querySetQueries"] == [{"queryText": "a b"}, {"queryText": "c d"}]
+    j = busqueda.juicios("Ventas", "QS", ["P", "H"], "JUEZ")
+    assert j == {"name": "Ventas · juicios del LLM", "type": "LLM_JUDGMENT", "modelId": "JUEZ", "querySetId": "QS",
+                 "searchConfigurationList": ["P", "H"], "size": 10, "contextFields": ["texto"]}
+    pares, eval_p, eval_h = busqueda.experimentos("QS", ["P", "H"], "J")
+    assert pares == {"querySetId": "QS", "size": 10, "searchConfigurationList": ["P", "H"], "type": "PAIRWISE_COMPARISON"}
+    assert eval_p["searchConfigurationList"] == ["P"] and eval_h["searchConfigurationList"] == ["H"], "una por evaluación"
+    assert eval_p["judgmentList"] == ["J"] and eval_p["type"] == "POINTWISE_EVALUATION"
+
+
+class _SR:
+    """Un Search Relevance de mentira: lo que hay, lo que se borra y se crea."""
+
+    def __init__(self, hay=None, estado="COMPLETED", juez_contesta=True):
+        self.hay = hay or {}
+        self.estado, self.juez_contesta, self.pedidos = estado, juez_contesta, []
+
+    def __call__(self, m, url, user, password, json_body=None, timeout=30, headers=None):
+        ruta = url.replace("http://x/", "")
+        self.pedidos.append((m, ruta, json_body))
+        if ruta.endswith("/_search") and ruta.startswith("busqueda-"):
+            return _R(200, {"hits": {"hits": [{"_source": {"texto": "Prenatal visit"}}]}})
+        if ruta.endswith("/_predict"):
+            return _R(200, {"inference_results": [{"output": [{"dataAsMap": {"choices": [{"message": {"content": "ok"}}]}}]}]}) \
+                if self.juez_contesta else _R(500, {})
+        if m == "GET" and ruta.startswith("_plugins/_search_relevance/"):
+            partes = ruta.split("/")
+            if len(partes) == 3:
+                assert json_body == {"size": 1000}, "el tamaño, en el body"
+                return _R(200, {"hits": {"hits": [{"_id": i, "_source": s} for i, s in self.hay.get(partes[2], [])]}})
+            return _R(200, {"hits": {"hits": [{"_source": {"status": self.estado}}]}})
+        if m == "PUT":
+            clave = {"query_sets": "query_set_id", "judgments": "judgment_id", "experiments": "experiment_id"}[ruta.split("/")[-1]]
+            return _R(200, {clave: f"nuevo-{ruta.split('/')[-1]}"})
+        return _R(200, {})
+
+
+def test_la_evaluacion_se_rehace_entera(monkeypatch):
+    import semantica
+    sr = _SR(hay={
+        "search_configurations": [("P", {"name": "Ventas · por palabras"}), ("H", {"name": "Ventas · híbrida"})],
+        "query_sets": [("QS-VIEJO", {"name": "Ventas · búsquedas"}), ("QS-OTRO", {"name": "De otro"})],
+        "experiments": [("E-VIEJO", {"querySetId": "QS-VIEJO"}), ("E-OTRO", {"querySetId": "QS-OTRO"})],
+        "judgments": [("J-VIEJO", {"name": "Ventas · juicios del LLM"}), ("J-OTRO", {"name": "x"})]})
+    monkeypatch.setattr(main, "_os_req", sr)
+    monkeypatch.setattr(main, "_SONDEO_SR_S", 0)
+    prompts = []
+    monkeypatch.setattr(semantica, "_llamar_al_llm", lambda p: prompts.append(p) or json.dumps(
+        {"consultas": ["prenatal visit", "control de embarazo", "chequeo del bebé"]}))
+    r = main._evaluar_busqueda("http://x", "a", "p", "ventas", "Ventas", "comentario", ("JUEZ", ""))
+    assert r == {"ok": True, "consultas": 3, "motivo": "3 búsquedas juzgadas por el LLM"}
+    borrados = [ruta.split("/")[-1] for m, ruta, _ in sr.pedidos if m == "DELETE"]
+    assert borrados == ["E-VIEJO", "J-VIEJO", "QS-VIEJO"], "lo del caso, y nada de otros"
+    creados = [(ruta.split("/")[-1], b) for m, ruta, b in sr.pedidos if m == "PUT"]
+    assert [c for c, _ in creados] == ["query_sets", "judgments", "experiments", "experiments", "experiments"]
+    assert creados[0][1]["querySetQueries"][1] == {"queryText": "control de embarazo"}
+    assert creados[1][1]["modelId"] == "JUEZ" and creados[1][1]["searchConfigurationList"] == ["P", "H"]
+    assert "Prenatal visit" in prompts[0] and "«comentario» de «Ventas»" in prompts[0]
+    # Sin el juez, sin el LLM o con un experimento roto: dice por qué (y saca lo viejo igual).
+    assert main._evaluar_busqueda("http://x", "a", "p", "ventas", "Ventas", "c", ("", "sin API key de MaaS")) == \
+        {"ok": False, "motivo": "sin el juez: sin API key de MaaS"}
+    monkeypatch.setattr(semantica, "_llamar_al_llm", lambda p: (_ for _ in ()).throw(TimeoutError()))
+    assert main._evaluar_busqueda("http://x", "a", "p", "ventas", "Ventas", "c", ("JUEZ", ""))["motivo"] == \
+        "el LLM no propuso búsquedas (TimeoutError)"
+    monkeypatch.setattr(semantica, "_llamar_al_llm", lambda p: json.dumps({"consultas": ["a b", "c d", "e f"]}))
+    sr.estado = "ERROR"
+    assert main._evaluar_busqueda("http://x", "a", "p", "ventas", "Ventas", "c", ("JUEZ", ""))["motivo"] == \
+        "los juicios del LLM no terminaron (ERROR)"
+
+
+def test_el_juez_se_reusa_si_contesta_y_si_no_se_rehace(monkeypatch):
+    import maas_integrator
+    monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "k")
+    monkeypatch.setattr(main, "_modelos_por_nombre", lambda b, u, p, nombre: ["VIEJO"] if nombre == busqueda.NOMBRE_DEL_JUEZ else [])
+    sr = _SR()
+    monkeypatch.setattr(main, "_os_req", sr)
+    assert main._asegurar_juez("http://x", "a", "p") == ("VIEJO", "")
+    assert not [p for p in sr.pedidos if p[0] == "DELETE"]
+    borrados, creados = [], []
+    monkeypatch.setattr(main, "_borrar_modelo_remoto", lambda b, u, p, mid: borrados.append(mid))
+    monkeypatch.setattr(main, "_ml_create", lambda b, u, p, ruta, cuerpo, clave: creados.append(cuerpo) or "CON")
+    monkeypatch.setattr(main, "_estado_del_modelo", lambda *a: "DEPLOYED")
+    contesta = iter([False, True])   # el viejo no (otra key), el nuevo sí
+
+    def req(m, url, *a, json_body=None, **k):
+        if url.endswith("/_predict"):
+            return _R(200, {"inference_results": [{"output": [{"dataAsMap": {"choices": [{"message": {"content": "ok"}}]}}]}]}) \
+                if next(contesta) else _R(500, {})
+        return _R(200, {"model_id": "NUEVO"})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    assert main._asegurar_juez("http://x", "a", "p") == ("NUEVO", "")
+    assert borrados == ["VIEJO"] and creados[0]["credential"] == {"maas_key": "k"}
+    monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "")
+    assert main._asegurar_juez("http://x", "a", "p") == ("", "sin API key de MaaS")
+
+
+def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_path):
+    estados = {}
+    monkeypatch.setattr(main, "_read_estados", lambda td: estados)
+    monkeypatch.setattr(main, "_guardar_estados", lambda td, slug, nuevo: estados.setdefault(slug, {}).update(nuevo))
+    monkeypatch.setattr(main, "_salida_a_nvidia", lambda *a: None)
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ({"passage": "M1", "query": "Q1"}, ""))
+    monkeypatch.setattr(main, "_esperar_cluster_libre", lambda *a: None)
+    monkeypatch.setattr(main, "_provisionar_busqueda", lambda *a: {"ok": True, "campo": "msg", "textos": 10, "reason": "ok"})
+    monkeypatch.setattr(main, "_configurar_search_relevance", lambda *a: "")
+    jueces, evaluadas = [], []
+    monkeypatch.setattr(main, "_asegurar_juez", lambda *a: jueces.append(1) or ("JUEZ", ""))
+    monkeypatch.setattr(main, "_evaluar_busqueda", lambda b, u, p, slug, label, campo, juez: evaluadas.append((slug, campo, juez))
+                        or {"ok": True, "consultas": 10, "motivo": "10 búsquedas juzgadas por el LLM"})
+    pipe = {"a": {"fields": [F("msg")]}, "b": {"fields": [F("msg")]}}
+    activar = lambda force=False: main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path,  # noqa: E731
+                                                          ["a", "b"], pipe, force, main.runs.start("capabilities"))
+    activar()
+    assert len(jueces) == 1, "un juez para todos los casos"
+    assert evaluadas == [("a", "msg", ("JUEZ", "")), ("b", "msg", ("JUEZ", ""))]
+    assert estados["a"]["busqueda"]["evaluacion"] == {"ok": True, "consultas": 10, "motivo": "10 búsquedas juzgadas por el LLM",
+                                                      "modelo": "Q1"}
+    activar()
+    assert len(evaluadas) == 2, "ya armada y con el mismo modelo: no se rehace"
+    activar(force=True)
+    assert len(evaluadas) == 4
+    # Un "ya estaba" de la búsqueda igual guarda la evaluación nueva.
+    estados["a"]["busqueda"] = {"ok": True, "motivo": "1234 textos", "campo": "msg"}
+    monkeypatch.setattr(main, "_provisionar_busqueda", lambda *a: {"ok": True, "campo": "msg", "reason": "ya estaba"})
+    activar()
+    assert estados["a"]["busqueda"]["motivo"] == "1234 textos" and estados["a"]["busqueda"]["evaluacion"]["ok"]

@@ -265,6 +265,13 @@ check('el texto largo, cortado', sug.includes('x'.repeat(89) + '…') && !sug.in
 check('se pueden pedir otras', sug.includes('fn__otras'));
 const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
 check('sin sugerencias, los textos que hay', sinSug.includes('El LLM no propuso búsquedas (RuntimeError). Buscá alguno de estos textos dicho con otras palabras: «llegó roto» · «tardó»'), sinSug);
+// La evaluación con números: dónde verla, o por qué no está.
+const ev = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, query_set: 'SIEM · búsquedas' });
+check('la evaluación, dónde verla', ev.includes('<strong>Search Evaluation</strong>') && ev.includes('de 10 búsquedas')
+  && ev.includes('<code>SIEM · búsquedas</code>'), ev);
+check('la evaluación que falló, con su motivo', evaluacionHTML({ evaluacion: { ok: false, motivo: 'sin el juez' } })
+  .includes('no se armó: sin el juez.'));
+check('sin evaluación, nada', evaluacionHTML({}) === '');
 // Dev Tools, desde la URL de Dashboards.
 check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
 check('sin dashboards, sin link', devToolsDe('') === '');

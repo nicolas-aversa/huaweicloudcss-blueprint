@@ -8302,6 +8302,7 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         "model_id_consulta": ids.get("query") or conocido.get("model_id_consulta", ""),
         "clave": _huella(_mi.get_nvidia_api_key()) if model_id else conocido.get("clave", ""),
         "dimensiones": busqueda.DIMENSION if model_id else 0}})
+    juez = None   # el juez de la evaluación: uno para todos los casos, recién cuando hace falta
     for slug, fields in casos.items():
         indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
         if not model_id and ((guardados.get(slug) or {}).get("busqueda") or {}).get("ok"):
@@ -8317,21 +8318,42 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         else:
             res = {"ok": False, "reason": f"sin el modelo de embeddings: {motivo}"}
         runs.step(run, f"Búsqueda híbrida · {slug}", bool(res["ok"] or res.get("no_aplica")), res["reason"][:300])
-        # Para compararla en Dashboards (Search Relevance), sin pegar consultas.
+        # Para compararla en Dashboards (Search Relevance), sin pegar consultas,
+        # y con números: la evaluación (query set, juicios del LLM, experimentos).
+        # Con el mismo modelo y ya armada, no se rehace: cada vez son llamados al
+        # LLM y a NVIDIA.
         label = _label_del_caso(slug, pipe_reg.get(slug) or {})
+        anterior = (guardados.get(slug) or {}).get("busqueda") or {}
+        modelo_de_consultas = ids.get("query") or model_id
+        evaluacion = None
         try:
-            if res["ok"]:
-                fallo = _configurar_search_relevance(base, user, password, slug, label, ids.get("query") or model_id)
+            if res["ok"] and not force and (anterior.get("evaluacion") or {}).get("ok") \
+                    and anterior["evaluacion"].get("modelo") == modelo_de_consultas:
+                evaluacion = anterior["evaluacion"]
+                runs.step(run, f"Search Relevance · {slug}", True, "ya estaba (configuraciones y evaluación)")
+            elif res["ok"]:
+                fallo = _configurar_search_relevance(base, user, password, slug, label, modelo_de_consultas)
                 runs.step(run, f"Search Relevance · {slug}", not fallo,
                           fallo or f"«{label} · por palabras» y «{label} · híbrida», para Single Query Comparison")
+                if not fallo:
+                    juez = juez if juez is not None else _asegurar_juez(base, user, password)
+                    evaluacion = {**_evaluar_busqueda(base, user, password, slug, label,
+                                                      res.get("campo") or busqueda.campo_de_texto_libre(fields), juez),
+                                  "modelo": modelo_de_consultas}
+                    runs.step(run, f"Evaluación con LLM · {slug}", evaluacion["ok"], evaluacion["motivo"][:300])
             elif res.get("no_aplica"):
                 _sacar_de_search_relevance(base, user, password, label)
+                _sacar_la_evaluacion(base, user, password, label)
         except Exception as exc:  # noqa: BLE001 — la búsqueda igual anda
             runs.step(run, f"Search Relevance · {slug}", False, repr(exc)[:300])
         e = plugins_vista.estado_simple(res)
-        _guardar_estados(terraform_dir, slug, {"busqueda": e and {
-            **e, "campo": res.get("campo") or busqueda.campo_de_texto_libre(fields),
-            "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}})
+        nuevo = e and {**e, "campo": res.get("campo") or busqueda.campo_de_texto_libre(fields),
+                       "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}
+        if nuevo and evaluacion is not None:
+            # Un "ya estaba" no pisa lo guardado, pero la evaluación puede ser nueva.
+            nuevo = ({**{k: v for k, v in anterior.items() if k != "ya"}, "evaluacion": evaluacion}
+                     if nuevo.get("ya") and anterior.get("ok") else {**nuevo, "evaluacion": evaluacion})
+        _guardar_estados(terraform_dir, slug, {"busqueda": nuevo})
 
 
 _RUTA_DE_CONFIGURACIONES = "_plugins/_search_relevance/search_configurations"
@@ -8341,14 +8363,24 @@ def _label_del_caso(slug: str, entry: dict) -> str:
     return (entry or {}).get("label") or (verticals.get_vertical(slug) or {}).get("label") or slug
 
 
-def _configuraciones_por_nombre(base: str, user: str, password: str, nombres: "set[str]") -> list[str]:
-    """Los ids de las Search Configurations con esos nombres."""
-    r = _os_req("GET", f"{base}/{_RUTA_DE_CONFIGURACIONES}", user, password, timeout=20)
+_RUTA_DE_SR = "_plugins/_search_relevance"
+
+
+def _listar_sr(base: str, user: str, password: str, que: str) -> list[dict]:
+    """Los objetos de Search Relevance de ese tipo (`search_configurations`,
+    `query_sets`, `judgments`, `experiments`), como `[{_id, ...}]`. El tamaño
+    va en el body: por URL el plugin lo rechaza (y sin él trae una página)."""
+    r = _os_req("GET", f"{base}/{_RUTA_DE_SR}/{que}", user, password, json_body={"size": 1000}, timeout=20)
     try:
         hits = ((r.json() or {}).get("hits") or {}).get("hits") or [] if _resp_ok(r) else []
     except ValueError:
         hits = []
-    return [h["_id"] for h in hits if (h.get("_source") or {}).get("name") in nombres and h.get("_id")]
+    return [{**(h.get("_source") or {}), "_id": h["_id"]} for h in hits if h.get("_id")]
+
+
+def _configuraciones_por_nombre(base: str, user: str, password: str, nombres: "set[str]") -> list[str]:
+    """Los ids de las Search Configurations con esos nombres."""
+    return [x["_id"] for x in _listar_sr(base, user, password, "search_configurations") if x.get("name") in nombres]
 
 
 def _configurar_search_relevance(base: str, user: str, password: str, slug: str, label: str,
@@ -8384,6 +8416,158 @@ def _busqueda_lista(terraform_dir: Path, slug: str) -> "tuple[str, dict]":
     return model_id, caso
 
 
+# ── La evaluación con números (Search Relevance) ─────────────────────────────
+_ESPERA_DE_LOS_JUICIOS_S = 300
+_ESPERA_DEL_EXPERIMENTO_S = 180
+_SONDEO_SR_S = 5.0
+
+
+def _id_de(r: Any, clave: str) -> str:
+    try:
+        return str((r.json() or {}).get(clave) or "") if _resp_ok(r) else ""
+    except ValueError:
+        return ""
+
+
+def _esperar_sr(base: str, user: str, password: str, ruta: str, tope_s: float) -> str:
+    """El `status` de un judgment o un experimento cuando termina (COMPLETED,
+    ERROR), o "" si en `tope_s` sigue corriendo."""
+    fin = time.time() + tope_s
+    while True:
+        r = _os_req("GET", f"{base}/{_RUTA_DE_SR}/{ruta}", user, password, timeout=20)
+        try:
+            hits = ((r.json() or {}).get("hits") or {}).get("hits") or [] if _resp_ok(r) else []
+        except ValueError:
+            hits = []
+        estado = str(((hits[0].get("_source") or {}) if hits else {}).get("status") or "")
+        if estado in ("COMPLETED", "ERROR", "FAILED") or time.time() >= fin:
+            return estado if estado in ("COMPLETED", "ERROR", "FAILED") else ""
+        time.sleep(_SONDEO_SR_S)
+
+
+def _el_juez_contesta(base: str, user: str, password: str, model_id: str) -> bool:
+    r = _os_req("POST", f"{base}/_plugins/_ml/models/{model_id}/_predict", user, password, timeout=60,
+                json_body={"parameters": {"messages": [{"role": "user", "content": "Respondé solo: ok"}]}})
+    try:
+        salida = (r.json() or {})["inference_results"][0]["output"][0]["dataAsMap"]
+        return bool(salida["choices"][0]["message"]["content"])
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return False
+
+
+def _asegurar_juez(base: str, user: str, password: str) -> "tuple[str, str]":
+    """(model_id, "") del juez de los juicios de Search Relevance: un LLM de
+    MaaS en ml-commons, con el formato que usa el plugin (`messages`). Se reusa
+    por nombre si contesta; si no (p. ej. otra key de MaaS), se rehace."""
+    import capabilities as _caps
+    import maas_integrator as _mi
+
+    clave = _mi.get_maas_api_key()
+    if not clave:
+        return "", "sin API key de MaaS"
+    for mid in _modelos_por_nombre(base, user, password, busqueda.NOMBRE_DEL_JUEZ):
+        if _el_juez_contesta(base, user, password, mid):
+            return mid, ""
+        _borrar_modelo_remoto(base, user, password, mid)
+    cid = _ml_create(base, user, password, "/_plugins/_ml/connectors/_create",
+                     _caps.build_judge_connector(clave), "connector_id")
+    if not cid:
+        return "", "no se pudo crear el conector del juez"
+    r = _os_req("POST", f"{base}/_plugins/_ml/models/_register?deploy=true", user, password, timeout=60,
+                json_body={"name": busqueda.NOMBRE_DEL_JUEZ, "function_name": "remote", "connector_id": cid,
+                           "description": "LLM de MaaS que califica resultados para Search Relevance (plataforma)"})
+    try:
+        cuerpo = (r.json() or {}) if _resp_ok(r) else {}
+    except ValueError:
+        cuerpo = {}
+    mid, motivo = (_esperar_tarea(base, user, password, str(cuerpo["task_id"])) if cuerpo.get("task_id")
+                   else (str(cuerpo.get("model_id") or ""), _resp_motivo(r)))
+    mid = mid or str(cuerpo.get("model_id") or "")
+    if not mid:
+        return "", f"no se pudo registrar el juez: {motivo}"[:300]
+    if _estado_del_modelo(base, user, password, mid) != "DEPLOYED" and not _desplegar(base, user, password, mid):
+        return "", "el juez no quedó desplegado"
+    if not _el_juez_contesta(base, user, password, mid):
+        return "", "el juez no contesta (¿la API key de MaaS?)"
+    return mid, ""
+
+
+def _sacar_la_evaluacion(base: str, user: str, password: str, label: str) -> None:
+    """La evaluación del caso (por nombre): los experimentos de su query set,
+    los juicios y el query set."""
+    nombres = busqueda.nombres_de_evaluacion(label)
+    sets = [x["_id"] for x in _listar_sr(base, user, password, "query_sets") if x.get("name") == nombres["query_set"]]
+    if sets:
+        for x in _listar_sr(base, user, password, "experiments"):
+            if x.get("querySetId") in sets:
+                _os_req("DELETE", f"{base}/{_RUTA_DE_SR}/experiments/{x['_id']}", user, password, timeout=20)
+    for x in _listar_sr(base, user, password, "judgments"):
+        if x.get("name") == nombres["juicios"]:
+            _os_req("DELETE", f"{base}/{_RUTA_DE_SR}/judgments/{x['_id']}", user, password, timeout=20)
+    for qid in sets:
+        _os_req("DELETE", f"{base}/{_RUTA_DE_SR}/query_sets/{qid}", user, password, timeout=20)
+
+
+def _textos_del_caso(base: str, user: str, password: str, slug: str) -> list[str]:
+    """Los textos más frecuentes del índice de búsqueda del caso."""
+    r = _os_req("POST", f"{base}/{busqueda.indice(slug)}/_search", user, password,
+                json_body=busqueda.muestra_para_sugerir(), timeout=30)
+    try:
+        return [x["texto"] for x in busqueda.resultados(r.json()) if x["texto"]] if _resp_ok(r) else []
+    except ValueError:
+        return []
+
+
+def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str, campo: str,
+                      juez: "tuple[str, str]") -> dict:
+    """La evaluación del caso en Search Relevance: búsquedas realistas (las
+    propone el LLM desde los textos), los juicios del juez sobre lo que traen
+    las dos configuraciones y los experimentos ya corridos. Se rehace entera:
+    las configuraciones se acaban de rehacer, con otros ids. `{ok, motivo, consultas}`."""
+    _sacar_la_evaluacion(base, user, password, label)
+    if not juez[0]:
+        return {"ok": False, "motivo": f"sin el juez: {juez[1]}"}
+    nombres = busqueda.nombres_de_configuracion(label)
+    por_nombre = {x.get("name"): x["_id"] for x in _listar_sr(base, user, password, "search_configurations")}
+    configs = [por_nombre.get(nombres["palabras"]), por_nombre.get(nombres["hibrida"])]
+    if not all(configs):
+        return {"ok": False, "motivo": "faltan las configuraciones de búsqueda del caso"}
+    textos = _textos_del_caso(base, user, password, slug)
+    if not textos:
+        return {"ok": False, "motivo": "el índice todavía no tiene textos"}
+    try:
+        consultas = busqueda.consultas_a_evaluar(semantica._json_de(
+            semantica._llamar_al_llm(busqueda.prompt_de_consultas(textos, campo, label))))
+    except Exception as exc:  # noqa: BLE001 — la búsqueda igual anda
+        return {"ok": False, "motivo": f"el LLM no propuso búsquedas ({type(exc).__name__})"}
+    if len(consultas) < 3:
+        return {"ok": False, "motivo": "el LLM propuso muy pocas búsquedas"}
+    r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/query_sets", user, password,
+                json_body=busqueda.query_set(label, consultas), timeout=30)
+    qs = _id_de(r, "query_set_id")
+    if not qs:
+        return {"ok": False, "motivo": f"no se pudo crear el query set: {_resp_motivo(r)}"[:300]}
+    r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/judgments", user, password,
+                json_body=busqueda.juicios(label, qs, configs, juez[0]), timeout=30)
+    jid = _id_de(r, "judgment_id")
+    if not jid:
+        return {"ok": False, "motivo": f"no se pudieron pedir los juicios: {_resp_motivo(r)}"[:300]}
+    estado = _esperar_sr(base, user, password, f"judgments/{jid}", _ESPERA_DE_LOS_JUICIOS_S)
+    if estado != "COMPLETED":
+        return {"ok": False, "motivo": f"los juicios del LLM no terminaron ({estado or 'tardaron demasiado'})"}
+    corriendo = 0
+    for cuerpo in busqueda.experimentos(qs, configs, jid):
+        r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/experiments", user, password, json_body=cuerpo, timeout=30)
+        eid = _id_de(r, "experiment_id")
+        estado = _esperar_sr(base, user, password, f"experiments/{eid}", _ESPERA_DEL_EXPERIMENTO_S) if eid else "ERROR"
+        if estado != "COMPLETED" and estado:
+            return {"ok": False, "motivo": f"el experimento {cuerpo['type']} falló: {_resp_motivo(r) if not eid else estado}"[:300]}
+        corriendo += not estado
+    return {"ok": True, "consultas": len(consultas),
+            "motivo": f"{len(consultas)} búsquedas juzgadas por el LLM"
+                      + (f"; {corriendo} experimento(s) siguen corriendo" if corriendo else "")}
+
+
 @app.get("/api/v1/plugins/busqueda/comparar", tags=["capabilities"],
          summary="Lo que hace falta para comparar la búsqueda de un caso en Search Relevance (Dashboards)")
 def comparar_busqueda(slug: str) -> dict:
@@ -8400,6 +8584,9 @@ def comparar_busqueda(slug: str) -> dict:
     nombres = busqueda.nombres_de_configuracion(_label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
     return {"indice": busqueda.indice(slug), "pipeline": busqueda.PIPELINE_DE_BUSQUEDA, "campo": caso.get("campo", ""),
             "configuraciones": [nombres["palabras"], nombres["hibrida"]],
+            "evaluacion": caso.get("evaluacion") or None,
+            "query_set": busqueda.nombres_de_evaluacion(
+                _label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))["query_set"],
             # En una línea: se copian y se pegan, no se leen (con sangría, la
             # híbrida ocupaba media pantalla y quedaba con scroll).
             "palabras": _json.dumps(consultas["palabras"], ensure_ascii=False),
@@ -8433,8 +8620,7 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
         return {"sugerencias": previa["sugerencias"], "ejemplos": previa.get("ejemplos") or [], "motivo": ""}
     base, user, password = _cluster_del_entorno("busqueda")
     ruta = f"{base}/{busqueda.indice(slug)}/_search"
-    r = _os_req("POST", ruta, user, password, json_body=busqueda.muestra_para_sugerir(), timeout=30)
-    textos = [x["texto"] for x in busqueda.resultados(r.json()) if x["texto"]] if _resp_ok(r) else []
+    textos = _textos_del_caso(base, user, password, slug)
     if not textos:
         return {"sugerencias": [], "ejemplos": [], "motivo": "El índice todavía no tiene textos"}
     ejemplos = textos[:busqueda.SUGERENCIAS]

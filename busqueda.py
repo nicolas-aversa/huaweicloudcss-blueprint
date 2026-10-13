@@ -297,10 +297,13 @@ def _en_una_linea(texto: Any) -> str:
 def prompt_de_busquedas(textos: list[str], campo: str = "", label: str = "") -> str:
     """El pedido al LLM, con de dónde son los textos: sin eso, "Health" en los
     logs de un firewall volvía como "bienestar físico"."""
-    de_donde = (f"los valores del campo «{campo}» de «{label}»" if campo and label
-                else f"los valores del campo «{campo}»" if campo else "los textos de un caso")
-    return _PROMPT_DE_BUSQUEDAS.format(n=CANDIDATAS, de_donde=de_donde,
+    return _PROMPT_DE_BUSQUEDAS.format(n=CANDIDATAS, de_donde=_de_donde(campo, label),
                                        textos="\n".join(_en_una_linea(t) for t in textos))
+
+
+def _de_donde(campo: str, label: str) -> str:
+    return (f"los valores del campo «{campo}» de «{label}»" if campo and label
+            else f"los valores del campo «{campo}»" if campo else "los textos de un caso")
 
 
 def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
@@ -341,3 +344,85 @@ def probar(candidata: dict[str, str], por_palabras: list[dict[str, Any]],
 def elegir(probadas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Las mejores: el texto más arriba en la híbrida, y por palabras lo menos posible."""
     return sorted(probadas, key=lambda p: (p["puesto"], p["por_palabras"]))[:SUGERENCIAS]
+
+
+# ── La evaluación en Search Relevance ───────────────────────────────────────
+# Single Query Comparison compara una búsqueda por vez. Para tener números, la
+# plataforma deja armado en Search Relevance, por caso: un query set con
+# búsquedas realistas, los juicios de un LLM de MaaS (el "juez") sobre lo que
+# traen las dos configuraciones, y los experimentos ya corridos: Query Set
+# Comparison (cuánto cambian los resultados) y un Search Evaluation de cada
+# configuración (NDCG, precisión, MAP). Las búsquedas son mitad con palabras de
+# los textos y mitad con otras: con solo las que fallan por palabras (las que
+# se sugieren para Search), los números saldrían a favor de la híbrida de antemano.
+CONSULTAS_A_EVALUAR = 10
+RESULTADOS_A_JUZGAR = 10
+NOMBRE_DEL_JUEZ = "plataforma-juez-de-relevancia"
+_LARGO_DEL_NOMBRE = 50        # el tope de Search Relevance para un nombre
+_LARGO_DE_LA_DESCRIPCION = 250
+
+_PROMPT_DE_CONSULTAS = """Estos son textos de un índice de búsqueda, uno por línea: {de_donde}.
+
+Escribí {n} búsquedas realistas, como las escribiría en un buscador alguien que busca entre estos textos \
+(de 1 a 5 palabras). La mitad con palabras que aparecen en los textos (tal cual, aunque estén en otro \
+idioma) y la otra mitad en castellano, diciendo lo que busca con otras palabras. Variadas: no todas sobre \
+el mismo tema. Sin comillas.
+
+Respondé solo JSON: {{"consultas": ["...", "..."]}}
+
+Textos:
+{textos}
+"""
+
+
+def prompt_de_consultas(textos: list[str], campo: str = "", label: str = "") -> str:
+    return _PROMPT_DE_CONSULTAS.format(n=CONSULTAS_A_EVALUAR, de_donde=_de_donde(campo, label),
+                                       textos="\n".join(_en_una_linea(t) for t in textos))
+
+
+def consultas_a_evaluar(datos: Any) -> list[str]:
+    """Las búsquedas que propuso el LLM para evaluar: texto, de largo
+    razonable y sin repetir."""
+    propuestas = datos.get("consultas") if isinstance(datos, dict) else None
+    fuera: list[str] = []
+    vistas: set[str] = set()
+    for x in propuestas if isinstance(propuestas, list) else []:
+        q = " ".join(x.split()) if isinstance(x, str) else ""
+        if not 2 <= len(q) <= _LARGO_DE_BUSQUEDA[1] or q.lower() in vistas:
+            continue
+        vistas.add(q.lower())
+        fuera.append(q)
+        if len(fuera) >= CONSULTAS_A_EVALUAR:
+            break
+    return fuera
+
+
+def nombres_de_evaluacion(label: str) -> dict[str, str]:
+    """Cómo se llaman en Search Relevance el query set y los juicios del caso."""
+    return {"query_set": f"{label} · búsquedas"[:_LARGO_DEL_NOMBRE],
+            "juicios": f"{label} · juicios del LLM"[:_LARGO_DEL_NOMBRE]}
+
+
+def query_set(label: str, consultas: list[str]) -> dict[str, Any]:
+    """`PUT _plugins/_search_relevance/query_sets` (manual)."""
+    return {"name": nombres_de_evaluacion(label)["query_set"],
+            "description": (f"Búsquedas realistas sobre los textos de {label}, para comparar la búsqueda "
+                            "por palabras con la híbrida (plataforma)")[:_LARGO_DE_LA_DESCRIPCION],
+            "sampling": "manual", "querySetQueries": [{"queryText": q} for q in consultas]}
+
+
+def juicios(label: str, query_set_id: str, configuraciones: list[str], model_id: str) -> dict[str, Any]:
+    """`PUT _plugins/_search_relevance/judgments` (LLM_JUDGMENT): el juez
+    califica lo que traen las dos configuraciones, mirando solo el texto."""
+    return {"name": nombres_de_evaluacion(label)["juicios"], "type": "LLM_JUDGMENT", "modelId": model_id,
+            "querySetId": query_set_id, "searchConfigurationList": list(configuraciones),
+            "size": RESULTADOS_A_JUZGAR, "contextFields": ["texto"]}
+
+
+def experimentos(query_set_id: str, configuraciones: list[str], judgment_id: str) -> list[dict[str, Any]]:
+    """Query Set Comparison de las dos configuraciones y un Search Evaluation
+    de cada una (el plugin acepta una sola por evaluación)."""
+    comunes = {"querySetId": query_set_id, "size": RESULTADOS_A_JUZGAR}
+    return ([{**comunes, "searchConfigurationList": list(configuraciones), "type": "PAIRWISE_COMPARISON"}]
+            + [{**comunes, "searchConfigurationList": [c], "judgmentList": [judgment_id],
+                "type": "POINTWISE_EVALUATION"} for c in configuraciones])

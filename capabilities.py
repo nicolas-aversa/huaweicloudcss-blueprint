@@ -252,6 +252,27 @@ def build_ppl_connector(api_key: str, ppl_system_prompt: str,
     }
 
 
+def build_judge_connector(api_key: str, endpoint: str | None = None, model: str | None = None) -> dict[str, Any]:
+    """Connector del juez de Search Relevance (juicios con LLM): el plugin manda
+    la conversación ya armada en `${parameters.messages}` y lee
+    `choices[0].message.content` de la respuesta cruda, sin post-proceso. Sin
+    razonamiento: califica muchos documentos por búsqueda y tiene que ser rápido."""
+    endpoint = endpoint or maas_connector_endpoint()
+    model = model or maas_llm_model()
+    request_body = ('{ "model": "${parameters.model}", "messages": ${parameters.messages}, '
+                    '"temperature": 0, "chat_template_kwargs": {"thinking": false} }')
+    return {
+        "name": "MaaS juez de relevancia (platform)",
+        "description": _sanitize_desc("LLM MaaS que califica resultados para Search Relevance"),
+        "version": "1.0",
+        "protocol": "http",
+        "parameters": {"endpoint": endpoint, "model": model},
+        "credential": {"maas_key": api_key},
+        "actions": [_connector_action(request_body, endpoint)],
+        "client_config": _CLIENT_CONFIG,
+    }
+
+
 # ── Model group + remote model ───────────────────────────────────────────────
 
 def build_model_group(name: str = "platform-maas-deepseek") -> dict[str, Any]:
