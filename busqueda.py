@@ -223,6 +223,28 @@ def consultas_para_comparar(model_id: str) -> dict[str, dict[str, Any]]:
                 palabras, {"neural": {"embedding": {"query_text": "%SearchText%", "model_id": model_id, "k": 10}}}]}}}}
 
 
+def nombres_de_configuracion(label: str) -> dict[str, str]:
+    """Cómo se llaman en Search Relevance las dos búsquedas de un caso."""
+    return {"palabras": f"{label} · por palabras", "hibrida": f"{label} · híbrida"}
+
+
+def configuraciones_de_busqueda(slug: str, label: str, model_id: str) -> list[dict[str, Any]]:
+    """`PUT _plugins/_search_relevance/search_configurations`: las dos búsquedas
+    del caso, listas para elegir en Search Relevance → Single Query Comparison
+    (Dashboards), sin pegar consultas. El `query` va como texto."""
+    import json
+
+    consultas = consultas_para_comparar(model_id)
+    nombres = nombres_de_configuracion(label)
+    return [
+        {"name": nombres["palabras"], "index": indice(slug), "query": json.dumps(consultas["palabras"]),
+         "description": f"Búsqueda por palabras sobre los textos de {label} (plataforma)"},
+        {"name": nombres["hibrida"], "index": indice(slug), "query": json.dumps(consultas["hibrida"]),
+         "searchPipeline": PIPELINE_DE_BUSQUEDA,
+         "description": f"Búsqueda híbrida (palabras + significado, NVIDIA) sobre los textos de {label} (plataforma)"},
+    ]
+
+
 def resultados(cuerpo: dict[str, Any]) -> list[dict[str, Any]]:
     """`[{texto, cuenta, puntaje}]` de una respuesta de `_search`."""
     return [{"texto": (h.get("_source") or {}).get("texto", ""), "cuenta": (h.get("_source") or {}).get("cuenta"),

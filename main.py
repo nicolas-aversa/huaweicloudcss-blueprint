@@ -8317,10 +8317,58 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         else:
             res = {"ok": False, "reason": f"sin el modelo de embeddings: {motivo}"}
         runs.step(run, f"Búsqueda híbrida · {slug}", bool(res["ok"] or res.get("no_aplica")), res["reason"][:300])
+        # Para compararla en Dashboards (Search Relevance), sin pegar consultas.
+        label = _label_del_caso(slug, pipe_reg.get(slug) or {})
+        try:
+            if res["ok"]:
+                fallo = _configurar_search_relevance(base, user, password, slug, label, ids.get("query") or model_id)
+                runs.step(run, f"Search Relevance · {slug}", not fallo,
+                          fallo or f"«{label} · por palabras» y «{label} · híbrida», para Single Query Comparison")
+            elif res.get("no_aplica"):
+                _sacar_de_search_relevance(base, user, password, label)
+        except Exception as exc:  # noqa: BLE001 — la búsqueda igual anda
+            runs.step(run, f"Search Relevance · {slug}", False, repr(exc)[:300])
         e = plugins_vista.estado_simple(res)
         _guardar_estados(terraform_dir, slug, {"busqueda": e and {
             **e, "campo": res.get("campo") or busqueda.campo_de_texto_libre(fields),
             "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}})
+
+
+_RUTA_DE_CONFIGURACIONES = "_plugins/_search_relevance/search_configurations"
+
+
+def _label_del_caso(slug: str, entry: dict) -> str:
+    return (entry or {}).get("label") or (verticals.get_vertical(slug) or {}).get("label") or slug
+
+
+def _configuraciones_por_nombre(base: str, user: str, password: str, nombres: "set[str]") -> list[str]:
+    """Los ids de las Search Configurations con esos nombres."""
+    r = _os_req("GET", f"{base}/{_RUTA_DE_CONFIGURACIONES}", user, password, timeout=20)
+    try:
+        hits = ((r.json() or {}).get("hits") or {}).get("hits") or [] if _resp_ok(r) else []
+    except ValueError:
+        hits = []
+    return [h["_id"] for h in hits if (h.get("_source") or {}).get("name") in nombres and h.get("_id")]
+
+
+def _configurar_search_relevance(base: str, user: str, password: str, slug: str, label: str,
+                                 model_id: str) -> str:
+    """Deja en Search Relevance (Dashboards) las dos búsquedas del caso, para
+    compararlas en Single Query Comparison: se rehacen (el modelo de consultas
+    puede haber cambiado). "" si quedaron; si no, el motivo."""
+    cuerpos = busqueda.configuraciones_de_busqueda(slug, label, model_id)
+    for cid in _configuraciones_por_nombre(base, user, password, {c["name"] for c in cuerpos}):
+        _os_req("DELETE", f"{base}/{_RUTA_DE_CONFIGURACIONES}/{cid}", user, password, timeout=20)
+    for cuerpo in cuerpos:
+        r = _os_req("PUT", f"{base}/{_RUTA_DE_CONFIGURACIONES}", user, password, json_body=cuerpo, timeout=30)
+        if not _resp_ok(r):
+            return f"no se pudo crear «{cuerpo['name']}» en Search Relevance: {_resp_motivo(r)}"[:300]
+    return ""
+
+
+def _sacar_de_search_relevance(base: str, user: str, password: str, label: str) -> None:
+    for cid in _configuraciones_por_nombre(base, user, password, set(busqueda.nombres_de_configuracion(label).values())):
+        _os_req("DELETE", f"{base}/{_RUTA_DE_CONFIGURACIONES}/{cid}", user, password, timeout=20)
 
 
 @app.get("/api/v1/plugins/busqueda/comparar", tags=["capabilities"],
@@ -8342,7 +8390,9 @@ def comparar_busqueda(slug: str) -> dict:
     cluster = _cluster_with_public_access(terraform_dir)
     base = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, _read_https_enabled_from_state(terraform_dir)))
     consultas = busqueda.consultas_para_comparar(model_id)
+    nombres = busqueda.nombres_de_configuracion(_label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
     return {"indice": busqueda.indice(slug), "pipeline": busqueda.PIPELINE_DE_BUSQUEDA, "campo": caso.get("campo", ""),
+            "configuraciones": [nombres["palabras"], nombres["hibrida"]],
             # En una línea: se copian y se pegan, no se leen (con sangría, la
             # híbrida ocupaba media pantalla y quedaba con scroll).
             "palabras": _json.dumps(consultas["palabras"], ensure_ascii=False),

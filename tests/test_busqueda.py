@@ -156,6 +156,7 @@ def test_la_comparacion_va_en_search_relevance(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_build_dashboards_url", lambda cluster, https: "https://dash.example/app/home")
     d = c.get("/api/v1/plugins/busqueda/comparar", params={"slug": "ventas"}).json()
     assert d["indice"] == "busqueda-ventas" and d["pipeline"] == "plataforma-hibrida" and d["campo"] == "comentario"
+    assert d["configuraciones"] == ["ventas · por palabras", "ventas · híbrida"], "las que se eligen en Single Query Comparison"
     assert d["url"] == "https://dash.example/app/searchRelevance#/"
     assert _json.loads(d["palabras"]) == {"query": {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}}}
     assert "\n" not in d["palabras"] and "\n" not in d["hibrida"], "en una línea: se copian, no se leen"
@@ -325,3 +326,32 @@ def test_rehacer_espera_a_que_el_anterior_se_borre(monkeypatch):
     borrado = pedidos.index(("DELETE", "/_plugins/_transform/s-busqueda?force=true"))
     ultimo_get = max(i for i, (m, u) in enumerate(pedidos) if m == "GET" and u.endswith("/_transform/s-busqueda"))
     assert borrado < ultimo_get < pedidos.index(("PUT", "/_plugins/_transform/s-busqueda")), "crea recién cuando ya no está"
+
+
+def test_las_configuraciones_de_search_relevance():
+    """Single Query Comparison (Dashboards) compara Search Configurations
+    guardadas: la plataforma deja las dos de cada caso, sin pegar consultas."""
+    import json as _json
+    palabras, hibrida = busqueda.configuraciones_de_busqueda("ventas", "Ventas", "Q1")
+    assert palabras["name"] == "Ventas · por palabras" and hibrida["name"] == "Ventas · híbrida"
+    assert palabras["index"] == hibrida["index"] == "busqueda-ventas"
+    assert isinstance(palabras["query"], str) and "%SearchText%" in palabras["query"], "el query va como texto"
+    assert "searchPipeline" not in palabras and hibrida["searchPipeline"] == "plataforma-hibrida"
+    assert _json.loads(hibrida["query"])["query"]["hybrid"]["queries"][1]["neural"]["embedding"]["model_id"] == "Q1"
+
+
+def test_se_rehacen_al_armar_la_busqueda(monkeypatch):
+    pedidos = []
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        pedidos.append((m, url.replace("http://x", ""), json_body))
+        if m == "GET" and url.endswith("/search_configurations"):
+            return _R(200, {"hits": {"hits": [{"_id": "VIEJA", "_source": {"name": "Ventas · híbrida"}},
+                                              {"_id": "OTRA", "_source": {"name": "De otro"}}]}})
+        return _R(200, {"_id": "nueva"})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    assert main._configurar_search_relevance("http://x", "a", "p", "ventas", "Ventas", "Q1") == ""
+    assert ("DELETE", "/_plugins/_search_relevance/search_configurations/VIEJA", None) in pedidos
+    assert not [u for m, u, _ in pedidos if m == "DELETE" and u.endswith("OTRA")], "las de otros, no"
+    assert [b["name"] for m, u, b in pedidos if m == "PUT"] == ["Ventas · por palabras", "Ventas · híbrida"]
