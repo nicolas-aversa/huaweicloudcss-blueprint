@@ -138,11 +138,11 @@ def prompt_de_explicacion(pregunta: str, contexto: str, v: dict[str, str],
         f"Referencia: {v['baselineTimeRangeStart']} a {v['baselineTimeRangeEnd']} (el período anterior).\n"
         "Lo que más cambió entre la referencia y el intervalo (medido sobre los documentos):\n"
         + "\n".join(lineas) + "\n\n"
-        "Respondé en el MISMO idioma que el usuario: una frase con la conclusión (qué fue distinto en "
-        "ese intervalo) y hasta tres viñetas con los cambios más importantes y sus porcentajes. Explicá "
-        "con estos números por qué el intervalo se sale de lo normal; si sugieren una causa probable "
-        "(por ejemplo, una campaña de logins fallidos o un pozo que dejó de parar), decila como "
-        "probable. No digas que no se puede determinar. No muestres JSON ni nombres de herramientas."
+        "Respondé en el MISMO idioma que el usuario, CORTO (60 palabras como máximo): una frase con la "
+        "conclusión (qué fue distinto en ese intervalo y, si los números la sugieren, la causa probable, "
+        "dicha como probable; por ejemplo, una campaña de logins fallidos o un pozo que dejó de parar) y "
+        "hasta dos viñetas de una línea con los cambios más importantes y sus porcentajes. Sin títulos ni "
+        "introducción. No digas que no se puede determinar. No muestres JSON ni nombres de herramientas."
     )
 
 

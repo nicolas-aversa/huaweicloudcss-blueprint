@@ -653,3 +653,27 @@ def test_un_backtest_en_curso_se_rejuzga_al_mirar_el_caso(monkeypatch, tmp_path)
                                                                             "states": ["a=TEST_COMPLETE"], "note": "ok"})
     assert TestClient(main.app).get("/api/v1/plugins/numeros?slug=ventas").json()["actualizado"] is True
     assert pv  # el módulo de la vista, el mismo que usa el endpoint
+
+
+
+def test_la_negrita_del_asistente_se_ve_en_negrita(tmp_path):
+    """El LLM escribe **negrita** (markdown) y el chat mostraba los asteriscos."""
+    import shutil
+    import subprocess
+    if shutil.which("node") is None:
+        return
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("    const _NEGRITA = ")
+    fuente = html[i:html.index("    function escapeHtml(text) {", i)]
+    js = tmp_path / "negrita.mjs"
+    js.write_text("const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n"
+                  + fuente + """
+const f = [];
+const h = _respuestaHTML('Conclusión.\\n- **Caída de SLA y alta criticidad:** bajó de 65 % a 53 % <b>');
+if (!h.includes('<strong>Caída de SLA y alta criticidad:</strong> bajó')) f.push('negrita ' + h);
+if (!h.includes('&lt;b&gt;')) f.push('escapa ' + h);
+if (_sinMarcas('a **b** c') !== 'a b c') f.push('sin marcas');
+console.log(f.join('\\n')); process.exit(f.length ? 1 : 0);
+""", encoding="utf-8")
+    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stdout + r.stderr

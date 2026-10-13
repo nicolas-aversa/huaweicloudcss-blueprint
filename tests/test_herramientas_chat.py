@@ -86,6 +86,7 @@ def test_la_tabla_y_el_prompt_llevan_los_numeros():
     assert "- event.action = ssh_login: 84 % del intervalo vs 22 % antes" in prompt
     assert "- event.action = executeSql: 47 % del intervalo vs 0 % antes" in prompt
     assert "No digas que no se puede determinar" in prompt
+    assert "CORTO (60 palabras como máximo)" in prompt and "hasta dos viñetas de una línea" in prompt
 
 
 @pytest.mark.parametrize("pregunta, tipo", [

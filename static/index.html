@@ -7693,16 +7693,19 @@
         _renderCapChartInto(actual, data.result, pend.vega);
         _scrollLog(actual);
       }
+      // Se tipea el texto sin los ** y al final queda con su negrita.
       function _typeInto(el, text, onDone) {
         text = text || '';
-        if (_reduceMotion || text.length > 320) { el.textContent = text; onDone && onDone(); return; }
+        const plano = _sinMarcas(text);
+        const final = () => { el.innerHTML = _respuestaHTML(text); };
+        if (_reduceMotion || plano.length > 320) { final(); onDone && onDone(); return; }
         el.classList.add('cap-chat__typing');
         let i = 0;
         const step = () => {
-          el.textContent = text.slice(0, i++);
+          el.textContent = plano.slice(0, i++);
           _scrollLog(el);
-          if (i <= text.length) setTimeout(step, 12);
-          else { el.classList.remove('cap-chat__typing'); onDone && onDone(); }
+          if (i <= plano.length) setTimeout(step, 12);
+          else { el.classList.remove('cap-chat__typing'); final(); onDone && onDone(); }
         };
         step();
       }
@@ -7753,7 +7756,7 @@
           const cabecera = capChatCabeceraHTML(data);
           // Lo que queda guardado es la respuesta entera: el typewriter es solo
           // la primera vez; un re-render la muestra completa, con su gráfico.
-          pend.html = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer">${escapeHtml(data.answer || '')}</span>${details}`;
+          pend.html = `${cabecera}<div class="cap-chart-host"></div><span class="cap-chat__answer">${_respuestaHTML(data.answer)}</span>${details}`;
           pend.result = data.result || null;
           pend.vega = data.vega || null;
           // Con el agente, el gráfico lo arma text to visualization: se pide
@@ -9312,6 +9315,17 @@
         if (e.target.matches('input, select, textarea')) clearFieldError(e.target);
       });
     });
+
+    // Lo que escribe el LLM trae **negrita** (markdown): en negrita, no con los
+    // asteriscos a la vista. Lo demás queda como texto (los saltos de línea ya
+    // se respetan en el mensaje).
+    const _NEGRITA = /\*\*([^*\n]+?)\*\*/g;
+    function _respuestaHTML(texto) {
+      return escapeHtml(texto || '').replace(_NEGRITA, '<strong>$1</strong>');
+    }
+    function _sinMarcas(texto) {
+      return String(texto || '').replace(_NEGRITA, '$1');
+    }
 
     function escapeHtml(text) {
       const div = document.createElement('div');
