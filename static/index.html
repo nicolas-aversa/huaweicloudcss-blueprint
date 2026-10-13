@@ -2443,7 +2443,6 @@
     .fn__pasos { margin: 10px 0 8px; padding-left: 20px; font-size: var(--fs-sm); color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
     .fn__dsls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 10px; }
     .fn__dsl { min-width: 0; }
-    .fn__a-mano > summary { cursor: pointer; font-size: var(--fs-xs); color: var(--text-muted); margin-bottom: 6px; }
     .fn__dsl-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: var(--fs-xs); }
     .fn__dsl .cat__cmd { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
     @media (max-width: 560px) { .busq__fila { flex-wrap: wrap; } .busq__caso { flex-basis: 100%; } }
@@ -7046,15 +7045,15 @@
         const bloque = (titulo, texto) => `<div class="fn__dsl"><div class="fn__dsl-cab"><strong>${titulo}</strong>`
           + `<button type="button" class="btn btn-ghost btn-sm fn__copiar">Copiar</button></div>`
           + `<pre class="cat__cmd" tabindex="0">${escapeHtml(texto)}</pre></div>`;
-        const [cfgPalabras, cfgHibrida] = d.configuraciones || [];
+        // Single Query Comparison pide, de cada lado, índice, pipeline y la
+        // consulta (no usa las Search Configurations: esas son para Query Set
+        // Comparison y Search Evaluation, y también quedan creadas).
         cuerpo.innerHTML = `<ol class="fn__pasos">
-            <li>En Search Relevance, entrá a <strong>Single Query Comparison</strong>.</li>
-            <li>Elegí las dos configuraciones del caso: <strong>${escapeHtml(cfgPalabras || '')}</strong> y <strong>${escapeHtml(cfgHibrida || '')}</strong>.</li>
-            <li>Escribí lo que buscás, con tus palabras, y compará: la híbrida trae lo que la búsqueda por palabras no encuentra.</li>
+            <li>En Search Relevance → <strong>Single Query Comparison</strong>, en <strong>Query 1</strong> y en <strong>Query 2</strong> elegí el índice <code>${escapeHtml(d.indice)}</code>.</li>
+            <li>En Query 1 dejá el pipeline vacío y pegá la consulta por palabras; en Query 2 elegí el pipeline <code>${escapeHtml(d.pipeline)}</code> y pegá la híbrida.</li>
+            <li>Arriba, escribí lo que buscás con tus palabras y tocá Search: a la derecha aparece lo que la búsqueda por palabras no encuentra.</li>
           </ol>
-          <details class="fn__a-mano"><summary>Ver las consultas (para armarlas a mano)</summary>
-            <div class="fn__dsls">${bloque('Por palabras', d.palabras)}${bloque(`Híbrida · pipeline ${escapeHtml(d.pipeline)}`, d.hibrida)}</div>
-          </details>`;
+          <div class="fn__dsls">${bloque('Query 1 · por palabras', d.palabras)}${bloque(`Query 2 · híbrida (pipeline ${escapeHtml(d.pipeline)})`, d.hibrida)}</div>`;
       } catch (err) {
         cuerpo.innerHTML = `<span class="busq__vacio">No se pudieron armar: ${escapeHtml(err.message)}</span>`;
       }

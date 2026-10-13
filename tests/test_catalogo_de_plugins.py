@@ -276,6 +276,8 @@ def test_que_podes_mostrar_esta_conectado():
     assert "if (e.target.closest('.fn__probar')) return abrirAsistente();" in vista
     assert "if (fila) return verFuncion(fila, data);" in vista
     assert "if (caja && e.target.closest('.busq__caso')) llenarComparador(caja);" in vista
+    # Los pasos, como es la pantalla: índice, pipeline y consulta de cada lado.
+    assert "En Query 1 dejá el pipeline vacío y pegá la consulta por palabras; en Query 2 elegí el pipeline" in html
     assert "busquedaHTML" not in html and "probarBusqueda" not in html and "/api/v1/plugins/buscar" not in html
     assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
