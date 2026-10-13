@@ -8758,6 +8758,38 @@ def _textos_del_caso(base: str, user: str, password: str, slug: str) -> list[str
         return []
 
 
+# La evaluación necesita textos ya vectorizados, y el Transform recién creado
+# los carga al minuto y NVIDIA los vectoriza de a poco: evaluaba segundos
+# después de crearlo y fallaba en todos los casos ("el índice todavía no tiene
+# textos", visto en la ECS). Se espera a unos cuantos, con un tope.
+_TEXTOS_PARA_EVALUAR = 20
+_ESPERA_DE_TEXTOS_S = 480.0
+_SONDEO_DE_TEXTOS_S = 15.0
+
+
+def _esperar_textos_vectorizados(base: str, user: str, password: str, slug: str) -> "int | None":
+    """Espera a que `busqueda-<caso>` tenga `_TEXTOS_PARA_EVALUAR` textos con su
+    vector (o los que haya si el Transform dejó de sumar). Devuelve cuántos
+    hay; None si el cluster no lo dice (y no se espera)."""
+    consulta = {"query": {"bool": {"must": [busqueda.CON_TEXTO, {"exists": {"field": "embedding"}}]}}}
+    limite = time.monotonic() + _ESPERA_DE_TEXTOS_S
+    anterior, quietos = -1, 0
+    while True:
+        r = _os_req("POST", f"{base}/{busqueda.indice(slug)}/_count", user, password, json_body=consulta, timeout=20)
+        try:
+            n = int((r.json() or {})["count"]) if _resp_ok(r) else None
+        except (ValueError, KeyError, TypeError):
+            n = None
+        if n is None:
+            return None
+        # Ya alcanza, o hay textos y hace un minuto que no suben (eran pocos).
+        quietos = quietos + 1 if n == anterior else 0
+        if n >= _TEXTOS_PARA_EVALUAR or (n > 0 and quietos >= 4) or time.monotonic() >= limite:
+            return n
+        anterior = n
+        time.sleep(_SONDEO_DE_TEXTOS_S)
+
+
 def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str, campo: str,
                       juez: "tuple[str, str]") -> dict:
     """La evaluación del caso en Search Relevance: búsquedas realistas (las
@@ -8772,6 +8804,7 @@ def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str
     configs = [por_nombre.get(nombres["palabras"]), por_nombre.get(nombres["hibrida"])]
     if not all(configs):
         return {"ok": False, "motivo": "faltan las configuraciones de búsqueda del caso"}
+    _esperar_textos_vectorizados(base, user, password, slug)
     textos = _textos_del_caso(base, user, password, slug)
     if not textos:
         return {"ok": False, "motivo": "el índice todavía no tiene textos"}

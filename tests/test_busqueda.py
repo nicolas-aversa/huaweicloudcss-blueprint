@@ -660,3 +660,30 @@ def test_el_campo_de_un_transform_ya_creado():
     cuerpo = {"_id": "t", "transform": {"groups": [{"terms": {"source_field": "evento.motivo", "target_field": "texto"}}]}}
     assert busqueda.campo_del_transform(cuerpo) == "evento.motivo"
     assert busqueda.campo_del_transform({}) == "" and busqueda.campo_del_transform(None) == ""
+
+
+
+def test_la_evaluacion_espera_textos_vectorizados(monkeypatch):
+    """Evaluaba segundos después de crear el Transform y el índice estaba vacío
+    (en la ECS, en los cinco casos). Espera a que haya textos con vector."""
+    cuentas = iter([0, 0, 7, 25])
+    sondeos = []
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        if url.endswith("/_count"):
+            assert {"exists": {"field": "embedding"}} in json_body["query"]["bool"]["must"]
+            return _R(200, {"count": next(cuentas)})
+        return _R(200, {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main.time, "sleep", lambda s: sondeos.append(s))
+    assert main._esperar_textos_vectorizados("http://x", "a", "p", "s") == 25
+    assert len(sondeos) == 3
+    # Pocos textos que ya no suben: no espera hasta el tope.
+    cuentas = iter([3] * 10)
+    sondeos.clear()
+    assert main._esperar_textos_vectorizados("http://x", "a", "p", "s") == 3 and len(sondeos) == 4
+    # Si el cluster no dice cuántos, no espera.
+    monkeypatch.setattr(main, "_os_req", lambda *a, **k: _R(200, {"acknowledged": True}))
+    sondeos.clear()
+    assert main._esperar_textos_vectorizados("http://x", "a", "p", "s") is None and not sondeos
