@@ -253,3 +253,91 @@ def resultados(cuerpo: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"texto": (h.get("_source") or {}).get("texto", ""), "cuenta": (h.get("_source") or {}).get("cuenta"),
              "puntaje": h.get("_score")}
             for h in ((cuerpo or {}).get("hits") or {}).get("hits") or []]
+
+
+# ── Qué escribir en la barra de Search ──────────────────────────────────────
+# Para ver la diferencia hace falta una búsqueda que la híbrida resuelva y la
+# búsqueda por palabras no. El LLM propone, desde los textos del caso,
+# búsquedas dichas con otras palabras y el texto que cada una debería traer; la
+# plataforma las corre en el cluster y sugiere solo las que lo prueban. Sale de
+# los datos: anda con cualquier dataset, sin una lista a mano por caso.
+MUESTRA_PARA_SUGERIR = 40
+CANDIDATAS = 8
+SUGERENCIAS = 3
+PUESTO_MAXIMO = 5
+_LARGO_DE_BUSQUEDA = (3, 80)
+_LARGO_EN_EL_PROMPT = 200
+
+_PROMPT_DE_BUSQUEDAS = """Estos son textos de un índice de búsqueda, uno por línea: {de_donde}. Quiero \
+mostrar que la búsqueda por significado encuentra lo que la búsqueda por palabras no encuentra. Interpretá \
+cada texto según de qué son los datos.
+
+Proponé {n} búsquedas en castellano, como las escribiría una persona en un buscador (de 2 a 5 palabras). \
+Cada una apunta a UNO de estos textos (uno distinto cada vez) y lo describe **sin usar sus palabras**: con \
+sinónimos, contando la situación o el problema de otra forma, o en castellano si el texto está en otro \
+idioma. Sin comillas, códigos, números ni nombres propios del texto.
+
+Respondé solo JSON: {{"busquedas": [{{"busqueda": "...", "texto": "<el texto al que apunta, copiado tal cual>"}}]}}
+
+Textos:
+{textos}
+"""
+
+
+def muestra_para_sugerir() -> dict[str, Any]:
+    """Los textos más frecuentes del índice: de ahí salen las búsquedas."""
+    return {"size": MUESTRA_PARA_SUGERIR, "_source": ["texto", "cuenta"], "query": CON_TEXTO,
+            "sort": [{"cuenta": "desc"}]}
+
+
+def _en_una_linea(texto: Any) -> str:
+    return " ".join(str(texto or "").split())[:_LARGO_EN_EL_PROMPT]
+
+
+def prompt_de_busquedas(textos: list[str], campo: str = "", label: str = "") -> str:
+    """El pedido al LLM, con de dónde son los textos: sin eso, "Health" en los
+    logs de un firewall volvía como "bienestar físico"."""
+    de_donde = (f"los valores del campo «{campo}» de «{label}»" if campo and label
+                else f"los valores del campo «{campo}»" if campo else "los textos de un caso")
+    return _PROMPT_DE_BUSQUEDAS.format(n=CANDIDATAS, de_donde=de_donde,
+                                       textos="\n".join(_en_una_linea(t) for t in textos))
+
+
+def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
+    """Las búsquedas que propuso el LLM, validadas: cada una apunta a uno de
+    los textos (como quedó en el prompt) y a uno distinto."""
+    por_linea = {_en_una_linea(t): t for t in textos}
+    propuestas = datos.get("busquedas") if isinstance(datos, dict) else None
+    fuera: list[dict[str, str]] = []
+    usados: set[str] = set()
+    for x in propuestas if isinstance(propuestas, list) else []:
+        if not isinstance(x, dict):
+            continue
+        q = " ".join(str(x.get("busqueda") or "").split())
+        objetivo = por_linea.get(_en_una_linea(x.get("texto")))
+        if (not objetivo or objetivo in usados or q.lower() == objetivo.lower()
+                or not _LARGO_DE_BUSQUEDA[0] <= len(q) <= _LARGO_DE_BUSQUEDA[1]):
+            continue
+        usados.add(objetivo)
+        fuera.append({"busqueda": q, "objetivo": objetivo})
+        if len(fuera) >= CANDIDATAS:
+            break
+    return fuera
+
+
+def probar(candidata: dict[str, str], por_palabras: list[dict[str, Any]],
+           hibrida: list[dict[str, Any]]) -> "dict[str, Any] | None":
+    """La sugerencia, si prueba la diferencia: la híbrida trae su texto entre
+    los primeros y la búsqueda por palabras no lo trae."""
+    lexica = [r.get("texto") for r in por_palabras]
+    primeros = [r.get("texto") for r in hibrida][:PUESTO_MAXIMO]
+    objetivo = candidata["objetivo"]
+    if objetivo in lexica or objetivo not in primeros:
+        return None
+    return {"busqueda": candidata["busqueda"], "encuentra": objetivo,
+            "puesto": primeros.index(objetivo) + 1, "por_palabras": len(lexica)}
+
+
+def elegir(probadas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Las mejores: el texto más arriba en la híbrida, y por palabras lo menos posible."""
+    return sorted(probadas, key=lambda p: (p["puesto"], p["por_palabras"]))[:SUGERENCIAS]

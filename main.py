@@ -8371,6 +8371,19 @@ def _sacar_de_search_relevance(base: str, user: str, password: str, label: str) 
         _os_req("DELETE", f"{base}/{_RUTA_DE_CONFIGURACIONES}/{cid}", user, password, timeout=20)
 
 
+def _busqueda_lista(terraform_dir: Path, slug: str) -> "tuple[str, dict]":
+    """(model_id de las consultas, estado de la búsqueda del caso), o 409 si
+    la búsqueda del caso no está armada."""
+    estados = _read_estados(terraform_dir)
+    embeddings = (estados.get("_cluster") or {}).get("embeddings") or {}
+    model_id = embeddings.get("model_id_consulta") or embeddings.get("model_id") or ""
+    caso = (estados.get(slug) or {}).get("busqueda") or {}
+    if not (model_id and caso.get("ok")):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: activala con «Completar» en Búsqueda híbrida."})
+    return model_id, caso
+
+
 @app.get("/api/v1/plugins/busqueda/comparar", tags=["capabilities"],
          summary="Lo que hace falta para comparar la búsqueda de un caso en Search Relevance (Dashboards)")
 def comparar_busqueda(slug: str) -> dict:
@@ -8380,13 +8393,7 @@ def comparar_busqueda(slug: str) -> dict:
     import json as _json
 
     terraform_dir = _active_terraform_dir()
-    estados = _read_estados(terraform_dir)
-    embeddings = (estados.get("_cluster") or {}).get("embeddings") or {}
-    model_id = embeddings.get("model_id_consulta") or embeddings.get("model_id") or ""
-    caso = (estados.get(slug) or {}).get("busqueda") or {}
-    if not (model_id and caso.get("ok")):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: activala con «Completar» en Búsqueda híbrida."})
+    model_id, caso = _busqueda_lista(terraform_dir, slug)
     cluster = _cluster_with_public_access(terraform_dir)
     base = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, _read_https_enabled_from_state(terraform_dir)))
     consultas = busqueda.consultas_para_comparar(model_id)
@@ -8398,6 +8405,65 @@ def comparar_busqueda(slug: str) -> dict:
             "palabras": _json.dumps(consultas["palabras"], ensure_ascii=False),
             "hibrida": _json.dumps(consultas["hibrida"], ensure_ascii=False),
             "url": plugins_vista.link(base, plugins_vista.APP_SEARCH_RELEVANCE, "/")}
+
+
+# Las búsquedas sugeridas, por caso y modelo: armarlas lleva al LLM y una
+# docena de consultas, no se rehacen cada vez que se abre el panel.
+_SUGERIDAS_NAME = ".busquedas_sugeridas.json"
+
+
+@app.get("/api/v1/plugins/busqueda/sugerencias", tags=["capabilities"],
+         summary="Qué escribir en Search para ver la diferencia, probado contra el índice")
+def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
+    """Búsquedas para la barra de Search Relevance que muestran lo que agrega
+    la híbrida: el LLM las propone desde los textos del caso y quedan solo las
+    que, corridas en el cluster, traen su texto en la híbrida y no por
+    palabras. Sin LLM o sin ninguna que lo pruebe, `ejemplos` son textos que
+    hay, para buscarlos con otras palabras. `nuevas` las rehace."""
+    terraform_dir = _active_terraform_dir()
+    model_id, caso = _busqueda_lista(terraform_dir, slug)
+    archivo = terraform_dir / _SUGERIDAS_NAME
+    try:
+        guardadas = json.loads(archivo.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        guardadas = {}
+    guardadas = guardadas if isinstance(guardadas, dict) else {}
+    previa = guardadas.get(slug) or {}
+    if not nuevas and previa.get("model_id") == model_id and previa.get("sugerencias"):
+        return {"sugerencias": previa["sugerencias"], "ejemplos": previa.get("ejemplos") or [], "motivo": ""}
+    base, user, password = _cluster_del_entorno("busqueda")
+    ruta = f"{base}/{busqueda.indice(slug)}/_search"
+    r = _os_req("POST", ruta, user, password, json_body=busqueda.muestra_para_sugerir(), timeout=30)
+    textos = [x["texto"] for x in busqueda.resultados(r.json()) if x["texto"]] if _resp_ok(r) else []
+    if not textos:
+        return {"sugerencias": [], "ejemplos": [], "motivo": "El índice todavía no tiene textos"}
+    ejemplos = textos[:busqueda.SUGERENCIAS]
+    try:
+        label = _label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {})
+        datos = semantica._json_de(semantica._llamar_al_llm(busqueda.prompt_de_busquedas(textos, caso.get("campo", ""), label)))
+    except Exception as exc:  # noqa: BLE001 — sin el LLM quedan los ejemplos
+        return {"sugerencias": [], "ejemplos": ejemplos, "motivo": f"El LLM no propuso búsquedas ({type(exc).__name__})"}
+    probadas = []
+    for c in busqueda.candidatas(datos, textos):
+        lexica = _os_req("POST", ruta, user, password, json_body=busqueda.consulta_lexica(c["busqueda"], 10), timeout=30)
+        hibrida = _os_req("POST", f"{ruta}?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}", user, password,
+                          json_body=busqueda.consulta_hibrida(c["busqueda"], model_id, 10), timeout=60)
+        if not (_resp_ok(lexica) and _resp_ok(hibrida)):
+            continue
+        p = busqueda.probar(c, busqueda.resultados(lexica.json()), busqueda.resultados(hibrida.json()))
+        if p:
+            probadas.append(p)
+            if len(probadas) >= busqueda.SUGERENCIAS:   # cada híbrida es un llamado a NVIDIA
+                break
+    sugerencias = busqueda.elegir(probadas)
+    if sugerencias:
+        guardadas[slug] = {"model_id": model_id, "sugerencias": sugerencias, "ejemplos": ejemplos}
+        try:
+            archivo.write_text(json.dumps(guardadas, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            print(f"[busqueda] no se pudieron guardar las sugerencias: {exc!r}")
+    return {"sugerencias": sugerencias, "ejemplos": ejemplos,
+            "motivo": "" if sugerencias else "Ninguna de las búsquedas propuestas mostró la diferencia"}
 
 
 # ── Los datos de la demo, en un snapshot ────────────────────────────────────

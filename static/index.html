@@ -2445,6 +2445,11 @@
     .fn__dsl { min-width: 0; }
     .fn__dsl-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: var(--fs-xs); }
     .fn__dsl .cat__cmd { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .fn__sugerencias { margin-top: 6px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+    .fn__sugs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    .fn__sug { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+    .fn__sug-q { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); }
+    .fn__sug-por { font-size: var(--fs-xs); color: var(--text-muted); }
     @media (max-width: 560px) { .busq__fila { flex-wrap: wrap; } .busq__caso { flex-basis: 100%; } }
     .busq__res { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--sp-2); }
     .busq__res:empty { display: none; }
@@ -7031,6 +7036,36 @@
           <div class="fn__comparar-cuerpo" aria-live="polite"></div>
         </div>`;
     }
+    // Qué escribir en Search: búsquedas probadas en el índice (la híbrida trae
+    // el texto y por palabras no). La plataforma las arma la primera vez.
+    const _corto = (t, n = 90) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
+    function sugerenciasHTML(d) {
+      const sug = d.sugerencias || [];
+      const otras = '<button type="button" class="btn btn-ghost btn-sm fn__otras">Otras búsquedas</button>';
+      if (!sug.length) {
+        const ej = (d.ejemplos || []).map(t => `«${escapeHtml(_corto(t))}»`).join(' · ');
+        return `<span class="busq__vacio">${escapeHtml(d.motivo || 'Sin sugerencias')}.`
+          + `${ej ? ` Buscá alguno de estos textos dicho con otras palabras: ${ej}` : ''}</span> ${otras}`;
+      }
+      return `<ul class="fn__sugs">${sug.map(s => `<li class="fn__sug"><strong class="fn__sug-q">${escapeHtml(s.busqueda)}</strong>`
+        + '<button type="button" class="btn btn-ghost btn-sm fn__copiar-sug">Copiar</button>'
+        + `<span class="fn__sug-por">la híbrida trae «${escapeHtml(_corto(s.encuentra))}»`
+        + `${s.puesto > 1 ? ` (puesto ${s.puesto})` : ' primero'}; por palabras no aparece</span></li>`).join('')}</ul>${otras}`;
+    }
+    async function llenarSugerencias(caja, slug, nuevas = false) {
+      const lugar = caja.querySelector('.fn__sugerencias');
+      if (!lugar || !slug) return;
+      const sigue = () => caja.querySelector('.busq__caso')?.value === slug;   // no cambió el caso mientras tanto
+      lugar.innerHTML = '<span class="busq__vacio">Buscando frases que muestren la diferencia (la primera vez tarda unos segundos)…</span>';
+      try {
+        const r = await fetch('/api/v1/plugins/busqueda/sugerencias?slug=' + encodeURIComponent(slug) + (nuevas ? '&nuevas=1' : ''));
+        const d = await r.json();
+        if (!r.ok) throw detailError(d);
+        if (sigue()) lugar.innerHTML = sugerenciasHTML(d);
+      } catch (err) {
+        if (sigue()) lugar.innerHTML = `<span class="busq__vacio">No se pudieron armar: ${escapeHtml(err.message)}</span>`;
+      }
+    }
     async function llenarComparador(caja) {
       const slug = caja.querySelector('.busq__caso')?.value;
       const cuerpo = caja.querySelector('.fn__comparar-cuerpo');
@@ -7051,10 +7086,12 @@
         cuerpo.innerHTML = `<ol class="fn__pasos">
             <li>En Search Relevance → <strong>Single Query Comparison</strong>, en <strong>Query 1</strong> y en <strong>Query 2</strong> elegí el índice <code>${escapeHtml(d.indice)}</code>.</li>
             <li>En Query 1 dejá el pipeline vacío y pegá la consulta por palabras; en Query 2 elegí el pipeline <code>${escapeHtml(d.pipeline)}</code> y pegá la híbrida.</li>
-            <li>Arriba, en la barra <strong>Search</strong>, escribí lo que buscás con tus palabras y tocá Search (con la barra vacía la híbrida da error: no tiene qué buscar).</li>
+            <li>Arriba, en la barra <strong>Search</strong>, escribí una de estas búsquedas y tocá Search (con la barra vacía la híbrida da error: no tiene qué buscar).
+              <div class="fn__sugerencias" aria-live="polite"></div></li>
             <li>Los resultados salen debajo de las consultas. Muestran el ID: cambiá el campo a <code>texto</code> y a la derecha aparece lo que la búsqueda por palabras no encuentra.</li>
           </ol>
           <div class="fn__dsls">${bloque('Query 1 · por palabras', d.palabras)}${bloque(`Query 2 · híbrida (pipeline ${escapeHtml(d.pipeline)})`, d.hibrida)}</div>`;
+        llenarSugerencias(caja, slug);
       } catch (err) {
         cuerpo.innerHTML = `<span class="busq__vacio">No se pudieron armar: ${escapeHtml(err.message)}</span>`;
       }
@@ -9053,6 +9090,13 @@
         if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
         const copiarDsl = e.target.closest('.fn__copiar');
         if (copiarDsl) return copyToClipboard(copiarDsl.closest('.fn__dsl')?.querySelector('.cat__cmd')?.textContent || '', copiarDsl);
+        const copiarSug = e.target.closest('.fn__copiar-sug');
+        if (copiarSug) return copyToClipboard(copiarSug.closest('.fn__sug')?.querySelector('.fn__sug-q')?.textContent || '', copiarSug);
+        const otras = e.target.closest('.fn__otras');
+        if (otras) {
+          const caja = otras.closest('.fn__comparar');
+          return llenarSugerencias(caja, caja?.querySelector('.busq__caso')?.value, true);
+        }
         const fila = e.target.closest('.fn__fila');
         if (fila) return verFuncion(fila, data);
       }));
@@ -9241,6 +9285,12 @@
           return json(fuera);
         }
         // La búsqueda híbrida: lo que agrega el significado a la búsqueda por palabras.
+        if (u.includes('/api/v1/plugins/busqueda/sugerencias')) {
+          await espera(900);
+          return json({ motivo: '', ejemplos: [], sugerencias: [
+            { busqueda: 'no puede entrar a su cuenta', encuentra: 'Admin login failed', puesto: 1, por_palabras: 0 },
+            { busqueda: 'equipo sobrecargado', encuentra: 'Fortigate CPU usage high', puesto: 2, por_palabras: 3 }] });
+        }
         if (u.includes('/api/v1/plugins/busqueda/comparar')) {
           await espera(300);
           const slug = new URL(u, location.href).searchParams.get('slug') || '';

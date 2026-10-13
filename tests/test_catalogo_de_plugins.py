@@ -256,6 +256,15 @@ const listaB = funcionesHTML({ ...conBusq, catalogo: [C('busqueda', ['siem'], ['
 check('la tarjeta lista se prueba', tile(listaB, 'busqueda').includes('class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'), tile(listaB, 'busqueda'));
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
 check('escapado', conX.includes('&lt;x&gt;') && !conX.includes('<x>'), conX);
+// Qué escribir en Search: las búsquedas probadas, o textos que hay.
+const sug = sugerenciasHTML({ sugerencias: [{ busqueda: 'no <puede> entrar', encuentra: 'Admin login failed', puesto: 1, por_palabras: 0 },
+                                            { busqueda: 'equipo lento', encuentra: 'x'.repeat(200), puesto: 3, por_palabras: 2 }] });
+check('sugerencias, con copiar', sug.includes('<strong class="fn__sug-q">no &lt;puede&gt; entrar</strong><button type="button" class="btn btn-ghost btn-sm fn__copiar-sug">Copiar</button>')
+  && sug.includes('la híbrida trae «Admin login failed» primero; por palabras no aparece') && sug.includes('(puesto 3)'), sug);
+check('el texto largo, cortado', sug.includes('x'.repeat(89) + '…') && !sug.includes('x'.repeat(90)), sug);
+check('se pueden pedir otras', sug.includes('fn__otras'));
+const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
+check('sin sugerencias, los textos que hay', sinSug.includes('El LLM no propuso búsquedas (RuntimeError). Buscá alguno de estos textos dicho con otras palabras: «llegó roto» · «tardó»'), sinSug);
 // Dev Tools, desde la URL de Dashboards.
 check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
 check('sin dashboards, sin link', devToolsDe('') === '');
@@ -273,6 +282,8 @@ def test_que_podes_mostrar_esta_conectado():
     assert "${funcionesHTML(data)}" in vista and "catalogoHTML" not in html and "verComandos" not in html
     assert "provisionCapabilitiesFromInfra(e.currentTarget, pipelines, false, { recomendados: true })" in vista
     assert "if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);" in vista
+    assert "return llenarSugerencias(caja, caja?.querySelector('.busq__caso')?.value, true);" in vista
+    assert "llenarSugerencias(caja, slug);" in html, "el panel de la búsqueda pide qué escribir"
     assert "if (e.target.closest('.fn__probar')) return abrirAsistente();" in vista
     assert "if (fila) return verFuncion(fila, data);" in vista
     assert "if (caja && e.target.closest('.busq__caso')) llenarComparador(caja);" in vista

@@ -357,3 +357,85 @@ def test_se_rehacen_al_armar_la_busqueda(monkeypatch):
     assert ("DELETE", "/_plugins/_search_relevance/search_configurations/VIEJA", None) in pedidos
     assert not [u for m, u, _ in pedidos if m == "DELETE" and u.endswith("OTRA")], "las de otros, no"
     assert [b["name"] for m, u, b in pedidos if m == "PUT"] == ["Ventas · por palabras", "Ventas · híbrida"]
+
+
+# ── Qué escribir en Search ──────────────────────────────────────────────────
+def test_las_busquedas_propuestas_se_validan():
+    textos = ["Admin login failed", "Fortigate CPU usage high", "Línea\n  partida"]
+    datos = {"busquedas": [
+        {"busqueda": "no puede entrar", "texto": "Admin login failed"},
+        {"busqueda": "otra para el mismo", "texto": "Admin login failed"},       # ese texto ya tiene búsqueda
+        {"busqueda": "inventado", "texto": "No existe"},                        # no es uno de los textos
+        {"busqueda": "x", "texto": "Fortigate CPU usage high"},                  # muy corta
+        {"busqueda": "fortigate cpu usage high", "texto": "Fortigate CPU usage high"},  # el mismo texto
+        "basura", {"busqueda": 3, "texto": "Fortigate CPU usage high"},
+        {"busqueda": "  línea   cortada ", "texto": "Línea partida"}]}           # como quedó en el prompt
+    assert busqueda.candidatas(datos, textos) == [
+        {"busqueda": "no puede entrar", "objetivo": "Admin login failed"},
+        {"busqueda": "línea cortada", "objetivo": "Línea\n  partida"}]
+    assert busqueda.candidatas({"busquedas": "no"}, textos) == [] and busqueda.candidatas(None, textos) == []
+    p = busqueda.prompt_de_busquedas(textos, "msg", "FortiAnalyzer")
+    assert "\nLínea partida" in p and "\nAdmin login failed" in p and f"Proponé {busqueda.CANDIDATAS} búsquedas" in p
+    assert "los valores del campo «msg» de «FortiAnalyzer»" in p, "de dónde son: «Health» no es bienestar físico"
+    assert "los textos de un caso" in busqueda.prompt_de_busquedas(textos)
+
+
+def test_una_sugerencia_prueba_la_diferencia():
+    c = {"busqueda": "no puede entrar", "objetivo": "Admin login failed"}
+    hits = lambda *ts: [{"texto": t} for t in ts]  # noqa: E731
+    assert busqueda.probar(c, hits("Otro"), hits("X", "Admin login failed")) == {
+        "busqueda": "no puede entrar", "encuentra": "Admin login failed", "puesto": 2, "por_palabras": 1}
+    assert busqueda.probar(c, hits("Admin login failed"), hits("Admin login failed")) is None, "por palabras también"
+    assert busqueda.probar(c, hits(), hits(*"abcde", "Admin login failed")) is None, "la híbrida, no entre los primeros"
+    p = lambda puesto, n: {"puesto": puesto, "por_palabras": n}  # noqa: E731
+    assert busqueda.elegir([p(3, 0), p(1, 5), p(1, 0), p(2, 0)]) == [p(1, 0), p(1, 5), p(2, 0)]
+
+
+def test_que_escribir_en_search(monkeypatch, tmp_path):
+    """Las sugerencias salen de los textos del caso (LLM) y quedan solo las que
+    el cluster prueba: la híbrida trae el texto y por palabras no."""
+    from fastapi.testclient import TestClient
+    import semantica
+    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
+    c = TestClient(main.app)
+    url = "/api/v1/plugins/busqueda/sugerencias?slug=ventas"
+    assert c.get(url).status_code == 409, "sin armar"
+    monkeypatch.setattr(main, "_read_estados", lambda td: {
+        "_cluster": {"embeddings": {"model_id_consulta": "CONSULTAS"}}, "ventas": {"busqueda": {"ok": True, "campo": "comentario"}}})
+    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
+    textos = ["llegó roto", "tardó un mes", "excelente atención"]
+    pedidos, llm = [], []
+    hits = lambda *ts: _R(200, {"hits": {"hits": [{"_source": {"texto": t}} for t in ts]}})  # noqa: E731
+
+    def req(m, u, user, password, json_body=None, timeout=30, headers=None):
+        pedidos.append(u.replace("http://x", ""))
+        if json_body.get("sort"):
+            return hits(*textos)
+        if "hybrid" in json_body["query"]:
+            assert u.endswith("?search_pipeline=plataforma-hibrida")
+            neural = json_body["query"]["hybrid"]["queries"][1]["neural"]["embedding"]
+            assert neural["model_id"] == "CONSULTAS"
+            return hits({"producto dañado": "llegó roto", "demora en la entrega": "tardó un mes"}[neural["query_text"]])
+        return hits(*{"demora en la entrega": ["tardó un mes"]}.get(json_body["query"]["multi_match"]["query"], []))
+
+    def llamar(prompt):
+        llm.append(prompt)
+        return json.dumps({"busquedas": [{"busqueda": "producto dañado", "texto": "llegó roto"},
+                                         {"busqueda": "demora en la entrega", "texto": "tardó un mes"}]})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(semantica, "_llamar_al_llm", llamar)
+    d = c.get(url).json()
+    assert d == {"sugerencias": [{"busqueda": "producto dañado", "encuentra": "llegó roto", "puesto": 1, "por_palabras": 0}],
+                 "ejemplos": textos, "motivo": ""}, "la de la demora, por palabras también la encuentra"
+    assert "llegó roto" in llm[0] and "«comentario» de «ventas»" in llm[0]
+    assert all(u.startswith("/busqueda-ventas/_search") for u in pedidos)
+    # Guardadas: la segunda vez, ni el LLM ni el cluster; `nuevas` las rehace.
+    n = len(pedidos)
+    assert c.get(url).json()["sugerencias"] == d["sugerencias"] and len(llm) == 1 and len(pedidos) == n
+    c.get(url + "&nuevas=1")
+    assert len(llm) == 2
+    # Sin el LLM: textos que hay, para buscarlos con otras palabras.
+    monkeypatch.setattr(semantica, "_llamar_al_llm", lambda p: (_ for _ in ()).throw(RuntimeError("sin key")))
+    d = c.get(url + "&nuevas=1").json()
+    assert d["sugerencias"] == [] and d["ejemplos"] == textos and "RuntimeError" in d["motivo"]
