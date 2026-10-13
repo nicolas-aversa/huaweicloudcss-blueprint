@@ -240,6 +240,16 @@ check('lo del cluster va con su función, si tiene algo que decir', bus.cluster.
 const busOk = funcionDe('busqueda', { ...data, plugins: { ...data.plugins, _cluster: [T('embeddings', 'ok')] } });
 check('el modelo listo no se muestra', busOk.cluster.length === 0, JSON.stringify(busOk.cluster));
 check('Query Insights, siempre (es la función)', funcionDe('query_insights', data).cluster.map(t => t.plugin).join() === 'query_insights');
+// La búsqueda se prueba desde su panel: un caso listo, lo que buscás y los resultados lado a lado.
+const conBusq = { ...data, catalogo: [...data.catalogo, C('busqueda', ['siem', 'produccion-pozos'], ['siem'])],
+  plugins: { ...data.plugins, siem: [...data.plugins.siem, T('busqueda', 'ok', { campo: 'msg' })],
+             'produccion-pozos': [...data.plugins['produccion-pozos'], T('busqueda', 'falla')] } };
+const busq = detalleDeFuncionHTML(funcionDe('busqueda', conBusq));
+check('el buscador, con los casos listos y su campo', busq.includes('<form class="busq fn__busq">')
+  && busq.includes('<option value="siem">SIEM · msg</option>') && !busq.includes('<option value="produccion-pozos">'), busq);
+check('sin casos listos, sin buscador', !detalleDeFuncionHTML(funcionDe('busqueda', { ...conBusq, plugins: {} })).includes('fn__busq'));
+const listaB = funcionesHTML({ ...conBusq, catalogo: [C('busqueda', ['siem'], ['siem'])] });
+check('la tarjeta lista se prueba', tile(listaB, 'busqueda').includes('class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'), tile(listaB, 'busqueda'));
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
 check('escapado', conX.includes('&lt;x&gt;') && !conX.includes('<x>'), conX);
 // Dev Tools, desde la URL de Dashboards.
@@ -261,6 +271,7 @@ def test_que_podes_mostrar_esta_conectado():
     assert "if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);" in vista
     assert "if (e.target.closest('.fn__probar')) return abrirAsistente();" in vista
     assert "if (fila) return verFuncion(fila, data);" in vista
+    assert "buscarDesde(form, form.querySelector('.busq__caso')?.value);" in vista
     assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
     # El paso 3 activa todo lo que hace falta: sin "recomendados" ni "elegí cuáles" (traían dudas).

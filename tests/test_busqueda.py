@@ -183,7 +183,7 @@ def test_el_export_lleva_la_busqueda():
 
 def test_la_tarjeta():
     ok = pv._busqueda({"ok": True, "campo": "comentario"})
-    assert ok["estado"] == pv.OK and "«comentario»" in ok["que"] and ok["numero"] == "busqueda"
+    assert ok["estado"] == pv.OK and "«comentario»" in ok["que"] and ok["numero"] == "busqueda" and ok["campo"] == "comentario"
     assert ok["accion"] == {"id": "probar_busqueda", "texto": "Probar una búsqueda"}
     assert pv._busqueda({"ok": False, "no_aplica": True, "motivo": "es una categoría"})["estado"] == pv.EXCLUIDO
     mal = pv._busqueda({"ok": False, "motivo": "sin el modelo"})

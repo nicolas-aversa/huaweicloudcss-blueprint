@@ -2436,6 +2436,9 @@
     .busq { display: flex; flex-direction: column; gap: var(--sp-2); }
     .busq__fila { display: flex; gap: var(--sp-2); }
     .busq__q { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); }
+    .busq__caso { flex: 0 1 260px; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); }
+    .fn__busq { margin: 6px 0 4px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-primary); }
+    @media (max-width: 560px) { .busq__fila { flex-wrap: wrap; } .busq__caso { flex-basis: 100%; } }
     .busq__res { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--sp-2); }
     .busq__res:empty { display: none; }
     .busq__col { min-width: 0; font-size: var(--fs-sm); }
@@ -6948,6 +6951,8 @@
       const falta = f.c && f.hechos.length < f.aplica.length && f.id !== 'security_analytics' && f.estado !== 'en_curso';
       const accion = f.id === 'agente' && f.hechos.length
         ? '<button type="button" class="btn btn-secondary btn-sm fn__probar">Probar</button>'
+        : f.id === 'busqueda' && f.hechos.length && !falta
+        ? '<button type="button" class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'
         : falta ? '<button type="button" class="btn btn-secondary btn-sm cat__aplicar" '
           + `data-plugin="${escapeHtml(f.id)}"${state.provisionandoPlugins ? ' disabled' : ''}>`
           + `${state.aplicandoPlugin === f.id ? 'Activando…' : f.hechos.length ? 'Completar' : 'Activar'}</button>`
@@ -6995,11 +7000,43 @@
       const casos = [...conTarjeta, ...sinTarjeta].join('');
       return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
+        + (f.id === 'busqueda' ? buscadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
         + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
         + (f.c && f.aplica.length ? `<div class="fn__pie"><button type="button" class="btn btn-ghost btn-sm fn__comandos" data-plugin="${escapeHtml(f.id)}" `
           + `aria-expanded="false">${icon('code')} Ver cómo se hace en Dev Tools</button></div>`
           + `<div class="cat__det" data-det="${escapeHtml(f.id)}" hidden></div>` : '');
+    }
+    // Probar la búsqueda híbrida: un caso, lo que buscás con tus palabras, y lo
+    // que encuentra por palabras al lado de lo que encuentra la híbrida.
+    function buscadorHTML(f) {
+      const listos = f.tarjetas.filter(([, t]) => t.estado === 'ok');
+      if (!listos.length) return '';
+      const opciones = listos.map(([s, t]) => `<option value="${escapeHtml(s)}">${escapeHtml(SLUG_LABELS[s] || s)}`
+        + `${t.campo ? ` · ${escapeHtml(t.campo)}` : ''}</option>`).join('');
+      return `<form class="busq fn__busq">
+          <div class="busq__fila">
+            <select class="form-input busq__caso" name="slug" aria-label="Caso">${opciones}</select>
+            <input class="form-input busq__q" name="q" maxlength="200" required
+              placeholder="Escribí lo que buscás, con tus palabras" aria-label="Lo que buscás">
+            <button class="btn btn-primary btn-sm" type="submit">${icon('search')} Buscar</button>
+          </div>
+          <div class="busq__res" aria-live="polite"></div>
+        </form>`;
+    }
+    async function buscarDesde(form, slug) {
+      const q = (form.querySelector('.busq__q')?.value || '').trim();
+      const res = form.querySelector('.busq__res');
+      if (!q || !slug || !res) return;
+      res.innerHTML = '<span class="busq__vacio">Buscando…</span>';
+      try {
+        const r = await fetch('/api/v1/plugins/buscar?slug=' + encodeURIComponent(slug) + '&q=' + encodeURIComponent(q));
+        const d = await r.json();
+        if (!r.ok) throw detailError(d);
+        res.innerHTML = busquedaHTML(d);
+      } catch (err) {
+        res.innerHTML = `<span class="busq__vacio">No se pudo buscar: ${escapeHtml(err.message)}</span>`;
+      }
     }
     function pintarFuncion(panel, id, data) {
       const f = funcionDe(id, data);
@@ -7317,20 +7354,9 @@
         <div class="busq__res" aria-live="polite"></div>`;
       btn.closest('.plug__links')?.insertAdjacentElement('afterend', caja);
       caja.querySelector('input').focus();
-      caja.addEventListener('submit', async (e) => {
+      caja.addEventListener('submit', (e) => {
         e.preventDefault();
-        const q = caja.querySelector('input').value.trim();
-        const res = caja.querySelector('.busq__res');
-        if (!q) return;
-        res.innerHTML = '<span class="busq__vacio">Buscando…</span>';
-        try {
-          const r = await fetch('/api/v1/plugins/buscar?slug=' + encodeURIComponent(slug) + '&q=' + encodeURIComponent(q));
-          const d = await r.json();
-          if (!r.ok) throw detailError(d);
-          res.innerHTML = busquedaHTML(d);
-        } catch (err) {
-          res.innerHTML = `<span class="busq__vacio">No se pudo buscar: ${escapeHtml(err.message)}</span>`;
-        }
+        buscarDesde(caja, slug);
       });
     }
     function busquedaHTML(d) {
@@ -9007,6 +9033,13 @@
         const aplicar = e.target.closest('.cat__aplicar');
         if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);
         if (e.target.closest('.fn__probar')) return abrirAsistente();
+        const probarBusq = e.target.closest('.fn__probar-busqueda');
+        if (probarBusq) {
+          const fila = probarBusq.closest('.fn-tile')?.querySelector('.fn__fila');
+          if (fila && state.funcionAbierta !== 'busqueda') verFuncion(fila, data);
+          setTimeout(() => body.querySelector('.fn__busq .busq__q')?.focus(), 0);
+          return;
+        }
         if (e.target.closest('.fn-panel__cerrar')) {
           const abierta = body.querySelector(`.fn-tile[data-fn="${state.funcionAbierta}"] .fn__fila`);
           return abierta && verFuncion(abierta, data);
@@ -9030,6 +9063,12 @@
         if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
         const fila = e.target.closest('.fn__fila');
         if (fila) return verFuncion(fila, data);
+      }));
+      body.querySelectorAll('.fn-seccion').forEach(seccion => seccion.addEventListener('submit', (e) => {
+        const form = e.target.closest('.fn__busq');
+        if (!form) return;
+        e.preventDefault();
+        buscarDesde(form, form.querySelector('.busq__caso')?.value);
       }));
       // Un repintado deja abierta la función que se estaba mirando.
       const tileAbierta = state.funcionAbierta && body.querySelector(`.fn-tile[data-fn="${state.funcionAbierta}"]`);

@@ -291,11 +291,13 @@ def _busqueda(estado: dict) -> dict:
     if estado.get("no_aplica"):
         return _tarjeta("busqueda", "Búsqueda híbrida", "", EXCLUIDO, estado.get("motivo") or "no aplica")
     ok = bool(estado.get("ok"))
-    return _tarjeta("busqueda", "Búsqueda híbrida",
-                    f"Busca en «{campo}» por palabras y por significado a la vez: lo exacto sale arriba y "
-                    "encuentra también lo que está dicho con otras palabras.",
-                    OK if ok else FALLA, "" if ok else estado.get("motivo", ""), numero="busqueda" if ok else "",
-                    accion={"id": "probar_busqueda", "texto": "Probar una búsqueda"} if ok else None)
+    t = _tarjeta("busqueda", "Búsqueda híbrida",
+                 f"Busca en «{campo}» por palabras y por significado a la vez: lo exacto sale arriba y "
+                 "encuentra también lo que está dicho con otras palabras.",
+                 OK if ok else FALLA, "" if ok else estado.get("motivo", ""), numero="busqueda" if ok else "",
+                 accion={"id": "probar_busqueda", "texto": "Probar una búsqueda"} if ok else None)
+    t["campo"] = campo
+    return t
 
 
 def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: "dict | None",
