@@ -415,6 +415,13 @@ def nombre_del_buscador(slug: str) -> str:
     return f"BuscarTextos-{slug}"
 
 
+def firma_del_buscador(b: dict[str, Any]) -> str:
+    """Lo que, si cambia, obliga a rearmar el agente: el campo, el modelo y la
+    configuración de la herramienta."""
+    p = build_buscador_tool(b)["parameters"]
+    return f"{b['campo']}|{b['model_id']}|{p['doc_size']}"
+
+
 def build_buscador_tool(b: dict[str, Any]) -> dict[str, Any]:
     """La búsqueda por significado de un caso, como herramienta del agente: un
     VectorDBTool (skills de OpenSearch) sobre `busqueda-<caso>`, el índice con
@@ -428,10 +435,15 @@ def build_buscador_tool(b: dict[str, Any]) -> dict[str, Any]:
             f"Busca por significado en los textos de {b['campo']} de {b['label']}: devuelve las frases distintas "
             "que se escribieron sobre un tema (texto) y cuántas veces aparece cada una (cuenta). Usala cuando la "
             "pregunta habla de un tema que la gente escribe con distintas palabras. El input es SOLO el tema, en "
-            f"pocas palabras. Después pasale a PPLTool-{b['slug']} las frases que correspondan, copiadas textuales."),
+            "pocas palabras; si hace falta, llamala otra vez con otra forma de decirlo. Después pasale a "
+            f"PPLTool-{b['slug']} las frases que correspondan, copiadas textuales."),
         "parameters": {
             "index": b["index"], "embedding_field": "embedding", "source_field": '["texto", "cuenta"]',
-            "model_id": b["model_id"], "doc_size": "10", "k": "10",
+            # 25 y no 10: con 10, las variantes casi iguales de una misma frase
+            # ("falta de aire al caminar, es diabético", "…, embarazada") llenaban
+            # el lugar y quedaban afuera los sinónimos ("disnea súbita en reposo"),
+            # que es lo que la búsqueda por significado tiene que traer (CSS 3.4).
+            "model_id": b["model_id"], "doc_size": "25", "k": "25",
         },
         "include_output_in_agent_response": False,
     }
@@ -477,7 +489,8 @@ def _instruccion_de_busqueda(buscadores: list[dict[str, Any]]) -> str:
         f"{lineas}\n"
         "When the question is about a topic that people write in many different ways (a symptom, a complaint, "
         "a failure, what an operator wrote), FIRST call that search tool with just the topic. Keep only the "
-        "returned phrases that really mean that topic. THEN call the PPLTool of that source asking it to filter "
+        "returned phrases that really mean that topic (if they are few or all alike, call it again with another "
+        "way of saying it). THEN call the PPLTool of that source asking it to filter "
         "the field by exactly those phrases (copy them verbatim) and to count or group as the user asked. "
         "In the answer, say briefly which phrasings you counted.\n\n"
     )

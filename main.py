@@ -7227,12 +7227,13 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
         caso = str(v.get("tool_name") or "").removeprefix("PPLTool-")
         if caso:
             registry.setdefault(caso, {})["agent_id"] = agent_id
-    # En qué casos busca por significado (para saber si hay que rearmarlo
-    # cuando la búsqueda de un caso queda lista, ver _sumar_la_busqueda_al_agente).
-    busca = {b["slug"] for b in buscadores}
+    # En qué casos busca por significado y con qué (campo, modelo, cuántos
+    # textos trae): si cambia, hay que rearmarlo (ver _sumar_la_busqueda_al_agente).
+    firmas = {b["slug"]: caps.firma_del_buscador(b) for b in buscadores}
+    busca = set(firmas)
     for caso, ids in registry.items():
         if ids.get("agent_id") == agent_id:
-            ids["busca_por_significado"] = caso in busca
+            ids["busca_por_significado"] = firmas.get(caso, "")
     _write_capabilities(terraform_dir, registry)
     print(f"[capabilities] agente registrado con {len(agent_verticals)} fuentes"
           + (f" y búsqueda por significado en {', '.join(sorted(busca))}" if busca else ""))
@@ -7243,16 +7244,17 @@ def _sumar_la_busqueda_al_agente(cluster: dict, user: str, password: str, https_
                                  terraform_dir: Path, run: dict) -> None:
     """El agente se arma antes que la búsqueda híbrida (que va al final de
     "Provisionar plugins"): si ahora hay casos con la búsqueda lista en los que
-    el agente no busca, se lo vuelve a registrar con su herramienta."""
+    el agente no busca, o busca con otra cosa (cambió el campo de texto libre,
+    el modelo o la herramienta), se lo vuelve a registrar."""
+    import capabilities as caps
+
     registry = _read_capabilities(terraform_dir)
-    del_agente = {s for s, ids in registry.items() if ids.get("agent_id")}
+    del_agente = [{"tool_name": f"PPLTool-{s}", "label": s} for s, ids in registry.items() if ids.get("agent_id")]
     if not del_agente:
         return
-    estados = _read_estados(terraform_dir)
-    listas = {s for s in del_agente if ((estados.get(s) or {}).get("busqueda") or {}).get("ok")
-              and not estados[s]["busqueda"].get("no_aplica")}
-    ya = {s for s in del_agente if registry[s].get("busca_por_significado")}
-    if not listas or listas <= ya:
+    deseadas = {b["slug"]: caps.firma_del_buscador(b) for b in _buscadores_del_agente(terraform_dir, del_agente)}
+    actuales = {s: registry[s].get("busca_por_significado") for s in deseadas}
+    if not deseadas or deseadas == actuales:
         return
     modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
                     if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
@@ -8481,7 +8483,13 @@ def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_
     ruta = f"{base}/_plugins/_transform/{tid}"
     ya = _os_req("GET", ruta, user, password, timeout=20)
     if _resp_ok(ya):
-        if not force and _motivo_si_fallo(ruta, user, password) is None:
+        # Si agrupa otro campo (cambió cuál es el texto libre), se rehace: si
+        # no, el estado diría el campo nuevo y el índice seguiría con el viejo.
+        try:
+            mismo_campo = busqueda.campo_del_transform(ya.json()) == agrupable
+        except ValueError:
+            mismo_campo = False
+        if not force and mismo_campo and _motivo_si_fallo(ruta, user, password) is None:
             return {"ok": True, "reason": "ya estaba", "campo": campo, "textos": n}
         _borrar_transform(ruta, user, password)
     _os_req("DELETE", f"{base}/{idx}", user, password, timeout=30)
@@ -8559,7 +8567,8 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         evaluacion = None
         try:
             if res["ok"] and not force and (anterior.get("evaluacion") or {}).get("ok") \
-                    and anterior["evaluacion"].get("modelo") == modelo_de_consultas:
+                    and anterior["evaluacion"].get("modelo") == modelo_de_consultas \
+                    and anterior.get("campo") == res.get("campo"):
                 evaluacion = anterior["evaluacion"]
                 runs.step(run, f"Search Relevance · {slug}", True, "ya estaba (configuraciones y evaluación)")
             elif res["ok"]:
@@ -8884,7 +8893,8 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
         guardadas = {}
     guardadas = guardadas if isinstance(guardadas, dict) else {}
     previa = guardadas.get(slug) or {}
-    if not nuevas and previa.get("model_id") == model_id and previa.get("sugerencias"):
+    if not nuevas and previa.get("model_id") == model_id and previa.get("campo") == caso.get("campo") \
+            and previa.get("sugerencias"):
         return {"sugerencias": previa["sugerencias"], "ejemplos": previa.get("ejemplos") or [], "motivo": ""}
     base, user, password = _cluster_del_entorno("busqueda")
     ruta = f"{base}/{busqueda.indice(slug)}/_search"
@@ -8911,7 +8921,8 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
                 break
     sugerencias = busqueda.elegir(probadas)
     if sugerencias:
-        guardadas[slug] = {"model_id": model_id, "sugerencias": sugerencias, "ejemplos": ejemplos}
+        guardadas[slug] = {"model_id": model_id, "campo": caso.get("campo"), "sugerencias": sugerencias,
+                           "ejemplos": ejemplos}
         try:
             archivo.write_text(json.dumps(guardadas, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as exc:

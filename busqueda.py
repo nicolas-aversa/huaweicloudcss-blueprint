@@ -62,7 +62,8 @@ MIN_TEXTOS, MAX_TEXTOS = 5, 20000
 # motivo, que suele ser casi una categoría.
 _PISTAS = (
     re.compile(r"(^|[._])(msg|message|mensaje|logdesc|log_message)([._]|$)", re.I),
-    re.compile(r"(^|[._])(desc|description|descripcion|detail|detalle|summary|resumen|comment|comentario|nota|note)([._]|$)", re.I),
+    re.compile(r"(^|[._])(desc|description|descripcion|detail|detalle|summary|resumen|comments?|comentarios?|notas?|notes?|"
+               r"observaci[oó]n|observaciones|observations?)([._]|$)", re.I),
     re.compile(r"(^|[._])(rule\.name|attack|title|titulo|product_name|nombre_producto)([._]|$)", re.I),
     re.compile(r"(^|[._])(\w*reason|motivo|razon|causa|cause|diagnos\w*|sintoma\w*|symptom\w*)([._]|$)", re.I),
 )
@@ -79,6 +80,9 @@ def campos_de_texto_libre(fields: list[dict[str, Any]]) -> list[str]:
               and (f.get("type") or "") in ("text", "string", "keyword")
               and not _NO_ES_TEXTO.search(f.get("field_path") or "")
               and f.get("role") not in ("entity_id", "timestamp")]
+    # A igual pista, primero lo que no es una categoría (`dimension`, del
+    # análisis): en logística, la observación del repartidor antes que el motivo.
+    textos.sort(key=lambda f: f.get("dimension") is True)
     orden = [f["field_path"].strip() for f in textos if f.get("type") == "text"]
     for pista in _PISTAS:
         orden += [f["field_path"].strip() for f in textos if pista.search(f["field_path"])]
@@ -97,6 +101,14 @@ def son_frases(valores: list[Any]) -> bool:
     significado sobre ellos no aporta. Sin muestra, no se descarta."""
     valores = [str(v) for v in valores or [] if str(v).strip()]
     return not valores or 2 * sum(1 for v in valores if len(v.split()) >= 2) >= len(valores)
+
+
+def campo_del_transform(cuerpo: Any) -> str:
+    """El campo que agrupa un Transform ya creado (`GET _plugins/_transform/<id>`)."""
+    try:
+        return str(cuerpo["transform"]["groups"][0]["terms"]["source_field"])
+    except (KeyError, IndexError, TypeError):
+        return ""
 
 
 def campo_agrupable(campo: str, tipo: str) -> str:

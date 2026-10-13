@@ -9,6 +9,7 @@ import subprocess
 import pytest
 
 import agente_chat
+import busqueda as busqueda_mod
 import capabilities as caps
 import main
 
@@ -25,7 +26,7 @@ def test_la_herramienta_del_agente():
     assert tool["name"] == "BuscarTextos-envios"
     p = tool["parameters"]
     assert (p["index"], p["embedding_field"], p["model_id"]) == ("busqueda-envios", "embedding", "M-CONSULTA")
-    assert json.loads(p["source_field"]) == ["texto", "cuenta"] and p["k"] == "10" and p["doc_size"] == "10"
+    assert json.loads(p["source_field"]) == ["texto", "cuenta"] and p["k"] == "25" and p["doc_size"] == "25"
     assert "PPLTool-envios" in tool["description"] and "data.evento.observacion" in tool["description"]
     sin = caps.build_conversational_agent("LLM", "PPL", "i", VERT)
     assert [t["type"] for t in sin["tools"]] == ["PPLTool"], "sin búsqueda armada, como antes"
@@ -81,15 +82,27 @@ def test_se_rearma_el_agente_solo_si_hay_busqueda_nueva(tmp_path, monkeypatch):
     pasos = []
     monkeypatch.setattr(main.runs, "step", lambda run, nombre, ok, detalle="": pasos.append((nombre, ok, detalle)))
     run = {"events": []}
-    registro = {"envios": {"agent_id": "AG", "ppl_model_id": "P", "llm_model_id": "L", "busca_por_significado": False}}
-    _estados(tmp_path, {"envios": {"busqueda": {"ok": True, "campo": "c"}}}, registro)
+    registro = {"envios": {"agent_id": "AG", "ppl_model_id": "P", "llm_model_id": "L", "busca_por_significado": ""}}
+    estados = {"_cluster": {"embeddings": {"model_id_consulta": "Q"}}, "envios": {"busqueda": {"ok": True, "campo": "c"}}}
+    _estados(tmp_path, estados, registro)
     main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
     assert len(llamadas) == 1, "la búsqueda quedó lista y el agente no la tenía"
     assert pasos and pasos[0][0] == "Asistente · búsqueda por significado"
-    registro["envios"]["busca_por_significado"] = True
-    _estados(tmp_path, {"envios": {"busqueda": {"ok": True, "campo": "c"}}}, registro)
+    firma = caps.firma_del_buscador({"slug": "envios", "label": "envios", "index": "busqueda-envios", "campo": "c", "model_id": "Q"})
+    registro["envios"]["busca_por_significado"] = firma
+    _estados(tmp_path, estados, registro)
     main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
-    assert len(llamadas) == 1, "ya la tenía: no se rearma"
+    assert len(llamadas) == 1, "ya la tenía, con lo mismo: no se rearma"
+    # Cambió el campo de texto libre (logística: de motivo a observación): se rearma.
+    estados["envios"]["busqueda"]["campo"] = "evento.observacion"
+    _estados(tmp_path, estados, registro)
+    main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
+    assert len(llamadas) == 2
+    # Un registro de antes de la firma (True) también se rearma.
+    registro["envios"]["busca_por_significado"] = True
+    _estados(tmp_path, estados, registro)
+    main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
+    assert len(llamadas) == 3
 
 
 def test_sin_vectordbtool_el_agente_igual_queda(tmp_path, monkeypatch):
@@ -109,7 +122,7 @@ def test_sin_vectordbtool_el_agente_igual_queda(tmp_path, monkeypatch):
     registro = {"envios": {"llm_model_id": "L"}}
     agent_id, _ = main._registrar_agente("http://x", "admin", "pw", "k", tmp_path, registro, "P", "L")
     assert agent_id == "AG" and len(cuerpos) == 2
-    assert main._read_capabilities(tmp_path)["envios"]["busca_por_significado"] is False
+    assert main._read_capabilities(tmp_path)["envios"]["busca_por_significado"] == ""
 
 
 def test_la_respuesta_lleva_lo_que_busco():
@@ -138,3 +151,44 @@ console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+
+class _R:
+    def __init__(self, status, data=None):
+        self.status_code, self._d = status, data or {}
+        self.text = json.dumps(self._d)
+
+    def json(self):
+        return self._d
+
+
+def test_si_cambio_el_campo_la_busqueda_se_rehace(monkeypatch):
+    """Un Transform que agrupa otro campo no es "ya estaba": se borra y se arma
+    con el nuevo (si no, el estado decía observación y el índice seguía con motivo)."""
+    pedidos = []
+
+    def req(metodo, url, user, password, json_body=None, timeout=30):
+        pedidos.append((metodo, url.split(":9200", 1)[1]))
+        if url.endswith("/_search"):
+            return _R(200, {"aggregations": {"n": {"value": 220}, "muestra": {"buckets": [
+                {"key": "La caja llegó aplastada"}, {"key": "Nadie atendió en el domicilio"}]}}})
+        if metodo == "GET" and "/_transform/" in url:
+            return _R(200, {"transform": {"groups": [{"terms": {"source_field": "evento.motivo"}}]}})
+        return _R(200, {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main, "_motivo_si_fallo", lambda *a, **k: None)
+    monkeypatch.setattr(main, "_borrar_transform", lambda ruta, u, p: pedidos.append(("BORRAR", ruta.split(":9200", 1)[1])))
+    fields = [{"field_path": "evento.motivo", "type": "string", "dimension": True, "role": "critical_indicator"},
+              {"field_path": "evento.observacion", "type": "string", "dimension": False}]
+    r = main._provisionar_busqueda("http://x:9200", "admin", "pw", "envios", "envios-*", fields, "M", False)
+    assert r["ok"] and r["campo"] == "evento.observacion" and r.get("reason") != "ya estaba"
+    assert ("BORRAR", "/_plugins/_transform/" + busqueda_mod.nombre_del_transform("envios")) in pedidos
+    assert ("PUT", "/" + busqueda_mod.indice("envios")) in pedidos
+
+
+def test_las_sugeridas_y_la_evaluacion_dependen_del_campo():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    assert 'and previa.get("campo") == caso.get("campo")' in src
+    assert 'and anterior.get("campo") == res.get("campo"):' in src

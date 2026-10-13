@@ -68,7 +68,7 @@ def test_las_piezas():
 
 
 # ── Provisionar ─────────────────────────────────────────────────────────────
-def _cluster(monkeypatch, distintos=120, transform_existe=False, fallado=None):
+def _cluster(monkeypatch, distintos=120, transform_existe=False, fallado=None, agrupa="msg"):
     pedidos = []
 
     def req(m, url, user, password, json_body=None, timeout=30, headers=None):
@@ -76,7 +76,8 @@ def _cluster(monkeypatch, distintos=120, transform_existe=False, fallado=None):
         if url.endswith("/_search") and json_body and "aggs" in json_body:
             return _R(200, {"aggregations": {"n": {"value": distintos}}})
         if m == "GET" and "/_transform/" in url:
-            return _R(200, {"_id": "t"}) if transform_existe else _R(404)
+            return (_R(200, {"_id": "t", "transform": {"groups": [{"terms": {"source_field": agrupa}}]}})
+                    if transform_existe else _R(404))
         return _R(200, {"acknowledged": True})
 
     monkeypatch.setattr(main, "_os_req", req)
@@ -636,3 +637,26 @@ def test_un_link_a_cada_experimento_del_caso(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_experimentos_del_caso", lambda *a: (_ for _ in ()).throw(ConnectionError()))
     d = TestClient(main.app).get("/api/v1/plugins/busqueda/comparar?slug=ventas").json()
     assert d["experimentos"] == {} and d["url_experimentos"].endswith("#/experiment"), "sin cluster, queda la lista"
+
+
+
+def test_la_observacion_es_texto_libre_y_gana_a_una_categoria():
+    """Logística (visto en la ECS): `evento.observacion` no se reconocía y la
+    búsqueda se armó sobre `evento.motivo`, una categoría de 14 valores."""
+    fields = [
+        {"field_path": "evento.motivo", "type": "string", "role": "critical_indicator", "dimension": True},
+        {"field_path": "evento.observacion", "type": "string", "role": None, "dimension": False},
+    ]
+    assert busqueda.campos_de_texto_libre(fields) == ["evento.observacion", "evento.motivo"]
+    assert busqueda.campo_de_texto_libre([{"field_path": "notas_del_operador", "type": "keyword"}]) == "notas_del_operador"
+    # A igual pista, la que no es categoría primero; el orden de las pistas no cambia.
+    assert busqueda.campos_de_texto_libre([
+        {"field_path": "logdesc", "type": "keyword", "dimension": True},
+        {"field_path": "msg", "type": "keyword", "dimension": False},
+        {"field_path": "detalle", "type": "keyword", "dimension": False}]) == ["msg", "logdesc", "detalle"]
+
+
+def test_el_campo_de_un_transform_ya_creado():
+    cuerpo = {"_id": "t", "transform": {"groups": [{"terms": {"source_field": "evento.motivo", "target_field": "texto"}}]}}
+    assert busqueda.campo_del_transform(cuerpo) == "evento.motivo"
+    assert busqueda.campo_del_transform({}) == "" and busqueda.campo_del_transform(None) == ""
