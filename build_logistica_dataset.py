@@ -24,8 +24,13 @@ demo cuente algo:
 - coordenadas → mapa; DNI y teléfono del destinatario → enmascarado; cuenta del
   remitente → perfil por entidad (pocos vendedores grandes mandan mucho).
 
-Uso:   py build_logistica_dataset.py [--desde 2025-10-13] [--hasta 2026-10-12] [--por-dia 55]
-Sale:  datasets/seguimiento-de-envios.csv
+Formato: por defecto, JSON por línea (un evento por línea, con el envío, el
+remitente, el destino y la ubicación anidados), que es como sale un evento de
+seguimiento de un sistema de transporte: por la API, por webhooks a los clientes
+o por una cola. `--formato csv` saca lo mismo plano, como un export del sistema.
+
+Uso:   py build_logistica_dataset.py [--formato json|csv] [--desde 2025-10-13] [--hasta 2026-10-12] [--por-dia N]
+Sale:  datasets/seguimiento-de-envios.ndjson (o .csv)
 """
 from __future__ import annotations
 
@@ -33,13 +38,14 @@ import argparse
 import bisect
 import csv
 import itertools
+import json
 import random
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ART = timezone(timedelta(hours=-3))
-SALIDA = Path(__file__).parent / "datasets" / "seguimiento-de-envios.csv"
+SALIDA = Path(__file__).parent / "datasets" / "seguimiento-de-envios"
 
 COLUMNAS = [
     "fecha_hora", "nro_envio", "evento", "tipo_servicio", "canal_admision", "segmento_cliente", "cuenta_remitente",
@@ -48,6 +54,39 @@ COLUMNAS = [
     "valor_declarado_ars", "costo_envio_ars", "sla_horas", "horas_desde_admision", "cumple_sla", "motivo",
     "observacion", "recibio", "dni_destinatario", "telefono_destinatario", "calificacion",
 ]
+
+# En JSON, cada columna va dentro de su objeto (como lo arma el sistema de transporte).
+ANIDADO = {
+    "fecha_hora": ("timestamp",), "evento": ("evento", "tipo"), "motivo": ("evento", "motivo"),
+    "observacion": ("evento", "observacion"), "intento": ("evento", "intento"),
+    "horas_desde_admision": ("evento", "horas_desde_admision"), "cumple_sla": ("evento", "cumple_sla"),
+    "nro_envio": ("envio", "nro"), "tipo_servicio": ("envio", "servicio"), "canal_admision": ("envio", "canal_admision"),
+    "sla_horas": ("envio", "sla_horas"), "bultos": ("envio", "bultos"), "peso_kg": ("envio", "peso_kg"),
+    "valor_declarado_ars": ("envio", "valor_declarado_ars"), "costo_envio_ars": ("envio", "costo_ars"),
+    "segmento_cliente": ("remitente", "segmento"), "cuenta_remitente": ("remitente", "cuenta"), "rubro": ("remitente", "rubro"),
+    "origen_localidad": ("origen", "localidad"), "origen_provincia": ("origen", "provincia"),
+    "destino_localidad": ("destino", "localidad"), "destino_provincia": ("destino", "provincia"),
+    "region_destino": ("destino", "region"), "dni_destinatario": ("destinatario", "dni"),
+    "telefono_destinatario": ("destinatario", "telefono"), "centro_distribucion": ("ubicacion", "centro"),
+    "latitud": ("ubicacion", "lat"), "longitud": ("ubicacion", "lon"), "vehiculo": ("transporte", "vehiculo"),
+    "repartidor_id": ("transporte", "repartidor"), "recibio": ("entrega", "recibio"), "calificacion": ("entrega", "calificacion"),
+}
+
+
+def a_json(fila: dict) -> str:
+    """Una fila plana como el evento JSON del sistema: anidado y sin los campos vacíos."""
+    evento: dict = {}
+    for columna in COLUMNAS:
+        valor = fila.get(columna, "")
+        if valor == "" or columna == "canal_admision" and fila["evento"] != "Admitido":   # dato de la admisión
+            continue
+        *padres, hoja = ANIDADO[columna]
+        destino = evento
+        for padre in padres:
+            destino = destino.setdefault(padre, {})
+        destino[hoja] = valor
+    return json.dumps(evento, ensure_ascii=False, separators=(",", ":"))
+
 
 # ── Dónde ───────────────────────────────────────────────────────────────────
 # Centro de distribución: (latitud, longitud, horas de troncal desde Buenos Aires,
@@ -601,7 +640,7 @@ def _recorrido(r: random.Random, e: dict) -> list[dict]:
     return ev
 
 
-def generar(desde: date, hasta: date, por_dia: int, semilla: int = 20261013) -> tuple[list[list], Counter]:
+def generar(desde: date, hasta: date, por_dia: int, semilla: int = 20261013) -> tuple[list[dict], Counter]:
     r = random.Random(semilla)
     cuentas = _cuentas(r)
     envios: list[dict] = []
@@ -615,7 +654,7 @@ def generar(desde: date, hasta: date, por_dia: int, semilla: int = 20261013) -> 
     envios.sort(key=lambda e: e["t0"])
     inicio = datetime(desde.year, desde.month, desde.day, tzinfo=ART)
     fin = datetime(hasta.year, hasta.month, hasta.day, tzinfo=ART) + timedelta(days=1)
-    filas: list[list] = []
+    filas: list[dict] = []
     eventos: Counter = Counter()
     for i, e in enumerate(envios):
         nro = f"ENV-{e['t0']:%y%m}-{i + 1:06d}"
@@ -634,25 +673,32 @@ def generar(desde: date, hasta: date, por_dia: int, semilla: int = 20261013) -> 
                 "dni_destinatario": e["dni"], "telefono_destinatario": e["tel"],
             }
             fila.update({k: v for k, v in x.items() if k not in ("ts", "evento", "centro", "lugar")})
-            filas.append([fila.get(c, "") for c in COLUMNAS])
-    filas.sort(key=lambda f: f[0])
+            filas.append({c: fila.get(c, "") for c in COLUMNAS})
+    filas.sort(key=lambda f: f["fecha_hora"])
     return filas, eventos
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
+    p.add_argument("--formato", choices=["json", "csv"], default="json")
     p.add_argument("--desde", default="2025-10-13")
     p.add_argument("--hasta", default="2026-10-12")
-    p.add_argument("--por-dia", type=int, default=55)
+    # En JSON, menos envíos por día: repite los nombres de los campos y el Builder acepta hasta 50 MB.
+    p.add_argument("--por-dia", type=int, default=None, help="envíos por día (55 en CSV, 45 en JSON)")
     a = p.parse_args()
-    filas, eventos = generar(date.fromisoformat(a.desde), date.fromisoformat(a.hasta), a.por_dia)
-    SALIDA.parent.mkdir(exist_ok=True)
-    with SALIDA.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(COLUMNAS)
-        w.writerows(filas)
-    envios = len({f[1] for f in filas})
-    print(f"{len(filas):,} eventos de {envios:,} envíos -> {SALIDA} ({SALIDA.stat().st_size / 1e6:.1f} MB)")
+    por_dia = a.por_dia or (45 if a.formato == "json" else 55)
+    filas, eventos = generar(date.fromisoformat(a.desde), date.fromisoformat(a.hasta), por_dia)
+    salida = SALIDA.with_suffix(".ndjson" if a.formato == "json" else ".csv")
+    salida.parent.mkdir(exist_ok=True)
+    with salida.open("w", encoding="utf-8", newline="") as f:
+        if a.formato == "json":
+            f.writelines(a_json(fila) + "\n" for fila in filas)
+        else:
+            w = csv.writer(f)
+            w.writerow(COLUMNAS)
+            w.writerows([fila[c] for c in COLUMNAS] for fila in filas)
+    envios = len({f["nro_envio"] for f in filas})
+    print(f"{len(filas):,} eventos de {envios:,} envíos -> {salida} ({salida.stat().st_size / 1e6:.1f} MB)")
     print("  " + " · ".join(f"{k}: {v:,}" for k, v in eventos.most_common()))
 
 
