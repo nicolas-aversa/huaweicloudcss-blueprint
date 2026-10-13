@@ -175,18 +175,29 @@ def mapping_del_indice() -> dict[str, Any]:
     }
 
 
-def transform(slug: str, index_pattern: str, campo: str, tipo: str) -> dict[str, Any]:
+PERIODO_DEL_TRANSFORM_MIN = 60
+
+
+def transform(slug: str, index_pattern: str, campo: str, tipo: str, ahora_ms: "int | None" = None) -> dict[str, Any]:
     """El Transform que deja una fila por texto distinto en `busqueda-<caso>`,
     continuo: un texto nuevo en los logs entra (y se vectoriza) solo.
 
     Cada hora y no cada pocos minutos: en cada pasada reescribe (y el pipeline
     vuelve a vectorizar) cada texto que apareció de nuevo, y con ingesta en
     vivo eso es carga de CPU del nodo. Solo los eventos que tienen el campo:
-    los demás dejaban una fila `texto: null` que no se puede vectorizar."""
+    los demás dejaban una fila `texto: null` que no se puede vectorizar.
+
+    La primera pasada, al minuto: el scheduler corre en `start_time + n·período`,
+    y con `start_time: 1` eso era la próxima hora en punto — "Activar los
+    plugins" encontraba el índice vacío (sin evaluación ni frases sugeridas)."""
+    import time
+
     agrupable = campo_agrupable(campo, tipo)
+    ahora_ms = int(time.time() * 1000) if ahora_ms is None else ahora_ms
     return {"transform": {
         "enabled": True, "continuous": True,
-        "schedule": {"interval": {"period": 60, "unit": "Minutes", "start_time": 1}},
+        "schedule": {"interval": {"period": PERIODO_DEL_TRANSFORM_MIN, "unit": "Minutes",
+                                  "start_time": ahora_ms - (PERIODO_DEL_TRANSFORM_MIN - 1) * 60_000}},
         "description": f"Textos distintos de {campo} para la búsqueda híbrida de {slug} (plataforma)",
         "source_index": index_pattern, "target_index": indice(slug),
         "data_selection_query": {"exists": {"field": agrupable}}, "page_size": 200,
@@ -328,22 +339,34 @@ def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
     return fuera
 
 
+# Cuántos puestos más abajo tiene que quedar el texto por palabras para que
+# la diferencia se vea. Con datos en castellano, la búsqueda por palabras casi
+# siempre trae el texto entre sus diez (comparte "de", "con" y las raíces):
+# pedir que no lo trajera dejaba un dataset entero sin sugerencias.
+VENTAJA_MINIMA = 3
+
+
 def probar(candidata: dict[str, str], por_palabras: list[dict[str, Any]],
            hibrida: list[dict[str, Any]]) -> "dict[str, Any] | None":
     """La sugerencia, si prueba la diferencia: la híbrida trae su texto entre
-    los primeros y la búsqueda por palabras no lo trae."""
+    los primeros y por palabras no aparece, o aparece bastante más abajo."""
     lexica = [r.get("texto") for r in por_palabras]
     primeros = [r.get("texto") for r in hibrida][:PUESTO_MAXIMO]
     objetivo = candidata["objetivo"]
-    if objetivo in lexica or objetivo not in primeros:
+    if objetivo not in primeros:
         return None
-    return {"busqueda": candidata["busqueda"], "encuentra": objetivo,
-            "puesto": primeros.index(objetivo) + 1, "por_palabras": len(lexica)}
+    puesto = primeros.index(objetivo) + 1
+    puesto_por_palabras = lexica.index(objetivo) + 1 if objetivo in lexica else 0
+    if puesto_por_palabras and puesto_por_palabras < puesto + VENTAJA_MINIMA:
+        return None
+    return {"busqueda": candidata["busqueda"], "encuentra": objetivo, "puesto": puesto,
+            "por_palabras": len(lexica), "puesto_por_palabras": puesto_por_palabras}
 
 
 def elegir(probadas: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Las mejores: el texto más arriba en la híbrida, y por palabras lo menos posible."""
-    return sorted(probadas, key=lambda p: (p["puesto"], p["por_palabras"]))[:SUGERENCIAS]
+    """Las mejores: el texto más arriba en la híbrida, y por palabras ausente o
+    lo más abajo posible."""
+    return sorted(probadas, key=lambda p: (p["puesto"], -(p.get("puesto_por_palabras") or 99), p["por_palabras"]))[:SUGERENCIAS]
 
 
 # ── La evaluación en Search Relevance ───────────────────────────────────────

@@ -49,6 +49,9 @@ def test_las_piezas():
     # Cada hora (cada pasada vuelve a vectorizar lo que apareció de nuevo) y solo
     # los eventos con el campo (si no, una fila `texto: null` sin vector).
     assert t["schedule"]["interval"]["period"] == 60 and t["schedule"]["interval"]["unit"] == "Minutes"
+    # La primera pasada, al minuto (con start_time: 1 era la próxima hora en punto).
+    pr = busqueda.transform("x", "x-*", "msg", "keyword", ahora_ms=10_000_000)["transform"]["schedule"]["interval"]
+    assert pr["start_time"] == 10_000_000 - 59 * 60_000, "start + 1·período = ahora + 1 minuto"
     assert t["data_selection_query"] == {"exists": {"field": "comentario.keyword"}}
     m = busqueda.mapping_del_indice()
     assert m["settings"]["index.default_pipeline"] == busqueda.PIPELINE_DE_INGESTA and m["settings"]["index.knn"]
@@ -386,8 +389,12 @@ def test_una_sugerencia_prueba_la_diferencia():
     c = {"busqueda": "no puede entrar", "objetivo": "Admin login failed"}
     hits = lambda *ts: [{"texto": t} for t in ts]  # noqa: E731
     assert busqueda.probar(c, hits("Otro"), hits("X", "Admin login failed")) == {
-        "busqueda": "no puede entrar", "encuentra": "Admin login failed", "puesto": 2, "por_palabras": 1}
+        "busqueda": "no puede entrar", "encuentra": "Admin login failed", "puesto": 2, "por_palabras": 1,
+        "puesto_por_palabras": 0}
     assert busqueda.probar(c, hits("Admin login failed"), hits("Admin login failed")) is None, "por palabras también"
+    assert busqueda.probar(c, hits("a", "b", "Admin login failed"), hits("Admin login failed")) is None, "casi igual de arriba"
+    # En castellano casi siempre está entre los diez por palabras: vale si queda bastante más abajo.
+    assert busqueda.probar(c, hits(*"abcdef", "Admin login failed"), hits("Admin login failed"))["puesto_por_palabras"] == 7
     assert busqueda.probar(c, hits(), hits(*"abcde", "Admin login failed")) is None, "la híbrida, no entre los primeros"
     p = lambda puesto, n: {"puesto": puesto, "por_palabras": n}  # noqa: E731
     assert busqueda.elegir([p(3, 0), p(1, 5), p(1, 0), p(2, 0)]) == [p(1, 0), p(1, 5), p(2, 0)]
@@ -428,7 +435,8 @@ def test_que_escribir_en_search(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_os_req", req)
     monkeypatch.setattr(semantica, "_llamar_al_llm", llamar)
     d = c.get(url).json()
-    assert d == {"sugerencias": [{"busqueda": "producto dañado", "encuentra": "llegó roto", "puesto": 1, "por_palabras": 0}],
+    assert d == {"sugerencias": [{"busqueda": "producto dañado", "encuentra": "llegó roto", "puesto": 1, "por_palabras": 0,
+                                  "puesto_por_palabras": 0}],
                  "ejemplos": textos, "motivo": ""}, "la de la demora, por palabras también la encuentra"
     assert "llegó roto" in llm[0] and "«comentario» de «ventas»" in llm[0]
     assert all(u.startswith("/busqueda-ventas/_search") for u in pedidos)

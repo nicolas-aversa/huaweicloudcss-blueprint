@@ -6871,7 +6871,8 @@
       }
       return sug.map(s => `<button type="button" class="fn__sug" data-q="${_attr(s.busqueda)}" title="${_attr(
         `La híbrida trae «${_corto(s.encuentra)}»${s.puesto > 1 ? ` (puesto ${s.puesto})` : ' primero'}; `
-        + 'por palabras no aparece. Tocá para copiar.')}">${escapeHtml(s.busqueda)}</button>`).join('') + otras;
+        + `${s.puesto_por_palabras ? `por palabras sale en el puesto ${s.puesto_por_palabras}` : 'por palabras no aparece'}. Tocá para copiar.`)}">`
+        + `${escapeHtml(s.busqueda)}</button>`).join('') + otras;
     }
     // Los números: la evaluación que dejó armada la plataforma en Search Relevance.
     function evaluacionHTML(d) {

@@ -250,6 +250,8 @@ check('las sugerencias, un toque para copiar', sug.includes('<button type="butto
 check('el detalle, al pasar el mouse', sug.includes('title="La híbrida trae «Admin login failed» primero; por palabras no aparece. Tocá para copiar."')
   && sug.includes('(puesto 3)'), sug);
 check('el texto largo, cortado', sug.includes('x'.repeat(89) + '…') && !sug.includes('x'.repeat(90)), sug);
+const abajo = sugerenciasHTML({ sugerencias: [{ busqueda: 'falta de aire', encuentra: 'disnea súbita', puesto: 1, por_palabras: 10, puesto_por_palabras: 8 }] });
+check('por palabras, más abajo', abajo.includes('La híbrida trae «disnea súbita» primero; por palabras sale en el puesto 8.'), abajo);
 check('se pueden pedir otras', sug.includes('class="fn__otras"'));
 const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó', 'tercero'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
 check('sin sugerencias, textos que hay', sinSug.includes('algo como «llegó roto» o «tardó», dicho con otras palabras')

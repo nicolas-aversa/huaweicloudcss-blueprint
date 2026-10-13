@@ -74,6 +74,16 @@ def secciones(slug: str, fields: list[dict], **kw: Any) -> dict[str, str]:
     return fuera
 
 
+def _transform_de_busqueda(slug: str, ip: str, campo: str, tipo: str) -> dict[str, Any]:
+    """El de la búsqueda, con la hora de quien lo corre (como el rollup): la
+    primera pasada sale de `start_time`, y la del momento de exportar no le sirve."""
+    import busqueda
+
+    cuerpo = busqueda.transform(slug, ip, campo, tipo)
+    cuerpo["transform"]["schedule"]["interval"]["start_time"] = "<AHORA_EN_EPOCH_MS>"
+    return cuerpo
+
+
 def _armar(slug: str, fields: list[dict], *, label: str = "", index_name: str = "",
            seguridad_propuesta: "dict | None" = None, excluir: "list[str] | None" = None,
            filter_code: str = "", retencion_dias: int = 0, decidido: "dict | None" = None
@@ -234,7 +244,7 @@ def _armar(slug: str, fields: list[dict], *, label: str = "", index_name: str = 
             _req("PUT", f"_ingest/pipeline/{busqueda.PIPELINE_DE_INGESTA}", busqueda.pipeline_de_ingesta("<MODEL_ID_TEXTOS>")),
             _req("PUT", f"_search/pipeline/{busqueda.PIPELINE_DE_BUSQUEDA}", busqueda.pipeline_de_busqueda()),
             _req("PUT", idx, busqueda.mapping_del_indice()),
-            _req("PUT", f"_plugins/_transform/{tid}", busqueda.transform(slug, ip, cfg["campo"], cfg["tipo"])),
+            _req("PUT", f"_plugins/_transform/{tid}", _transform_de_busqueda(slug, ip, cfg["campo"], cfg["tipo"])),
             _req("POST", f"_plugins/_transform/{tid}/_start"),
             _comentario("Probala:"),
             _req("POST", f"{idx}/_search?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}",
