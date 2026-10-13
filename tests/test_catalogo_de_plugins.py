@@ -222,6 +222,10 @@ const bus = funcionDe('busqueda', data);
 check('lo del cluster va con su función, si tiene algo que decir', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
 const busOk = funcionDe('busqueda', { ...data, plugins: { ...data.plugins, _cluster: [T('embeddings', 'ok')] } });
 check('el modelo listo no se muestra', busOk.cluster.length === 0, JSON.stringify(busOk.cluster));
+// Sin tarjeta por caso (el agente, los reportes): listo si el catálogo lo da por aplicado.
+const agente = detalleDeFuncionHTML(funcionDe('agente', data));
+check('el agente aplicado, listo en cada caso (no «Sin activar»)', agente.includes('<span class="fn__caso-nombre">SIEM</span><span class="sev sev--ok">Listo</span>')
+  && !agente.includes('Sin activar'), agente);
 // La búsqueda se prueba desde su panel: un caso listo, lo que buscás y los resultados lado a lado.
 const conBusq = { ...data, catalogo: [...data.catalogo, C('busqueda', ['siem', 'produccion-pozos'], ['siem'])],
   plugins: { ...data.plugins, siem: [...data.plugins.siem, T('busqueda', 'ok', { campo: 'msg' })],

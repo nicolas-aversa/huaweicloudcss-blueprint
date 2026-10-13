@@ -6818,8 +6818,9 @@
     // lo del cluster que la acompaña y sus comandos de Dev Tools (a demanda).
     function detalleDeFuncionHTML(f) {
       const [que, negocio] = _PARA_QUE_SIRVE[f.id] || [];
-      const caso = (s, t) => {
-        const [texto, clase] = t ? (_ESTADO_PLUGIN[t.estado] || [t.estado, '']) : ['Sin activar', 'sev--low'];
+      const caso = (s, t, hecho = false) => {
+        const [texto, clase] = t ? (_ESTADO_PLUGIN[t.estado] || [t.estado, ''])
+          : hecho ? _ESTADO_PLUGIN.ok : ['Sin activar', 'sev--low'];
         const link = t && ((t.links || []).find(l => l.url) || (t.filas || []).find(x => x.url));
         return `<li class="fn__caso"><span class="fn__caso-nombre">${escapeHtml(SLUG_LABELS[s] || s)}</span>`
           + `<span class="sev ${clase}">${escapeHtml(texto)}</span>`
@@ -6829,7 +6830,10 @@
       };
       const conComparador = f.id === 'busqueda' && f.tarjetas.some(([, t]) => t.estado === 'ok');
       const conTarjeta = f.tarjetas.filter(([, t]) => !conComparador || t.estado !== 'ok').map(([s, t]) => caso(s, t));
-      const sinTarjeta = f.aplica.filter(s => s !== '_cluster' && !f.tarjetas.some(([x]) => x === s)).map(s => caso(s, null));
+      // Sin tarjeta del caso (el agente y los reportes se registran para el
+      // cluster): listo si el catálogo lo da por aplicado, como dice la función.
+      const sinTarjeta = f.aplica.filter(s => s !== '_cluster' && !f.tarjetas.some(([x]) => x === s))
+        .map(s => caso(s, null, f.hechos.includes(s)));
       const casos = [...conTarjeta, ...sinTarjeta].join('');
       return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
@@ -8791,7 +8795,6 @@
           <summary>${icon('settings')} Más opciones <svg class="icon setup-card__chevron"><use href="#ic-chevron"/></svg></summary>
           <div class="env-mas__cuerpo">
             ${allDone ? setupPanel : ''}
-            ${matrizDePluginsHTML(filas, data.plugins)}
             <div class="env-extras">${accesosHTML(pipelines)}</div>
           </div>
         </details>

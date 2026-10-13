@@ -106,8 +106,8 @@ def test_la_vista_va_sin_pestanas():
     # snapshots: son para el cliente, van en el runbook).
     orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${allDone ? '' : setupPanel}",
              "${funcionesHTML(data)}", '<details class="env-mas" id="infra-mas"', "${allDone ? setupPanel : ''}",
-             "${matrizDePluginsHTML(filas, data.plugins)}",
              '<div class="env-extras">${accesosHTML(pipelines)}</div>']
+    assert "${matrizDePluginsHTML(" not in vista, "sin «Detalle por caso»"
     posiciones = [vista.index(p) for p in orden]
     assert posiciones == sorted(posiciones), orden
     # El resultado de "Provisionar plugins", dentro de la puesta en marcha.

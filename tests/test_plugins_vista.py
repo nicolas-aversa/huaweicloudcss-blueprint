@@ -584,11 +584,13 @@ process.exit(fallos.length ? 1 : 0);
     assert "|| !!data.activando !== !!antes.activando) {" in html, "y al terminar la activación"
 
 
-def test_la_matriz_esta_conectada():
+def test_la_matriz_ya_no_va_en_la_demo():
+    """«Detalle por caso» se sacó de Entorno desplegado (pedido del usuario): en
+    la demo alcanza con las funciones. La matriz y sus clicks quedan, sin uso."""
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    function renderInfraView(data) {")
     vista = html[i:html.index("    async function hydrateActiveEnv() {", i)]
-    assert "${matrizDePluginsHTML(filas, data.plugins)}" in vista
+    assert "${matrizDePluginsHTML(" not in vista
     assert "body.querySelector('#infra-plugins')?.addEventListener('click'" in vista
     assert "if (abrir) return verPlugins(abrir, celda.dataset.plugin);" in vista, "una celda abre su tarjeta"
     assert "if (explicar) return explicarAnomalia(explicar);" in vista
