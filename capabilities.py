@@ -393,7 +393,11 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         "Alternatively use the extractors: year(@timestamp)=YYYY and month(@timestamp)=M (1-12).\n"
         "9. For sort direction use EITHER the '-' prefix OR the 'desc' suffix, NEVER both: "
         "'sort -total' or 'sort total desc' (ascending: 'sort total' or 'sort +total'). "
-        "NEVER write 'sort -total desc' - it is invalid.\n"
+        "NEVER write 'sort -total desc' - it is invalid. "
+        # En PPL 3 la columna de `by span(...)` sin alias no se puede nombrar:
+        # "Field [span(@timestamp, 1d)] not found" (visto en la ECS).
+        "When grouping by time, ALWAYS alias the span and use that alias: "
+        "'by span(@timestamp, 1d) as dia | sort dia'. NEVER refer to `span(...)` by name in sort, where or eval.\n"
         # La ingesta borra los campos vacíos (la limpieza del perfilador): un
         # comentario vacío no es '', es un campo AUSENTE. "¿Cuántas sin
         # comentario?" daba 0 comparando con ''.
@@ -407,7 +411,7 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
         "CORRECT PATTERNS:\n"
         f"{examples}"
         f"# Filter a month (never match/wildcards on dates):\nsource={index_pattern} | where @timestamp >= '2025-03-01 00:00:00' and @timestamp < '2025-04-01 00:00:00' | stats count() as total\n\n"
-        f"# Time histogram:\nsource={index_pattern} | stats count() as total by span(@timestamp, 1d)"
+        f"# Time histogram:\nsource={index_pattern} | stats count() as total by span(@timestamp, 1d) as dia | sort dia"
     )
 
 
@@ -843,14 +847,36 @@ _SUCCESS_VALUES = frozenset(
 )
 
 
-def _field_desc(f: dict[str, Any], values: "list[str] | None" = None) -> str:
+# Un caudal (m3/d, bbl/d, kWh/h, "por día"): lo que mide es una tasa, no una
+# cantidad. Sumar sus lecturas da un número sin sentido (en la ECS, "3.167.042
+# m³" sumando el caudal de cada pozo cada 2 horas): el total por día es el
+# promedio de cada entidad ese día, sumado entre entidades.
+_TASA = re.compile(r"/\s*(d|día|dia|day|h|hr|hora|hour)\b|\bpor\s+(día|dia|hora)\b|\bper\s+(day|hour)\b|\bbpd\b", re.I)
+_NOMBRE_DE_TASA = re.compile(r"(_m3d|_bpd|_mm3d|_por_dia|_per_day|_por_hora|_per_hour)$", re.I)
+
+
+def es_tasa(f: dict[str, Any]) -> bool:
+    """Si un campo numérico es un caudal (por su unidad o su nombre)."""
+    if (f.get("type") or "") not in _MEASURE_TYPES:
+        return False
+    return bool(_TASA.search(f.get("unit") or "") or _NOMBRE_DE_TASA.search((f.get("field_path") or "").strip()))
+
+
+def _field_desc(f: dict[str, Any], values: "list[str] | None" = None, entidad: str = "") -> str:
     """Descripción de un campo para el prompt del PPLTool: la etiqueta de negocio
-    + unidad + los valores reales del índice (si se descubrieron)."""
+    + unidad + los valores reales del índice (si se descubrieron). Un caudal
+    lleva cómo totalizarlo (con la entidad del caso, si se conoce)."""
     desc = (f.get("business_label") or f.get("raw_name") or "").strip()
     unit = (f.get("unit") or "").strip()
     if unit:
         desc += f" (in {unit})"
-    if (f.get("type") or "") in _MEASURE_TYPES:
+    if es_tasa(f):
+        path = (f.get("field_path") or "").strip()
+        por = f"{entidad}, " if entidad else ""
+        desc += (" — RATE (a flow per day or hour, not an amount): NEVER sum its raw readings. For a total per "
+                 f"day: stats avg({path}) as tasa by span(@timestamp, 1d) as dia{', ' + entidad if entidad else ''} "
+                 f"| stats sum(tasa) as total by dia | sort dia. For one {por.rstrip(', ') or 'source'}: avg it")
+    elif (f.get("type") or "") in _MEASURE_TYPES:
         desc += " — numeric measure: sum/avg it"
     if values:
         shown = ", ".join(values[:12])
@@ -1005,6 +1031,11 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         entity = next((f for f in usable if _ENTITY_HINT_RE.search(f["field_path"])
                        and (f.get("type") or "") not in _MEASURE_TYPES), None)
     if entity:
+        # Los caudales se totalizan por entidad: su descripción la nombra.
+        for f in usable:
+            if es_tasa(f) and f["field_path"].strip() in prompt_fields:
+                prompt_fields[f["field_path"].strip()] = _field_desc(f, enums.get(f["field_path"].strip()),
+                                                                     entidad=entity["field_path"].strip())
         forecasts.append({
             "name": f"{slug}-entities-forecast",
             "feature_name": "unique_entities",
