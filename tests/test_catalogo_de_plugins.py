@@ -256,26 +256,28 @@ const listaB = funcionesHTML({ ...conBusq, catalogo: [C('busqueda', ['siem'], ['
 check('la tarjeta lista se prueba', tile(listaB, 'busqueda').includes('class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'), tile(listaB, 'busqueda'));
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
 check('escapado', conX.includes('&lt;x&gt;') && !conX.includes('<x>'), conX);
-// Qué escribir en Search: las búsquedas probadas, o textos que hay.
-const sug = sugerenciasHTML({ sugerencias: [{ busqueda: 'no <puede> entrar', encuentra: 'Admin login failed', puesto: 1, por_palabras: 0 },
+// Qué escribir en Search: un toque copia; el detalle, al pasar el mouse.
+const sug = sugerenciasHTML({ sugerencias: [{ busqueda: 'no "puede" entrar', encuentra: 'Admin login failed', puesto: 1, por_palabras: 0 },
                                             { busqueda: 'equipo lento', encuentra: 'x'.repeat(200), puesto: 3, por_palabras: 2 }] });
-check('sugerencias, con copiar', sug.includes('<strong class="fn__sug-q">no &lt;puede&gt; entrar</strong><button type="button" class="btn btn-ghost btn-sm fn__copiar-sug">Copiar</button>')
-  && sug.includes('la híbrida trae «Admin login failed» primero; por palabras no aparece') && sug.includes('(puesto 3)'), sug);
+check('las sugerencias, un toque para copiar', sug.includes('<button type="button" class="fn__sug" data-q="no &quot;puede&quot; entrar"')
+  && sug.includes('>no &quot;puede&quot; entrar</button>'), sug);
+check('el detalle, al pasar el mouse', sug.includes('title="La híbrida trae «Admin login failed» primero; por palabras no aparece. Tocá para copiar."')
+  && sug.includes('(puesto 3)'), sug);
 check('el texto largo, cortado', sug.includes('x'.repeat(89) + '…') && !sug.includes('x'.repeat(90)), sug);
-check('se pueden pedir otras', sug.includes('fn__otras'));
-const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
-check('sin sugerencias, los textos que hay', sinSug.includes('El LLM no propuso búsquedas (RuntimeError). Buscá alguno de estos textos dicho con otras palabras: «llegó roto» · «tardó»'), sinSug);
-// La evaluación con números: dónde verla, o por qué no está.
-const ev = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, query_set: 'SIEM · búsquedas',
-  url_experimentos: 'https://d/app/searchRelevance#/experiment',
+check('se pueden pedir otras', sug.includes('class="fn__otras"'));
+const sinSug = sugerenciasHTML({ sugerencias: [], ejemplos: ['llegó roto', 'tardó', 'tercero'], motivo: 'El LLM no propuso búsquedas (RuntimeError)' });
+check('sin sugerencias, textos que hay', sinSug.includes('algo como «llegó roto» o «tardó», dicho con otras palabras')
+  && !sinSug.includes('tercero') && sinSug.includes('title="El LLM no propuso búsquedas (RuntimeError)"'), sinSug);
+// Los números: un link a cada experimento, en una línea.
+const ev = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, url_experimentos: 'https://d/app/searchRelevance#/experiment',
   experimentos: { hibrida: 'https://d/app/searchRelevance#/experiment/view/H', palabras: 'https://d/app/searchRelevance#/experiment/view/P' } });
-check('la evaluación, en Experiments y con un link a cada uno', ev.includes('<a href="https://d/app/searchRelevance#/experiment" target="_blank" rel="noopener"><strong>Experiments</strong></a>')
-  && ev.includes('sobre 10 búsquedas') && ev.includes('<a href="https://d/app/searchRelevance#/experiment/view/H" target="_blank" rel="noopener">Search Evaluation · híbrida</a> · <a')
-  && !ev.includes('Query Set Comparison</a>') && ev.includes('NDCG'), ev);
-const evSinLinks = evaluacionHTML({ evaluacion: { ok: true, consultas: 10 }, query_set: 'SIEM · búsquedas' });
-check('sin los links, el nombre del query set', evSinLinks.includes('<strong>Experiments</strong> (el título') && evSinLinks.includes('<code>SIEM · búsquedas</code>'), evSinLinks);
+check('los números, un link a cada experimento', ev.includes('<strong>Números</strong> de 10 búsquedas calificadas por un LLM: '
+  + '<a href="https://d/app/searchRelevance#/experiment/view/H" target="_blank" rel="noopener">híbrida</a> · <a href="https://d/app/searchRelevance#/experiment/view/P"')
+  && !ev.includes('comparación</a>') && ev.includes('mirá NDCG'), ev);
+check('sin los links, la lista de Experiments', evaluacionHTML({ evaluacion: { ok: true, consultas: 10 },
+  url_experimentos: 'https://d/app/searchRelevance#/experiment' }).includes('#/experiment" target="_blank" rel="noopener">Experiments</a>'));
 check('la evaluación que falló, con su motivo', evaluacionHTML({ evaluacion: { ok: false, motivo: 'sin el juez' } })
-  .includes('no se armó: sin el juez.'));
+  .includes('no se armaron (sin el juez)'));
 check('sin evaluación, nada', evaluacionHTML({}) === '');
 // Dev Tools, desde la URL de Dashboards.
 check('dev tools', devToolsDe('https://1.2.3.4:5601/app/home#/') === 'https://1.2.3.4:5601/app/dev_tools#/console');
@@ -300,7 +302,8 @@ def test_que_podes_mostrar_esta_conectado():
     assert "if (fila) return verFuncion(fila, data);" in vista
     assert "if (caja && e.target.closest('.busq__caso')) llenarComparador(caja);" in vista
     # Los pasos, como es la pantalla: índice, pipeline y consulta de cada lado.
-    assert "En Query 1 dejá el pipeline vacío y pegá la consulta por palabras; en Query 2 elegí el pipeline" in html
+    assert "índice <code>${escapeHtml(d.indice)}</code> en los dos lados y, en Query 2, pipeline" in html
+    assert "querySelector(`.fn__consulta[data-cual=\"${copiarDsl.dataset.cual}\"]`)" in vista, "Copiar Query 1/2: la consulta oculta"
     assert "busquedaHTML" not in html and "probarBusqueda" not in html and "/api/v1/plugins/buscar" not in html
     assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
