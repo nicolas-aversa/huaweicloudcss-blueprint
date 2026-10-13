@@ -14,6 +14,8 @@ VERTICAL = {
     'icon': 'shopping-cart',
     'index_base': 'ventas-ecommerce',
     'description': 'E-commerce · órdenes, revenue, clientes',
+    # Oculto: los datos están en inglés. Sacar la marca lo vuelve a mostrar.
+    'hidden': True,
     'sample': '{"order_id":100136,"order_date":"2025-07-01T00:08:46+00:00","status":"COMPLETED","customer_id":18,"customer_full_name":"Clarice Reyes","customer_gender":"FEMALE","category":["Women\'s Shoes","Women\'s Clothing"],"manufacturer":["Tigress Enterprises","Pyramidustries"],"total_quantity":2,"taxful_total_price":45.98,"currency":"EUR","day_of_week":"Tuesday","geo":{"city":"Birmingham","region":"Birmingham","country":"GB"},"products":[{"product_id":15117,"sku":"ZO0019500195","category":"Women\'s Shoes","price":28.99,"quantity":1}]}',
     'filter_code': """filter {
   json { source => "message" }

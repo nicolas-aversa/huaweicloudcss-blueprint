@@ -60,7 +60,9 @@ def _filas(code: str, lineas):
 
 
 def _muestra(slug):
-    archivos = verticals.demo_dataset_files().get(slug) or []
+    # Del registro y no de demo_dataset_files(): los ocultos no se pre-cargan,
+    # pero se siguen chequeando (se pueden volver a mostrar).
+    archivos = (verticals.get_vertical(slug) or {}).get("dataset_files") or []
     ruta = _DATASETS / archivos[0] if archivos else None
     if not ruta or not ruta.exists():
         pytest.skip(f"sin dataset local para {slug}")

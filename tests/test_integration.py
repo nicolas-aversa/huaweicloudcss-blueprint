@@ -5161,7 +5161,8 @@ def test_spec_from_fields_uses_role_entity_for_metric():
 # ===========================================================================
 def test_verticals_registry_wellformed():
     """Cada VERTICAL tiene las keys mínimas; los visibles traen card+specs y
-    fraud-detection es el único hidden (sin card). Los agregadores producen
+    los hidden no tienen card: fraud-detection y los que tienen datos en inglés
+    (ventas-ecommerce, encuentros-clinicos). Los agregadores producen
     exactamente los sets que el resto del backend espera (13 capabilities,
     13 industry, 8 datasets — cts no tiene dataset: lee su propio bucket)."""
     import verticals as V
@@ -5175,8 +5176,8 @@ def test_verticals_registry_wellformed():
     visible = V.visible_verticals()
     assert [v["slug"] for v in visible] == [
         "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
-        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos",
-        "cts"]
+        "streaming-ott", "produccion-pozos", "cts"]
+    assert [v["slug"] for v in vs if v.get("hidden")] == ["fraud-detection", "ventas-ecommerce", "encuentros-clinicos"]
     for v in visible:
         # Card + datos de front + specs backend presentes en cada primario.
         for k in ("label", "full_label", "group", "icon", "index_base", "description",
@@ -5203,9 +5204,10 @@ def test_verticals_registry_wellformed():
 
     # Agregadores == lo que consume el backend.
     assert len(V.capability_specs()) == 14
+    # Los hidden no se pre-cargan en "Preparar bucket".
     assert set(V.demo_dataset_files()) == {
         "siem", "fortianalyzer", "transacciones-billetera", "transacciones-alyc",
-        "streaming-ott", "produccion-pozos", "ventas-ecommerce", "encuentros-clinicos"}
+        "streaming-ott", "produccion-pozos"}
     # fortianalyzer aporta sus 4 sub-specs backend-only.
     assert {"fortianalyzer-soc", "fortianalyzer-traffic", "fortianalyzer-utm",
             "fortianalyzer-event"} <= set(V.capability_specs())
@@ -5341,7 +5343,7 @@ def test_read_sample_sin_bucket_es_400():
 
 def test_index_inyecta_verticals_y_endpoint():
     """GET / reemplaza el placeholder por el JSON real (no queda null) y expone
-    los 9 verticales visibles; GET /api/v1/verticals devuelve el mismo payload."""
+    los 7 verticales visibles; GET /api/v1/verticals devuelve el mismo payload."""
     import re as _re
 
     html = client.get("/").text
@@ -5352,7 +5354,7 @@ def test_index_inyecta_verticals_y_endpoint():
     # Logistics no tiene caso curado: sus casos salen del Builder.
     assert [g["id"] for g in injected["groups"]] == ["seguridad", "fintech", "retail", "media", "energia", "salud", "logistica"]
     visible =[v for v in injected["verticals"] if not v["hidden"]]
-    assert len(visible) == 9
+    assert len(visible) == 7
     assert {v["slug"] for v in visible} >= {"siem", "transacciones-alyc", "fortianalyzer", "cts"}
 
     # El front necesita el origen propio para no mandar CTS a buscar sus trazas

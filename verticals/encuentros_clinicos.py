@@ -14,6 +14,8 @@ VERTICAL = {
     'icon': 'heart',
     'index_base': 'encuentros-clinicos',
     'description': 'Salud · consultas, pacientes, triage',
+    # Oculto: los datos están en inglés. Sacar la marca lo vuelve a mostrar.
+    'hidden': True,
     'sample': '2025-07-01T07:14:09Z,emergency,183460006,Obstetric emergency hospital admission,d286528e,Hamilton,129.16,129.16,69.16,Normal pregnancy,YELLOW',
     'filter_code': """filter {
   csv {

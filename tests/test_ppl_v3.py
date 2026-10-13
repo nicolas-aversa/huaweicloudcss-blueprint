@@ -389,7 +389,7 @@ def test_sin_ppl3_no_hay_ml_ni_join():
 def test_las_sugeridas_muestran_lo_nuevo_entre_las_primeras():
     import herramientas_chat as hc
     import verticals
-    q = {v["slug"]: v["suggested_questions"] for v in verticals.visible_verticals()}
+    q = {v["slug"]: v["suggested_questions"] for v in verticals.all_verticals()}
     primeras = {s: qs[:5] for s, qs in q.items()}
     assert "¿Qué IPs atacaron la web (WAF) y además aparecen en el firewall?" in primeras["siem"]
     assert "Segmentá los pedidos en 3 grupos por monto y cantidad" in primeras["ventas-ecommerce"]
