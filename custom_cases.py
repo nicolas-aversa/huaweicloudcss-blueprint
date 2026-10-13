@@ -81,6 +81,20 @@ def cases_dir() -> Path:
     return _auth.DATA_ROOT / "cases"
 
 
+# Qué formato lee el pipeline, como lo diría el SA. Sale del filtro (lo arma el
+# Builder para cualquier archivo), así que vale también para los casos guardados
+# antes de que la card lo mostrara.
+_FORMATOS = [(r"\bcsv\s*\{", "CSV"), (r"\bjson\s*\{", "JSON"), (r"\bxml\s*\{", "XML"),
+             (r"\bkv\s*\{", "clave=valor"), (r"SYSLOG|syslog_pri", "Syslog"), (r"CEF:", "CEF")]
+
+
+def formato_del_filtro(filter_code: str) -> str:
+    hallados = [nombre for patron, nombre in _FORMATOS if re.search(patron, filter_code or "")]
+    if not hallados and re.search(r"\b(grok|dissect)\s*\{", filter_code or ""):
+        hallados = ["Texto"]
+    return ", ".join(hallados)
+
+
 # ── Normalización ────────────────────────────────────────────────────────────
 def slugify(text: str) -> str:
     """`'Logs de mi Firewall'` -> `'logs-de-mi-firewall'`."""
@@ -261,6 +275,8 @@ def front_entries() -> list[dict]:
             "icon": c.get("icon", "box"),
             "indexBase": c.get("index_base", "") or c["slug"],
             "description": c.get("description", ""),
+            "formato": c.get("formato") or formato_del_filtro(c.get("filter_code", "")),
+            "origen": c.get("origen", ""),
             "dedupId": "",
             "hidden": False,
             "hasCapability": bool(c.get("fields")),  # el asistente sale de sus campos
@@ -384,6 +400,10 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
         "icon": icon,
         "index_base": slug,
         "description": str(meta.get("description", "") or "").strip()[:200],
+        # La línea chica de la card: el formato lo dice el filtro; de qué sistema
+        # sale el dato, el SA (no se puede deducir del archivo).
+        "formato": formato_del_filtro(filter_code),
+        "origen": str(meta.get("origen", "") or "").strip()[:40],
         "sample": sample,
         "filter_code": filter_code,
         "fields": fields,

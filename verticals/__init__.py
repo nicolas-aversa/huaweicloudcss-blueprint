@@ -16,6 +16,7 @@ Convenciones del shape de `VERTICAL`:
   extra_capabilities/extra_dashboards                             -> sub-specs backend-only
   obs_bucket, obs_prefix                                          -> origen propio (solo cts)
   hidden (bool)                                                   -> sin card ni grupo (ej. fraud-detection)
+  formato, origen                                                 -> la línea chica de la card (cómo llega el dato, de dónde sale)
 """
 from __future__ import annotations
 
@@ -141,6 +142,8 @@ def front_payload() -> dict:
             "obsBucket": v.get("obs_bucket", ""),
             "obsPrefix": v.get("obs_prefix", ""),
             "description": v.get("description", ""),
+            "formato": v.get("formato", ""),
+            "origen": v.get("origen", ""),
             "dedupId": v.get("dedup_id", ""),
             "hidden": bool(v.get("hidden")),
             "hasCapability": "capability" in v,

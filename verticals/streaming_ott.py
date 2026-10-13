@@ -14,6 +14,9 @@ VERTICAL = {
     'icon': 'play',
     'index_base': 'streaming-ott',
     'description': 'Streaming · sesiones, rebuffering, CDN',
+    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
+    'formato': 'JSON',
+    'origen': 'telemetría del reproductor',
     'sample': '{"ts":"2025-07-01T00:03:21Z","event":"PLAY_START","session_id":"s-9e0cf02be2","user_id":"u100418","content_id":"d001","title":"Memoria del Fuego","content_type":"DOCUMENTARY","genre":"Documental","device":"SMART_TV","cdn_pop":"SCL1","country":"BR","bitrate_kbps":3600}',
     'filter_code': """filter {
   json { source => "message" }

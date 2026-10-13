@@ -14,6 +14,9 @@ VERTICAL = {
     'icon': 'droplet',
     'index_base': 'produccion-pozos',
     'description': 'Pozos · producción, presión, flujo',
+    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
+    'formato': 'clave=valor',
+    'origen': 'SCADA de los pozos',
     'sample': 'ts=2025-07-01T00:00:00Z well="15/9-F-12 H" well_type=OP flow_kind=production status=FLOWING on_stream_hrs=24.0 avg_dhp=230.8 avg_dht=105.6 avg_whp=71.9 avg_wht=77.1 choke_size=47.0 oil_vol=58.77 gas_vol=6536.52 wat_vol=0.28 wi_vol=0.0',
     'filter_code': """filter {
   kv { source => "message" field_split => " " value_split => "=" }

@@ -1354,6 +1354,7 @@ def create_custom_case(request: dict) -> dict:
                 "label": request.get("label", ""),
                 "slug": request.get("slug", ""),
                 "description": request.get("description", ""),
+                "origen": request.get("origen", ""),
                 "icon": request.get("icon", ""),
                 "group": request.get("group", ""),
                 "sample": request.get("sample", ""),

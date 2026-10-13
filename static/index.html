@@ -1727,6 +1727,12 @@
          "Transacciones" aparecía como "Transaccio". */
       overflow-wrap: anywhere;
     }
+    /* Debajo del nombre, chiquito: en qué formato llega el dato y de dónde sale. */
+    .example-card__texto { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .example-card__fuente {
+      font-size: var(--fs-xs); font-weight: var(--fw-normal); color: var(--text-muted); line-height: 1.25;
+      display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
     .example-card__preview {
       font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted);
       line-height: 1.35; margin-top: 4px; padding: 5px 7px;
@@ -3730,6 +3736,10 @@
           <input type="text" class="form-input settings-field" id="save-case-desc" maxlength="200" placeholder="Una línea que explique qué muestra el dataset">
         </div>
         <div class="form-group">
+          <label class="form-label" for="save-case-origen">De dónde sale el dato (opcional)</label>
+          <input type="text" class="form-input settings-field" id="save-case-origen" maxlength="40" placeholder="Ej: API de seguimiento, export del CRM, syslog del firewall">
+        </div>
+        <div class="form-group">
           <label class="form-label" for="save-case-group">Grupo del grid</label>
           <select class="form-select settings-field" id="save-case-group"></select>
         </div>
@@ -4914,6 +4924,7 @@
           body: JSON.stringify({
             label: document.getElementById('save-case-label').value.trim(),
             description: document.getElementById('save-case-desc').value.trim(),
+            origen: document.getElementById('save-case-origen').value.trim(),
             group: document.getElementById('save-case-group').value,
             icon: _saveCaseIcon,
             sample: state.rawLog || '',
@@ -4981,6 +4992,7 @@
       const label = document.getElementById('save-case-label').value.trim();
       const comunes = {
         description: document.getElementById('save-case-desc').value.trim(),
+        origen: document.getElementById('save-case-origen').value.trim(),
         group: document.getElementById('save-case-group').value,
         icon: _saveCaseIcon,
         familia: label,
@@ -9529,11 +9541,15 @@
       // cliente lo despliegue sin la plataforma) y, en los creados desde el
       // Builder, borrarlo. Va dentro del <button> de la card, así que el handler
       // del grid distingue primero el ··· y solo después trata el click como selección.
+      const fuenteDe = (e) => [e.formato, e.origen].filter(Boolean).join(' · ');
       const cardHtml = (e) => `
         <button type="button" class="example-card${e.disabled ? ' is-disabled' : ''}" data-example-id="${e.id}"${e.disabled ? ' disabled' : ''} title="${escapeHtml(e.description || '')}">
           ${e.disabled ? '' : `<span class="example-card__mas" data-menu-case="${escapeHtml(e.id)}" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" title="Más opciones" aria-label="Más opciones de ${escapeHtml(e.label)}">···</span>`}
           <span class="example-card__tile"><svg class="icon"><use href="#ic-${e.icon || 'box'}"/></svg></span>
-          <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}${e.fuentes ? ` <span class="example-card__soon">${e.fuentes} fuentes</span>` : ''}</span>
+          <span class="example-card__texto">
+            <span class="example-card__label">${escapeHtml(e.label)}${e.disabled ? ' <span class="example-card__soon">Próximamente</span>' : ''}${e.fuentes ? ` <span class="example-card__soon">${e.fuentes} fuentes</span>` : ''}</span>
+            ${fuenteDe(e) ? `<span class="example-card__fuente" title="${escapeHtml(fuenteDe(e))}">${escapeHtml(fuenteDe(e))}</span>` : ''}
+          </span>
         </button>`;
       // Las fuentes de una familia, una sola tarjeta (la primera ocupa el lugar).
       const tarjeta = (id) => {
@@ -9542,7 +9558,12 @@
         const famId = `fam:${e.familia}`;
         const fam = FAMILIAS[famId];
         if (!fam || fam.miembros[0] !== id) return null;
+        // Los formatos de todas sus fuentes; el origen, si es uno solo.
+        const miembros = fam.miembros.map(m => LOG_EXAMPLES.find(x => x.id === m) || {});
+        const origenes = [...new Set(miembros.map(m => m.origen).filter(Boolean))];
         return { id: famId, label: fam.label, icon: fam.icon, custom: true, fuentes: fam.miembros.length,
+                 formato: [...new Set(miembros.map(m => m.formato).filter(Boolean))].join(', '),
+                 origen: origenes.length === 1 ? origenes[0] : '',
                  description: fam.miembros.map(m => SLUG_LABELS[m] || m).join(' · ') };
       };
       // Render agrupado por vertical: cada grupo es un encabezado + una grilla de

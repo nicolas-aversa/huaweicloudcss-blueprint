@@ -14,6 +14,9 @@ VERTICAL = {
     'icon': 'heart',
     'index_base': 'encuentros-clinicos',
     'description': 'Salud · consultas, pacientes, triage',
+    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
+    'formato': 'CSV',
+    'origen': 'export de la historia clínica',
     # Oculto: los datos están en inglés. Sacar la marca lo vuelve a mostrar.
     'hidden': True,
     'sample': '2025-07-01T07:14:09Z,emergency,183460006,Obstetric emergency hospital admission,d286528e,Hamilton,129.16,129.16,69.16,Normal pregnancy,YELLOW',
