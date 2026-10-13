@@ -1246,6 +1246,12 @@
     .settings-fields { display: flex; flex-wrap: wrap; gap: 0 14px; }
     /* Campos: algo más chicos que el form del wizard, pero cómodos. */
     .settings-field { margin-bottom: 10px; }
+    /* Credenciales: AK, SK y el bucket en la primera fila; las dos API keys, abajo. */
+    .settings-fields--cred { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
+    .settings-fields--cred > :nth-child(-n+3) { grid-column: span 2; }
+    .settings-fields--cred > :nth-child(n+4) { grid-column: span 3; }
+    .settings-fields--cred .settings-field__row .form-input { flex-basis: 80px; }
+    @media (max-width: 760px) { .settings-fields--cred > * { grid-column: 1 / -1; } }
     .settings-field .form-label { font-size: var(--fs-sm); margin-bottom: var(--sp-1); }
     .settings-field .form-input { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-base); }
     /* Campo con su propia acción al lado ("Probar", "Preparar bucket"): comparten
@@ -3279,9 +3285,17 @@
                   <div class="settings-card__hint">Las claves se guardan cifradas. <strong>Probar</strong> llama a MaaS o a NVIDIA con la key y te dice si sirve. <strong>Preparar</strong> sube los datasets de demo al bucket de tu cuenta.</div>
                 </div>
               </div>
-              <div class="settings-fields" style="display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;">
+              <!-- Arriba lo de la cuenta (AK, SK y el bucket); abajo las dos API keys. -->
+              <div class="settings-fields settings-fields--cred">
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-ak">Access Key ID (AK)</label><input class="form-input" id="settings-obs-ak" autocomplete="off" placeholder="HPUAB..."></div>
                 <div class="form-group settings-field"><label class="form-label" for="settings-obs-sk">Secret Access Key (SK)</label><input type="password" class="form-input" id="settings-obs-sk" autocomplete="off" placeholder="••••••"></div>
+                <div class="form-group settings-field">
+                  <label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label>
+                  <div class="settings-field__row">
+                    <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss">
+                    <button class="btn btn-muted" type="button" id="settings-hw-preload" title="Sube los datasets de demo a este bucket">Preparar</button>
+                  </div>
+                </div>
                 <div class="form-group settings-field">
                   <label class="form-label" for="settings-maas-key">MaaS API Key</label>
                   <div class="settings-field__row">
@@ -3296,19 +3310,12 @@
                 <!-- La de NVIDIA: los vectores de la búsqueda por significado. Opcional:
                      sin ella, la búsqueda híbrida no se activa (el resto, sí). -->
                 <div class="form-group settings-field">
-                  <label class="form-label" for="settings-nvidia-key">NVIDIA API Key</label>
+                  <label class="form-label" for="settings-nvidia-key">NVIDIA NIM API Key</label>
                   <div class="settings-field__row">
                     <input type="password" class="form-input" id="settings-nvidia-key" autocomplete="off" placeholder="nvapi-…"
                            title="Para la búsqueda por significado (NVIDIA NIM): los textos del campo de búsqueda viajan a NVIDIA. Opcional; se crea gratis en build.nvidia.com">
                     <button class="btn btn-muted" type="button" id="settings-nvidia-test"
                             title="Pide un vector a NVIDIA con esta API key y te dice si funciona">Probar</button>
-                  </div>
-                </div>
-                <div class="form-group settings-field">
-                  <label class="form-label" for="settings-hw-bucket">Bucket de demos y tfstate</label>
-                  <div class="settings-field__row">
-                    <input class="form-input" id="settings-hw-bucket" autocomplete="off" placeholder="demoscss">
-                    <button class="btn btn-muted" type="button" id="settings-hw-preload" title="Sube los datasets de demo a este bucket">Preparar</button>
                   </div>
                 </div>
               </div>
