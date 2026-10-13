@@ -411,10 +411,39 @@ def build_ppl_system_prompt(index_pattern: str, operations: list[str],
     )
 
 
-def build_agent_system_instruction(verticals: list[dict[str, Any]]) -> str:
+def nombre_del_buscador(slug: str) -> str:
+    return f"BuscarTextos-{slug}"
+
+
+def build_buscador_tool(b: dict[str, Any]) -> dict[str, Any]:
+    """La búsqueda por significado de un caso, como herramienta del agente: un
+    VectorDBTool (skills de OpenSearch) sobre `busqueda-<caso>`, el índice con
+    una fila por texto distinto del campo libre y su vector. Con el modelo de
+    CONSULTAS de NVIDIA (el de los textos es otro: `input_type` passage).
+    `b`: {slug, label, index, campo, model_id}."""
+    return {
+        "type": "VectorDBTool",
+        "name": nombre_del_buscador(b["slug"]),
+        "description": _sanitize_desc(
+            f"Busca por significado en los textos de {b['campo']} de {b['label']}: devuelve las frases distintas "
+            "que se escribieron sobre un tema (texto) y cuántas veces aparece cada una (cuenta). Usala cuando la "
+            "pregunta habla de un tema que la gente escribe con distintas palabras. El input es SOLO el tema, en "
+            f"pocas palabras. Después pasale a PPLTool-{b['slug']} las frases que correspondan, copiadas textuales."),
+        "parameters": {
+            "index": b["index"], "embedding_field": "embedding", "source_field": '["texto", "cuenta"]',
+            "model_id": b["model_id"], "doc_size": "10", "k": "10",
+        },
+        "include_output_in_agent_response": False,
+    }
+
+
+def build_agent_system_instruction(verticals: list[dict[str, Any]],
+                                   buscadores: list[dict[str, Any]] | None = None) -> str:
     """`system_instruction` del agente conversacional multi-vertical.
     Recibe una lista de dicts: {label, tool_name, index_pattern, operations, fields, success_code}.
-    El LLM decide qué PPLTool usar según la pregunta del usuario."""
+    El LLM decide qué PPLTool usar según la pregunta del usuario. Con
+    `buscadores` (los casos con búsqueda híbrida), además sabe buscar por
+    significado antes de contar."""
     tool_lines = []
     for v in verticals:
         ops = ", ".join(v.get("operations", [])) if v.get("operations") else "(a definir)"
@@ -429,9 +458,28 @@ def build_agent_system_instruction(verticals: list[dict[str, Any]]) -> str:
         f"{tools_desc}\n\n"
         "To get data, call the appropriate PPLTool. Pass it the user's question in natural language; "
         "PPLTool generates and runs the PPL query itself and returns the numbers.\n\n"
+        + _instruccion_de_busqueda(buscadores or []) +
         "Resolve references ('esas', 'those', 'esos') from the chat history. "
         "After PPLTool returns, answer in the user's language, with thousands separators. "
         "Never invent numbers: if PPLTool fails, say so instead of guessing."
+    )
+
+
+def _instruccion_de_busqueda(buscadores: list[dict[str, Any]]) -> str:
+    """Cómo usar la búsqueda por significado: primero encontrar cómo se dijo,
+    después contar esas frases exactas con PPL (sobre los eventos)."""
+    if not buscadores:
+        return ""
+    lineas = "\n".join(f"- {nombre_del_buscador(b['slug'])}: field {b['campo']} of {b['label']} "
+                        f"(then PPLTool-{b['slug']})" for b in buscadores)
+    return (
+        "Some sources also have a semantic search over a free-text field:\n"
+        f"{lineas}\n"
+        "When the question is about a topic that people write in many different ways (a symptom, a complaint, "
+        "a failure, what an operator wrote), FIRST call that search tool with just the topic. Keep only the "
+        "returned phrases that really mean that topic. THEN call the PPLTool of that source asking it to filter "
+        "the field by exactly those phrases (copy them verbatim) and to count or group as the user asked. "
+        "In the answer, say briefly which phrasings you counted.\n\n"
     )
 
 
@@ -440,7 +488,8 @@ def build_agent_system_instruction(verticals: list[dict[str, Any]]) -> str:
 def build_conversational_agent(llm_model_id: str, ppl_model_id: str,
                                system_instruction: str,
                                verticals: list[dict[str, Any]],
-                               name: str = "Platform Conversational Root") -> dict[str, Any]:
+                               name: str = "Platform Conversational Root",
+                               buscadores: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Agente conversacional ml-commons con **múltiples PPLTools** (uno por vertical).
     Cada vertical aporta: {tool_name, label, index_pattern, ppl_system_prompt}.
     El LLM (`llm_model_id`) razona y decide cuál PPLTool invocar según la pregunta.
@@ -468,6 +517,7 @@ def build_conversational_agent(llm_model_id: str, ppl_model_id: str,
             },
             "include_output_in_agent_response": False,
         })
+    tools += [build_buscador_tool(b) for b in buscadores or []]
     return {
         "name": name,
         "type": "conversational",

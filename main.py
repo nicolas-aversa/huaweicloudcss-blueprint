@@ -7133,6 +7133,24 @@ def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path
     return agent_verticals
 
 
+def _buscadores_del_agente(terraform_dir: Path, agent_verticals: list[dict]) -> list[dict]:
+    """Los casos del agente con la búsqueda híbrida armada: el agente busca por
+    significado en su índice de textos (con el modelo de consultas)."""
+    estados = _read_estados(terraform_dir)
+    emb = (estados.get("_cluster") or {}).get("embeddings") or {}
+    model_id = emb.get("model_id_consulta") or emb.get("model_id") or ""
+    if not model_id:
+        return []
+    out = []
+    for v in agent_verticals:
+        slug = str(v.get("tool_name") or "").removeprefix("PPLTool-")
+        b = (estados.get(slug) or {}).get("busqueda") or {}
+        if slug and b.get("ok") and not b.get("no_aplica") and b.get("campo"):
+            out.append({"slug": slug, "label": v.get("label") or slug, "index": busqueda.indice(slug),
+                        "campo": b["campo"], "model_id": model_id})
+    return out
+
+
 def _registrar_agente(base: str, user: str, password: str, api_key: str, terraform_dir: Path,
                       registry: dict, ppl_model: str, llm_model: str,
                       slug_actual: str = "") -> "tuple[str | None, dict]":
@@ -7142,13 +7160,21 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
     import capabilities as caps
 
     agent_verticals = _fuentes_del_agente(base, user, password, terraform_dir, slug_actual)
-    instr = caps.build_agent_system_instruction(agent_verticals)
+    buscadores = _buscadores_del_agente(terraform_dir, agent_verticals)
     # ml-commons NO exige nombres únicos de agente: sin borrar el anterior
     # quedarían duplicados.
     for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search", "Platform Conversational Root"):
         _os_req("DELETE", f"{base}/_plugins/_ml/agents/{aid}", user, password, timeout=20)
-    agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register",
-                          caps.build_conversational_agent(llm_model, ppl_model, instr, agent_verticals), "agent_id")
+    agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register", caps.build_conversational_agent(
+        llm_model, ppl_model, caps.build_agent_system_instruction(agent_verticals, buscadores), agent_verticals,
+        buscadores=buscadores), "agent_id")
+    if not agent_id and buscadores:
+        # Un cluster sin VectorDBTool rechaza el agente entero: sin la búsqueda
+        # por significado, pero con el chat.
+        print("[capabilities] el agente con la búsqueda por significado no se registró: va sin ella")
+        buscadores = []
+        agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register", caps.build_conversational_agent(
+            llm_model, ppl_model, caps.build_agent_system_instruction(agent_verticals), agent_verticals), "agent_id")
     if not agent_id:
         return None, {}
     # El Assistant de Dashboards apuntado a este agente (best-effort).
@@ -7165,9 +7191,45 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
         caso = str(v.get("tool_name") or "").removeprefix("PPLTool-")
         if caso:
             registry.setdefault(caso, {})["agent_id"] = agent_id
+    # En qué casos busca por significado (para saber si hay que rearmarlo
+    # cuando la búsqueda de un caso queda lista, ver _sumar_la_busqueda_al_agente).
+    busca = {b["slug"] for b in buscadores}
+    for caso, ids in registry.items():
+        if ids.get("agent_id") == agent_id:
+            ids["busca_por_significado"] = caso in busca
     _write_capabilities(terraform_dir, registry)
-    print(f"[capabilities] agente registrado con {len(agent_verticals)} fuentes")
+    print(f"[capabilities] agente registrado con {len(agent_verticals)} fuentes"
+          + (f" y búsqueda por significado en {', '.join(sorted(busca))}" if busca else ""))
     return agent_id, t2v
+
+
+def _sumar_la_busqueda_al_agente(cluster: dict, user: str, password: str, https_enabled: bool,
+                                 terraform_dir: Path, run: dict) -> None:
+    """El agente se arma antes que la búsqueda híbrida (que va al final de
+    "Provisionar plugins"): si ahora hay casos con la búsqueda lista en los que
+    el agente no busca, se lo vuelve a registrar con su herramienta."""
+    registry = _read_capabilities(terraform_dir)
+    del_agente = {s for s, ids in registry.items() if ids.get("agent_id")}
+    if not del_agente:
+        return
+    estados = _read_estados(terraform_dir)
+    listas = {s for s in del_agente if ((estados.get(s) or {}).get("busqueda") or {}).get("ok")
+              and not estados[s]["busqueda"].get("no_aplica")}
+    ya = {s for s in del_agente if registry[s].get("busca_por_significado")}
+    if not listas or listas <= ya:
+        return
+    modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
+                    if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
+    if not modelos:
+        return
+    from maas_integrator import get_maas_api_key
+    agent_id, _ = _registrar_agente(_os_base(cluster, https_enabled), user, password, get_maas_api_key(),
+                                    terraform_dir, registry, modelos[0], modelos[1])
+    busca = sorted(s for s, ids in _read_capabilities(terraform_dir).items() if ids.get("busca_por_significado"))
+    runs.step(run, "Asistente · búsqueda por significado", bool(agent_id and busca),
+              (f"el asistente busca por significado en {', '.join(busca)}" if agent_id and busca
+               else "el asistente quedó sin la búsqueda por significado (el cluster no la aceptó)" if agent_id
+               else "no se pudo volver a registrar el asistente"))
 
 
 def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_enabled: bool,
@@ -9837,6 +9899,11 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     except Exception as exc:  # noqa: BLE001 — la búsqueda no frena el resto
         runs.step(run, "Búsqueda híbrida", False, repr(exc)[:300])
     try:
+        if pide("agente"):
+            _sumar_la_busqueda_al_agente(cluster, user, password, request.https_enabled, terraform_dir, run)
+    except Exception as exc:  # noqa: BLE001 — el chat sigue andando sin ella
+        runs.step(run, "Asistente · búsqueda por significado", False, repr(exc)[:300])
+    try:
         if pide("security_analytics"):
             _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
                                         list(slugs), terraform_dir, run)
@@ -9900,6 +9967,8 @@ class PplChatResponse(BaseModel):
     # la memoria de la conversación.
     vega: dict = Field(default_factory=dict)
     memory_id: str = ""
+    # Lo que el agente buscó por significado antes de contar: [{tema, frases}].
+    busquedas: list[dict] = Field(default_factory=list)
 
 
 def _index_time_window(base: str, user: str, password: str, index_pattern: str):
@@ -10476,7 +10545,8 @@ def _conversar_con_el_agente(base: str, user: str, password: str, agente: str, r
     # pide aparte (/capabilities/visualizar), así la respuesta no lo espera.
     return PplChatResponse(answer=salida["respuesta"], ppl=(buena or {}).get("ppl", ""), result=resultado,
                            consultas=leido["consultas"] if len(leido["consultas"]) > 1 else [],
-                           memory_id=salida["memory_id"])
+                           memory_id=salida["memory_id"],
+                           busquedas=[b for b in leido.get("busquedas") or [] if b.get("frases")])
 
 
 class VisualizarRequest(BaseModel):

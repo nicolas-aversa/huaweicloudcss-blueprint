@@ -6341,9 +6341,17 @@
         + `<tbody>${rows.slice(0, 20).map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     }
     // Una investigación se anuncia arriba de la respuesta, con cuántas consultas.
+    // Y lo que el agente buscó por significado antes de contar: el tema y las
+    // frases que encontró (así se ve por qué contó esas y no solo las que dicen
+    // la palabra).
     function capChatCabeceraHTML(data) {
       const n = ((data && data.consultas) || []).length;
-      return n ? `<div class="cap-chat__investigacion">${icon('search')} Investigación · ${n} consultas</div>` : '';
+      const busco = ((data && data.busquedas) || []).filter(b => (b.frases || []).length).map(b => {
+        const frases = b.frases.map(f => f.texto);
+        return `<div class="cap-chat__investigacion">${icon('search')} Buscó por significado «${escapeHtml(b.tema)}»: `
+          + `${escapeHtml(frases.slice(0, 4).join(' · '))}${frases.length > 4 ? ` · y ${frases.length - 4} más` : ''}</div>`;
+      }).join('');
+      return busco + (n ? `<div class="cap-chat__investigacion">${icon('search')} Investigación · ${n} consultas</div>` : '');
     }
     // "ver PPL / datos": la consulta y su tabla; en una investigación, cada
     // consulta con la suya (o con su error).

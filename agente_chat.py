@@ -45,13 +45,38 @@ def respuesta(resp: dict[str, Any]) -> dict[str, str]:
 
 
 def de_las_trazas(trazas: list[dict[str, Any]]) -> dict[str, Any]:
-    """Las consultas PPL que corrió el agente, con su resultado o su error."""
+    """Las consultas PPL que corrió el agente, con su resultado o su error, y lo
+    que buscó por significado (el tema y las frases que encontró)."""
     consultas: list[dict[str, Any]] = []
+    busquedas: list[dict[str, Any]] = []
     for t in sorted(trazas or [], key=lambda x: int(x.get("trace_number") or 0)):
         origen = t.get("origin") or ""
         if origen.startswith("PPLTool"):
             consultas.append(_consulta(origen, t.get("input") or "", t.get("response") or ""))
-    return {"consultas": consultas}
+        elif origen.startswith("BuscarTextos-"):
+            busquedas.append(_busqueda(t.get("input") or "", t.get("response") or ""))
+    return {"consultas": consultas, "busquedas": busquedas}
+
+
+def _busqueda(entrada: str, salida: str) -> dict[str, Any]:
+    """Una traza del VectorDBTool: la entrada es el tema (texto o JSON con
+    `input`) y la salida, un documento JSON por línea con `_source`."""
+    tema = entrada
+    try:
+        datos = json.loads(entrada)
+        tema = (datos.get("input") or datos.get("question") or entrada) if isinstance(datos, dict) else entrada
+    except ValueError:
+        pass
+    frases: list[dict[str, Any]] = []
+    for linea in str(salida).splitlines():
+        try:
+            doc = json.loads(linea)
+        except ValueError:
+            continue
+        fuente = (doc.get("_source") or {}) if isinstance(doc, dict) else {}
+        if fuente.get("texto"):
+            frases.append({"texto": str(fuente["texto"]), "cuenta": fuente.get("cuenta")})
+    return {"tema": str(tema).strip()[:200], "frases": frases}
 
 
 def _consulta(origen: str, entrada: str, salida: str) -> dict[str, Any]:

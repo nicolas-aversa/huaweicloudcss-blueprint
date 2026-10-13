@@ -45,7 +45,7 @@ def test_las_consultas_salen_de_las_trazas():
     assert [c["ok"] for c in r["consultas"]] == [True, False, True]
     assert r["consultas"][1]["error"] == "execute ppl: boom"
     assert r["consultas"][2]["result"] == {"schema": [{"name": "total", "type": "bigint"}], "datarows": [[571]]}
-    assert list(r) == ["consultas"]
+    assert list(r) == ["consultas", "busquedas"] and r["busquedas"] == [], "sin búsqueda por significado"
 
 
 def test_la_que_respondio_es_la_ultima_que_corrio():

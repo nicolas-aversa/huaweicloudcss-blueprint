@@ -331,8 +331,8 @@ def test_el_agente_queda_en_todos_los_casos_que_consulta(monkeypatch, tmp_path):
     escrito = {}
     monkeypatch.setattr(main, "_write_capabilities", lambda td, reg: escrito.update(reg))
     import capabilities
-    monkeypatch.setattr(capabilities, "build_agent_system_instruction", lambda v: "")
-    monkeypatch.setattr(capabilities, "build_conversational_agent", lambda *a: {})
+    monkeypatch.setattr(capabilities, "build_agent_system_instruction", lambda *a, **k: "")
+    monkeypatch.setattr(capabilities, "build_conversational_agent", lambda *a, **k: {})
     registro = {"siem": {"llm_model_id": "M", "ppl_model_id": "P"}}
     assert main._registrar_agente("http://x", "a", "p", "KEY", tmp_path, registro, "P", "M")[0] == "AG"
     assert {s: v.get("agent_id") for s, v in escrito.items()} == {"siem": "AG", "ventas": "AG", "pozos": "AG"}
