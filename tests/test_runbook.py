@@ -68,6 +68,8 @@ def test_un_dataset_los_pasos_en_orden_y_sus_archivos():
     assert "| `<ENDPOINT_DEL_CLUSTER>` | el endpoint de tu cluster CSS" in md, "lo que completás, en palabras"
     assert "## Qué vas a tener" in md and "| Plugin | ¿Se configura? | Por qué |" in md
     assert "## Para producción" not in md and "el tamaño" not in md, "sin volumen, sin dimensionamiento"
+    assert "- **Backups (snapshots)**: en la consola de CSS" in md, "los backups, para el cliente (no en la demo)"
+    assert "Dashboards → Query Insights" in md
 
 
 def test_con_volumen_dimensiona_y_con_varios_una_carpeta_por_dataset():

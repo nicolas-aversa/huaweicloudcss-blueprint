@@ -89,38 +89,14 @@ def test_lo_que_falta_y_lo_que_falla_se_dice(entorno, monkeypatch):
     assert r.status_code == 502 and "No se pudo restaurar: index already exists" in r.json()["detail"]["message"]
 
 
-def test_la_tarjeta_en_el_resumen():
+def test_sin_la_tarjeta_en_la_demo():
+    """La tarjeta "Datos de la demo (snapshot)" se fue de Entorno desplegado:
+    los backups del cliente van en el runbook (Cómo se opera)."""
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>' in html
-    assert "body.querySelector('#infra-snapshots-guardar')?.addEventListener('click', (e) => guardarSnapshot(e.currentTarget));" in html
-    assert "confirmLabel: 'Restaurar' });" in html, "restaurar pide confirmación"
+    assert '<div class="env-extras">${accesosHTML(pipelines)}</div>' in html
+    assert "snapshotsDeDemoHTML" not in html and "infra-snapshots" not in html
     assert "settings-hw-agency" not in html and "Agencia de CSS para OBS" not in html, "sin el campo: va la de siempre"
     assert "const body = { ..._hwSinCampo };" in html, "guardar la infra no borra la agencia que hubiera"
-
-
-_ARNES = r"""
-const icon = (n) => `<svg data-i="${n}"></svg>`;
-const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-""" + "{FUNCIONES}" + r"""
-const f = [];
-const l = snapshotsListaHTML([{ id: 'S0', nombre: 'demo-1', estado: 'COMPLETED', cluster: 'c1', indices: 'siem-*' },
-                              { id: 'S1', nombre: 'demo-2', estado: 'IN_PROGRESS', cluster: 'c1', indices: 'siem-*' }]);
-if (!l.includes('<span class="sev sev--ok">Listo</span><span class="snap__nombre">demo-1</span>')) f.push('listo ' + l);
-if ((l.match(/snap__restaurar/g) || []).length !== 1) f.push('solo los listos se restauran ' + l);
-if (!l.includes('data-id="S0"')) f.push('id');
-if (!snapshotsListaHTML([]).includes('Todavía no hay datos')) f.push('vacío');
-console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
-"""
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
-def test_la_lista_en_node(tmp_path):
-    html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    i = html.index("    const _ESTADO_SNAPSHOT = {")
-    js = tmp_path / "snap.mjs"
-    js.write_text(_ARNES.replace("{FUNCIONES}", html[i:html.index("    async function verSnapshots() {", i)]), encoding="utf-8")
-    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
-    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_con_el_cluster_ocupado_lo_dice_en_palabras():

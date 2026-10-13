@@ -183,9 +183,8 @@ check('Security Analytics no se activa desde acá', !h.includes('data-plugin="se
 check('los tableros, de las tarjetas', tile(h, 'dashboard').includes('Lista · 2 casos'), tile(h, 'dashboard'));
 check('lo que no aplica no se muestra', !h.includes('data-fn="rollup"') && !h.includes('data-fn="busqueda"'), h);
 check('lo opcional y lo del cluster, no acá', !h.includes('data-fn="ciclo_de_vida"') && !h.includes('data-fn="query_insights"'), h);
-const extra = funcionesHTML(data, { extra: true });
-check('van en "Otras funciones"', extra.includes('id="infra-funciones-extra"') && extra.includes('>Otras funciones<')
-  && tile(extra, 'ciclo_de_vida').includes('data-plugin="ciclo_de_vida">Activar</button>') && tile(extra, 'query_insights').includes('Lista'), extra);
+check('sin "Otras funciones": ciclo de vida, rollups y Query Insights van en el runbook', !h.includes('Otras funciones')
+  && !h.includes('data-fn="rollup"') && !h.includes('infra-funciones-extra'), h);
 check('cuántas listas', h.includes('<span class="fn-cab__n">2 de 5 listas</span>'), h);
 check('el panel, cerrado', h.includes('<div class="fn-panel" hidden></div>') && h.includes('aria-expanded="false"'), h);
 const sinTableros = funcionesHTML({ ...data, plugins: {} });
@@ -201,7 +200,6 @@ const enCurso = funcionesHTML({ ...data, activando: { desde: 1 } });
 check('activando: en cola, sin botón', tile(enCurso, 'forecasting').includes('Activando… 1 de 2')
   && tile(enCurso, 'anomalias').includes('<span class="fn-tile__estado">Activando…</span>')
   && !enCurso.includes('cat__aplicar" data-plugin="forecasting"') && !enCurso.includes('cat__aplicar" data-plugin="anomalias"'), enCurso);
-check('activando: lo que no arma el paso 3 sigue como está', tile(funcionesHTML({ ...data, activando: { desde: 1 } }, { extra: true }), 'ciclo_de_vida').includes('Sin activar'));
 check('activando: lo dice arriba', enCurso.includes('Activando: se completan solas'), enCurso);
 const unaSola = funcionesHTML({ ...data, activando: { desde: 1, plugins: ['forecasting'] } });
 check('activando una sola: solo esa en cola', tile(unaSola, 'forecasting').includes('Activando… 1 de 2')
@@ -209,7 +207,7 @@ check('activando una sola: solo esa en cola', tile(unaSola, 'forecasting').inclu
 state.funcionAbierta = 'forecasting';
 const abierta = funcionesHTML(data);
 check('abierta: marcada y con su panel a la vista', abierta.includes('<div class="fn-tile fn--parcial is-abierta" data-fn="forecasting">')
-  && abierta.includes('<div class="fn-panel"></div>') && funcionesHTML(data, { extra: true }).includes('<div class="fn-panel" hidden></div>'), abierta);
+  && abierta.includes('<div class="fn-panel"></div>'), abierta);
 state.funcionAbierta = null;
 // El detalle.
 const d = detalleDeFuncionHTML(funcionDe('forecasting', data));
@@ -224,7 +222,6 @@ const bus = funcionDe('busqueda', data);
 check('lo del cluster va con su función, si tiene algo que decir', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
 const busOk = funcionDe('busqueda', { ...data, plugins: { ...data.plugins, _cluster: [T('embeddings', 'ok')] } });
 check('el modelo listo no se muestra', busOk.cluster.length === 0, JSON.stringify(busOk.cluster));
-check('Query Insights, siempre (es la función)', funcionDe('query_insights', data).cluster.map(t => t.plugin).join() === 'query_insights');
 // La búsqueda se prueba desde su panel: un caso listo, lo que buscás y los resultados lado a lado.
 const conBusq = { ...data, catalogo: [...data.catalogo, C('busqueda', ['siem', 'produccion-pozos'], ['siem'])],
   plugins: { ...data.plugins, siem: [...data.plugins.siem, T('busqueda', 'ok', { campo: 'msg' })],

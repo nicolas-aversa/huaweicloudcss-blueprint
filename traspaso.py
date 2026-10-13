@@ -31,6 +31,8 @@ _DONDE = {
     "ciclo_de_vida": "Dashboards → Index Management → State management policies. La retención se cambia "
                      "editando la política (y `_plugins/_ism/change_policy` para los índices que ya existen).",
     "rollup": "Dashboards → Index Management → Rollup jobs; el índice `rollup-<caso>` se consulta como cualquier otro.",
+    "query_insights": "Dashboards → Query Insights: las consultas más pesadas del cluster (latencia, CPU, memoria). "
+                      "Viene activo en OpenSearch 3.x: no hay que configurar nada.",
 }
 
 _ESTADO = {"ok": "listo", "parcial": "parcial", "falla": "falló", "en_curso": "en curso", "excluido": "excluido"}

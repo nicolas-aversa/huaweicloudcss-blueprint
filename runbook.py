@@ -144,7 +144,10 @@ def documento(nombre: str, datasets: list[dict], *, dimensionamiento: "dict | No
 
     if dimensionamiento and dimensionamiento.get("eventos_por_dia"):
         l += ["## Para producción", ""] + traspaso.para_produccion(dimensionamiento) + [""]
-    l += ["## Cómo se opera", ""]
+    l += ["## Cómo se opera", "",
+          "- **Backups (snapshots)**: en la consola de CSS → tu cluster → Backups and Restorations, activá los "
+          "snapshots automáticos a un bucket de OBS (CSS necesita una agencia de IAM con permiso de escritura en "
+          "ese bucket). Para volver atrás, se restaura desde ahí.", ""]
     for d in datasets:
         operar = traspaso.como_se_opera(d["plan"], d.get("excluir"))
         if not operar:

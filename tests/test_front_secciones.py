@@ -102,11 +102,12 @@ def test_la_vista_va_sin_pestanas():
     html = _INDEX.read_text(encoding="utf-8")
     vista = _vista(html)
     # La franja del entorno con sus acciones y la puesta en marcha arriba;
-    # después los números, la matriz, y accesos y snapshot lado a lado.
+    # después los números, la matriz y los accesos (sin "Otras funciones" ni
+    # snapshots: son para el cliente, van en el runbook).
     orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${allDone ? '' : setupPanel}",
              "${funcionesHTML(data)}", '<details class="env-mas" id="infra-mas"', "${allDone ? setupPanel : ''}",
-             "${funcionesHTML(data, { extra: true })}", "${matrizDePluginsHTML(filas, data.plugins)}",
-             '<div class="env-extras">${accesosHTML(pipelines)}${snapshotsDeDemoHTML()}</div>']
+             "${matrizDePluginsHTML(filas, data.plugins)}",
+             '<div class="env-extras">${accesosHTML(pipelines)}</div>']
     posiciones = [vista.index(p) for p in orden]
     assert posiciones == sorted(posiciones), orden
     # El resultado de "Provisionar plugins", dentro de la puesta en marcha.
