@@ -45,7 +45,7 @@ import verticals as _verticals
 GROUP = {"id": "mis-casos", "label": "Mis casos", "icon": "plus"}
 
 # Iconos ofrecidos en la UI: sprites que YA existen en el <svg> de index.html.
-ICONS = ["shield", "activity", "shopping-cart", "play", "droplet", "heart",
+ICONS = ["shield", "activity", "shopping-cart", "play", "droplet", "mountain", "heart",
          "truck", "database", "cloud", "code", "box"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")

@@ -18,6 +18,8 @@ venv/
 # .log y .csv pasan de 1,2 GB → nunca commitearlos.
 datasets/*.log
 datasets/*.csv
+datasets/*.ndjson
+datasets/*.json
 datasets/train_identity.csv
 datasets/train_transaction.csv
 
