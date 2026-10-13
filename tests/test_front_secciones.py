@@ -102,11 +102,11 @@ def test_la_vista_va_sin_pestanas():
     html = _INDEX.read_text(encoding="utf-8")
     vista = _vista(html)
     # La franja del entorno con sus acciones y la puesta en marcha arriba;
-    # después los números, la matriz y los accesos (sin "Otras funciones" ni
-    # snapshots: son para el cliente, van en el runbook).
+    # después las funciones y, plegado, la puesta en marcha hecha (sin "Otras
+    # funciones" ni snapshots: son para el cliente, van en el runbook; los
+    # accesos de demo, en el panel de Enmascaramiento de campos).
     orden = ['<section class="env-bar">', 'id="infra-destroy-btn"', "${allDone ? '' : setupPanel}",
-             "${funcionesHTML(data)}", '<details class="env-mas" id="infra-mas"', "${allDone ? setupPanel : ''}",
-             '<div class="env-extras">${accesosHTML(pipelines)}</div>']
+             "${funcionesHTML(data)}", '<details class="env-mas" id="infra-mas"', "${allDone ? setupPanel : ''}"]
     assert "${matrizDePluginsHTML(" not in vista, "sin «Detalle por caso»"
     posiciones = [vista.index(p) for p in orden]
     assert posiciones == sorted(posiciones), orden

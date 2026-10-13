@@ -93,7 +93,6 @@ def test_sin_la_tarjeta_en_la_demo():
     """La tarjeta "Datos de la demo (snapshot)" se fue de Entorno desplegado:
     los backups del cliente van en el runbook (Cómo se opera)."""
     html = (pathlib.Path(main.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert '<div class="env-extras">${accesosHTML(pipelines)}</div>' in html
     assert "snapshotsDeDemoHTML" not in html and "infra-snapshots" not in html
     assert "settings-hw-agency" not in html and "Agencia de CSS para OBS" not in html, "sin el campo: va la de siempre"
     assert "const body = { ..._hwSinCampo };" in html, "guardar la infra no borra la agencia que hubiera"

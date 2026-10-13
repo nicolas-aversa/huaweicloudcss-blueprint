@@ -222,6 +222,15 @@ const bus = funcionDe('busqueda', data);
 check('lo del cluster va con su función, si tiene algo que decir', bus.cluster.map(t => t.plugin).join() === 'embeddings', JSON.stringify(bus.cluster));
 const busOk = funcionDe('busqueda', { ...data, plugins: { ...data.plugins, _cluster: [T('embeddings', 'ok')] } });
 check('el modelo listo no se muestra', busOk.cluster.length === 0, JSON.stringify(busOk.cluster));
+// El reporte vive en la tarjeta del dashboard: su link va en el panel de Reportes.
+const conReporte = { ...data, catalogo: [...data.catalogo, C('reporte', ['siem'], ['siem'])],
+  plugins: { ...data.plugins, siem: [T('dashboard', 'ok', { filas: [{ texto: 'Reporte en PDF (Reporting)', url: 'https://d/app/reports-dashboards#/report_definition_details/R1' }] })] } };
+const rep = detalleDeFuncionHTML(funcionDe('reporte', conReporte));
+check('el reporte, con su link', rep.includes('href="https://d/app/reports-dashboards#/report_definition_details/R1"') && rep.includes('Ver el reporte'), rep);
+// Las anomalías leen su número al abrir el panel (con "Explicarla con IA").
+const conAnom = { ...data, plugins: { ...data.plugins, siem: [T('anomalias', 'ok', { numero: 'anomalias' })] } };
+const anom = detalleDeFuncionHTML(funcionDe('anomalias', conAnom));
+check('las anomalías, con su número', anom.includes('<span class="fn__numero" data-slug="siem" data-numero="anomalias"></span>'), anom);
 // Sin tarjeta por caso (el agente, los reportes): listo si el catálogo lo da por aplicado.
 const agente = detalleDeFuncionHTML(funcionDe('agente', data));
 check('el agente aplicado, listo en cada caso (no «Sin activar»)', agente.includes('<span class="fn__caso-nombre">SIEM</span><span class="sev sev--ok">Listo</span>')

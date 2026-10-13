@@ -145,7 +145,13 @@ def test_la_tarjeta_en_node(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_la_vista_la_pone_en_el_resumen():
+def test_va_en_el_panel_de_enmascaramiento():
+    """Los accesos de demo, con su función (Enmascaramiento de campos) y no
+    sueltos en "Más opciones"."""
     html = _INDEX.read_text(encoding="utf-8")
-    assert '<div class="env-extras">${accesosHTML(pipelines)}</div>' in html
-    assert "body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));" in html
+    assert "+ (f.id === 'analista' ? accesosHTML(f.pipelines) : '');" in html
+    assert "env-extras" not in html.split("function renderInfraView(data) {")[1].split("async function hydrateActiveEnv()")[0]
+    assert "const accesos = e.target.closest('#infra-accesos-ver');\n        if (accesos) return verAccesos(accesos);" in html
+    # "Explicarla con IA", desde el panel de Detección de anomalías (antes, solo en «Detalle por caso»).
+    assert "const explicar = e.target.closest('.anomalia__explicar');\n        if (explicar) return explicarAnomalia(explicar);" in html
+    assert "const _NUMERO_EN_EL_PANEL = new Set(['anomalias', 'perfil']);" in html and "llenarNumerosDeFuncion(panel);" in html

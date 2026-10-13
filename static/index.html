@@ -2409,6 +2409,10 @@
                 padding: 6px 0; border-bottom: 1px dashed var(--border-subtle); font-size: var(--fs-sm); }
     .fn__caso-nombre { font-weight: var(--fw-semi); }
     .fn__motivo { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-muted); }
+    .fn__numero { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+                  font-size: var(--fs-xs); color: var(--text-secondary); }
+    .fn__numero:empty { display: none; }
+    .fn-panel #infra-accesos { margin: 12px 0 0; }
     .fn__ir { justify-self: end; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--accent-hover); text-decoration: none; }
     .fn__ir .icon { width: 12px; height: 12px; }
     .fn__ir:hover { text-decoration: underline; }
@@ -6771,7 +6775,12 @@
         && (act.plugins ? act.plugins.includes(id) : c.recomendado);
       const estado = !aplica.length ? 'na' : (enCola || (!hechos.length && enCurso)) ? 'en_curso' : !hechos.length ? 'off'
         : (hechos.length < aplica.length || problemas) ? 'parcial' : 'ok';
-      return { id, titulo, tecnico, icono, c, aplica, hechos, tarjetas, cluster, problemas, estado, recomendado: c ? c.recomendado : true };
+      // Lo que no tiene tarjeta propia trae su link de otra: el reporte vive en la del dashboard.
+      const links = id !== 'reporte' ? {} : Object.fromEntries(slugs.map(s => [s,
+        (((_tarjetasDe(data.plugins, s).find(t => t.plugin === 'dashboard') || {}).filas || [])
+          .find(x => x.url && /reporte/i.test(x.texto || '')) || {}).url]).filter(([, u]) => u));
+      return { id, titulo, tecnico, icono, c, aplica, hechos, tarjetas, cluster, problemas, estado,
+               recomendado: c ? c.recomendado : true, links, pipelines: data.pipelines || [] };
     }
     function tarjetaDeFuncionHTML(f) {
       const n = f.aplica.filter(s => s !== '_cluster').length;
@@ -6818,28 +6827,49 @@
     // lo del cluster que la acompaña y sus comandos de Dev Tools (a demanda).
     function detalleDeFuncionHTML(f) {
       const [que, negocio] = _PARA_QUE_SIRVE[f.id] || [];
-      const caso = (s, t, hecho = false) => {
+      const caso = (s, t, hecho = false, url = '') => {
         const [texto, clase] = t ? (_ESTADO_PLUGIN[t.estado] || [t.estado, ''])
           : hecho ? _ESTADO_PLUGIN.ok : ['Sin activar', 'sev--low'];
-        const link = t && ((t.links || []).find(l => l.url) || (t.filas || []).find(x => x.url));
+        const link = (t && ((t.links || []).find(l => l.url) || (t.filas || []).find(x => x.url)))
+          || (url ? { url, texto: f.id === 'reporte' ? 'Ver el reporte' : 'Ver en Dashboards' } : null);
+        const numero = t && t.numero && t.estado === 'ok' && _NUMERO_EN_EL_PANEL.has(f.id)
+          ? `<span class="fn__numero" data-slug="${escapeHtml(s)}" data-numero="${escapeHtml(t.numero)}"></span>` : '';
         return `<li class="fn__caso"><span class="fn__caso-nombre">${escapeHtml(SLUG_LABELS[s] || s)}</span>`
           + `<span class="sev ${clase}">${escapeHtml(texto)}</span>`
           + (link ? `<a class="fn__ir" href="${escapeHtml(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.texto || 'Ver en Dashboards')} ${icon('arrow-right')}</a>` : '')
           + (t && t.motivo && t.estado !== 'ok' ? `<span class="fn__motivo">${escapeHtml(t.motivo)}</span>` : '')
-          + '</li>';
+          + numero + '</li>';
       };
       const conComparador = f.id === 'busqueda' && f.tarjetas.some(([, t]) => t.estado === 'ok');
       const conTarjeta = f.tarjetas.filter(([, t]) => !conComparador || t.estado !== 'ok').map(([s, t]) => caso(s, t));
       // Sin tarjeta del caso (el agente y los reportes se registran para el
       // cluster): listo si el catálogo lo da por aplicado, como dice la función.
       const sinTarjeta = f.aplica.filter(s => s !== '_cluster' && !f.tarjetas.some(([x]) => x === s))
-        .map(s => caso(s, null, f.hechos.includes(s)));
+        .map(s => caso(s, null, f.hechos.includes(s), (f.links || {})[s]));
       const casos = [...conTarjeta, ...sinTarjeta].join('');
       return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
         + (f.id === 'busqueda' ? comparadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
-        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '');
+        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
+        // Los accesos de demo (usuario y contraseña de cada analista), con su función.
+        + (f.id === 'analista' ? accesosHTML(f.pipelines) : '');
+    }
+    // Las funciones cuyo número se lee al abrir el panel (en vivo, del cluster).
+    const _NUMERO_EN_EL_PANEL = new Set(['anomalias', 'perfil']);
+    // Lo lee caso por caso: en anomalías, cuántas hay y la más fuerte, con "Explicarla con IA".
+    async function llenarNumerosDeFuncion(panel) {
+      const lugares = [...panel.querySelectorAll('.fn__numero[data-slug]')];
+      lugares.forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
+      for (const slug of [...new Set(lugares.map(el => el.dataset.slug))]) {
+        let numeros = {};
+        try {
+          const res = await fetch('/api/v1/plugins/numeros?slug=' + encodeURIComponent(slug));
+          if (res.ok) numeros = await res.json();
+        } catch (_err) { /* sin números: el panel igual sirve */ }
+        lugares.filter(el => el.dataset.slug === slug)
+          .forEach(el => { el.innerHTML = numeroDePlugin(el.dataset.numero, numeros[el.dataset.numero], slug, 'ok'); });
+      }
     }
     // Comparar la búsqueda híbrida en Dashboards (Search Relevance), no acá: la
     // plataforma no replica las pantallas de OpenSearch. El panel da el link,
@@ -6943,6 +6973,7 @@
       panel.querySelectorAll('.plug-grid').forEach(repartirTarjetas);
       const comparar = panel.querySelector('.fn__comparar');
       if (comparar) llenarComparador(comparar);
+      llenarNumerosDeFuncion(panel);
     }
     // Abre (o cierra) el panel de una función, debajo de su grupo de tarjetas.
     function verFuncion(fila, data) {
@@ -8796,7 +8827,6 @@
           <summary>${icon('settings')} Más opciones <svg class="icon setup-card__chevron"><use href="#ic-chevron"/></svg></summary>
           <div class="env-mas__cuerpo">
             ${allDone ? setupPanel : ''}
-            <div class="env-extras">${accesosHTML(pipelines)}</div>
           </div>
         </details>
         </div>`;
@@ -8814,7 +8844,6 @@
       }
 
       // Accesos de demo: a demanda (la contraseña no viaja con el estado).
-      body.querySelector('#infra-accesos-ver')?.addEventListener('click', (e) => verAccesos(e.currentTarget));
       // Casos y plugins: el caso abre su detalle; una celda, el detalle en esa
       // tarjeta. "Explicarla con IA" va al asistente.
       body.querySelector('#infra-plugins')?.addEventListener('click', (e) => {
@@ -8849,6 +8878,10 @@
         const aplicar = e.target.closest('.cat__aplicar');
         if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);
         if (e.target.closest('.fn__probar')) return abrirAsistente();
+        const explicar = e.target.closest('.anomalia__explicar');
+        if (explicar) return explicarAnomalia(explicar);
+        const accesos = e.target.closest('#infra-accesos-ver');
+        if (accesos) return verAccesos(accesos);
         const probarBusq = e.target.closest('.fn__probar-busqueda');
         if (probarBusq) {
           const fila = probarBusq.closest('.fn-tile')?.querySelector('.fn__fila');
