@@ -1113,8 +1113,43 @@ def _front_payload() -> dict:
     return payload
 
 
+# Lo que cambia en el nav cuando hay sesión (ver `_con_la_sesion`): el mismo
+# HTML que deja el front después de /auth/me.
+_NAV_SIN_SESION = {
+    "marca": ('<img class="app-nav__logo" id="nav-marca-logo"', '<img class="app-nav__logo hidden" id="nav-marca-logo"'),
+    "texto": ('<div class="app-nav__brand-text" id="nav-marca-texto">', '<div class="app-nav__brand-text hidden" id="nav-marca-texto">'),
+    "cuenta": ('<button class="app-nav__cuenta hidden" id="nav-user"', '<button class="app-nav__cuenta" id="nav-user"'),
+}
+_NAV_ADMIN = ('<button class="nav-item hidden" data-view="control" id="nav-control"',
+              '<button class="nav-item" data-view="control" id="nav-control"')
+
+
+def _con_la_sesion(html: str, request: Request) -> str:
+    """En modo hosteado, la página sale con la cuenta ya puesta en el nav (el
+    email y, si es admin, el Panel de control). Antes lo ponía el front recién
+    cuando volvía /auth/me: con la ECS lejos, después de cada F5 se veía un rato
+    la marca sola, sin usuario ni panel, como si se hubiera perdido la sesión.
+    El front lo sigue haciendo igual (arma el menú de la cuenta y el panel)."""
+    if not auth.AUTH_ENABLED:
+        return html
+    email = auth.read_session_token(request.cookies.get(auth.COOKIE_NAME))
+    if not email:
+        return html
+    import html as _html
+
+    e = _html.escape(email)
+    for viejo, nuevo in _NAV_SIN_SESION.values():
+        html = html.replace(viejo, nuevo, 1)
+    html = html.replace('<span class="app-nav__user-email" id="nav-user-email"></span>',
+                        f'<span class="app-nav__user-email" id="nav-user-email">{e}</span>', 1)
+    html = html.replace('<strong id="nav-user-email-full"></strong>', f'<strong id="nav-user-email-full">{e}</strong>', 1)
+    if auth.is_admin(email):
+        html = html.replace(*_NAV_ADMIN, 1)
+    return html
+
+
 @app.get("/", include_in_schema=False)
-def index() -> Response:
+def index(request: Request) -> Response:
     """Sirve la página de onboarding con los verticales inyectados.
 
     El front deriva LOG_EXAMPLES/EXAMPLE_DATA/etc. de `window.__VERTICALS__`.
@@ -1125,6 +1160,7 @@ def index() -> Response:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     payload = json.dumps(_front_payload(), ensure_ascii=False)
     html = html.replace(_VERTICALS_MARKER, payload, 1)
+    html = _con_la_sesion(html, request)
     return Response(
         content=html,
         media_type="text/html; charset=utf-8",
