@@ -250,6 +250,8 @@ check('el comparador, con los casos listos y su campo', busq.includes('<div clas
   && busq.includes('Abrir Search Relevance'), busq);
 check('sin casos listos, sin comparador', !detalleDeFuncionHTML(funcionDe('busqueda', { ...conBusq, plugins: {} })).includes('fn__comparar'));
 check('no busca desde la plataforma', !busq.includes('<form') && !busq.includes('Buscar</button>'), busq);
+check('abajo, solo los casos con algo que decir (los listos están en el selector)',
+  !busq.includes('<span class="fn__caso-nombre">SIEM</span>') && busq.includes('<span class="fn__caso-nombre">Producción de pozos</span>'), busq);
 const listaB = funcionesHTML({ ...conBusq, catalogo: [C('busqueda', ['siem'], ['siem'])] });
 check('la tarjeta lista se prueba', tile(listaB, 'busqueda').includes('class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'), tile(listaB, 'busqueda'));
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));

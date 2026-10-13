@@ -8343,8 +8343,10 @@ def comparar_busqueda(slug: str) -> dict:
     base = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, _read_https_enabled_from_state(terraform_dir)))
     consultas = busqueda.consultas_para_comparar(model_id)
     return {"indice": busqueda.indice(slug), "pipeline": busqueda.PIPELINE_DE_BUSQUEDA, "campo": caso.get("campo", ""),
-            "palabras": _json.dumps(consultas["palabras"], indent=2, ensure_ascii=False),
-            "hibrida": _json.dumps(consultas["hibrida"], indent=2, ensure_ascii=False),
+            # En una línea: se copian y se pegan, no se leen (con sangría, la
+            # híbrida ocupaba media pantalla y quedaba con scroll).
+            "palabras": _json.dumps(consultas["palabras"], ensure_ascii=False),
+            "hibrida": _json.dumps(consultas["hibrida"], ensure_ascii=False),
             "url": plugins_vista.link(base, plugins_vista.APP_SEARCH_RELEVANCE, "/")}
 
 

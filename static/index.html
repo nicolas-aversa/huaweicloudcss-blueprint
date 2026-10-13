@@ -2406,10 +2406,11 @@
     .fn__que p { margin: 0 0 6px; max-width: 780px; font-size: var(--fs-sm); color: var(--text-secondary); }
     .fn__casos { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 0 20px;
                  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
-    .fn__caso { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle); font-size: var(--fs-sm); }
+    .fn__caso { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 2px 8px;
+                padding: 6px 0; border-bottom: 1px dashed var(--border-subtle); font-size: var(--fs-sm); }
     .fn__caso-nombre { font-weight: var(--fw-semi); }
-    .fn__motivo { flex: 1 1 100%; font-size: var(--fs-xs); color: var(--text-muted); }
-    .fn__ir { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--accent-hover); text-decoration: none; }
+    .fn__motivo { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-muted); }
+    .fn__ir { justify-self: end; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--accent-hover); text-decoration: none; }
     .fn__ir .icon { width: 12px; height: 12px; }
     .fn__ir:hover { text-decoration: underline; }
     .fn__cluster { margin-top: 10px; }
@@ -2443,7 +2444,7 @@
     .fn__dsls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 10px; }
     .fn__dsl { min-width: 0; }
     .fn__dsl-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: var(--fs-xs); }
-    .fn__dsl .cat__cmd { max-height: 220px; }
+    .fn__dsl .cat__cmd { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
     @media (max-width: 560px) { .busq__fila { flex-wrap: wrap; } .busq__caso { flex-basis: 100%; } }
     .busq__res { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--sp-2); }
     .busq__res:empty { display: none; }
@@ -7001,7 +7002,8 @@
           + (t && t.motivo && t.estado !== 'ok' ? `<span class="fn__motivo">${escapeHtml(t.motivo)}</span>` : '')
           + '</li>';
       };
-      const conTarjeta = f.tarjetas.map(([s, t]) => caso(s, t));
+      const conComparador = f.id === 'busqueda' && f.tarjetas.some(([, t]) => t.estado === 'ok');
+      const conTarjeta = f.tarjetas.filter(([, t]) => !conComparador || t.estado !== 'ok').map(([s, t]) => caso(s, t));
       const sinTarjeta = f.aplica.filter(s => s !== '_cluster' && !f.tarjetas.some(([x]) => x === s)).map(s => caso(s, null));
       const casos = [...conTarjeta, ...sinTarjeta].join('');
       return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
@@ -9240,9 +9242,9 @@
           const slug = new URL(u, location.href).searchParams.get('slug') || '';
           const palabras = { multi_match: { query: '%SearchText%', fields: ['texto', 'texto.es'] } };
           return json({ indice: `busqueda-${slug}`, pipeline: 'plataforma-hibrida', campo: 'msg', url: 'https://example.invalid/app/searchRelevance#/',
-            palabras: JSON.stringify({ query: palabras }, null, 2),
+            palabras: JSON.stringify({ query: palabras }),
             hibrida: JSON.stringify({ query: { hybrid: { queries: [palabras, { neural: { embedding: {
-              query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } } }, null, 2) });
+              query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } } }) });
         }
         // Una sesión de ejemplo, para ver la cuenta arriba como en el hosteado.
         if (u.includes('/auth/me')) return json({ auth: true, logged_in: true, email: 'demo@vista-previa.com', is_admin: false });
