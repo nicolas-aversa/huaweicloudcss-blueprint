@@ -45,6 +45,28 @@ def test_el_perfil_sale_de_los_campos():
     assert perfiles.perfil_desde_campos([{"field_path": "x", "type": "float"}]) is None
 
 
+def test_el_perfil_no_suma_coordenadas_ni_edades_y_promedia_los_tiempos():
+    """Emergencias médicas: entraban latitud, longitud y edad, sumadas (-2012 de
+    latitud para 58 llamadas). Ahora, las medidas del análisis: el costo sumado
+    y los tiempos promediados."""
+    F = lambda path, tipo, **kw: {"field_path": path, "type": tipo, "business_label": path, **kw}  # noqa: E731
+    campos = [F("afiliado_id", "string", entity=True), F("edad_paciente", "integer"), F("latitud", "float"),
+              F("longitud", "float"), F("tiempo_respuesta_min", "float", role="measure"),
+              F("costo_servicio_ars", "integer", role="measure"), F("satisfaccion", "integer")]
+    p = perfiles.perfil_desde_campos(campos)
+    assert p["medidas"] == {"eventos": {"value_count": {"field": "@timestamp"}},
+                            "costo_servicio_ars": {"sum": {"field": "costo_servicio_ars"}},
+                            "tiempo_respuesta_min": {"avg": {"field": "tiempo_respuesta_min"}},
+                            "ultimo": {"max": {"field": "@timestamp"}}}
+    assert p["nombres"]["tiempo_respuesta_min"] == "tiempo_respuesta_min (promedio)"
+    # Sin medidas marcadas: los números que no son coordenadas, edades ni ids.
+    sin_roles = [dict(f, role=None) for f in campos]
+    assert [f["field_path"] for f, _ in perfiles.medidas_de_la_entidad(sin_roles, "afiliado_id")] == \
+        ["costo_servicio_ars", "satisfaccion", "tiempo_respuesta_min"]
+    assert perfiles.mapping_del_destino(p) == {"mappings": {"properties": {"entidad": {"type": "keyword"},
+                                                                          "ultimo": {"type": "date"}}}}
+
+
 def test_los_sensibles_son_los_marcados():
     assert accesos.enmascarados_desde_campos(CAMPOS) == ["data.dni"]
     assert accesos.enmascarados_desde_campos([]) == []

@@ -65,7 +65,9 @@ def test_alta_del_perfil(monkeypatch):
     pedidos = _cluster(monkeypatch)
     r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
     assert r == {"ok": True, "reason": "siem-perfil → perfil-siem, una fila por IP de origen"}
-    assert pedidos == [("GET", "/_plugins/_transform/siem-perfil"), ("PUT", "/_plugins/_transform/siem-perfil"),
+    assert pedidos == [("GET", "/_plugins/_transform/siem-perfil"),
+                       ("PUT", "/perfil-siem"),       # el índice con sus tipos (la fecha, como fecha)
+                       ("PUT", "/_plugins/_transform/siem-perfil"),
                        ("POST", "/_plugins/_transform/siem-perfil/_start")]
 
 

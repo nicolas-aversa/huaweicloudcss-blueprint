@@ -101,10 +101,45 @@ def entidad_propuesta(fields: list[dict]) -> str:
     return ""
 
 
+# Números que no son una medida de la entidad: coordenadas, edades, fechas
+# partidas, puertos, códigos e identificadores. Antes entraban los tres primeros
+# numéricos del dataset, sumados: en emergencias médicas, la "latitud" de un
+# afiliado con 58 llamadas daba -2012 y su "edad", 2276.
+_NO_ES_MEDIDA = _re.compile(
+    r"(^|[._])(lat|latitud|latitude|lon|lng|long|longitud|longitude|edad|age|anio|año|year|mes|month|dia|day|"
+    r"hora|hour|puerto|port|codigo|code|cod|id|nro|numero|number|zip|cp)($|[._])", _re.I)
+# Las duraciones se promedian (la suma de los tiempos de respuesta no dice nada);
+# montos y cantidades, se suman.
+_ES_DURACION = _re.compile(
+    r"(^|[._])(tiempo|duracion|duration|latencia|latency|demora|delay|espera|wait|time|seg|segundos|seconds|"
+    r"min|minutos|minutes|ms|horas|hours)($|[._])", _re.I)
+
+
+def medidas_de_la_entidad(fields: list[dict], entidad: str = "") -> list[tuple[dict, str]]:
+    """Hasta tres `(campo, agregación)` para el perfil: las medidas que marcó el
+    análisis (rol `measure`) o, si no marcó ninguna, los números que no son
+    coordenadas, edades ni identificadores. Montos primero (suma) y después
+    duraciones (promedio)."""
+    numericos = [f for f in fields or [] if f.get("type") in _NUMERICOS and _ruta(f) != entidad]
+    elegidas = [f for f in numericos if f.get("role") == "measure"] or \
+               [f for f in numericos if not (_NO_ES_MEDIDA.search(_ruta(f)) or _NO_ES_MEDIDA.search(f.get("raw_name") or ""))]
+    duracion = lambda f: bool(_ES_DURACION.search(_ruta(f)) or _ES_DURACION.search(f.get("raw_name") or ""))  # noqa: E731
+    return ([(f, "sum") for f in elegidas if not duracion(f)] + [(f, "avg") for f in elegidas if duracion(f)])[:3]
+
+
+def mapping_del_destino(perfil: dict) -> dict[str, Any]:
+    """El índice del perfil, creado antes del Transform: la entidad como keyword
+    y las fechas como fecha (si no, el último evento se veía como milisegundos)."""
+    props: dict[str, Any] = {"entidad": {"type": "keyword"}}
+    for nombre in perfil.get("fechas") or []:
+        props[nombre] = {"type": "date"}
+    return {"mappings": {"properties": props}}
+
+
 def perfil_desde_campos(fields: list[dict]) -> "dict | None":
     """El perfil de un dataset nuevo: agrupado por su entidad, con los eventos,
-    hasta tres medidas numéricas sumadas y el último evento. None si no hay
-    entidad."""
+    hasta tres medidas (montos sumados, duraciones promediadas) y el último
+    evento. None si no hay entidad."""
     entidad = entidad_propuesta(fields)
     if not entidad:
         return None
@@ -112,10 +147,11 @@ def perfil_desde_campos(fields: list[dict]) -> "dict | None":
                      for f in fields if _ruta(f) == entidad), entidad)
     medidas: dict = {"eventos": {"value_count": {"field": "@timestamp"}}}
     nombres = {"eventos": "Eventos"}
-    for f in [f for f in fields if f.get("type") in _NUMERICOS and _ruta(f) != entidad][:3]:
+    for f, agg in medidas_de_la_entidad(fields, entidad):
         clave = _re.sub(r"[^a-z0-9_]", "_", _ruta(f).lower())
-        medidas[clave] = {"sum": {"field": _ruta(f)}}
-        nombres[clave] = f.get("business_label") or f.get("raw_name") or _ruta(f)
+        medidas[clave] = {agg: {"field": _ruta(f)}}
+        nombre = f.get("business_label") or f.get("raw_name") or _ruta(f)
+        nombres[clave] = f"{nombre} (promedio)" if agg == "avg" else nombre
     medidas["ultimo"] = {"max": {"field": "@timestamp"}}
     nombres["ultimo"] = "Último evento"
     return {"campo": entidad, "etiqueta": etiqueta, "medidas": medidas, "nombres": nombres, "fechas": ["ultimo"]}
