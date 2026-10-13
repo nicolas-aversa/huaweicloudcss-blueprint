@@ -258,21 +258,6 @@ def test_ocupado_no_pisa_el_estado_con_un_fallo(monkeypatch, tmp_path):
     assert main._read_estados(tmp_path)["_cluster"]["embeddings"] == {"en_curso": 123}
 
 
-def test_la_busqueda_usa_el_modelo_de_consultas(monkeypatch, tmp_path):
-    from fastapi.testclient import TestClient
-    vistos = []
-    monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
-    monkeypatch.setattr(main, "_read_estados", lambda td: {
-        "_cluster": {"embeddings": {"ok": True, "model_id": "TEXTOS", "model_id_consulta": "CONSULTAS"}},
-        "s": {"busqueda": {"ok": True, "campo": "msg"}}})
-    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
-    monkeypatch.setattr(main, "_os_req", lambda m, url, u, p, json_body=None, **k:
-                        vistos.append(json_body) or _R(200, {"hits": {"hits": []}}))
-    assert TestClient(main.app).get("/api/v1/plugins/buscar?slug=s&q=pago").status_code == 200
-    hibrida = [b for b in vistos if "hybrid" in (b or {}).get("query", {})][0]
-    assert hibrida["query"]["hybrid"]["queries"][1]["neural"]["embedding"]["model_id"] == "CONSULTAS"
-
-
 # ── Subir archivos grandes a OBS (lo usa cualquier dataset pesado) ──────────
 def test_la_subida_grande_reintenta_desde_donde_quedo(monkeypatch, tmp_path):
     import obs_client

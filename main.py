@@ -8323,9 +8323,14 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
             "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}})
 
 
-@app.get("/api/v1/plugins/buscar", tags=["capabilities"],
-         summary="La búsqueda de un caso: por palabras y la híbrida, lado a lado")
-def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict:
+@app.get("/api/v1/plugins/busqueda/comparar", tags=["capabilities"],
+         summary="Lo que hace falta para comparar la búsqueda de un caso en Search Relevance (Dashboards)")
+def comparar_busqueda(slug: str) -> dict:
+    """El índice, el pipeline, las dos consultas (por palabras e híbrida) y el
+    link a Search Relevance. La comparación se hace en Dashboards: la
+    plataforma no replica esa pantalla."""
+    import json as _json
+
     terraform_dir = _active_terraform_dir()
     estados = _read_estados(terraform_dir)
     embeddings = (estados.get("_cluster") or {}).get("embeddings") or {}
@@ -8333,22 +8338,14 @@ def buscar(slug: str, q: str = Query(..., min_length=1, max_length=200)) -> dict
     caso = (estados.get(slug) or {}).get("busqueda") or {}
     if not (model_id and caso.get("ok")):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: activala con «Completar» en Búsqueda por significado."})
-    base, user, password = _cluster_del_entorno("busqueda")
-    idx = busqueda.indice(slug)
-    rl = _os_req("POST", f"{base}/{idx}/_search", user, password, json_body=busqueda.consulta_lexica(q), timeout=30)
-    rh = _os_req("POST", f"{base}/{idx}/_search?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}", user, password,
-                 json_body=busqueda.consulta_hibrida(q, model_id), timeout=60)
-
-    def leer(r) -> "tuple[list, str]":
-        try:
-            return (busqueda.resultados(r.json() or {}), "") if _resp_ok(r) else ([], _resp_motivo(r))
-        except ValueError:
-            return [], "respuesta inválida"
-
-    lexica, err_l = leer(rl)
-    hibrida, err_h = leer(rh)
-    return {"campo": caso.get("campo", ""), "lexica": lexica, "hibrida": hibrida, "error": err_h or err_l}
+            "stage": "busqueda", "message": "La búsqueda de este caso no está armada: activala con «Completar» en Búsqueda híbrida."})
+    cluster = _cluster_with_public_access(terraform_dir)
+    base = plugins_vista.base_de_dashboards(_build_dashboards_url(cluster, _read_https_enabled_from_state(terraform_dir)))
+    consultas = busqueda.consultas_para_comparar(model_id)
+    return {"indice": busqueda.indice(slug), "pipeline": busqueda.PIPELINE_DE_BUSQUEDA, "campo": caso.get("campo", ""),
+            "palabras": _json.dumps(consultas["palabras"], indent=2, ensure_ascii=False),
+            "hibrida": _json.dumps(consultas["hibrida"], indent=2, ensure_ascii=False),
+            "url": plugins_vista.link(base, plugins_vista.APP_SEARCH_RELEVANCE, "/")}
 
 
 # ── Los datos de la demo, en un snapshot ────────────────────────────────────

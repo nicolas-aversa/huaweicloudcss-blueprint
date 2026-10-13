@@ -213,6 +213,16 @@ def consulta_hibrida(q: str, model_id: str, n: int = 5) -> dict[str, Any]:
             ]}}}
 
 
+def consultas_para_comparar(model_id: str) -> dict[str, dict[str, Any]]:
+    """Las dos consultas para comparar en Search Relevance (Dashboards), lado a
+    lado: por palabras y la híbrida. `%SearchText%` es lo que escribe quien
+    prueba; la híbrida va con el pipeline `PIPELINE_DE_BUSQUEDA`."""
+    palabras = {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}}
+    return {"palabras": {"query": palabras},
+            "hibrida": {"query": {"hybrid": {"queries": [
+                palabras, {"neural": {"embedding": {"query_text": "%SearchText%", "model_id": model_id, "k": 10}}}]}}}}
+
+
 def resultados(cuerpo: dict[str, Any]) -> list[dict[str, Any]]:
     """`[{texto, cuenta, puntaje}]` de una respuesta de `_search`."""
     return [{"texto": (h.get("_source") or {}).get("texto", ""), "cuenta": (h.get("_source") or {}).get("cuenta"),

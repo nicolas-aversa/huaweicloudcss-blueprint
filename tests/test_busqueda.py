@@ -141,25 +141,27 @@ def test_el_run_prepara_el_modelo_una_vez_y_cada_caso(monkeypatch, tmp_path):
                                         "campo": "msg", "textos": None, "no_aplica": False}
 
 
-def test_el_endpoint_busca_de_las_dos_formas(monkeypatch, tmp_path):
+def test_la_comparacion_va_en_search_relevance(monkeypatch, tmp_path):
+    """La plataforma no replica Dashboards: da el índice, el pipeline, las dos
+    consultas y el link a Search Relevance, que las muestra lado a lado."""
+    import json as _json
     from fastapi.testclient import TestClient
     monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
     c = TestClient(main.app)
-    assert c.get("/api/v1/plugins/buscar?slug=ventas&q=x").status_code == 409, "sin armar"
-    monkeypatch.setattr(main, "_read_estados", lambda td: {"_cluster": {"embeddings": {"model_id": "M1"}},
-                                                          "ventas": {"busqueda": {"ok": True, "campo": "comentario"}}})
-    monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
-    pedidos = []
-
-    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
-        pedidos.append(url)
-        texto = "pago denegado" if "search_pipeline" in url else "cobro rechazado"
-        return _R(200, {"hits": {"hits": [{"_score": 1.0, "_source": {"texto": texto, "cuenta": 7}}]}})
-
-    monkeypatch.setattr(main, "_os_req", req)
-    d = c.get("/api/v1/plugins/buscar", params={"slug": "ventas", "q": "cobro rechazado"}).json()
-    assert d["campo"] == "comentario" and d["lexica"][0]["texto"] == "cobro rechazado" and d["hibrida"][0]["texto"] == "pago denegado"
-    assert "http://x/busqueda-ventas/_search?search_pipeline=plataforma-hibrida" in pedidos
+    assert c.get("/api/v1/plugins/busqueda/comparar?slug=ventas").status_code == 409, "sin armar"
+    monkeypatch.setattr(main, "_read_estados", lambda td: {
+        "_cluster": {"embeddings": {"model_id": "TEXTOS", "model_id_consulta": "CONSULTAS"}},
+        "ventas": {"busqueda": {"ok": True, "campo": "comentario"}}})
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda td: {"public_endpoint": "1.2.3.4:9200"})
+    monkeypatch.setattr(main, "_build_dashboards_url", lambda cluster, https: "https://dash.example/app/home")
+    d = c.get("/api/v1/plugins/busqueda/comparar", params={"slug": "ventas"}).json()
+    assert d["indice"] == "busqueda-ventas" and d["pipeline"] == "plataforma-hibrida" and d["campo"] == "comentario"
+    assert d["url"] == "https://dash.example/app/searchRelevance#/"
+    assert _json.loads(d["palabras"]) == {"query": {"multi_match": {"query": "%SearchText%", "fields": ["texto", "texto.es"]}}}
+    neural = _json.loads(d["hibrida"])["query"]["hybrid"]["queries"][1]["neural"]["embedding"]
+    assert neural == {"query_text": "%SearchText%", "model_id": "CONSULTAS", "k": 10}, "con el modelo de consultas"
+    import pathlib
+    assert "/api/v1/plugins/buscar" not in pathlib.Path(main.__file__).read_text(encoding="utf-8"), "no se busca desde la plataforma"
 
 
 # ── El plan, el export y la tarjeta ─────────────────────────────────────────
@@ -184,7 +186,9 @@ def test_el_export_lleva_la_busqueda():
 def test_la_tarjeta():
     ok = pv._busqueda({"ok": True, "campo": "comentario"})
     assert ok["estado"] == pv.OK and "«comentario»" in ok["que"] and ok["numero"] == "busqueda" and ok["campo"] == "comentario"
-    assert ok["accion"] == {"id": "probar_busqueda", "texto": "Probar una búsqueda"}
+    con_base = pv._busqueda({"ok": True, "campo": "comentario"}, "https://d")
+    assert con_base["links"] == [{"texto": "Comparar en Search Relevance", "url": "https://d/app/searchRelevance#/"}]
+    assert "accion" not in ok, "sin botón: se compara en Dashboards"
     assert pv._busqueda({"ok": False, "no_aplica": True, "motivo": "es una categoría"})["estado"] == pv.EXCLUIDO
     mal = pv._busqueda({"ok": False, "motivo": "sin el modelo"})
     assert mal["estado"] == pv.FALLA and "accion" not in mal

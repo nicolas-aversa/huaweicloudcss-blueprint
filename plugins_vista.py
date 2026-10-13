@@ -28,6 +28,7 @@ APP_INSIGHTS = "query-insights-dashboards"
 APP_DASHBOARDS = "dashboards"
 APP_DISCOVER = "discover"
 APP_REPORTING = "reports-dashboards"
+APP_SEARCH_RELEVANCE = "searchRelevance"
 
 # Estado de una tarjeta: cómo quedó lo que se provisionó.
 OK, PARCIAL, FALLA, EN_CURSO, EXCLUIDO = "ok", "parcial", "falla", "en_curso", "excluido"
@@ -285,8 +286,9 @@ def _dashboard(entry: dict, base: str, reporte: "dict | None" = None) -> dict:
                             "url": link(base, APP_DASHBOARDS, f"/view/{did}" if did else "/list")}] if importado else [])
 
 
-def _busqueda(estado: dict) -> dict:
-    """La búsqueda híbrida del caso: sobre qué campo, y el botón para probarla."""
+def _busqueda(estado: dict, base: str = "") -> dict:
+    """La búsqueda híbrida del caso: sobre qué campo, y dónde compararla en
+    Dashboards (Search Relevance): la plataforma no replica esa pantalla."""
     campo = estado.get("campo") or ""
     if estado.get("no_aplica"):
         return _tarjeta("busqueda", "Búsqueda híbrida", "", EXCLUIDO, estado.get("motivo") or "no aplica")
@@ -295,7 +297,7 @@ def _busqueda(estado: dict) -> dict:
                  f"Busca en «{campo}» por palabras y por significado a la vez: lo exacto sale arriba y "
                  "encuentra también lo que está dicho con otras palabras.",
                  OK if ok else FALLA, "" if ok else estado.get("motivo", ""), numero="busqueda" if ok else "",
-                 accion={"id": "probar_busqueda", "texto": "Probar una búsqueda"} if ok else None)
+                 links=[{"texto": "Comparar en Search Relevance", "url": link(base, APP_SEARCH_RELEVANCE, "/")}] if ok else None)
     t["campo"] = campo
     return t
 
@@ -348,7 +350,7 @@ def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: 
     if "busqueda" in excluidos:
         fuera.append(_tarjeta("busqueda", "Búsqueda híbrida", "", EXCLUIDO, "excluido en el paso 2"))
     elif estados.get("busqueda"):
-        fuera.append(_busqueda(estados["busqueda"]))
+        fuera.append(_busqueda(estados["busqueda"], base))
     return fuera
 
 

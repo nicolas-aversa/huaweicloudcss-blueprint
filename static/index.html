@@ -2436,8 +2436,14 @@
     .busq { display: flex; flex-direction: column; gap: var(--sp-2); }
     .busq__fila { display: flex; gap: var(--sp-2); }
     .busq__q { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); }
-    .busq__caso { flex: 0 1 260px; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); }
-    .fn__busq { margin: 6px 0 4px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-primary); }
+    .busq__caso { flex: 1 1 260px; min-width: 0; max-width: 420px; padding: 7px 10px; font-size: var(--fs-sm); }
+    .fn__comparar { margin: 6px 0 4px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-primary); }
+    .fn__comparar .fn__sr { text-decoration: none; }
+    .fn__pasos { margin: 10px 0 8px; padding-left: 20px; font-size: var(--fs-sm); color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
+    .fn__dsls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 10px; }
+    .fn__dsl { min-width: 0; }
+    .fn__dsl-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: var(--fs-xs); }
+    .fn__dsl .cat__cmd { max-height: 220px; }
     @media (max-width: 560px) { .busq__fila { flex-wrap: wrap; } .busq__caso { flex-basis: 100%; } }
     .busq__res { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--sp-2); }
     .busq__res:empty { display: none; }
@@ -7000,42 +7006,51 @@
       const casos = [...conTarjeta, ...sinTarjeta].join('');
       return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
-        + (f.id === 'busqueda' ? buscadorHTML(f) : '')
+        + (f.id === 'busqueda' ? comparadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
         + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
         + (f.c && f.aplica.length ? `<div class="fn__pie"><button type="button" class="btn btn-ghost btn-sm fn__comandos" data-plugin="${escapeHtml(f.id)}" `
           + `aria-expanded="false">${icon('code')} Ver cómo se hace en Dev Tools</button></div>`
           + `<div class="cat__det" data-det="${escapeHtml(f.id)}" hidden></div>` : '');
     }
-    // Probar la búsqueda híbrida: un caso, lo que buscás con tus palabras, y lo
-    // que encuentra por palabras al lado de lo que encuentra la híbrida.
-    function buscadorHTML(f) {
+    // Comparar la búsqueda híbrida en Dashboards (Search Relevance), no acá: la
+    // plataforma no replica las pantallas de OpenSearch. El panel da el link,
+    // el índice, el pipeline y las dos consultas para pegar.
+    function comparadorHTML(f) {
       const listos = f.tarjetas.filter(([, t]) => t.estado === 'ok');
       if (!listos.length) return '';
       const opciones = listos.map(([s, t]) => `<option value="${escapeHtml(s)}">${escapeHtml(SLUG_LABELS[s] || s)}`
         + `${t.campo ? ` · ${escapeHtml(t.campo)}` : ''}</option>`).join('');
-      return `<form class="busq fn__busq">
+      return `<div class="fn__comparar">
           <div class="busq__fila">
-            <select class="form-input busq__caso" name="slug" aria-label="Caso">${opciones}</select>
-            <input class="form-input busq__q" name="q" maxlength="200" required
-              placeholder="Escribí lo que buscás, con tus palabras" aria-label="Lo que buscás">
-            <button class="btn btn-primary btn-sm" type="submit">${icon('search')} Buscar</button>
+            <select class="form-input busq__caso" aria-label="Caso">${opciones}</select>
+            <a class="btn btn-primary btn-sm fn__sr hidden" target="_blank" rel="noopener">${icon('arrow-right')} Abrir Search Relevance</a>
           </div>
-          <div class="busq__res" aria-live="polite"></div>
-        </form>`;
+          <div class="fn__comparar-cuerpo" aria-live="polite"></div>
+        </div>`;
     }
-    async function buscarDesde(form, slug) {
-      const q = (form.querySelector('.busq__q')?.value || '').trim();
-      const res = form.querySelector('.busq__res');
-      if (!q || !slug || !res) return;
-      res.innerHTML = '<span class="busq__vacio">Buscando…</span>';
+    async function llenarComparador(caja) {
+      const slug = caja.querySelector('.busq__caso')?.value;
+      const cuerpo = caja.querySelector('.fn__comparar-cuerpo');
+      const abrir = caja.querySelector('.fn__sr');
+      if (!slug || !cuerpo) return;
+      cuerpo.innerHTML = '<span class="busq__vacio">Armando las consultas…</span>';
       try {
-        const r = await fetch('/api/v1/plugins/buscar?slug=' + encodeURIComponent(slug) + '&q=' + encodeURIComponent(q));
+        const r = await fetch('/api/v1/plugins/busqueda/comparar?slug=' + encodeURIComponent(slug));
         const d = await r.json();
         if (!r.ok) throw detailError(d);
-        res.innerHTML = busquedaHTML(d);
+        if (abrir) { abrir.href = d.url || '#'; abrir.classList.toggle('hidden', !d.url); }
+        const bloque = (titulo, texto) => `<div class="fn__dsl"><div class="fn__dsl-cab"><strong>${titulo}</strong>`
+          + `<button type="button" class="btn btn-ghost btn-sm fn__copiar">Copiar</button></div>`
+          + `<pre class="cat__cmd" tabindex="0">${escapeHtml(texto)}</pre></div>`;
+        cuerpo.innerHTML = `<ol class="fn__pasos">
+            <li>En Search Relevance, comparar resultados de búsqueda: elegí el índice <code>${escapeHtml(d.indice)}</code> en los dos lados.</li>
+            <li>Pegá la consulta 1 a la izquierda y la 2 a la derecha; para la 2, elegí el pipeline <code>${escapeHtml(d.pipeline)}</code>.</li>
+            <li>Escribí lo que buscás, con tus palabras (reemplaza a <code>%SearchText%</code>), y buscá: a la derecha aparece lo que la búsqueda por palabras no encuentra.</li>
+          </ol>
+          <div class="fn__dsls">${bloque('Consulta 1 · por palabras', d.palabras)}${bloque('Consulta 2 · híbrida', d.hibrida)}</div>`;
       } catch (err) {
-        res.innerHTML = `<span class="busq__vacio">No se pudo buscar: ${escapeHtml(err.message)}</span>`;
+        cuerpo.innerHTML = `<span class="busq__vacio">No se pudieron armar: ${escapeHtml(err.message)}</span>`;
       }
     }
     function pintarFuncion(panel, id, data) {
@@ -7045,6 +7060,8 @@
         + `<button type="button" class="fn-panel__cerrar" aria-label="Cerrar" title="Cerrar">${icon('x')}</button></div>`
         + detalleDeFuncionHTML(f);
       panel.querySelectorAll('.plug-grid').forEach(repartirTarjetas);
+      const comparar = panel.querySelector('.fn__comparar');
+      if (comparar) llenarComparador(comparar);
     }
     // Abre (o cierra) el panel de una función, debajo de su grupo de tarjetas.
     function verFuncion(fila, data) {
@@ -7340,37 +7357,6 @@
     // Probar la búsqueda híbrida de un caso: lo que encuentra por palabras y lo
     // que encuentra sumando el significado, lado a lado. Es la demo: la misma
     // frase, y a la derecha aparece lo que está dicho con otras palabras.
-    function probarBusqueda(btn) {
-      const tarjeta = btn.closest('.plug');
-      const slug = btn.closest('.mtx__det')?.dataset.det;
-      if (!tarjeta || !slug) return;
-      let caja = tarjeta.querySelector('.busq');
-      if (caja) { caja.querySelector('input')?.focus(); return; }
-      caja = document.createElement('form');
-      caja.className = 'busq';
-      caja.innerHTML = `<div class="busq__fila"><input class="form-input busq__q" name="q" maxlength="200" required
-          placeholder="Escribí lo que buscás, con tus palabras" aria-label="Búsqueda">
-          <button class="btn btn-primary btn-sm" type="submit">${icon('search')} Buscar</button></div>
-        <div class="busq__res" aria-live="polite"></div>`;
-      btn.closest('.plug__links')?.insertAdjacentElement('afterend', caja);
-      caja.querySelector('input').focus();
-      caja.addEventListener('submit', (e) => {
-        e.preventDefault();
-        buscarDesde(caja, slug);
-      });
-    }
-    function busquedaHTML(d) {
-      const lista = (xs) => (xs || []).length
-        ? `<ol>${xs.map(x => `<li><span>${escapeHtml(x.texto)}</span>${x.cuenta ? `<small>${_fmtN(x.cuenta)}</small>` : ''}</li>`).join('')}</ol>`
-        : '<span class="busq__vacio">Nada.</span>';
-      const lexicos = new Set((d.lexica || []).map(x => x.texto));
-      const nuevos = (d.hibrida || []).filter(x => !lexicos.has(x.texto)).length;
-      return `<div class="busq__col"><strong>Por palabras</strong>${lista(d.lexica)}</div>`
-        + `<div class="busq__col"><strong>Híbrida (palabras + significado)</strong>${lista(d.hibrida)}</div>`
-        + (nuevos ? `<p class="busq__nota">${nuevos} resultado${nuevos === 1 ? '' : 's'} que la búsqueda por palabras no encuentra.</p>` : '')
-        + (d.error ? `<p class="busq__nota">${escapeHtml(d.error)}</p>` : '');
-    }
-
     // "Explicar" una anomalía: el asistente compara ese intervalo con el resto.
     function explicarAnomalia(b) {
       const { slug, inicio, fin, grado, valores } = b.dataset;
@@ -9007,8 +8993,6 @@
         if (caso) return verPlugins(caso);
         const explicar = e.target.closest('.anomalia__explicar');
         if (explicar) return explicarAnomalia(explicar);
-        const probar = e.target.closest('.plug__accion[data-accion="probar_busqueda"]');
-        if (probar) return probarBusqueda(probar);
       });
 
       // Acciones: reusan las funciones del flujo.
@@ -9037,7 +9021,7 @@
         if (probarBusq) {
           const fila = probarBusq.closest('.fn-tile')?.querySelector('.fn__fila');
           if (fila && state.funcionAbierta !== 'busqueda') verFuncion(fila, data);
-          setTimeout(() => body.querySelector('.fn__busq .busq__q')?.focus(), 0);
+          setTimeout(() => body.querySelector('.fn__comparar .busq__caso')?.focus(), 0);
           return;
         }
         if (e.target.closest('.fn-panel__cerrar')) {
@@ -9061,14 +9045,14 @@
         }
         const copiar = e.target.closest('.cat__copiar');
         if (copiar) return copyToClipboard(copiar.closest('.cat__det')?.querySelector('.cat__cmd')?.textContent || '', copiar);
+        const copiarDsl = e.target.closest('.fn__copiar');
+        if (copiarDsl) return copyToClipboard(copiarDsl.closest('.fn__dsl')?.querySelector('.cat__cmd')?.textContent || '', copiarDsl);
         const fila = e.target.closest('.fn__fila');
         if (fila) return verFuncion(fila, data);
       }));
-      body.querySelectorAll('.fn-seccion').forEach(seccion => seccion.addEventListener('submit', (e) => {
-        const form = e.target.closest('.fn__busq');
-        if (!form) return;
-        e.preventDefault();
-        buscarDesde(form, form.querySelector('.busq__caso')?.value);
+      body.querySelectorAll('.fn-seccion').forEach(seccion => seccion.addEventListener('change', (e) => {
+        const caja = e.target.closest('.fn__comparar');
+        if (caja && e.target.closest('.busq__caso')) llenarComparador(caja);
       }));
       // Un repintado deja abierta la función que se estaba mirando.
       const tileAbierta = state.funcionAbierta && body.querySelector(`.fn-tile[data-fn="${state.funcionAbierta}"]`);
@@ -9251,12 +9235,14 @@
           return json(fuera);
         }
         // La búsqueda híbrida: lo que agrega el significado a la búsqueda por palabras.
-        if (u.includes('/api/v1/plugins/buscar')) {
-          await espera(600);
-          return json({ campo: 'rule.name', error: '',
-            lexica: [{ texto: 'SSH brute force attempt', cuenta: 214 }],
-            hibrida: [{ texto: 'SSH brute force attempt', cuenta: 214 }, { texto: 'Multiple failed logins from the same IP', cuenta: 96 },
-                      { texto: 'Password spraying detected', cuenta: 41 }, { texto: 'Account locked after repeated failures', cuenta: 18 }] });
+        if (u.includes('/api/v1/plugins/busqueda/comparar')) {
+          await espera(300);
+          const slug = new URL(u, location.href).searchParams.get('slug') || '';
+          const palabras = { multi_match: { query: '%SearchText%', fields: ['texto', 'texto.es'] } };
+          return json({ indice: `busqueda-${slug}`, pipeline: 'plataforma-hibrida', campo: 'msg', url: 'https://example.invalid/app/searchRelevance#/',
+            palabras: JSON.stringify({ query: palabras }, null, 2),
+            hibrida: JSON.stringify({ query: { hybrid: { queries: [palabras, { neural: { embedding: {
+              query_text: '%SearchText%', model_id: 'vista-previa', k: 10 } } }] } } }, null, 2) });
         }
         // Una sesión de ejemplo, para ver la cuenta arriba como en el hosteado.
         if (u.includes('/auth/me')) return json({ auth: true, logged_in: true, email: 'demo@vista-previa.com', is_admin: false });

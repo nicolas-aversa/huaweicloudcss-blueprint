@@ -245,9 +245,11 @@ const conBusq = { ...data, catalogo: [...data.catalogo, C('busqueda', ['siem', '
   plugins: { ...data.plugins, siem: [...data.plugins.siem, T('busqueda', 'ok', { campo: 'msg' })],
              'produccion-pozos': [...data.plugins['produccion-pozos'], T('busqueda', 'falla')] } };
 const busq = detalleDeFuncionHTML(funcionDe('busqueda', conBusq));
-check('el buscador, con los casos listos y su campo', busq.includes('<form class="busq fn__busq">')
-  && busq.includes('<option value="siem">SIEM · msg</option>') && !busq.includes('<option value="produccion-pozos">'), busq);
-check('sin casos listos, sin buscador', !detalleDeFuncionHTML(funcionDe('busqueda', { ...conBusq, plugins: {} })).includes('fn__busq'));
+check('el comparador, con los casos listos y su campo', busq.includes('<div class="fn__comparar">')
+  && busq.includes('<option value="siem">SIEM · msg</option>') && !busq.includes('<option value="produccion-pozos">')
+  && busq.includes('Abrir Search Relevance'), busq);
+check('sin casos listos, sin comparador', !detalleDeFuncionHTML(funcionDe('busqueda', { ...conBusq, plugins: {} })).includes('fn__comparar'));
+check('no busca desde la plataforma', !busq.includes('<form') && !busq.includes('Buscar</button>'), busq);
 const listaB = funcionesHTML({ ...conBusq, catalogo: [C('busqueda', ['siem'], ['siem'])] });
 check('la tarjeta lista se prueba', tile(listaB, 'busqueda').includes('class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'), tile(listaB, 'busqueda'));
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
@@ -271,7 +273,8 @@ def test_que_podes_mostrar_esta_conectado():
     assert "if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);" in vista
     assert "if (e.target.closest('.fn__probar')) return abrirAsistente();" in vista
     assert "if (fila) return verFuncion(fila, data);" in vista
-    assert "buscarDesde(form, form.querySelector('.busq__caso')?.value);" in vista
+    assert "if (caja && e.target.closest('.busq__caso')) llenarComparador(caja);" in vista
+    assert "busquedaHTML" not in html and "probarBusqueda" not in html and "/api/v1/plugins/buscar" not in html
     assert "if (!det.hidden) pintarComandos(det, det.dataset.det);" in vista
     assert "body.querySelector('#infra-preguntar')?.addEventListener('click', abrirAsistente);" in vista
     # El paso 3 activa todo lo que hace falta: sin "recomendados" ni "elegí cuáles" (traían dudas).
