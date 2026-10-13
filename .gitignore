@@ -20,6 +20,7 @@ datasets/*.log
 datasets/*.csv
 datasets/*.ndjson
 datasets/*.json
+datasets/*.txt
 datasets/train_identity.csv
 datasets/train_transaction.csv
 
