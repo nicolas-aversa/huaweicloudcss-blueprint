@@ -317,11 +317,21 @@ def _de_donde(campo: str, label: str) -> str:
             else f"los valores del campo «{campo}»" if campo else "los textos de un caso")
 
 
+def _la_lista(datos: Any, clave: str) -> "list | None":
+    """La lista que pidió el prompt. El LLM a veces equivoca la clave (visto:
+    `"buquedas"` por `"busquedas"`, y se perdían todas): la primera lista."""
+    if not isinstance(datos, dict):
+        return None
+    if isinstance(datos.get(clave), list):
+        return datos[clave]
+    return next((v for v in datos.values() if isinstance(v, list)), None)
+
+
 def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
     """Las búsquedas que propuso el LLM, validadas: cada una apunta a uno de
     los textos (como quedó en el prompt) y a uno distinto."""
     por_linea = {_en_una_linea(t): t for t in textos}
-    propuestas = datos.get("busquedas") if isinstance(datos, dict) else None
+    propuestas = _la_lista(datos, "busquedas")
     fuera: list[dict[str, str]] = []
     usados: set[str] = set()
     for x in propuestas if isinstance(propuestas, list) else []:
@@ -406,7 +416,7 @@ def prompt_de_consultas(textos: list[str], campo: str = "", label: str = "") -> 
 def consultas_a_evaluar(datos: Any) -> list[str]:
     """Las búsquedas que propuso el LLM para evaluar: texto, de largo
     razonable y sin repetir."""
-    propuestas = datos.get("consultas") if isinstance(datos, dict) else None
+    propuestas = _la_lista(datos, "consultas")
     fuera: list[str] = []
     vistas: set[str] = set()
     for x in propuestas if isinstance(propuestas, list) else []:

@@ -379,6 +379,10 @@ def test_las_busquedas_propuestas_se_validan():
         {"busqueda": "no puede entrar", "objetivo": "Admin login failed"},
         {"busqueda": "línea cortada", "objetivo": "Línea\n  partida"}]
     assert busqueda.candidatas({"busquedas": "no"}, textos) == [] and busqueda.candidatas(None, textos) == []
+    # El LLM equivocó la clave ("buquedas") y se perdían todas: vale la primera lista.
+    assert busqueda.candidatas({"buquedas": [{"busqueda": "no puede entrar", "texto": "Admin login failed"}]}, textos) == \
+        [{"busqueda": "no puede entrar", "objetivo": "Admin login failed"}]
+    assert busqueda.consultas_a_evaluar({"consulta": ["dolor de cabeza"]}) == ["dolor de cabeza"]
     p = busqueda.prompt_de_busquedas(textos, "msg", "FortiAnalyzer")
     assert "\nLínea partida" in p and "\nAdmin login failed" in p and f"Proponé {busqueda.CANDIDATAS} búsquedas" in p
     assert "los valores del campo «msg» de «FortiAnalyzer»" in p, "de dónde son: «Health» no es bienestar físico"
