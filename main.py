@@ -3284,7 +3284,7 @@ def _tfvars_sin_activar(terraform_dir: Path, slugs: list[str]) -> str:
 # era el único paso del deploy que no se veía.
 # Las filas de las rutas, con su nombre en un solo lugar: lo usan el anuncio
 # (plan), las dos actualizaciones del deploy y la vista previa.
-_RUTA_MAAS = ("rutas:maas", "Rutas del cluster · IPs servicio MaaS")
+_RUTA_MAAS = ("rutas:maas", "Rutas del cluster · IPs de MaaS y NVIDIA")
 _RUTA_FUENTES = ("rutas:fuentes", "Rutas del Logstash · IPs de las fuentes")
 
 
@@ -4000,7 +4000,10 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     cluster = _read_opensearch_cluster_from_state(terraform_dir)
     _overlay_public_endpoints(cluster, tf_outputs or {})
 
-    # Cluster Routes del CSS → salida a MaaS (para el agente/chatbot). Solo en
+    # Cluster Routes del CSS → salida a MaaS (el agente) y a NVIDIA (los vectores
+    # de la búsqueda híbrida), en el mismo paso: así "Activar los plugins" ya la
+    # encuentra. Son IPs fijas y no abren nada hacia adentro; el paso 3 las
+    # vuelve a asegurar (idempotente) por si el deploy no pudo. Solo en
     # provisión (cluster nuevo). Best-effort. (Este es el path REAL del deploy —
     # el frontend usa /deploy-stream, no /terraform/deploy.)
     if not request.start_ingestion:
@@ -4009,14 +4012,14 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
             cluster_id = (tf_outputs.get("opensearch_cluster_id") or {}).get("value", "")
             r = _add_css_cluster_routes(
                 cluster_id, request.obs_access_key, request.obs_secret_key,
-                get_huawei_project_id(),
+                get_huawei_project_id(), ips=_maas_route_ips() + list(busqueda.PROVEEDOR["ips"]),
             )
             print(f"[css-routes] resultado: {r}")
             ok_maas, motivo_maas = not r.get("error"), str(r.get("error") or "")
         except Exception as exc:  # noqa: BLE001
             print(f"[css-routes] fallo agregando cluster routes (best-effort): {exc!r}")
             ok_maas, motivo_maas = False, repr(exc)[:300]
-        yield _sse({"type": "step", "name": "Rutas del cluster → MaaS",
+        yield _sse({"type": "step", "name": "Rutas del cluster → MaaS y NVIDIA",
                     "ok": ok_maas, "reason": motivo_maas})
         yield _sse({"type": "item", **_item_ruta(
             *_RUTA_MAAS, "listo" if ok_maas else "Falló",

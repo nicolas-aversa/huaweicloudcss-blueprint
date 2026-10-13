@@ -90,10 +90,17 @@ def test_el_plan_trae_las_filas_que_no_son_de_terraform(monkeypatch, tmp_path):
 
 
 # ── Los logos ───────────────────────────────────────────────────────────────
+def test_el_deploy_abre_la_salida_a_nvidia():
+    """Las rutas a NVIDIA (los vectores de la búsqueda híbrida) van en el deploy,
+    con las de MaaS: "Activar los plugins" las encuentra hechas."""
+    import inspect
+    assert 'get_huawei_project_id(), ips=_maas_route_ips() + list(busqueda.PROVEEDOR["ips"]),' in inspect.getsource(main)
+
+
 def test_las_rutas_se_llaman_como_en_la_consola():
-    assert main._RUTA_MAAS == ("rutas:maas", "Rutas del cluster · IPs servicio MaaS")
+    assert main._RUTA_MAAS == ("rutas:maas", "Rutas del cluster · IPs de MaaS y NVIDIA")
     assert main._RUTA_FUENTES == ("rutas:fuentes", "Rutas del Logstash · IPs de las fuentes")
-    assert progreso_tf._ETIQUETAS["snat"] == "SNAT · salida a MaaS"
+    assert progreso_tf._ETIQUETAS["snat"] == "SNAT · salida", "a internet: MaaS, NVIDIA y el canal de avisos (23 caracteres)"
     assert progreso_tf._ETIQUETAS["nat"] == "Public gateway"
 
 

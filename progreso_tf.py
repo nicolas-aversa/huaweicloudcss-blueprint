@@ -58,7 +58,7 @@ _ETIQUETAS = {
     "logstash": "Logstash cluster",
     "nat": "Public gateway",
     "eip": "IP pública",
-    "snat": "SNAT · salida a MaaS",
+    "snat": "SNAT · salida",
     "sg": "Reglas de entrada",
     "activar": "Activar pipelines",
     "otros": "Otros recursos",
