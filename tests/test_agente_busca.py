@@ -73,36 +73,34 @@ def test_los_buscadores_salen_de_la_busqueda_armada(tmp_path):
     assert main._buscadores_del_agente(tmp_path, VERT) == [], "sin modelo de embeddings, nada"
 
 
-def test_se_rearma_el_agente_solo_si_hay_busqueda_nueva(tmp_path, monkeypatch):
+def test_se_rearma_el_agente_solo_si_cambio_su_configuracion(tmp_path, monkeypatch):
+    """Un prompt de PPL mejorado, una búsqueda nueva u otro campo cambian la
+    configuración: el agente se vuelve a registrar. Con la misma, no."""
     llamadas = []
     monkeypatch.setattr(main, "_registrar_agente", lambda *a, **k: llamadas.append(a) or ("AG2", {}))
     monkeypatch.setattr(main, "_os_base", lambda c, h: "http://x:9200")
+    monkeypatch.setattr(main, "_fuentes_del_agente", lambda *a, **k: VERT)
     import maas_integrator
     monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "k")
     pasos = []
     monkeypatch.setattr(main.runs, "step", lambda run, nombre, ok, detalle="": pasos.append((nombre, ok, detalle)))
-    run = {"events": []}
-    registro = {"envios": {"agent_id": "AG", "ppl_model_id": "P", "llm_model_id": "L", "busca_por_significado": ""}}
+    registro = {"envios": {"agent_id": "AG", "ppl_model_id": "P", "llm_model_id": "L"}}
     estados = {"_cluster": {"embeddings": {"model_id_consulta": "Q"}}, "envios": {"busqueda": {"ok": True, "campo": "c"}}}
     _estados(tmp_path, estados, registro)
-    main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
-    assert len(llamadas) == 1, "la búsqueda quedó lista y el agente no la tenía"
-    assert pasos and pasos[0][0] == "Asistente · búsqueda por significado"
-    firma = caps.firma_del_buscador({"slug": "envios", "label": "envios", "index": "busqueda-envios", "campo": "c", "model_id": "Q"})
-    registro["envios"]["busca_por_significado"] = firma
+    main._rearmar_el_agente_si_cambio({}, "admin", "pw", True, tmp_path, {})
+    assert len(llamadas) == 1, "sin firma guardada (un entorno de antes): se rearma"
+    assert pasos and pasos[0][0] == "Asistente · al día"
+    # Con la firma de lo que tendría que tener, no se toca.
+    deseado = caps.build_conversational_agent("L", "P", caps.build_agent_system_instruction(
+        VERT, main._buscadores_del_agente(tmp_path, VERT)), VERT, buscadores=main._buscadores_del_agente(tmp_path, VERT))
+    estados["_cluster"]["agente"] = {"firma": main._firma_del_agente(deseado)}
     _estados(tmp_path, estados, registro)
-    main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
-    assert len(llamadas) == 1, "ya la tenía, con lo mismo: no se rearma"
-    # Cambió el campo de texto libre (logística: de motivo a observación): se rearma.
-    estados["envios"]["busqueda"]["campo"] = "evento.observacion"
-    _estados(tmp_path, estados, registro)
-    main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
+    main._rearmar_el_agente_si_cambio({}, "admin", "pw", True, tmp_path, {})
+    assert len(llamadas) == 1, "misma configuración: no se rearma"
+    # Cambió el prompt de PPL de un caso (o cualquier otra cosa): se rearma.
+    monkeypatch.setattr(main, "_fuentes_del_agente", lambda *a, **k: [{**VERT[0], "ppl_system_prompt": "otro"}])
+    main._rearmar_el_agente_si_cambio({}, "admin", "pw", True, tmp_path, {})
     assert len(llamadas) == 2
-    # Un registro de antes de la firma (True) también se rearma.
-    registro["envios"]["busca_por_significado"] = True
-    _estados(tmp_path, estados, registro)
-    main._sumar_la_busqueda_al_agente({}, "admin", "pw", True, tmp_path, run)
-    assert len(llamadas) == 3
 
 
 def test_sin_vectordbtool_el_agente_igual_queda(tmp_path, monkeypatch):
@@ -123,12 +121,14 @@ def test_sin_vectordbtool_el_agente_igual_queda(tmp_path, monkeypatch):
     agent_id, _ = main._registrar_agente("http://x", "admin", "pw", "k", tmp_path, registro, "P", "L")
     assert agent_id == "AG" and len(cuerpos) == 2
     assert main._read_capabilities(tmp_path)["envios"]["busca_por_significado"] == ""
+    # Queda la firma de lo que se quiso registrar: la próxima activación lo reintenta.
+    assert main._read_estados(tmp_path)["_cluster"]["agente"]["firma"] == main._firma_del_agente(cuerpos[0])
 
 
 def test_la_respuesta_lleva_lo_que_busco():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     assert 'busquedas=[b for b in leido.get("busquedas") or [] if b.get("frases")])' in src
-    assert '_sumar_la_busqueda_al_agente(cluster, user, password, request.https_enabled, terraform_dir, run)' in src
+    assert '_rearmar_el_agente_si_cambio(cluster, user, password, request.https_enabled, terraform_dir, run)' in src
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")

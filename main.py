@@ -7187,6 +7187,14 @@ def _buscadores_del_agente(terraform_dir: Path, agent_verticals: list[dict]) -> 
     return out
 
 
+def _firma_del_agente(cuerpo: dict) -> str:
+    """Lo que identifica la configuración de un agente: si cambia (un caso, un
+    prompt de PPL, una búsqueda, un modelo), hay que volver a registrarlo."""
+    import hashlib
+
+    return hashlib.sha256(json.dumps(cuerpo, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
 def _registrar_agente(base: str, user: str, password: str, api_key: str, terraform_dir: Path,
                       registry: dict, ppl_model: str, llm_model: str,
                       slug_actual: str = "") -> "tuple[str | None, dict]":
@@ -7201,9 +7209,11 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
     # quedarían duplicados.
     for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search", "Platform Conversational Root"):
         _os_req("DELETE", f"{base}/_plugins/_ml/agents/{aid}", user, password, timeout=20)
-    agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register", caps.build_conversational_agent(
+    cuerpo = caps.build_conversational_agent(
         llm_model, ppl_model, caps.build_agent_system_instruction(agent_verticals, buscadores), agent_verticals,
-        buscadores=buscadores), "agent_id")
+        buscadores=buscadores)
+    firma = _firma_del_agente(cuerpo)     # la de lo que se quiso registrar (ver _rearmar_el_agente_si_cambio)
+    agent_id = _ml_create(base, user, password, "/_plugins/_ml/agents/_register", cuerpo, "agent_id")
     if not agent_id and buscadores:
         # Un cluster sin VectorDBTool rechaza el agente entero: sin la búsqueda
         # por significado, pero con el chat.
@@ -7213,6 +7223,7 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
             llm_model, ppl_model, caps.build_agent_system_instruction(agent_verticals), agent_verticals), "agent_id")
     if not agent_id:
         return None, {}
+    _guardar_estados(terraform_dir, "_cluster", {"agente": {"firma": firma}})
     # El Assistant de Dashboards apuntado a este agente (best-effort).
     _set_os_chat_root_agent(base, user, password, agent_id)
     t2v = _provisionar_text2viz(base, user, password, api_key)
@@ -7227,8 +7238,7 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
         caso = str(v.get("tool_name") or "").removeprefix("PPLTool-")
         if caso:
             registry.setdefault(caso, {})["agent_id"] = agent_id
-    # En qué casos busca por significado y con qué (campo, modelo, cuántos
-    # textos trae): si cambia, hay que rearmarlo (ver _sumar_la_busqueda_al_agente).
+    # En qué casos busca por significado y con qué (campo, modelo, cuántos textos trae).
     firmas = {b["slug"]: caps.firma_del_buscador(b) for b in buscadores}
     busca = set(firmas)
     for caso, ids in registry.items():
@@ -7240,32 +7250,38 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
     return agent_id, t2v
 
 
-def _sumar_la_busqueda_al_agente(cluster: dict, user: str, password: str, https_enabled: bool,
+def _rearmar_el_agente_si_cambio(cluster: dict, user: str, password: str, https_enabled: bool,
                                  terraform_dir: Path, run: dict) -> None:
-    """El agente se arma antes que la búsqueda híbrida (que va al final de
-    "Provisionar plugins"): si ahora hay casos con la búsqueda lista en los que
-    el agente no busca, o busca con otra cosa (cambió el campo de texto libre,
-    el modelo o la herramienta), se lo vuelve a registrar."""
+    """El agente se arma una vez y su configuración queda adentro (los prompts
+    de PPL de cada caso, sus búsquedas): si lo que tendría que tener ahora es
+    otra cosa (la búsqueda híbrida, que va al final de "Provisionar plugins";
+    un prompt de PPL mejorado; otro campo de texto libre u otro modelo), se lo
+    vuelve a registrar. Antes solo se rearmaba si le faltaba un caso, y un
+    entorno ya desplegado seguía con los prompts viejos (visto en la ECS)."""
     import capabilities as caps
 
     registry = _read_capabilities(terraform_dir)
-    del_agente = [{"tool_name": f"PPLTool-{s}", "label": s} for s, ids in registry.items() if ids.get("agent_id")]
-    if not del_agente:
-        return
-    deseadas = {b["slug"]: caps.firma_del_buscador(b) for b in _buscadores_del_agente(terraform_dir, del_agente)}
-    actuales = {s: registry[s].get("busca_por_significado") for s in deseadas}
-    if not deseadas or deseadas == actuales:
+    if not any(ids.get("agent_id") for ids in registry.values()):
         return
     modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
                     if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
     if not modelos:
         return
+    base = _os_base(cluster, https_enabled)
+    fuentes = _fuentes_del_agente(base, user, password, terraform_dir)
+    buscadores = _buscadores_del_agente(terraform_dir, fuentes)
+    deseada = _firma_del_agente(caps.build_conversational_agent(
+        modelos[1], modelos[0], caps.build_agent_system_instruction(fuentes, buscadores), fuentes,
+        buscadores=buscadores))
+    if deseada == ((_read_estados(terraform_dir).get("_cluster") or {}).get("agente") or {}).get("firma"):
+        return
     from maas_integrator import get_maas_api_key
-    agent_id, _ = _registrar_agente(_os_base(cluster, https_enabled), user, password, get_maas_api_key(),
-                                    terraform_dir, registry, modelos[0], modelos[1])
+    agent_id, _ = _registrar_agente(base, user, password, get_maas_api_key(), terraform_dir, registry,
+                                    modelos[0], modelos[1])
     busca = sorted(s for s, ids in _read_capabilities(terraform_dir).items() if ids.get("busca_por_significado"))
-    runs.step(run, "Asistente · búsqueda por significado", bool(agent_id and busca),
-              (f"el asistente busca por significado en {', '.join(busca)}" if agent_id and busca
+    runs.step(run, "Asistente · al día", bool(agent_id and (busca or not buscadores)),
+              ((f"rearmado con la configuración nueva; busca por significado en {', '.join(busca)}" if busca
+                else "rearmado con la configuración nueva") if agent_id and (busca or not buscadores)
                else "el asistente quedó sin la búsqueda por significado (el cluster no la aceptó)" if agent_id
                else "no se pudo volver a registrar el asistente"))
 
@@ -9981,9 +9997,9 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         runs.step(run, "Búsqueda híbrida", False, repr(exc)[:300])
     try:
         if pide("agente"):
-            _sumar_la_busqueda_al_agente(cluster, user, password, request.https_enabled, terraform_dir, run)
-    except Exception as exc:  # noqa: BLE001 — el chat sigue andando sin ella
-        runs.step(run, "Asistente · búsqueda por significado", False, repr(exc)[:300])
+            _rearmar_el_agente_si_cambio(cluster, user, password, request.https_enabled, terraform_dir, run)
+    except Exception as exc:  # noqa: BLE001 — el chat sigue andando como estaba
+        runs.step(run, "Asistente · al día", False, repr(exc)[:300])
     try:
         if pide("security_analytics"):
             _revisar_meses_de_seguridad(cluster, user, password, request.https_enabled,
