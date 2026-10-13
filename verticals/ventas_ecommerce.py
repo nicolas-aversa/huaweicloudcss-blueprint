@@ -14,8 +14,7 @@ VERTICAL = {
     'icon': 'shopping-cart',
     'index_base': 'ventas-ecommerce',
     'description': 'E-commerce · órdenes, revenue, clientes',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'JSON',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'plataforma de e-commerce',
     # Oculto: los datos están en inglés. Sacar la marca lo vuelve a mostrar.
     'hidden': True,

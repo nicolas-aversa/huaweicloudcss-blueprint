@@ -14,8 +14,7 @@ VERTICAL = {
     'icon': 'layers',
     'index_base': 'siem',
     'description': 'Seguridad · FortiGate, WAF, audit',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'Syslog, JSON y kv',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'firewall, WAF, nube',
     'sample': """date=2025-08-12 time=14:03:11 logid="0419016384" type="utm" subtype="ips" level="alert" severity="critical" srcip="45.155.205.233" srccountry="Netherlands" dstip="10.1.2.50" dstport=443 action="dropped" attack="Apache.Struts.Remote.Code.Execution" service="HTTPS"
 <134>2025-10-21T03:14:07Z bastion-01 sshd[41022]: Failed password for invalid user admin from 141.98.10.62 port 51884 ssh2

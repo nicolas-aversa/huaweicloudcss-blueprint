@@ -14,8 +14,7 @@ VERTICAL = {
     'icon': 'activity',
     'index_base': 'transacciones-billetera',
     'description': 'Billetera · operaciones, funnel, geo',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'Log de aplicación',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'backend de la billetera',
     'dedup_id': '%{[@metadata][generated_id]}',
     'sample': '20251113014806:726000000 - 7846:1787478390 operation_code=TRANSFER|message_type=210|response_code=000|sequence_number=1015|channel=M|customer_id=15761618|entry_time=20251113014806726|account_ref=4|steps={"data":{"steps":[{"code":"validate_session","index":"0","counter":"1","stepType":"Req & Resp","status":"C","timedout":"False","lateResp":"False"},{"code":"check_account","index":"1","counter":"2","stepType":"Internal","status":"C","timedout":"False","lateResp":"False"},{"code":"confirm","index":"2","counter":"3","stepType":"Internal","status":"C","timedout":"False","lateResp":"False"}]}}|detail=carrier=Personal~platform=ANDROID~os_version=10~app_version=3.2.1~device_model=SM-A115M~device_platform=samsung/SM-A115M/samsung/sm-a115m~geo_lat=-34.9041327~geo_long=-57.9935279~geo_date=20251113014806',

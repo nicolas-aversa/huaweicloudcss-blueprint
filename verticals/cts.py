@@ -215,8 +215,8 @@ Audit trail: acciones, ratings, servicios, usuarios y recursos.""",
     'description': 'Quién hizo qué en la cuenta: cada acción de consola y de API '
                    'auditada por Cloud Trace Service, con usuario, servicio, IP de '
                    'origen y resultado.',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'JSON',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
+    'formato': '.json.gz',
     'origen': 'Huawei Cloud CTS',
 
     # ── Origen propio ────────────────────────────────────────────────────────

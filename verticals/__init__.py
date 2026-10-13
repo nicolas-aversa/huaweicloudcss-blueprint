@@ -16,9 +16,12 @@ Convenciones del shape de `VERTICAL`:
   extra_capabilities/extra_dashboards                             -> sub-specs backend-only
   obs_bucket, obs_prefix                                          -> origen propio (solo cts)
   hidden (bool)                                                   -> sin card ni grupo (ej. fraud-detection)
-  formato, origen                                                 -> la línea chica de la card (cómo llega el dato, de dónde sale)
+  origen                                                          -> la línea chica de la card: de qué sistema sale el dato
+  formato                                                         -> la extensión, solo si no sube archivos (cts)
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 from . import (
     transacciones_alyc,
@@ -105,6 +108,13 @@ def demo_dataset_files() -> dict:
             if v.get("dataset_files") and not v.get("hidden")}
 
 
+def _extensiones(v: dict) -> str:
+    """La extensión de los archivos que sube (`.log`) o, si no sube ninguno, la
+    que declara (cts lee sus trazas comprimidas de su propio bucket)."""
+    exts = sorted({Path(f).suffix.lower() for f in v.get("dataset_files") or [] if Path(f).suffix})
+    return ", ".join(exts) or v.get("formato", "")
+
+
 def _members(group_id: str) -> list[str]:
     return [v["slug"] for v in _VERTICALS if v.get("group") == group_id]
 
@@ -142,7 +152,9 @@ def front_payload() -> dict:
             "obsBucket": v.get("obs_bucket", ""),
             "obsPrefix": v.get("obs_prefix", ""),
             "description": v.get("description", ""),
-            "formato": v.get("formato", ""),
+            # La línea chica de la card: por dónde llega, en qué y de dónde sale.
+            "entrada": "OBS",
+            "formato": _extensiones(v),
             "origen": v.get("origen", ""),
             "dedupId": v.get("dedup_id", ""),
             "hidden": bool(v.get("hidden")),

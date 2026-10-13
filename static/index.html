@@ -9541,7 +9541,8 @@
       // cliente lo despliegue sin la plataforma) y, en los creados desde el
       // Builder, borrarlo. Va dentro del <button> de la card, así que el handler
       // del grid distingue primero el ··· y solo después trata el click como selección.
-      const fuenteDe = (e) => [e.formato, e.origen].filter(Boolean).join(' · ');
+      // OBS · .json · API de seguimiento: por dónde llega, en qué y de dónde sale.
+      const fuenteDe = (e) => [e.entrada, e.formato, e.origen].filter(Boolean).join(' · ');
       const cardHtml = (e) => `
         <button type="button" class="example-card${e.disabled ? ' is-disabled' : ''}" data-example-id="${e.id}"${e.disabled ? ' disabled' : ''} title="${escapeHtml(e.description || '')}">
           ${e.disabled ? '' : `<span class="example-card__mas" data-menu-case="${escapeHtml(e.id)}" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" title="Más opciones" aria-label="Más opciones de ${escapeHtml(e.label)}">···</span>`}
@@ -9558,11 +9559,12 @@
         const famId = `fam:${e.familia}`;
         const fam = FAMILIAS[famId];
         if (!fam || fam.miembros[0] !== id) return null;
-        // Los formatos de todas sus fuentes; el origen, si es uno solo.
+        // Las entradas y los formatos de todas sus fuentes; el origen, si es uno solo.
         const miembros = fam.miembros.map(m => LOG_EXAMPLES.find(x => x.id === m) || {});
-        const origenes = [...new Set(miembros.map(m => m.origen).filter(Boolean))];
+        const todos = (k) => [...new Set(miembros.map(m => m[k]).filter(Boolean))];
+        const origenes = todos('origen');
         return { id: famId, label: fam.label, icon: fam.icon, custom: true, fuentes: fam.miembros.length,
-                 formato: [...new Set(miembros.map(m => m.formato).filter(Boolean))].join(', '),
+                 entrada: todos('entrada').join(', '), formato: todos('formato').join(', '),
                  origen: origenes.length === 1 ? origenes[0] : '',
                  description: fam.miembros.map(m => SLUG_LABELS[m] || m).join(' · ') };
       };

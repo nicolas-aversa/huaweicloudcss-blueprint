@@ -14,8 +14,7 @@ VERTICAL = {
     'icon': 'activity',
     'index_base': 'transacciones-alyc',
     'description': 'Capitales · órdenes, liquidación, comitentes',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'clave=valor',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'sistema de órdenes',
     'sample': '20250701-11:00:26.461 BYMA evt=PARTIAL_FILL order_id=O-20250701-000060 comitente=C10020 especie=BMA side=SELL qty=100 price=11306.6 notional=1130660.0 currency=ARS plazo=T+1 channel=API status=PARTIAL fee=1695.99',
     'filter_code': """filter {

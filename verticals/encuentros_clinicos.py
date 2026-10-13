@@ -14,8 +14,7 @@ VERTICAL = {
     'icon': 'heart',
     'index_base': 'encuentros-clinicos',
     'description': 'Salud · consultas, pacientes, triage',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'CSV',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'export de la historia clínica',
     # Oculto: los datos están en inglés. Sacar la marca lo vuelve a mostrar.
     'hidden': True,

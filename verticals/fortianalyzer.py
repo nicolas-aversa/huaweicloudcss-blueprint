@@ -14,8 +14,7 @@ VERTICAL = {
     'icon': 'key',
     'index_base': 'fortianalyzer',
     'description': 'Firewall · tráfico, UTM, apps',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'clave=valor',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'FortiGate vía FortiAnalyzer',
     'sample': 'date=2026-04-13 time=21:08:17 logid="0000000013" type="traffic" subtype="forward" level="notice" vd="vdom1" srcip="10.1.100.121" srcport=34331 srcintf="port12" dstip="132.23.184.20" dstport=80 sessionid=575948 proto=6 action="server-rst" policyid=1 service="HTTP" dstcountry="Canada" srccountry="Reserved" app="HTTP.BROWSER_Firefox" appcat="Web.Client" apprisk="elevated" duration=179 sentbyte=2101 rcvdbyte=19445 utmaction="allow"',
     'filter_code': """filter {

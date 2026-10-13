@@ -95,6 +95,20 @@ def formato_del_filtro(filter_code: str) -> str:
     return ", ".join(hallados)
 
 
+_ENTRADAS = {"obs": "OBS", "s3": "OBS", "kafka": "Kafka", "beats": "Beats", "jdbc": "JDBC"}
+
+
+def entrada_y_formato(case: dict) -> tuple[str, str]:
+    """Por dónde llega el dato y en qué, para la card. Un dataset llega por OBS y
+    se dice con la extensión de su archivo; una fuente en vivo, con su plugin y
+    el formato que lee el filtro (no hay archivo)."""
+    if case.get("case_type", "dataset") == "live":
+        plugin = str((case.get("input_config") or {}).get("plugin_type", "") or "")
+        return _ENTRADAS.get(plugin, plugin.capitalize()), formato_del_filtro(case.get("filter_code", ""))
+    exts = sorted({Path(f).suffix.lower() for f in case.get("dataset_files") or [] if Path(f).suffix})
+    return "OBS", ", ".join(exts) or formato_del_filtro(case.get("filter_code", ""))
+
+
 # ── Normalización ────────────────────────────────────────────────────────────
 def slugify(text: str) -> str:
     """`'Logs de mi Firewall'` -> `'logs-de-mi-firewall'`."""
@@ -275,7 +289,8 @@ def front_entries() -> list[dict]:
             "icon": c.get("icon", "box"),
             "indexBase": c.get("index_base", "") or c["slug"],
             "description": c.get("description", ""),
-            "formato": c.get("formato") or formato_del_filtro(c.get("filter_code", "")),
+            "entrada": entrada_y_formato(c)[0],
+            "formato": entrada_y_formato(c)[1],
             "origen": c.get("origen", ""),
             "dedupId": "",
             "hidden": False,
@@ -400,9 +415,8 @@ def save_case(meta: dict, log_text: str, created_by: str = "", filename: str = "
         "icon": icon,
         "index_base": slug,
         "description": str(meta.get("description", "") or "").strip()[:200],
-        # La línea chica de la card: el formato lo dice el filtro; de qué sistema
-        # sale el dato, el SA (no se puede deducir del archivo).
-        "formato": formato_del_filtro(filter_code),
+        # La línea chica de la card: la entrada y el formato salen solos (ver
+        # entrada_y_formato); de qué sistema sale el dato lo dice el SA.
         "origen": str(meta.get("origen", "") or "").strip()[:40],
         "sample": sample,
         "filter_code": filter_code,

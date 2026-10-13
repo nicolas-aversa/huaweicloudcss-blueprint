@@ -1,7 +1,8 @@
-"""La línea chica de cada card del paso 1: en qué formato llega el dato y de
-qué sistema sale. Los curados lo declaran; los del Builder sacan el formato del
-filtro (sirve para cualquier archivo y para los casos ya guardados) y el origen
-lo escribe el SA al guardar."""
+"""La línea chica de cada card del paso 1: por dónde llega el dato (OBS,
+Kafka…), en qué (la extensión del archivo o, sin archivo, el formato que lee el
+filtro) y de qué sistema sale. La entrada y el formato salen solos (sirve para
+cualquier dataset y para los casos ya guardados); el origen lo declaran los
+curados y lo escribe el SA al guardar."""
 import json
 import pathlib
 
@@ -30,11 +31,12 @@ def test_el_formato_sale_del_filtro(filtro, formato):
     assert custom_cases.formato_del_filtro(filtro) == formato
 
 
-def test_los_curados_dicen_formato_y_origen():
-    for v in verticals.all_verticals():
-        assert v.get("formato") and v.get("origen"), v["slug"]
+def test_los_curados():
     payload = {v["slug"]: v for v in verticals.front_payload()["verticals"]}
-    assert (payload["cts"]["formato"], payload["cts"]["origen"]) == ("JSON", "Huawei Cloud CTS")
+    for slug, v in payload.items():
+        assert v["entrada"] == "OBS" and v["formato"].startswith(".") and v["origen"], slug
+    assert [payload["cts"][k] for k in ("entrada", "formato", "origen")] == ["OBS", ".json.gz", "Huawei Cloud CTS"]
+    assert payload["siem"]["formato"] == ".log", "cuatro archivos, una extensión"
 
 
 @pytest.fixture
@@ -53,28 +55,37 @@ def _caso(**kw):
     return base
 
 
-def test_al_guardar_queda_el_origen_y_el_formato(store):
-    r = TestClient(main.app).post("/api/v1/cases", json=_caso(origen="  API de seguimiento  "))
+def _linea(slug):
+    e = next(e for e in custom_cases.front_entries() if e["slug"] == slug)
+    return [e["entrada"], e["formato"], e["origen"]]
+
+
+def test_un_dataset_llega_por_obs_con_la_extension_de_su_archivo(store):
+    r = TestClient(main.app).post("/api/v1/cases", json=_caso(origen="  API de seguimiento  ",
+                                                             log_filename="seguimiento-de-envios.ndjson"))
     assert r.status_code == 200, r.text
-    caso = r.json()["case"]
-    assert (caso["formato"], caso["origen"]) == ("JSON", "API de seguimiento")
-    entrada = next(e for e in custom_cases.front_entries() if e["slug"] == "seguimiento-de-envios")
-    assert (entrada["formato"], entrada["origen"]) == ("JSON", "API de seguimiento")
+    assert r.json()["case"]["origen"] == "API de seguimiento"
+    assert _linea("seguimiento-de-envios") == ["OBS", ".ndjson", "API de seguimiento"]
 
 
-def test_un_caso_guardado_antes_igual_muestra_su_formato(store):
-    custom_cases.save_case(_caso(), '{"evento":"Admitido"}\n')
+def test_un_caso_guardado_antes_igual_muestra_entrada_y_formato(store):
+    custom_cases.save_case(_caso(), '{"evento":"Admitido"}\n', filename="envios.CSV")
     ruta = store / "seguimiento-de-envios.json"
     viejo = json.loads(ruta.read_text(encoding="utf-8"))
-    viejo.pop("formato"), viejo.pop("origen")
+    viejo.pop("origen")
     ruta.write_text(json.dumps(viejo), encoding="utf-8")
-    entrada = next(e for e in custom_cases.front_entries() if e["slug"] == "seguimiento-de-envios")
-    assert (entrada["formato"], entrada["origen"]) == ("JSON", "")
+    assert _linea("seguimiento-de-envios") == ["OBS", ".csv", ""]
+
+
+def test_una_fuente_en_vivo_dice_su_plugin_y_el_formato_del_filtro(store):
+    custom_cases.save_case(_caso(origen="eventos del TMS", sample='{"evento":"Admitido"}', input_config={
+        "plugin_type": "kafka", "kafka": {"bootstrap_servers": "10.0.0.5:9092", "topics": ["tracking"]}}), "")
+    assert _linea("seguimiento-de-envios") == ["Kafka", "JSON", "eventos del TMS"]
 
 
 def test_la_card_y_el_modal():
     html = _INDEX.read_text(encoding="utf-8")
-    assert "const fuenteDe = (e) => [e.formato, e.origen].filter(Boolean).join(' · ');" in html
+    assert "const fuenteDe = (e) => [e.entrada, e.formato, e.origen].filter(Boolean).join(' · ');" in html
     assert '<span class="example-card__fuente" title="${escapeHtml(fuenteDe(e))}">${escapeHtml(fuenteDe(e))}</span>' in html
     assert 'id="save-case-origen" maxlength="40"' in html
     # Las dos formas de guardar (un archivo o varias fuentes) lo mandan.

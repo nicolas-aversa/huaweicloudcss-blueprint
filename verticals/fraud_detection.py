@@ -28,8 +28,7 @@ VERTICAL = {
     'icon': 'alert-triangle',
     'index_base': 'fraud-detection',
     'description': 'Fraude · 590k tx, 3.5% fraude',
-    # La línea chica de la card: cómo llega el dato y de qué sistema sale.
-    'formato': 'JSON',
+    # La línea chica de la card, después de OBS y la extensión de sus archivos.
     'origen': 'motor antifraude',
     'dedup_id': '%{[@metadata][generated_id]}',
     'hidden': True,
