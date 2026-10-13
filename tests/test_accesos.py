@@ -98,8 +98,11 @@ def test_si_el_cluster_no_deja_se_dice(monkeypatch, tmp_path, falla, motivo):
 
 
 def test_el_endpoint_devuelve_los_accesos(monkeypatch, tmp_path):
+    """Solo los de los casos desplegados: el registro guarda los de entornos anteriores."""
     main._write_analistas(tmp_path, {"transacciones-alyc": {"usuario": "analista-transacciones-alyc",
-                                                            "password": "P#1aa", "enmascarados": ["comitente"]}})
+                                                            "password": "P#1aa", "enmascarados": ["comitente"]},
+                                     "de-antes": {"usuario": "analista-de-antes", "password": "x", "enmascarados": ["y"]}})
+    main._write_pipelines_registry(tmp_path, {"transacciones-alyc": {"index": "transacciones-alyc-%{+YYYY.MM}"}})
     monkeypatch.setattr(main, "_active_terraform_dir", lambda: tmp_path)
     assert main.analistas().analistas == [{"slug": "transacciones-alyc", "usuario": "analista-transacciones-alyc",
                                            "password": "P#1aa", "enmascarados": ["comitente"]}]
@@ -111,8 +114,8 @@ def test_el_registro_esta_gitignoreado():
 
 
 def _funciones(html: str) -> str:
-    i = html.index("    function accesosHTML(pipelines) {")
-    return html[i:html.index("    async function verAccesos(btn) {", i)]
+    i = html.index("    function accesoDelCasoHTML(slug, enmascarados) {")
+    return html[i:html.index("    async function verAcceso(btn) {", i)]
 
 
 _ARNES = r"""
@@ -122,16 +125,14 @@ const SLUG_LABELS = { 'encuentros-clinicos': 'Encuentros clínicos' };
 """ + "{FUNCIONES}" + r"""
 const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
-// Lo que informa el entorno por pipeline: sirve igual para un dataset nuevo.
-check('sin casos con analista, nada', accesosHTML([{ slug: 'siem', enmascarados: [] }]) === '' && accesosHTML(null) === '');
-const card = accesosHTML([{ slug: 'siem', enmascarados: [] }, { slug: 'encuentros-clinicos', enmascarados: ['patient'] },
-                          { slug: 'mi-dataset', enmascarados: ['data.dni'] }]);
-check('un dataset nuevo también', card.includes('mi-dataset: data.dni'), card);
-check('la tarjeta', card.includes('id="infra-accesos-ver"') && card.includes('Encuentros clínicos: patient') && !card.includes('siem'), card);
-check('sin contraseña en la tarjeta', !card.includes('Contraseña</span><code>'), card);
-const d = accesosDetalleHTML([{ slug: 'encuentros-clinicos', usuario: 'analista-encuentros-clinicos', password: 'Ab#1<x>', enmascarados: ['patient'] }]);
+// Una línea por caso, como las demás funciones: qué enmascara y, a pedido, el acceso.
+const linea = accesoDelCasoHTML('mi-dataset', ['data.dni', 'data.cuenta']);
+check('qué enmascara, con el botón', linea.includes('<span>Enmascara data.dni, data.cuenta</span>')
+  && linea.includes('class="fn__ver-acceso" data-slug="mi-dataset">Ver usuario y contraseña</button>'), linea);
+check('sin contraseña hasta pedirla', !linea.includes('Contraseña'), linea);
+const d = credencialesHTML({ slug: 'encuentros-clinicos', usuario: 'analista-encuentros-clinicos', password: 'Ab#1<x>' });
 check('usuario y contraseña', d.includes('<code>analista-encuentros-clinicos</code>') && d.includes('<code>Ab#1&lt;x&gt;</code>'), d);
-check('sin analistas', accesosDetalleHTML([]).includes('Activar los plugins'));
+check('sin analista', credencialesHTML(undefined).includes('Activar los plugins'));
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -146,12 +147,14 @@ def test_la_tarjeta_en_node(tmp_path):
 
 
 def test_va_en_el_panel_de_enmascaramiento():
-    """Los accesos de demo, con su función (Enmascaramiento de campos) y no
-    sueltos en "Más opciones"."""
+    """Los accesos de demo, con su función (Enmascaramiento de campos), una
+    línea por caso como las demás (no una tarjeta aparte ni en "Más opciones")."""
     html = _INDEX.read_text(encoding="utf-8")
-    assert "+ (f.id === 'analista' ? accesosHTML(f.pipelines) : '');" in html
+    assert "? accesoDelCasoHTML(s, ((f.pipelines || []).find(p => p.slug === s) || {}).enmascarados) : '';" in html
+    assert "accesosHTML" not in html and "infra-accesos" not in html
+    assert "panel.querySelectorAll('.fn__numero[data-slug][data-numero]')" in html, "el relleno de números no la vacía"
     assert "env-extras" not in html.split("function renderInfraView(data) {")[1].split("async function hydrateActiveEnv()")[0]
-    assert "const accesos = e.target.closest('#infra-accesos-ver');\n        if (accesos) return verAccesos(accesos);" in html
+    assert "const acceso = e.target.closest('.fn__ver-acceso');\n        if (acceso) return verAcceso(acceso);" in html
     # "Explicarla con IA", desde el panel de Detección de anomalías (antes, solo en «Detalle por caso»).
     assert "const explicar = e.target.closest('.anomalia__explicar');\n        if (explicar) return explicarAnomalia(explicar);" in html
     assert "const _NUMERO_EN_EL_PANEL = new Set(['anomalias', 'perfil']);" in html and "llenarNumerosDeFuncion(panel);" in html

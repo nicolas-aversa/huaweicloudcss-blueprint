@@ -9196,9 +9196,13 @@ class AnalistasResponse(BaseModel):
 @app.get("/api/v1/analistas", response_model=AnalistasResponse, tags=["capabilities"])
 def analistas() -> AnalistasResponse:
     """Los usuarios de demo con datos enmascarados, con su contraseña: para que
-    el SA entre a Dashboards como ese analista. Solo lo que creó la plataforma."""
-    registro = _read_analistas(_active_terraform_dir())
-    return AnalistasResponse(analistas=[{"slug": s, **v} for s, v in sorted(registro.items())])
+    el SA entre a Dashboards como ese analista. Solo lo que creó la plataforma y
+    de los casos del entorno desplegado: el registro guarda los de entornos
+    anteriores (aparecían analistas de casos que ya no estaban)."""
+    terraform_dir = _active_terraform_dir()
+    registro = _read_analistas(terraform_dir)
+    desplegados = set(_read_pipelines_registry(terraform_dir))
+    return AnalistasResponse(analistas=[{"slug": s, **v} for s, v in sorted(registro.items()) if s in desplegados])
 
 
 _TOPES_DE_LOS_DETECTORES = {

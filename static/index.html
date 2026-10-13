@@ -2297,11 +2297,6 @@
     .cap-chart__armando { display: flex; align-items: center; gap: 6px; padding: 8px 0; font-size: var(--fs-xs); color: var(--text-muted); }
     .cap-chart__armando .icon { width: 13px; height: 13px; animation: pulse 1.6s var(--ease) infinite; }
     /* Los accesos de demo, en grilla. */
-    #infra-accesos-detalle {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; align-items: start;
-    }
-    #infra-accesos-detalle > .hallazgos__det + .hallazgos__det { margin-top: 0; }
-    #infra-accesos-detalle:not(:empty) { margin-top: 12px; }
     .hallazgos__lista { gap: 2px; }
     .hallazgos__lista > li { margin: 0 -10px; }
 
@@ -2416,7 +2411,11 @@
     .anomalia { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
     .anomalia__cuando { font-variant-numeric: tabular-nums; color: var(--text-primary); }
     .anomalia__grado { color: var(--text-muted); min-width: 80px; }
-    .fn-panel #infra-accesos { margin: 12px 0 0; }
+    .fn__acceso code { user-select: all; font-size: var(--fs-xs); }
+    /* Con el aspecto de los links del panel ("Abrir Dashboards"), no de un botón. */
+    .fn__ver-acceso { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-hover); cursor: pointer; }
+    .fn__ver-acceso:hover { text-decoration: underline; }
+    .fn__ver-acceso:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
     .fn__ir { justify-self: end; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--accent-hover); text-decoration: none; }
     .fn__ir .icon { width: 12px; height: 12px; }
     .fn__ir:hover { text-decoration: underline; }
@@ -6538,49 +6537,28 @@
       });
     }
 
-    // Accesos de demo: un analista de solo lectura por caso de salud/fintech, que
-    // ve los datos sensibles enmascarados. La contraseña se pide a demanda.
-    function accesosHTML(pipelines) {
-      const conAnalista = (pipelines || []).filter(p => (p.enmascarados || []).length);
-      const casos = conAnalista.map(p => p.slug);
-      const campos = Object.fromEntries(conAnalista.map(p => [p.slug, p.enmascarados]));
-      if (!casos.length) return '';
-      return `<div class="section-card" id="infra-accesos">
-          <div class="section-card__head seguridad__head">
-            <span class="section-card__tile">${icon('key')}</span>
-            <span class="section-card__titlewrap">
-              <span class="section-card__title">Accesos de demo</span>
-              <span class="section-card__hint">Un analista de solo lectura por caso que ve los datos sensibles enmascarados · entrá a Dashboards con su usuario · los crea "Activar los plugins"</span>
-            </span>
-            <button type="button" class="btn btn-primary btn-sm" id="infra-accesos-ver">Ver accesos</button>
-          </div>
-          <div class="seguridad__caso"><span>${casos.map(s => `${escapeHtml(SLUG_LABELS[s] || s)}: ${escapeHtml(campos[s].join(', '))}`).join(' · ')}</span></div>
-          <div id="infra-accesos-detalle"></div>
-        </div>`;
+    // Enmascaramiento de campos: debajo de cada caso, qué enmascara y, a pedido,
+    // el usuario y la contraseña de su analista (con eso se entra a Dashboards).
+    // La contraseña no viaja con el estado: se pide al tocar el botón.
+    function accesoDelCasoHTML(slug, enmascarados) {
+      return `<span class="fn__numero fn__acceso" data-slug="${escapeHtml(slug)}">`
+        + `<span>Enmascara ${escapeHtml((enmascarados || []).join(', ') || 'los campos sensibles')}</span>`
+        + `<button type="button" class="fn__ver-acceso" data-slug="${escapeHtml(slug)}">Ver usuario y contraseña</button></span>`;
     }
-    function accesosDetalleHTML(lista) {
-      if (!(lista || []).length) return '<div class="hallazgos__vacio">Todavía no hay analistas: corré "Activar los plugins" (paso 3 de la puesta en marcha).</div>';
-      return lista.map(a => `<div class="hallazgos__det"><div class="hallazgos__head">`
-        + `<strong>${escapeHtml(SLUG_LABELS[a.slug] || a.slug)}</strong>`
-        + `<span class="hallazgos__total">enmascarado: ${escapeHtml((a.enmascarados || []).join(', '))}</span></div>`
-        + `<div class="acceso"><span class="acceso__lbl">Usuario</span><code>${escapeHtml(a.usuario)}</code>`
-        + `<span class="acceso__lbl">Contraseña</span><code>${escapeHtml(a.password)}</code></div></div>`).join('');
+    function credencialesHTML(a) {
+      return a ? `<span>Usuario <code>${escapeHtml(a.usuario)}</code></span><span>Contraseña <code>${escapeHtml(a.password)}</code></span>`
+        : '<span>Todavía no hay analista para este caso: corré «Activar los plugins».</span>';
     }
-    async function verAccesos(btn) {
-      const destino = document.getElementById('infra-accesos-detalle');
-      if (!destino) return;
+    async function verAcceso(btn) {
       btn.disabled = true;
-      showStatus(destino, 'Leyendo los accesos…', 'loading');
       try {
         const res = await fetch('/api/v1/analistas');
-        const data = await res.json();
-        if (!res.ok) throw detailError(data);
-        destino.className = '';
-        destino.innerHTML = accesosDetalleHTML(data.analistas || []);
+        const d = await res.json();
+        if (!res.ok) throw detailError(d);
+        btn.outerHTML = credencialesHTML((d.analistas || []).find(a => a.slug === btn.dataset.slug));
       } catch (err) {
-        showStatus(destino, `Error: ${err.message}`, 'error');
-      } finally {
         btn.disabled = false;
+        toast(`No se pudieron leer los accesos: ${err.message}`, 'error');
       }
     }
     // Los forecasters de un caso en el registro (los de antes guardaban uno solo).
@@ -6837,7 +6815,9 @@
         const link = (t && ((t.links || []).find(l => l.url) || (t.filas || []).find(x => x.url)))
           || (url ? { url, texto: f.id === 'reporte' ? 'Ver el reporte' : 'Ver en Dashboards' } : null);
         const numero = t && t.numero && t.estado === 'ok' && _NUMERO_EN_EL_PANEL.has(f.id)
-          ? `<span class="fn__numero" data-slug="${escapeHtml(s)}" data-numero="${escapeHtml(t.numero)}"></span>` : '';
+          ? `<span class="fn__numero" data-slug="${escapeHtml(s)}" data-numero="${escapeHtml(t.numero)}"></span>`
+          : f.id === 'analista' && t && t.estado === 'ok'
+            ? accesoDelCasoHTML(s, ((f.pipelines || []).find(p => p.slug === s) || {}).enmascarados) : '';
         return `<li class="fn__caso"><span class="fn__caso-nombre">${escapeHtml(SLUG_LABELS[s] || s)}</span>`
           + `<span class="sev ${clase}">${escapeHtml(texto)}</span>`
           + (link ? `<a class="fn__ir" href="${escapeHtml(link.url)}" target="_blank" rel="noopener">${escapeHtml(link.texto || 'Ver en Dashboards')} ${icon('arrow-right')}</a>` : '')
@@ -6855,15 +6835,14 @@
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
         + (f.id === 'busqueda' ? comparadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
-        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
-        // Los accesos de demo (usuario y contraseña de cada analista), con su función.
-        + (f.id === 'analista' ? accesosHTML(f.pipelines) : '');
+        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '');
     }
     // Las funciones cuyo número se lee al abrir el panel (en vivo, del cluster).
     const _NUMERO_EN_EL_PANEL = new Set(['anomalias', 'perfil']);
     // Lo lee caso por caso: en anomalías, cuántas hay y la más fuerte, con "Explicarla con IA".
     async function llenarNumerosDeFuncion(panel) {
-      const lugares = [...panel.querySelectorAll('.fn__numero[data-slug]')];
+      // Solo los que leen un número: la línea del acceso (Enmascaramiento) es otra cosa.
+      const lugares = [...panel.querySelectorAll('.fn__numero[data-slug][data-numero]')];
       lugares.forEach(el => { el.innerHTML = '<span>Leyendo…</span>'; });
       for (const slug of [...new Set(lugares.map(el => el.dataset.slug))]) {
         let numeros = {};
@@ -8895,8 +8874,8 @@
         if (e.target.closest('.fn__probar')) return abrirAsistente();
         const explicar = e.target.closest('.anomalia__explicar');
         if (explicar) return explicarAnomalia(explicar);
-        const accesos = e.target.closest('#infra-accesos-ver');
-        if (accesos) return verAccesos(accesos);
+        const acceso = e.target.closest('.fn__ver-acceso');
+        if (acceso) return verAcceso(acceso);
         const probarBusq = e.target.closest('.fn__probar-busqueda');
         if (probarBusq) {
           const fila = probarBusq.closest('.fn-tile')?.querySelector('.fn__fila');
