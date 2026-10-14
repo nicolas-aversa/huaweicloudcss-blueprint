@@ -738,6 +738,12 @@ def test_un_tema_junta_formas_distintas_de_la_lista():
     # El LLM equivocó la clave: vale la primera lista.
     assert len(busqueda.temas({"tema": datos["temas"][:1]}, _FILAS)) == 1
     assert busqueda.temas(None, _FILAS) == [] and busqueda.temas({"temas": "no"}, _FILAS) == []
+    # Dos formas en común con uno de antes (de esta tanda o de otra) es el mismo tema.
+    otra_vez = {"pregunta": "¿Cuántos paquetes llegaron con la caja rota por servicio?", "busqueda": "caja rota",
+                "textos": ["El producto llegó roto", "La caja llegó aplastada", "Envío dañado en el traslado"]}
+    primero = busqueda.temas(datos, _FILAS)
+    assert busqueda.temas({"temas": [otra_vez]}, _FILAS, ya=primero) == []
+    assert [t["busqueda"] for t in busqueda.temas({"temas": [datos["temas"][0], otra_vez]}, _FILAS)] == ["paquete dañado"]
 
 
 def test_el_tema_se_mide_como_busca_el_agente():
@@ -752,6 +758,8 @@ def test_el_tema_se_mide_como_busca_el_agente():
     assert busqueda.medir(tema, significado, hits("Envío dañado en el traslado", "El producto llegó roto")) == \
         {**tema, "por_significado": 3, "por_palabras": 1}
     assert busqueda.medir(tema, significado, significado) is None, "las palabras traen las mismas"
+    assert busqueda.medir(tema, significado, hits("El producto llegó roto", "La caja llegó aplastada")) is None, \
+        "una sola forma más no se ve en la demo"
     assert busqueda.medir(tema, hits("El producto llegó roto", "La caja llegó aplastada"), hits()) is None, "menos de tres"
     q = busqueda.consulta_por_significado("paquete dañado", "M")
     assert q["query"] == {"neural": {"embedding": {"query_text": "paquete dañado", "model_id": "M", "k": 25}}}
@@ -774,6 +782,9 @@ def test_el_prompt_de_temas_trae_textos_con_su_cuenta_y_los_cortes():
     assert "por uno de estos campos: Servicio, Provincia de destino; o por fecha" in p
     assert f"Proponé {busqueda.TEMAS_CANDIDATOS} temas" in p and "AL MENOS 3 textos" in p
     assert "en el tiempo" in busqueda.prompt_de_temas(_FILAS), "sin cortes no inventa por qué repartir"
+    assert "ya los tengo" not in p
+    assert "Estos temas ya los tengo: paquete dañado; entrega a tercero. Proponé OTROS" in \
+        busqueda.prompt_de_temas(_FILAS, ya=["paquete dañado", "entrega a tercero"])
     fields = [F("observacion", "text", dimension=True), F("envio.sucursal_destino", dimension=True),
               F("zona", dimension=True, business_label="Zona"), F("region", dimension=True, business_label="zona"),
               F("peso_kg", "float")]
@@ -815,7 +826,7 @@ def test_preguntas_por_significado(monkeypatch, tmp_path):
             {"pregunta": "¿Cuántos envíos terminaron dañados y en qué servicio pasa más?", "busqueda": "paquete dañado",
              "textos": rotos},
             {"pregunta": "¿Cuántos envíos con problemas de entrega hubo por servicio?", "busqueda": "entrega fallida",
-             "textos": rotos}]})
+             "textos": ["Entregado al titular", "Lo recibió un familiar", "Envío dañado en el traslado"]}]})
 
     monkeypatch.setattr(main, "_os_req", req)
     monkeypatch.setattr(semantica, "_llamar_al_llm", llamar)
@@ -824,12 +835,25 @@ def test_preguntas_por_significado(monkeypatch, tmp_path):
                                 "busqueda": "paquete dañado", "formas": rotos, "por_significado": 3, "por_palabras": 1}],
                  "motivo": ""}, "la otra, por significado no trae sus formas"
     assert "«obs» de «Envíos»" in llm[0] and "por uno de estos campos: Servicio" in llm[0]
+    # Con una sola, otra tanda pidiendo temas distintos (y los repetidos no se vuelven a buscar).
+    assert len(llm) == busqueda.TANDAS_DE_TEMAS == 2
+    assert "Estos temas ya los tengo: paquete dañado; entrega fallida." in llm[1] and "ya los tengo" not in llm[0]
+    assert len(pedidos) == 1 + 2 * 2, "la muestra y dos búsquedas por tema, solo los de la primera tanda"
     assert all(u == "/busqueda-envios/_search" for u in pedidos)
     # Guardadas: la segunda vez, ni el LLM ni el cluster; `nuevas` las rehace.
     n = len(pedidos)
-    assert c.get(url).json() == d and len(llm) == 1 and len(pedidos) == n
+    assert c.get(url).json() == d and len(llm) == 2 and len(pedidos) == n
     c.get(url + "&nuevas=1")
-    assert len(llm) == 2
+    assert len(llm) == 4
+
+    # Si el LLM falla en la segunda tanda, quedan las de la primera.
+    def segunda_caida(prompt):
+        if "ya los tengo" in prompt:
+            raise RuntimeError("caído")
+        return llamar(prompt)
+
+    monkeypatch.setattr(semantica, "_llamar_al_llm", segunda_caida)
+    assert c.get(url + "&nuevas=1").json() == d
 
     # Sin el LLM, sin preguntas (y se dice por qué).
     def caido(prompt):

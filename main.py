@@ -9088,23 +9088,32 @@ def preguntas_por_significado(slug: str, nuevas: bool = False) -> dict:
     if not filas:
         return {"preguntas": [], "motivo": "El índice todavía no tiene textos"}
     entry = _read_pipelines_registry(terraform_dir).get(slug) or {}
-    try:
-        prompt = busqueda.prompt_de_temas(filas, caso.get("campo", ""), _label_del_caso(slug, entry),
-                                          busqueda.cortes_de(_campos_del_caso(slug, entry), caso.get("campo", "")))
-        datos = semantica._json_de(semantica._llamar_al_llm(prompt))
-    except Exception as exc:  # noqa: BLE001 — sin el LLM, sin preguntas
-        return {"preguntas": [], "motivo": f"El LLM no propuso temas ({type(exc).__name__})"}
-    medidas = []
-    for t in busqueda.temas(datos, filas):
-        por_significado = _os_req("POST", ruta, user, password, timeout=60,
-                                  json_body=busqueda.consulta_por_significado(t["busqueda"], model_id))
-        por_palabras = _os_req("POST", ruta, user, password, timeout=30,
-                               json_body=busqueda.consulta_lexica(t["busqueda"], busqueda.RESULTADOS_DEL_AGENTE))
-        if not (_resp_ok(por_significado) and _resp_ok(por_palabras)):
-            continue
-        m = busqueda.medir(t, busqueda.resultados(por_significado.json()), busqueda.resultados(por_palabras.json()))
-        if m:
-            medidas.append(m)
+    label = _label_del_caso(slug, entry)
+    cortes = busqueda.cortes_de(_campos_del_caso(slug, entry), caso.get("campo", ""))
+    medidas: list[dict] = []
+    vistos: list[dict] = []
+    for tanda in range(busqueda.TANDAS_DE_TEMAS):
+        if len(medidas) >= busqueda.PREGUNTAS_POR_SIGNIFICADO:
+            break
+        try:
+            datos = semantica._json_de(semantica._llamar_al_llm(busqueda.prompt_de_temas(
+                filas, caso.get("campo", ""), label, cortes, ya=[t["busqueda"] for t in vistos])))
+        except Exception as exc:  # noqa: BLE001 — sin el LLM, las de la tanda anterior (o ninguna)
+            if not tanda:
+                return {"preguntas": [], "motivo": f"El LLM no propuso temas ({type(exc).__name__})"}
+            break
+        for t in busqueda.temas(datos, filas, ya=vistos):
+            vistos.append(t)
+            por_significado = _os_req("POST", ruta, user, password, timeout=60,
+                                      json_body=busqueda.consulta_por_significado(t["busqueda"], model_id))
+            por_palabras = _os_req("POST", ruta, user, password, timeout=30,
+                                   json_body=busqueda.consulta_lexica(t["busqueda"], busqueda.RESULTADOS_DEL_AGENTE))
+            if not (_resp_ok(por_significado) and _resp_ok(por_palabras)):
+                continue
+            m = busqueda.medir(t, busqueda.resultados(por_significado.json()),
+                               busqueda.resultados(por_palabras.json()))
+            if m:
+                medidas.append(m)
     preguntas = busqueda.elegir_preguntas(medidas)
     if preguntas:
         guardadas[slug] = {"model_id": model_id, "campo": caso.get("campo"), "preguntas": preguntas}

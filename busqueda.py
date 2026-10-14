@@ -405,6 +405,12 @@ MUESTRA_PARA_TEMAS = 120
 TEMAS_CANDIDATOS = 8
 PREGUNTAS_POR_SIGNIFICADO = 5
 MIN_FORMAS = 3
+# Cuántas formas más tiene que traer el significado que las palabras: con una
+# sola ("rodilla": 7 contra 6) la diferencia no se ve en la demo.
+VENTAJA_DEL_TEMA = 2
+# Si con los temas de la primera tanda no se llega a las cinco, otra tanda
+# pidiendo temas distintos (visto: en envíos, solo dos con ventaja).
+TANDAS_DE_TEMAS = 2
 # Cuántas frases trae la búsqueda del agente (el `k` de su VectorDBTool).
 RESULTADOS_DEL_AGENTE = 25
 _LARGO_DE_PREGUNTA = (15, 220)
@@ -428,7 +434,7 @@ responde contando esos registros y repartiéndolos {cortes}. Una sola cosa a con
 los textos fueran de guardias médicas: «¿Cuántos pacientes llegaron con problemas para respirar y en qué zona \
 pasa más?» junta «disnea súbita», «falta de aire al caminar», «broncoespasmo», «le cuesta respirar».
 
-Respondé solo JSON: {{"temas": [{{"pregunta": "...", "busqueda": "<el tema en 2 a 5 palabras, sin palabras de \
+{otros}Respondé solo JSON: {{"temas": [{{"pregunta": "...", "busqueda": "<el tema en 2 a 5 palabras, sin palabras de \
 los textos>", "textos": ["<copiado tal cual de la lista, sin la cuenta>", "...", "..."]}}]}}
 
 Textos:
@@ -478,13 +484,16 @@ def cortes_de(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
 
 
 def prompt_de_temas(filas: list[dict[str, Any]], campo: str = "", label: str = "",
-                    cortes: "list[str] | None" = None) -> str:
-    """`filas`: [{texto, cuenta}] del índice de búsqueda del caso."""
+                    cortes: "list[str] | None" = None, ya: "list[str] | None" = None) -> str:
+    """`filas`: [{texto, cuenta}] del índice de búsqueda del caso. `ya`, los
+    temas de una tanda anterior: se piden otros."""
     de_donde = (f"del campo «{campo}» de «{label}»" if campo and label
                 else f"del campo «{campo}»" if campo else "de un caso")
     return _PROMPT_DE_TEMAS.format(
         de_donde=de_donde, n=TEMAS_CANDIDATOS,
         cortes=(f"por uno de estos campos: {', '.join(cortes)}; o por fecha" if cortes else "en el tiempo"),
+        otros=(f"Estos temas ya los tengo: {'; '.join(ya)}. Proponé OTROS, que junten textos distintos.\n\n"
+               if ya else ""),
         textos="\n".join(f"{_en_una_linea(f.get('texto'))} ({int(f.get('cuenta') or 0)})" for f in filas))
 
 
@@ -493,9 +502,12 @@ def _variante_de(texto: str, otro: str) -> bool:
     return _plano(texto).startswith(_plano(otro) + ",")
 
 
-def temas(datos: Any, filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def temas(datos: Any, filas: list[dict[str, Any]],
+          ya: "list[dict[str, Any]] | None" = None) -> list[dict[str, Any]]:
     """Los temas que propuso el LLM, validados: cada forma es un texto de la
-    lista, sin variantes de una misma frase, y al menos MIN_FORMAS."""
+    lista, sin variantes de una misma frase, y al menos MIN_FORMAS. Fuera los
+    que repiten uno de `ya` (dos formas en común), de una tanda anterior."""
+    vistos = list(ya or [])
     por_clave = {_clave(f.get("texto")): f["texto"] for f in filas if f.get("texto")}
     fuera: list[dict[str, Any]] = []
     propuestos = _la_lista(datos, "temas")
@@ -509,9 +521,12 @@ def temas(datos: Any, filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
             forma = por_clave.get(_clave(x))
             if forma and not any(forma == f or _variante_de(forma, f) or _variante_de(f, forma) for f in formas):
                 formas.append(forma)
-        if (len(formas) >= MIN_FORMAS and _LARGO_DE_BUSQUEDA[0] <= len(q) <= _LARGO_DE_BUSQUEDA[1]
+        repite = any(len(set(formas) & set(v["formas"])) >= 2 for v in vistos)
+        if (len(formas) >= MIN_FORMAS and not repite
+                and _LARGO_DE_BUSQUEDA[0] <= len(q) <= _LARGO_DE_BUSQUEDA[1]
                 and _LARGO_DE_PREGUNTA[0] <= len(pregunta) <= _LARGO_DE_PREGUNTA[1]):
             fuera.append({"pregunta": pregunta, "busqueda": q, "formas": formas})
+            vistos.append(fuera[-1])
         if len(fuera) >= TEMAS_CANDIDATOS:
             break
     return fuera
@@ -531,10 +546,10 @@ def _cuantas_trae(formas: list[str], encontrados: list[dict[str, Any]]) -> int:
 def medir(tema: dict[str, Any], por_significado: list[dict[str, Any]],
           por_palabras: list[dict[str, Any]]) -> "dict[str, Any] | None":
     """El tema, con cuántas de sus formas trae cada búsqueda; None si no
-    muestra la diferencia (el significado trae menos de MIN_FORMAS, o las
-    palabras traen las mismas)."""
+    muestra la diferencia (el significado trae menos de MIN_FORMAS, o no
+    VENTAJA_DEL_TEMA más que las palabras)."""
     n, m = _cuantas_trae(tema["formas"], por_significado), _cuantas_trae(tema["formas"], por_palabras)
-    if n < MIN_FORMAS or n <= m:
+    if n < MIN_FORMAS or n - m < VENTAJA_DEL_TEMA:
         return None
     return {**tema, "por_significado": n, "por_palabras": m}
 
