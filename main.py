@@ -9016,8 +9016,11 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
         return {"sugerencias": [], "ejemplos": [], "motivo": "El índice todavía no tiene textos"}
     ejemplos = textos[:busqueda.SUGERENCIAS]
     try:
-        label = _label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {})
-        datos = semantica._json_de(semantica._llamar_al_llm(busqueda.prompt_de_busquedas(textos, caso.get("campo", ""), label)))
+        entry = _read_pipelines_registry(terraform_dir).get(slug) or {}
+        label = _label_del_caso(slug, entry)
+        cortes = busqueda.cortes_de(_campos_del_caso(slug, entry), caso.get("campo", ""))
+        datos = semantica._json_de(semantica._llamar_al_llm(
+            busqueda.prompt_de_busquedas(textos, caso.get("campo", ""), label, cortes)))
     except Exception as exc:  # noqa: BLE001 — sin el LLM quedan los ejemplos
         return {"sugerencias": [], "ejemplos": ejemplos, "motivo": f"El LLM no propuso búsquedas ({type(exc).__name__})"}
     probadas = []

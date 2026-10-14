@@ -29,6 +29,7 @@ Cómo:
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 # Quién calcula los vectores. Multilingüe (castellano entre 34 idiomas),
@@ -303,8 +304,8 @@ idioma. Sin comillas, códigos, números ni nombres propios del texto.
 
 Para cada búsqueda, además, una pregunta en castellano que le haría alguien del negocio a un asistente de \
 datos sobre ese tema: que use la búsqueda tal cual (con esas mismas palabras, no las del texto) y pida contar \
-o agrupar (cuántos, en qué, cuándo). Por ejemplo, para "fiebre en un nene": "¿Cuántos llamados hubo por fiebre \
-en un nene y en qué zona?".
+o agrupar {cortes}. Por ejemplo, para "fiebre en un nene": "¿Cuántos llamados hubo por fiebre en un nene y en \
+qué zona?".
 
 Respondé solo JSON: {{"busquedas": [{{"busqueda": "...", "texto": "<el texto al que apunta, copiado tal cual>", \
 "pregunta": "..."}}]}}
@@ -324,11 +325,56 @@ def _en_una_linea(texto: Any) -> str:
     return " ".join(str(texto or "").split())[:_LARGO_EN_EL_PROMPT]
 
 
-def prompt_de_busquedas(textos: list[str], campo: str = "", label: str = "") -> str:
-    """El pedido al LLM, con de dónde son los textos: sin eso, "Health" en los
-    logs de un firewall volvía como "bienestar físico"."""
-    return _PROMPT_DE_BUSQUEDAS.format(n=CANDIDATAS, de_donde=_de_donde(campo, label),
-                                       textos="\n".join(_en_una_linea(t) for t in textos))
+def prompt_de_busquedas(textos: list[str], campo: str = "", label: str = "",
+                        cortes: "list[str] | None" = None) -> str:
+    """El pedido al LLM, con de dónde son los textos (sin eso, "Health" en los
+    logs de un firewall volvía como "bienestar físico") y por qué se puede
+    agrupar: sin los cortes, las preguntas pedían "en qué barrios" o "en qué
+    rango de edad" a datos que no los tienen."""
+    return _PROMPT_DE_BUSQUEDAS.format(
+        n=CANDIDATAS, de_donde=_de_donde(campo, label), textos="\n".join(_en_una_linea(t) for t in textos),
+        cortes=(f"por uno de los campos que tienen los datos ({', '.join(cortes)}) o por fecha" if cortes
+                else "(cuántos, cuándo)"))
+
+
+_CORTES_EN_EL_PROMPT = 8
+
+
+def cortes_de(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
+    """Por qué se puede agrupar: las dimensiones del caso (su nombre de
+    negocio si lo tiene), sin el campo de los textos."""
+    fuera: list[str] = []
+    for f in fields or []:
+        ruta = (f.get("field_path") or "").strip()
+        if not f.get("dimension") or not ruta or ruta == campo:
+            continue
+        nombre = (f.get("business_label") or "").strip() or ruta.rsplit(".", 1)[-1].replace("_", " ")
+        if nombre.lower() not in (x.lower() for x in fuera):
+            fuera.append(nombre)
+    return fuera[:_CORTES_EN_EL_PROMPT]
+
+
+def _raices(texto: Any) -> set[str]:
+    """Las palabras con contenido, sin acentos y cortadas a cinco letras: así
+    "cargas" y "Carga" cuentan como la misma."""
+    plano = unicodedata.normalize("NFKD", str(texto or "").lower()).encode("ascii", "ignore").decode()
+    return {w[:5] for w in re.findall(r"[a-z]{4,}", plano)}
+
+
+def pregunta_valida(pregunta: str, busqueda: str, objetivo: str) -> bool:
+    """La pregunta muestra la búsqueda por significado si habla con las
+    palabras de la búsqueda y no con las del texto. El LLM a veces la armaba con
+    el texto ("¿Cuántas cargas de combustible en la estación de mina…?" para
+    «Carga de combustible en la estación de mina»): por palabras también la
+    contestaba."""
+    de_la_pregunta, de_la_busqueda = _raices(pregunta), _raices(busqueda)
+    copiadas = (de_la_pregunta & _raices(objetivo)) - de_la_busqueda
+    return len(copiadas) < 2 and 2 * len(de_la_pregunta & de_la_busqueda) >= len(de_la_busqueda)
+
+
+def pregunta_por_defecto(busqueda: str) -> str:
+    """La pregunta cuando la del LLM no sirve: la búsqueda, tal cual."""
+    return f"¿Cuántos casos hay de «{busqueda}» y dónde se concentran?"
 
 
 def _de_donde(campo: str, label: str) -> str:
@@ -363,7 +409,9 @@ def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
             continue
         usados.add(objetivo)
         pregunta = " ".join(str(x.get("pregunta") or "").split())
-        fuera.append({"busqueda": q, "objetivo": objetivo, **({"pregunta": pregunta} if pregunta else {})})
+        if not pregunta or not pregunta_valida(pregunta, q, objetivo):
+            pregunta = pregunta_por_defecto(q)
+        fuera.append({"busqueda": q, "objetivo": objetivo, "pregunta": pregunta})
         if len(fuera) >= CANDIDATAS:
             break
     return fuera

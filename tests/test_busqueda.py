@@ -376,13 +376,14 @@ def test_las_busquedas_propuestas_se_validan():
         {"busqueda": "fortigate cpu usage high", "texto": "Fortigate CPU usage high"},  # el mismo texto
         "basura", {"busqueda": 3, "texto": "Fortigate CPU usage high"},
         {"busqueda": "  línea   cortada ", "texto": "Línea partida"}]}           # como quedó en el prompt
+    sin_pregunta = busqueda.pregunta_por_defecto
     assert busqueda.candidatas(datos, textos) == [
-        {"busqueda": "no puede entrar", "objetivo": "Admin login failed"},
-        {"busqueda": "línea cortada", "objetivo": "Línea\n  partida"}]
+        {"busqueda": "no puede entrar", "objetivo": "Admin login failed", "pregunta": sin_pregunta("no puede entrar")},
+        {"busqueda": "línea cortada", "objetivo": "Línea\n  partida", "pregunta": sin_pregunta("línea cortada")}]
     assert busqueda.candidatas({"busquedas": "no"}, textos) == [] and busqueda.candidatas(None, textos) == []
     # El LLM equivocó la clave ("buquedas") y se perdían todas: vale la primera lista.
     assert busqueda.candidatas({"buquedas": [{"busqueda": "no puede entrar", "texto": "Admin login failed"}]}, textos) == \
-        [{"busqueda": "no puede entrar", "objetivo": "Admin login failed"}]
+        [{"busqueda": "no puede entrar", "objetivo": "Admin login failed", "pregunta": sin_pregunta("no puede entrar")}]
     assert busqueda.consultas_a_evaluar({"consulta": ["dolor de cabeza"]}) == ["dolor de cabeza"]
     p = busqueda.prompt_de_busquedas(textos, "msg", "FortiAnalyzer")
     assert "\nLínea partida" in p and "\nAdmin login failed" in p and f"Proponé {busqueda.CANDIDATAS} búsquedas" in p
@@ -418,6 +419,9 @@ def test_que_escribir_en_search(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_read_estados", lambda td: {
         "_cluster": {"embeddings": {"model_id_consulta": "CONSULTAS"}}, "ventas": {"busqueda": {"ok": True, "campo": "comentario"}}})
     monkeypatch.setattr(main, "_cluster_del_entorno", lambda stage: ("http://x", "a", "p"))
+    monkeypatch.setattr(main, "_read_pipelines_registry", lambda td: {"ventas": {"fields": [
+        {"field_path": "comentario", "type": "text"},
+        {"field_path": "tienda.sucursal", "type": "keyword", "dimension": True, "business_label": "Sucursal"}]}})
     textos = ["llegó roto", "tardó un mes", "excelente atención"]
     pedidos, llm = [], []
     hits = lambda *ts: _R(200, {"hits": {"hits": [{"_source": {"texto": t}} for t in ts]}})  # noqa: E731
@@ -447,6 +451,7 @@ def test_que_escribir_en_search(monkeypatch, tmp_path):
                                   "puesto_por_palabras": 0, "pregunta": "¿Cuántas ventas tuvieron un producto dañado?"}],
                  "ejemplos": textos, "motivo": ""}, "la de la demora, por palabras también la encuentra"
     assert "llegó roto" in llm[0] and "«comentario» de «ventas»" in llm[0]
+    assert "por uno de los campos que tienen los datos (Sucursal)" in llm[0], "agrupa solo por lo que hay"
     assert all(u.startswith("/busqueda-ventas/_search") for u in pedidos)
     # Guardadas: la segunda vez, ni el LLM ni el cluster; `nuevas` las rehace.
     n = len(pedidos)
@@ -729,3 +734,37 @@ def test_cada_busqueda_trae_su_pregunta_para_el_asistente():
     hits = lambda *t: [{"texto": x} for x in t]  # noqa: E731
     p = busqueda.probar(c[0], hits("otro"), hits("fiebre en un nene de 4 años"))
     assert p["pregunta"] == c[0]["pregunta"] and p["busqueda"] == "temperatura alta en un niño"
+
+
+def test_la_pregunta_habla_con_la_busqueda_no_con_el_texto():
+    """Visto en la flota de mina: «¿Cuántas cargas de combustible se hicieron
+    en la estación de mina?» para el texto «Carga de combustible en la estación
+    de mina». Esa la contesta la búsqueda por palabras: no demuestra nada, y se
+    cambia por una que usa la búsqueda tal cual."""
+    texto = "Carga de combustible en la estación de mina"
+    datos = {"busquedas": [
+        {"busqueda": "reabastecer gasoil en el yacimiento", "texto": texto,
+         "pregunta": "¿Cuántas cargas de combustible se hicieron en la estación de mina y en qué días?"},
+        {"busqueda": "relevo de turno", "texto": "Cambio de operadores",
+         "pregunta": "¿Cuántos relevos de turno hubo y en qué equipo?"},
+        {"busqueda": "camión sin frenos", "texto": "Falla en el sistema de frenado"}]}
+    c = busqueda.candidatas(datos, [texto, "Cambio de operadores", "Falla en el sistema de frenado"])
+    assert [x["pregunta"] for x in c] == [
+        "¿Cuántos casos hay de «reabastecer gasoil en el yacimiento» y dónde se concentran?",
+        "¿Cuántos relevos de turno hubo y en qué equipo?",
+        "¿Cuántos casos hay de «camión sin frenos» y dónde se concentran?"], "sin pregunta, la de la búsqueda"
+    # Una palabra del texto se tolera ("semana" en "¿… y en qué semana?").
+    assert busqueda.pregunta_valida("¿Cuántas consultas por dolor lumbar hubo y en qué semana?",
+                                    "dolor lumbar", "dolor de espalda baja desde hace una semana")
+    assert not busqueda.pregunta_valida("¿Cuántos envíos hubo?", "paquete deteriorado con firma",
+                                        "Se entregó con el embalaje roto"), "no usa la búsqueda"
+
+
+def test_los_cortes_son_las_dimensiones_del_caso():
+    fields = [{"field_path": "observacion", "type": "text", "dimension": True},
+              {"field_path": "envio.sucursal_destino", "type": "keyword", "dimension": True},
+              {"field_path": "zona", "type": "keyword", "dimension": True, "business_label": "Zona"},
+              {"field_path": "region", "type": "keyword", "dimension": True, "business_label": "zona"},
+              {"field_path": "peso_kg", "type": "float"}]
+    assert busqueda.cortes_de(fields, "observacion") == ["sucursal destino", "Zona"]
+    assert "(cuántos, cuándo)" in busqueda.prompt_de_busquedas(["x"]), "sin cortes no inventa por qué agrupar"
