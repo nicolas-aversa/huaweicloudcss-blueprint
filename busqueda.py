@@ -285,8 +285,9 @@ def resultados(cuerpo: dict[str, Any]) -> list[dict[str, Any]]:
 # plataforma las corre en el cluster y sugiere solo las que lo prueban. Sale de
 # los datos: anda con cualquier dataset, sin una lista a mano por caso.
 MUESTRA_PARA_SUGERIR = 40
-CANDIDATAS = 8
-SUGERENCIAS = 3
+CANDIDATAS = 10
+# Cinco: son también las preguntas de búsqueda por significado del asistente.
+SUGERENCIAS = 5
 PUESTO_MAXIMO = 5
 _LARGO_DE_BUSQUEDA = (3, 80)
 _LARGO_EN_EL_PROMPT = 200
@@ -300,7 +301,13 @@ Cada una apunta a UNO de estos textos (uno distinto cada vez) y lo describe **si
 sinónimos, contando la situación o el problema de otra forma, o en castellano si el texto está en otro \
 idioma. Sin comillas, códigos, números ni nombres propios del texto.
 
-Respondé solo JSON: {{"busquedas": [{{"busqueda": "...", "texto": "<el texto al que apunta, copiado tal cual>"}}]}}
+Para cada búsqueda, además, una pregunta en castellano que le haría alguien del negocio a un asistente de \
+datos sobre ese tema: que use la búsqueda tal cual (con esas mismas palabras, no las del texto) y pida contar \
+o agrupar (cuántos, en qué, cuándo). Por ejemplo, para "fiebre en un nene": "¿Cuántos llamados hubo por fiebre \
+en un nene y en qué zona?".
+
+Respondé solo JSON: {{"busquedas": [{{"busqueda": "...", "texto": "<el texto al que apunta, copiado tal cual>", \
+"pregunta": "..."}}]}}
 
 Textos:
 {textos}
@@ -355,7 +362,8 @@ def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
                 or not _LARGO_DE_BUSQUEDA[0] <= len(q) <= _LARGO_DE_BUSQUEDA[1]):
             continue
         usados.add(objetivo)
-        fuera.append({"busqueda": q, "objetivo": objetivo})
+        pregunta = " ".join(str(x.get("pregunta") or "").split())
+        fuera.append({"busqueda": q, "objetivo": objetivo, **({"pregunta": pregunta} if pregunta else {})})
         if len(fuera) >= CANDIDATAS:
             break
     return fuera
@@ -382,7 +390,8 @@ def probar(candidata: dict[str, str], por_palabras: list[dict[str, Any]],
     if puesto_por_palabras and puesto_por_palabras < puesto + VENTAJA_MINIMA:
         return None
     return {"busqueda": candidata["busqueda"], "encuentra": objetivo, "puesto": puesto,
-            "por_palabras": len(lexica), "puesto_por_palabras": puesto_por_palabras}
+            "por_palabras": len(lexica), "puesto_por_palabras": puesto_por_palabras,
+            **({"pregunta": candidata["pregunta"]} if candidata.get("pregunta") else {})}
 
 
 def elegir(probadas: list[dict[str, Any]]) -> list[dict[str, Any]]:

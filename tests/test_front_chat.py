@@ -28,7 +28,7 @@ check('vacío', capChatLogHTML('ventas', 'Ventas').includes('Preguntame lo que q
 const saludo = capChatLogHTML('ventas', 'Ventas', ['a', 'b', 'c', 'd', 'e', 'f']);
 check('vacío: cinco ideas', (saludo.match(/class="cap-chat__idea lp-q-btn"/g) || []).length === 5, saludo);
 check('vacío: la idea es la pregunta', saludo.includes('data-q="e"') && !saludo.includes('data-q="f"'));
-check('vacío: para empezar', saludo.includes('Para empezar'));
+check('vacío: sobre los datos', saludo.includes('Sobre los datos'));
 check('vacío: sin ideas, sin bloque', !capChatLogHTML('ventas', 'Ventas').includes('cap-chat__ideas'));
 
 // Pregunta en A, mientras se espera la respuesta.
@@ -92,7 +92,7 @@ let s1 = capChatLogHTML('seguir', 'S', QS);
 check('respondida: tres', ideas(s1).length === 3, ideas(s1).join(' | '));
 check('respondida: sin la ya preguntada', !ideas(s1).includes('¿Cuál es el pico?'), ideas(s1).join(' | '));
 check('respondida: en su orden', ideas(s1).join('|') === '¿Cuántos eventos hay?|¿Qué falla más?|¿Quién compra más?');
-check('respondida: podés seguir con', s1.includes('Podés seguir con') && !s1.includes('Para empezar'));
+check('respondida: podés seguir con', s1.includes('Podés seguir con') && !s1.includes('Sobre los datos'));
 check('respondida: después de la respuesta', s1.indexOf('Fue el martes.') < s1.indexOf('cap-chat__ideas'));
 // Escrita a mano, con otras mayúsculas y sin signos: cuenta igual.
 capChatAgregar('seguir', 'user', 'x').pregunta = '  cuántos EVENTOS hay ';
@@ -140,7 +140,7 @@ def _render(html: str) -> str:
 
 def test_el_asistente_se_arma_desde_lo_guardado():
     fn = _render(_INDEX.read_text(encoding="utf-8"))
-    assert "capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s))" in fn
+    assert "capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s), capBusquedaPreguntas[s] || [])" in fn
     # La pestaña elegida también sobrevive.
     assert "activeSlugs.indexOf(capChatSlug)" in fn
     assert "capChatSlug = slug;" in fn
@@ -326,7 +326,7 @@ def test_despues_de_cada_respuesta_vuelven_las_sugeridas():
     mostrar = fn[fn.index("const _mostrarSiguientes = (slug) => {"):]
     mostrar = mostrar[:mostrar.index("};")]
     assert "log.querySelectorAll('.cap-chat__ideas').forEach(n => n.remove());" in mostrar
-    assert "capChatSeguirHTML(slug, _questionsFor(slug))" in mostrar
+    assert "capChatSeguirHTML(slug, [..._questionsFor(slug).slice(0, 5), ...(capBusquedaPreguntas[slug] || [])])" in mostrar
     # Con el mensaje nuevo se van.
     agregar = fn[fn.index("const _agregar = (slug, who, html) => {"):]
     assert "log.querySelectorAll('.cap-chat__ideas').forEach(n => n.remove());" in agregar[:agregar.index("};")]

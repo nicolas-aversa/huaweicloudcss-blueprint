@@ -248,7 +248,11 @@ check('no busca desde la plataforma', !busq.includes('<form') && !busq.includes(
 check('abajo, solo los casos con algo que decir (los listos están en el selector)',
   !busq.includes('<span class="fn__caso-nombre">SIEM</span>') && busq.includes('<span class="fn__caso-nombre">Producción de pozos</span>'), busq);
 const listaB = funcionesHTML({ ...conBusq, catalogo: [C('busqueda', ['siem'], ['siem'])] });
-check('la tarjeta lista se prueba', tile(listaB, 'busqueda').includes('class="btn btn-secondary btn-sm fn__probar-busqueda">Probar</button>'), tile(listaB, 'busqueda'));
+check('la búsqueda no es una tarjeta aparte', !listaB.includes('data-fn="busqueda"'), listaB);
+const agenteB = detalleDeFuncionHTML(funcionDe('agente', { ...conBusq, catalogo: [C('agente', ['siem'], ['siem']), C('busqueda', ['siem', 'produccion-pozos'], ['siem'])] }));
+check('va dentro del agente, con el comparador', agenteB.includes('<div class="fn__sub">') && agenteB.includes('Búsqueda por significado')
+  && agenteB.includes('<div class="fn__comparar">') && agenteB.includes('<option value="siem">SIEM · msg</option>'), agenteB);
+check('y lo que le falta se completa desde ahí', agenteB.includes('data-plugin="busqueda"') && agenteB.includes('Completar la búsqueda'), agenteB);
 const conX = detalleDeFuncionHTML(funcionDe('agente', { ...data, catalogo: [C('agente', ['<x>'], [])] }));
 check('escapado', conX.includes('&lt;x&gt;') && !conX.includes('<x>'), conX);
 // Qué escribir en Search: un toque copia; el detalle, al pasar el mouse.

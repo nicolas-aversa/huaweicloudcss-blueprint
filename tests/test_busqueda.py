@@ -402,7 +402,8 @@ def test_una_sugerencia_prueba_la_diferencia():
     assert busqueda.probar(c, hits(*"abcdef", "Admin login failed"), hits("Admin login failed"))["puesto_por_palabras"] == 7
     assert busqueda.probar(c, hits(), hits(*"abcde", "Admin login failed")) is None, "la híbrida, no entre los primeros"
     p = lambda puesto, n: {"puesto": puesto, "por_palabras": n}  # noqa: E731
-    assert busqueda.elegir([p(3, 0), p(1, 5), p(1, 0), p(2, 0)]) == [p(1, 0), p(1, 5), p(2, 0)]
+    assert busqueda.elegir([p(3, 0), p(1, 5), p(1, 0), p(2, 0)]) == [p(1, 0), p(1, 5), p(2, 0), p(3, 0)]
+    assert len(busqueda.elegir([p(1, 0)] * 8)) == busqueda.SUGERENCIAS == 5, "cinco: las preguntas del asistente"
 
 
 def test_que_escribir_en_search(monkeypatch, tmp_path):
@@ -434,14 +435,16 @@ def test_que_escribir_en_search(monkeypatch, tmp_path):
 
     def llamar(prompt):
         llm.append(prompt)
-        return json.dumps({"busquedas": [{"busqueda": "producto dañado", "texto": "llegó roto"},
-                                         {"busqueda": "demora en la entrega", "texto": "tardó un mes"}]})
+        return json.dumps({"busquedas": [{"busqueda": "producto dañado", "texto": "llegó roto",
+                                          "pregunta": "¿Cuántas ventas tuvieron un producto dañado?"},
+                                         {"busqueda": "demora en la entrega", "texto": "tardó un mes",
+                                          "pregunta": "¿Cuántas ventas tuvieron demora en la entrega?"}]})
 
     monkeypatch.setattr(main, "_os_req", req)
     monkeypatch.setattr(semantica, "_llamar_al_llm", llamar)
     d = c.get(url).json()
     assert d == {"sugerencias": [{"busqueda": "producto dañado", "encuentra": "llegó roto", "puesto": 1, "por_palabras": 0,
-                                  "puesto_por_palabras": 0}],
+                                  "puesto_por_palabras": 0, "pregunta": "¿Cuántas ventas tuvieron un producto dañado?"}],
                  "ejemplos": textos, "motivo": ""}, "la de la demora, por palabras también la encuentra"
     assert "llegó roto" in llm[0] and "«comentario» de «ventas»" in llm[0]
     assert all(u.startswith("/busqueda-ventas/_search") for u in pedidos)
@@ -710,3 +713,19 @@ def test_gana_el_texto_libre_con_mas_textos(monkeypatch):
     assert busqueda.campos_de_texto_libre(campos)[0] == "observacion_auditor", "la pista la pone primera..."
     r = main._provisionar_busqueda("http://x", "a", "p", "prepaga", "prepaga-*", campos, "M1", force=False)
     assert r["ok"] and r["campo"] == "diagnostico" and r["textos"] == 375, "...pero gana la de más textos"
+
+
+
+def test_cada_busqueda_trae_su_pregunta_para_el_asistente():
+    """Cinco búsquedas, que son también las preguntas de búsqueda por
+    significado del asistente: cada una con su pregunta, que usa la búsqueda."""
+    assert busqueda.SUGERENCIAS == 5
+    p = busqueda.prompt_de_busquedas(["fiebre en un nene de 4 años"], "motivo", "Emergencias")
+    assert '"pregunta": "..."' in p and "que use la búsqueda tal cual" in p
+    datos = {"busquedas": [{"busqueda": "temperatura alta en un niño", "texto": "fiebre en un nene de 4 años",
+                            "pregunta": "¿Cuántos llamados hubo por temperatura alta en un niño?"}]}
+    c = busqueda.candidatas(datos, ["fiebre en un nene de 4 años"])
+    assert c[0]["pregunta"] == "¿Cuántos llamados hubo por temperatura alta en un niño?"
+    hits = lambda *t: [{"texto": x} for x in t]  # noqa: E731
+    p = busqueda.probar(c[0], hits("otro"), hits("fiebre en un nene de 4 años"))
+    assert p["pregunta"] == c[0]["pregunta"] and p["busqueda"] == "temperatura alta en un niño"

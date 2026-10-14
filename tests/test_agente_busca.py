@@ -249,3 +249,31 @@ def test_el_endpoint_de_activacion_sigue_siendo_el_de_activacion():
     pasó a ser otra función (422 en todo)."""
     rutas = {r.path: r.endpoint.__name__ for r in main.app.routes if hasattr(r, "endpoint")}
     assert rutas["/api/v1/onboarding/provision-capabilities"] == "provision_capabilities"
+
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
+def test_el_chat_ofrece_cinco_y_cinco(tmp_path):
+    """Cinco preguntas sobre los datos y cinco de búsqueda por significado."""
+    html = _INDEX.read_text(encoding="utf-8")
+    i = html.index("    function capChatLogHTML(slug, label, sugerencias = [], busqueda = []) {")
+    fuente = html[i:html.index("    async function cargarPreguntasDeBusqueda(slug) {", i)]
+    js = tmp_path / "cinco.mjs"
+    js.write_text("const icon = (n) => `<svg data-i=\"${n}\"></svg>`;\n"
+                  "const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n"
+                  "const capChats = {}; const capChatFilaHTML = () => ''; const capChatSeguirHTML = () => '';\n"
+                  "function capChatIdeasHTML(ideas, etiqueta) { return ideas.length ? `<div data-lbl=\"${etiqueta}\">${ideas.join('|')}</div>` : ''; }\n"
+                  + fuente + r"""
+const f = [];
+const datos = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7'];
+const busq = preguntasDeBusqueda([{ busqueda: 'fiebre en un nene', pregunta: '¿Cuántos llamados por fiebre en un nene?' },
+                                  { busqueda: 'caja aplastada' }, {}]);
+if (busq.length !== 2 || busq[1] !== '¿Cuántos casos hay de «caja aplastada» y dónde se concentran?') f.push(JSON.stringify(busq));
+const h = capChatLogHTML('s', 'S', datos, busq);
+if (!h.includes('<div data-lbl="Sobre los datos">d1|d2|d3|d4|d5</div>')) f.push('datos ' + h);
+if (!h.includes('<div data-lbl="Búsqueda por significado">¿Cuántos llamados por fiebre en un nene?|')) f.push('busqueda ' + h);
+if (capChatLogHTML('s', 'S', datos, []).includes('Búsqueda por significado')) f.push('sin búsqueda, sin el bloque');
+console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
+""", encoding="utf-8")
+    r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stdout + r.stderr

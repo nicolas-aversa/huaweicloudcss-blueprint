@@ -2353,6 +2353,11 @@
     .anomalia__cuando { font-variant-numeric: tabular-nums; color: var(--text-primary); }
     .anomalia__grado { color: var(--text-muted); min-width: 80px; }
     .fn__acceso code { user-select: all; font-size: var(--fs-xs); }
+    /* La búsqueda por significado, dentro del panel del agente. */
+    .fn__sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+    .fn__sub-tit { margin: 0 0 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
+    .fn__sub-tit strong { color: var(--text-primary); }
+    .fn__sub-que { margin: 0 0 10px; max-width: 780px; font-size: var(--fs-sm); color: var(--text-secondary); }
     /* Con el aspecto de los links del panel ("Abrir Dashboards"), no de un botón. */
     .fn__ver-acceso { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-hover); cursor: pointer; }
     .fn__ver-acceso:hover { text-decoration: underline; }
@@ -6411,16 +6416,31 @@
     }
     // Sin conversación: un saludo del asistente y cinco preguntas para
     // arrancar. Con conversación, los mensajes y las tres para seguir.
-    function capChatLogHTML(slug, label, sugerencias = []) {
+    function capChatLogHTML(slug, label, sugerencias = [], busqueda = []) {
       const msgs = capChats[slug] || [];
-      if (msgs.length) return msgs.map(capChatFilaHTML).join('') + capChatSeguirHTML(slug, sugerencias);
+      if (msgs.length) return msgs.map(capChatFilaHTML).join('') + capChatSeguirHTML(slug, [...sugerencias.slice(0, 5), ...busqueda]);
       return `<div class="cap-chat__empty">`
         + `<div class="cap-chat__row cap-chat__row--bot"><span class="cap-chat__avatar">${icon('spark')}</span>`
         + `<div class="cap-chat__msg cap-chat__msg--bot">Hola. Preguntame lo que quieras sobre `
         + `<strong>${escapeHtml(label)}</strong>, en lenguaje natural: armo la consulta y te respondo `
         + `con los datos reales.</div></div>`
-        + capChatIdeasHTML(sugerencias.slice(0, 5), 'Para empezar')
+        + capChatIdeasHTML(sugerencias.slice(0, 5), 'Sobre los datos')
+        + capChatIdeasHTML(busqueda.slice(0, 5), 'Búsqueda por significado')
         + `</div>`;
+    }
+    // Las preguntas de búsqueda por significado de cada caso: salen de las
+    // búsquedas que la híbrida encuentra y la búsqueda por palabras no (cada una
+    // con su pregunta, o una armada con la búsqueda). Llegan aparte.
+    const capBusquedaPreguntas = {};
+    function preguntasDeBusqueda(sugerencias) {
+      return (sugerencias || []).map(s => String(s.pregunta || '').trim()
+        || (s.busqueda ? `¿Cuántos casos hay de «${s.busqueda}» y dónde se concentran?` : ''))
+        .filter(Boolean).slice(0, 5);
+    }
+    async function cargarPreguntasDeBusqueda(slug) {
+      const res = await fetch('/api/v1/plugins/busqueda/sugerencias?slug=' + encodeURIComponent(slug));
+      if (!res.ok) throw new Error('sin búsqueda');
+      return preguntasDeBusqueda((await res.json()).sugerencias);
     }
 
     // El desplegable del caso, con el estilo de la plataforma (el <select>
@@ -6540,8 +6560,8 @@
         'Controla el costo de almacenamiento y cumple la retención exigida sin tareas manuales.'],
       rollup: ['Guarda un resumen por hora de las medidas, que queda aunque se borren los datos crudos.',
         'Historia de largo plazo (tendencias de años) ocupando una fracción del espacio.'],
-      agente: ['Preguntás en castellano ("¿qué pozo produjo más?") y responde con el dato real, la consulta que usó y un gráfico.',
-        'Cualquiera consulta los datos sin saber el lenguaje de consultas, y cada respuesta se puede auditar.'],
+      agente: ['Preguntás en castellano ("¿qué pozo produjo más?") y responde con el dato real, la consulta que usó y un gráfico. Si la pregunta habla de un tema que se escribe de muchas formas ("paquetes rotos", "falta de aire"), primero lo busca por significado en el texto libre y después cuenta.',
+        'Cualquiera consulta los datos sin saber el lenguaje de consultas, encuentra lo que se dijo con otras palabras, y cada respuesta se puede auditar.'],
       text2viz: ['Arma el gráfico de cada respuesta del asistente; en Dashboards, crea una visualización a partir de una frase.',
         'Del pedido al gráfico en segundos, sin saber armar visualizaciones.'],
       busqueda: ['Busca en el texto libre del caso por palabras y por significado a la vez: lo exacto sale arriba y "cobro rechazado" encuentra también "pago denegado". Los textos se vectorizan con NVIDIA: con datos de un cliente, avisale.',
@@ -6651,7 +6671,6 @@
       ['anomalias', 'Detección de anomalías', 'Anomaly Detection', 'activity'],
       ['alertas', 'Alertas', 'Alerting', 'alert-triangle'],
       ['security_analytics', 'Analítica de seguridad', 'Security Analytics', 'shield'],
-      ['busqueda', 'Búsqueda híbrida', 'Hybrid search · Neural search', 'search'],
       ['perfil', 'Transformaciones', 'Index Transforms', 'layers'],
       ['analista', 'Enmascaramiento de campos', 'Field masking · Security', 'key'],
       ['reporte', 'Reportes', 'Reporting', 'file'],
@@ -6697,7 +6716,8 @@
       const links = id !== 'reporte' ? {} : Object.fromEntries(slugs.map(s => [s,
         (((_tarjetasDe(data.plugins, s).find(t => t.plugin === 'dashboard') || {}).filas || [])
           .find(x => x.url && /reporte/i.test(x.texto || '')) || {}).url]).filter(([, u]) => u));
-      return { id, titulo, tecnico, icono, c, aplica, hechos, tarjetas, cluster, problemas, estado,
+      return { busqueda: id === 'agente' ? funcionDe('busqueda', data) : null,
+               id, titulo, tecnico, icono, c, aplica, hechos, tarjetas, cluster, problemas, estado,
                recomendado: c ? c.recomendado : true, links, pipelines: data.pipelines || [] };
     }
     function tarjetaDeFuncionHTML(f) {
@@ -6771,7 +6791,27 @@
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
         + (f.id === 'busqueda' ? comparadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
-        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '');
+        + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
+        + (f.busqueda ? busquedaDelAgenteHTML(f.busqueda, caso) : '');
+    }
+    // La búsqueda por significado, dentro del agente: es la que usa para
+    // encontrar lo que se dijo con otras palabras. Acá, cómo medirla y
+    // mostrarla en Dashboards (Search Relevance) y lo que le falta.
+    function busquedaDelAgenteHTML(fb, caso) {
+      if (fb.estado === 'na') return '';
+      const listos = fb.tarjetas.some(([, t]) => t.estado === 'ok');
+      const otros = fb.tarjetas.filter(([, t]) => t.estado !== 'ok').map(([s, t]) => caso(s, t)).join('');
+      const falta = fb.c && fb.hechos.length < fb.aplica.length && fb.estado !== 'en_curso';
+      return `<div class="fn__sub">`
+        + `<p class="fn__sub-tit"><strong>Búsqueda por significado</strong> · Hybrid search · Neural search</p>`
+        + `<p class="fn__sub-que">${escapeHtml(_PARA_QUE_SIRVE.busqueda[0])}</p>`
+        + (falta ? '<button type="button" class="btn btn-secondary btn-sm cat__aplicar" data-plugin="busqueda"'
+          + `${state.provisionandoPlugins ? ' disabled' : ''}>${state.aplicandoPlugin === 'busqueda' ? 'Activando…'
+            : fb.hechos.length ? 'Completar la búsqueda' : 'Activar la búsqueda'}</button>` : '')
+        + (listos ? comparadorHTML(fb) : '')
+        + (otros ? `<ul class="fn__casos">${otros}</ul>` : '')
+        + (fb.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(fb.cluster, { verificar: false })}</div>` : '')
+        + '</div>';
     }
     // Las funciones cuyo número se lee al abrir el panel (en vivo, del cluster).
     const _NUMERO_EN_EL_PANEL = new Set(['anomalias', 'perfil']);
@@ -7277,7 +7317,7 @@
           // Un log de chat por caso (conversación separada), armado desde lo
           // guardado: así un re-render devuelve la conversación como estaba.
           logsHtml = activeSlugs.map((s, i) =>
-            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s))}</div>`).join('');
+            `<div class="cap-chat__log" data-slug="${escapeHtml(s)}" style="display:${i === activa ? 'flex' : 'none'};">${capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s), capBusquedaPreguntas[s] || [])}</div>`).join('');
         }
       }
       // En el paso 3 queda una línea: qué plugins quedaron y el botón para abrir
@@ -7354,8 +7394,22 @@
         const slug = _activeChatSlug();
         capChatLimpiar(slug);
         const log = _logDe(slug);
-        if (log) log.innerHTML = capChatLogHTML(slug, SLUG_LABELS[slug] || 'tus datos', _questionsFor(slug));
+        if (log) log.innerHTML = capChatLogHTML(slug, SLUG_LABELS[slug] || 'tus datos', _questionsFor(slug), capBusquedaPreguntas[slug] || []);
       };
+      // Las de búsqueda por significado, una vez por caso: cuando llegan, el
+      // chat que todavía no empezó las muestra. Si falla (sin búsqueda), se
+      // vuelve a intentar en el próximo armado.
+      activeSlugs.forEach(s => {
+        if (s in capBusquedaPreguntas) return;
+        capBusquedaPreguntas[s] = [];
+        cargarPreguntasDeBusqueda(s).then(qs => {
+          capBusquedaPreguntas[s] = qs;
+          const log = _logDe(s);
+          if (qs.length && log && !(capChats[s] || []).length) {
+            log.innerHTML = capChatLogHTML(s, SLUG_LABELS[s] || 'tus datos', _questionsFor(s), qs);
+          }
+        }).catch(() => { delete capBusquedaPreguntas[s]; });
+      });
       // Un mensaje nuevo: se guarda en la conversación DE ESE CASO y se pinta.
       const _agregar = (slug, who, html) => {
         const entry = capChatAgregar(slug, who, html);
@@ -7374,7 +7428,7 @@
         const log = _logDe(slug);
         if (!log) return;
         log.querySelectorAll('.cap-chat__ideas').forEach(n => n.remove());
-        log.insertAdjacentHTML('beforeend', capChatSeguirHTML(slug, _questionsFor(slug)));
+        log.insertAdjacentHTML('beforeend', capChatSeguirHTML(slug, [..._questionsFor(slug).slice(0, 5), ...(capBusquedaPreguntas[slug] || [])]));
         log.scrollTop = log.scrollHeight;
       };
       // ── Wow: visualización Vega-Lite (el motor del tipo "Vega" de OpenSearch

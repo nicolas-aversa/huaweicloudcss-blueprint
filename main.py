@@ -9005,8 +9005,9 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
         guardadas = {}
     guardadas = guardadas if isinstance(guardadas, dict) else {}
     previa = guardadas.get(slug) or {}
+    # Las guardadas antes de las preguntas del asistente se rehacen una vez.
     if not nuevas and previa.get("model_id") == model_id and previa.get("campo") == caso.get("campo") \
-            and previa.get("sugerencias"):
+            and previa.get("sugerencias") and all(s.get("pregunta") for s in previa["sugerencias"]):
         return {"sugerencias": previa["sugerencias"], "ejemplos": previa.get("ejemplos") or [], "motivo": ""}
     base, user, password = _cluster_del_entorno("busqueda")
     ruta = f"{base}/{busqueda.indice(slug)}/_search"
