@@ -5,6 +5,11 @@ Todo el andamiaje existía suelto —`index_template` sabe emitir `geo_point`,
 recorrido completo a mano—, pero para un dataset nuevo las coordenadas quedaban
 como dos columnas de números decimales. Estos tests cubren el medio que faltaba.
 """
+import shutil
+import subprocess
+
+import pytest
+
 import conf_lint
 import geo_fields
 
@@ -137,3 +142,60 @@ def test_un_campo_combinado_solo_se_retipa():
     assert nuevo == FILTER, "no hay nada que fusionar"
     assert salida[0]["type"] == "geo_point" and salida[0]["dimension"] is False
     assert "geo_point" in nota
+
+
+# ── Los decimales de un JSON ────────────────────────────────────────────────
+# Visto en la ECS: en los dos casos de JSON, `geo_location` no estaba en ningún
+# documento y el mapa salía vacío. Logstash trae los decimales de un JSON como
+# BigDecimal, cuyo texto es "-0.3459341e2", y el bloque validaba el texto.
+def test_el_bloque_toma_un_numero_como_numero():
+    nuevo, _, _ = geo_fields.aplicar(FILTER, [_campo("data.ubicacion.lat"), _campo("data.ubicacion.lon")], "data")
+    assert 'event.get("[data][ubicacion][lat]"), event.get("[data][ubicacion][lon]")' in nuevo
+    assert "v.is_a?(Numeric)" in nuevo, "un BigDecimal no se valida por su texto"
+    assert 'event.set("[data][geo_location]", "#{latf},#{lonf}")' in nuevo
+    assert ').to_s\n' not in nuevo, "el valor no se pasa a texto antes de mirar si es un número"
+    assert conf_lint.lint_filtro(nuevo) == [], conf_lint.lint_filtro(nuevo)
+
+
+def test_el_bloque_de_antes_se_cambia_en_un_conf_ya_armado():
+    """Los casos guardados y la demo de billetera traen el bloque de antes: se
+    cambia al desplegar, una sola vez, y el `.conf` sigue compilando."""
+    import verticals
+    conf = verticals.get_vertical("transacciones-billetera")["filter_code"]
+    nuevo, n = geo_fields.actualizar(conf)
+    assert n == 1 and "latf, lonf = lat.to_f, lon.to_f" not in nuevo
+    assert ('coords = [event.get("[transaction][device][geo_lat]"), '
+            'event.get("[transaction][device][geo_long]")]') in nuevo
+    assert 'event.set("[transaction][geo_location]", "#{latf},#{lonf}")' in nuevo
+    assert geo_fields.actualizar(nuevo) == (nuevo, 0), "idempotente"
+    assert conf_lint.lint_filtro(nuevo) == conf_lint.lint_filtro(conf)
+    assert geo_fields.actualizar(FILTER) == (FILTER, 0) and geo_fields.actualizar("") == ("", 0)
+
+
+def test_al_desplegar_se_cambia_el_bloque_de_antes():
+    from types import SimpleNamespace
+    import main
+    import verticals
+    viejo = verticals.get_vertical("transacciones-billetera")["filter_code"]
+    caso = SimpleNamespace(slug="envios", filter_code=viejo)
+    pedido = SimpleNamespace(pipeline_conf=viejo, cases=[caso])
+    notas = main._normalizar_conf(pedido)
+    assert "v.is_a?(Numeric)" in pedido.pipeline_conf and "v.is_a?(Numeric)" in caso.filter_code
+    assert any(n.startswith("envios: cambié el bloque de coordenadas") for n in notas), notas
+
+
+@pytest.mark.skipif(shutil.which("ruby") is None, reason="ruby no está instalado")
+def test_el_bloque_corre_en_ruby(tmp_path):
+    """El código del bloque, ejecutado: un BigDecimal (JSON), un Float y un
+    texto (CSV) arman el punto; lo vacío, (0,0) y fuera de rango, no."""
+    cuerpo = geo_fields._codigo("[d][lat]", "[d][lon]", "[geo]")
+    rb = tmp_path / "geo.rb"
+    rb.write_text('require "bigdecimal"\nclass Ev\n  def initialize(h); @h = h; end\n'
+                  "  def get(k); @h[k]; end\n  def set(k, v); @h[k] = v; end\nend\n"
+                  f"def armar(event)\n{cuerpo}end\n"
+                  'casos = [[BigDecimal("-34.59341"), BigDecimal("-58.39715")], [-38.4, -68.7], ["-29.3", " -69.8 "],\n'
+                  '         ["N/D", "-58.4"], [nil, -58.4], [0.0, 0.0], [95.0, -58.4]]\n'
+                  'casos.each { |lat, lon| e = Ev.new({"[d][lat]" => lat, "[d][lon]" => lon}); armar(e); puts e.get("[geo]").inspect }\n',
+                  encoding="utf-8")
+    r = subprocess.run(["ruby", str(rb)], capture_output=True, text=True)
+    assert r.stdout.split() == ['"-34.59341,-58.39715"', '"-38.4,-68.7"', '"-29.3,-69.8"', "nil", "nil", "nil", "nil"], r.stdout + r.stderr

@@ -110,29 +110,59 @@ def _corchetes(path: str) -> str:
     return "".join(f"[{tramo}]" for tramo in path.split(".") if tramo)
 
 
-def bloque_ruby(geo: Geo, destino: str) -> str:
-    """El `ruby` que fusiona lat y lon en `"lat,lon"`.
+def _codigo(lat: str, lon: str, dst: str) -> str:
+    """El cuerpo del `ruby`. Un número se toma como número: de un JSON, Logstash
+    trae los decimales como BigDecimal, y su texto es "-0.3459341e2", que no
+    pasaba la validación de antes (pensada para el texto de un CSV): el campo no
+    se armaba en ningún documento y el mapa salía vacío, sin un error (visto en
+    la ECS con dos casos de JSON). Un texto se valida como antes."""
+    return (
+        f'        coords = [event.get("{lat}"), event.get("{lon}")].map do |v|\n'
+        f"          if v.is_a?(Numeric)\n"
+        f"            v.to_f\n"
+        f"          elsif v.to_s.strip =~ /\\A-?\\d+(\\.\\d+)?\\z/\n"
+        f"            v.to_s.strip.to_f\n"
+        f"          end\n"
+        f"        end\n"
+        f"        latf, lonf = coords\n"
+        f"        if latf && lonf && latf.abs<=90 && lonf.abs<=180 && !(latf==0.0 && lonf==0.0)\n"
+        f'          event.set("{dst}", "#{{latf}},#{{lonf}}")\n'
+        f"        end\n"
+    )
 
-    Es el de `verticals/transacciones_billetera.py`, que ya corre en CSS: no se
-    reescribe un filtro que funciona.
-    """
+
+def bloque_ruby(geo: Geo, destino: str) -> str:
+    """El `ruby` que fusiona lat y lon en `"lat,lon"`: los dos tienen que ser
+    números, en rango y no (0,0)."""
     lat, lon, dst = _corchetes(geo.lat), _corchetes(geo.lon), _corchetes(destino)
     return (
         f"\n  if {lat} and {lon} {{\n"
         f"    ruby {{\n"
         f"      code => '\n"
-        f'        lat = event.get("{lat}").to_s\n'
-        f'        lon = event.get("{lon}").to_s\n'
-        f"        if lat =~ /\\A-?\\d+(\\.\\d+)?\\z/ && lon =~ /\\A-?\\d+(\\.\\d+)?\\z/\n"
-        f"          latf, lonf = lat.to_f, lon.to_f\n"
-        f"          if latf.abs<=90 && lonf.abs<=180 && !(latf==0.0 && lonf==0.0)\n"
-        f'            event.set("{dst}", "#{{lat}},#{{lon}}")\n'
-        f"          end\n"
-        f"        end\n"
+        + _codigo(lat, lon, dst) +
         f"      '\n"
         f"    }}\n"
         f"  }}\n"
     )
+
+
+# El cuerpo de antes: validaba el texto del valor, y el de un decimal de JSON
+# no pasaba. Está en los casos ya guardados y en el `.conf` de las demos.
+_CODIGO_VIEJO = re.compile(
+    r'(?P<sangria>[ \t]*)lat = event\.get\("(?P<lat>[^"]+)"\)\.to_s\n'
+    r'[ \t]*lon = event\.get\("(?P<lon>[^"]+)"\)\.to_s\n'
+    r'[ \t]*if lat =~ /\\A-\?\\d\+\(\\\.\\d\+\)\?\\z/ && lon =~ /\\A-\?\\d\+\(\\\.\\d\+\)\?\\z/\n'
+    r'[ \t]*latf, lonf = lat\.to_f, lon\.to_f\n'
+    r'[ \t]*if latf\.abs<=90 && lonf\.abs<=180 && !\(latf==0\.0 && lonf==0\.0\)\n'
+    r'[ \t]*event\.set\("(?P<dst>[^"]+)", "#\{lat\},#\{lon\}"\)\n'
+    r'[ \t]*end\n'
+    r'[ \t]*end\n')
+
+
+def actualizar(conf: str) -> tuple[str, int]:
+    """Cambia el bloque de antes por el de ahora en un `.conf` ya armado (un
+    caso guardado, una demo): `(conf, cuántos cambió)`."""
+    return _CODIGO_VIEJO.subn(lambda m: _codigo(m["lat"], m["lon"], m["dst"]), conf or "")
 
 
 def _campo_geo(path: str) -> dict:

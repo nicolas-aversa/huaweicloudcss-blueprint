@@ -4420,13 +4420,19 @@ def _normalizar_conf(request: "TerraformDeployRequest") -> list[str]:
     por esa misma coma. Solo toca lo inequívoco (ver `conf_lint.normalizar`).
     """
     notas: list[str] = []
+    # Las coordenadas con el bloque de antes (no armaba el punto si venían de
+    # un JSON): los casos ya guardados lo traen en su `.conf`.
+    _GEO = "cambié el bloque de coordenadas por el que también lee los decimales de un JSON"
     if request.pipeline_conf:
         request.pipeline_conf, n = conf_lint.normalizar(request.pipeline_conf)
         notas += n
+        request.pipeline_conf, g = geo_fields.actualizar(request.pipeline_conf)
+        notas += [_GEO] if g else []
     for caso in (request.cases or []):
         if caso.filter_code:
             caso.filter_code, n = conf_lint.normalizar(caso.filter_code)
-            notas += [f"{caso.slug}: {x}" for x in n]
+            caso.filter_code, g = geo_fields.actualizar(caso.filter_code)
+            notas += [f"{caso.slug}: {x}" for x in n + ([_GEO] if g else [])]
     for nota in notas:
         print(f"[deploy] configuration file corregido — {nota}")
     if notas:
