@@ -7255,6 +7255,18 @@ def _firma_del_agente(cuerpo: dict) -> str:
     return hashlib.sha256(json.dumps(cuerpo, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
 
+def _modelos_del_entorno(registry: dict, slug: str = "") -> "tuple[str, str] | None":
+    """(platform-ppl, platform-llm): son los mismos para todos los casos del
+    entorno, pero quedan anotados en el caso que los creó. Primero los del caso,
+    si los tiene; si no, los de cualquier otro. Sin esto el chat de los demás
+    casos decía «no está provisionado» (visto en la ECS: de cinco casos, solo
+    el primero los tenía)."""
+    propios = registry.get(slug) or {}
+    con_modelos = [propios] + [ids for ids in registry.values() if isinstance(ids, dict)]
+    return next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in con_modelos
+                 if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
+
+
 def _registrar_agente(base: str, user: str, password: str, api_key: str, terraform_dir: Path,
                       registry: dict, ppl_model: str, llm_model: str,
                       slug_actual: str = "") -> "tuple[str | None, dict]":
@@ -7326,8 +7338,7 @@ def _rearmar_el_agente_si_cambio(cluster: dict, user: str, password: str, https_
     registry = _read_capabilities(terraform_dir)
     if not any(ids.get("agent_id") for ids in registry.values()):
         return
-    modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
-                    if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
+    modelos = _modelos_del_entorno(registry)
     if not modelos:
         return
     base = _os_base(cluster, https_enabled)
@@ -7373,8 +7384,7 @@ def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_ena
         return agente_ya
     from maas_integrator import get_maas_api_key
     registry = _read_capabilities(terraform_dir)
-    modelos = next(((ids["ppl_model_id"], ids["llm_model_id"]) for ids in registry.values()
-                    if ids.get("ppl_model_id") and ids.get("llm_model_id")), None)
+    modelos = _modelos_del_entorno(registry)
     if not modelos:
         runs.step(run, "Asistente", False, "no hay modelos listos para armar el agente")
         return ""
@@ -10588,9 +10598,9 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
              else _read_https_enabled_from_state(terraform_dir))
     base = _os_base(cluster, https)
 
-    ids = _read_capabilities(terraform_dir).get(request.slug, {})
-    ppl_model = ids.get("ppl_model_id")
-    llm_model = ids.get("llm_model_id")
+    registry = _read_capabilities(terraform_dir)
+    ids = registry.get(request.slug, {})
+    ppl_model, llm_model = _modelos_del_entorno(registry, request.slug) or (None, None)
     if not ppl_model or not llm_model:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail={"stage": "ppl_chat",
