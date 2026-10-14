@@ -143,8 +143,15 @@ def test_el_chat_muestra_lo_que_busco(tmp_path):
 const f = [];
 const frases = ['La caja llegó aplastada', 'Envoltorio roto', 'Paquete mojado', 'El producto llegó roto', 'Caja golpeada']
   .map((texto, i) => ({ texto, cuenta: 10 - i }));
-const h = capChatCabeceraHTML({ busquedas: [{ tema: 'paquetes rotos', frases }], consultas: [] });
-if (!h.includes('Buscó por significado «paquetes rotos»: La caja llegó aplastada · Envoltorio roto · Paquete mojado · El producto llegó roto · y 1 más')) f.push(h);
+// La etiqueta es solo el tema; las frases van en un desplegable, primero las
+// que usó la consulta (marcadas), después las que trajo la búsqueda y descartó.
+const ppl = "source=envios-* | where obs in ('El producto llegó roto', 'La caja llegó aplastada') | stats count()";
+const h = capChatCabeceraHTML({ busquedas: [{ tema: 'paquetes rotos', frases }], ppl, consultas: [] });
+if (!h.includes('Buscó por significado «paquetes rotos»</div>')) f.push('etiqueta ' + h);
+if (!h.includes('<summary>contó 2 de las 5 frases que encontró</summary>')) f.push('resumen ' + h);
+if (!h.includes('<ul class="cap-chat__frases"><li class="is-usada">La caja llegó aplastada</li><li class="is-usada">El producto llegó roto</li><li>Envoltorio roto</li>')) f.push('frases ' + h);
+const otra = capChatCabeceraHTML({ busquedas: [{ tema: 'sin luz', frases }], consultas: [{ ppl: "where codigo='PWR'" }] });
+if (!otra.includes('<summary>ver las 5 frases que encontró</summary>') || otra.includes('is-usada')) f.push('sin usar ' + otra);
 if (capChatCabeceraHTML({ busquedas: [{ tema: 'x', frases: [] }] }) !== '') f.push('sin frases, nada');
 if (!capChatCabeceraHTML({ consultas: [{}, {}] }).includes('Investigación · 2 consultas')) f.push('la investigación sigue');
 console.log(f.join('\n')); process.exit(f.length ? 1 : 0);

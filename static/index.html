@@ -2735,6 +2735,12 @@
       text-transform: uppercase; letter-spacing: .05em;
     }
     .cap-chat__investigacion .icon { width: 13px; height: 13px; }
+    .cap-chat__busco { margin-bottom: 10px; }
+    .cap-chat__busco .cap-chat__investigacion { margin-bottom: 0; }
+    .cap-chat__busco .cap-chat__det { margin-top: 3px; }
+    .cap-chat__frases { margin: 6px 0 2px; padding-left: 18px; color: var(--text-muted); }
+    .cap-chat__frases li { margin: 2px 0; }
+    .cap-chat__frases li.is-usada { color: var(--text-primary); font-weight: var(--fw-semi); }
     .cap-chat__consulta + .cap-chat__consulta { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
     .cap-chat__fallo { font-size: var(--fs-xs); color: var(--text-muted); }
     /* En un teléfono, el chat ocupa la pantalla. */
@@ -6350,12 +6356,25 @@
     // Y lo que el agente buscó por significado antes de contar: el tema y las
     // frases que encontró (así se ve por qué contó esas y no solo las que dicen
     // la palabra).
+    // Lo que buscó por significado: el tema como etiqueta corta y, en un
+    // desplegable, las frases que trajo la búsqueda, primero las que usó en la
+    // consulta (marcadas). Las primeras cuatro de la búsqueda, en la etiqueta,
+    // ocupaban medio mensaje en rojo y mostraban frases que el agente descartó.
     function capChatCabeceraHTML(data) {
       const n = ((data && data.consultas) || []).length;
+      const ppls = [(data && data.ppl) || '', ...((data && data.consultas) || []).map(c => (c && c.ppl) || '')].join('\n');
+      const usada = (t) => ppls.includes(`'${t}'`) || ppls.includes(`"${t}"`);
       const busco = ((data && data.busquedas) || []).filter(b => (b.frases || []).length).map(b => {
-        const frases = b.frases.map(f => f.texto);
-        return `<div class="cap-chat__investigacion">${icon('search')} Buscó por significado «${escapeHtml(b.tema)}»: `
-          + `${escapeHtml(frases.slice(0, 4).join(' · '))}${frases.length > 4 ? ` · y ${frases.length - 4} más` : ''}</div>`;
+        const frases = [...new Set(b.frases.map(f => String((f && f.texto) || '')).filter(Boolean))];
+        const usadas = frases.filter(usada);
+        const resto = frases.filter(t => !usada(t));
+        const resumen = usadas.length ? `contó ${usadas.length} de las ${frases.length} frases que encontró`
+          : `ver las ${frases.length} frases que encontró`;
+        return `<div class="cap-chat__busco"><div class="cap-chat__investigacion">${icon('search')} Buscó por significado «${escapeHtml(b.tema)}»</div>`
+          + `<details class="cap-chat__det"><summary>${resumen}</summary><ul class="cap-chat__frases">`
+          + usadas.map(t => `<li class="is-usada">${escapeHtml(t)}</li>`).join('')
+          + resto.map(t => `<li>${escapeHtml(t)}</li>`).join('')
+          + `</ul></details></div>`;
       }).join('');
       return busco + (n ? `<div class="cap-chat__investigacion">${icon('search')} Investigación · ${n} consultas</div>` : '');
     }
@@ -9176,6 +9195,19 @@
                 { ppl: 'source=transacciones-billetera-* | eval fallo=if(transaction.status=\'FAILED\',1,0) | stats sum(fallo) as fallidas, count() as total by channel | eval pct = round(fallidas * 100.0 / total, 1)', ok: true, result: porCanal, error: '' },
                 { ppl: 'source=transacciones-billetera-* | stats count() by device.os', ok: false, result: {}, error: 'Field [device.os] not found.' },
               ],
+            });
+          }
+          // Una de las de búsqueda por significado: busca el tema y cuenta con las frases que corresponden.
+          if (/dañad|rotos/i.test(pedido.question || '')) {
+            const usadas = ['El producto llegó roto', 'La caja llegó aplastada', 'Caja golpeada en una esquina', 'Envoltorio roto, contenido a la vista'];
+            const porServicio = { schema: [{ name: 'envio.servicio', type: 'string' }, { name: 'total', type: 'long' }],
+                                  datarows: [['Estándar', 272], ['Prioritario', 88], ['Retiro en sucursal', 19]] };
+            return json({
+              answer: `Vista previa, con datos de ejemplo: 379 envíos llegaron dañados, la mayoría en el servicio **Estándar** (272). Conté las frases que dicen eso con otras palabras: ${usadas.map(t => `'${t}'`).join(', ')}.`,
+              ppl: `source=seguimiento-de-envios-* | where evento.observacion in (${usadas.map(t => `'${t}'`).join(', ')}) | stats count() as total by envio.servicio | sort -total`,
+              result: porServicio,
+              busquedas: [{ tema: 'envío dañado o roto', frases: [...usadas, 'Etiqueta despegada', 'Envío extraviado, se inicia el reclamo', 'No se pudo entregar, se devuelve al vendedor']
+                .map((texto, i) => ({ texto, cuenta: 300 - i * 20 })) }],
             });
           }
           return json({
