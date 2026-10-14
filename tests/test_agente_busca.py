@@ -217,3 +217,35 @@ def test_los_saltos_escapados_de_la_respuesta():
     mezcla = "una línea\ny un \\n literal"
     assert agente_chat.respuesta(r(mezcla))["respuesta"] == mezcla, "con saltos reales no se toca"
 
+
+
+
+def test_si_la_busqueda_falla_va_directo_a_ppl():
+    instr = caps.build_agent_system_instruction(VERT, BUSCA)
+    assert "If the search tool FAILS" in instr and "do NOT call it again" in instr
+
+
+def test_una_activacion_sin_casos_toma_los_del_entorno():
+    """En la ECS, una activación sin casos armó ciclo de vida, rollups y
+    analistas de TODOS los curados, que no estaban desplegados."""
+    reg = {"pozos": {"fields": [1]}, "envios": {"fields": [1]}}
+    assert main._casos_a_activar([], reg) == ["pozos", "envios"]
+    assert main._casos_a_activar(["envios"], reg) == ["envios"], "lo pedido manda"
+    assert main._casos_a_activar([], {}) == caps.get_capability_slugs(), "un entorno sin registro, como antes"
+
+
+def test_lo_apagado_se_marca_en_cada_caso_que_se_activa():
+    """Un caso fuera del registro (un curado) quedaba sin la marca y corría
+    perfil, analista, ciclo de vida y rollup aunque se pidiera un solo plugin."""
+    reg = {"pozos": {"index": "pozos-%{+YYYY.MM}", "excluir": ["reporte"]}}
+    r = main._registro_con_apagados(reg, ["pozos", "siem"], {"perfil", "rollup"})
+    assert r["pozos"] == {"index": "pozos-%{+YYYY.MM}", "excluir": ["perfil", "reporte", "rollup"]}
+    assert r["siem"] == {"excluir": ["perfil", "rollup"]}
+    assert main._excluidos(r["siem"]) >= {"perfil", "rollup"}
+
+
+def test_el_endpoint_de_activacion_sigue_siendo_el_de_activacion():
+    """Las funciones nuevas quedaron entre el decorador y el endpoint: la ruta
+    pasó a ser otra función (422 en todo)."""
+    rutas = {r.path: r.endpoint.__name__ for r in main.app.routes if hasattr(r, "endpoint")}
+    assert rutas["/api/v1/onboarding/provision-capabilities"] == "provision_capabilities"

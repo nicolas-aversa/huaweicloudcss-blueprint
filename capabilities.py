@@ -513,7 +513,11 @@ def _instruccion_de_busqueda(buscadores: list[dict[str, Any]]) -> str:
         "returned phrases that really mean that topic (if they are few or all alike, call it again with another "
         "way of saying it). THEN call the PPLTool of that source asking it to filter "
         "the field by exactly those phrases (copy them verbatim) and to count or group as the user asked. "
-        "In the answer, say briefly which phrasings you counted.\n\n"
+        "In the answer, say briefly which phrasings you counted. "
+        # Con la clave de NVIDIA vencida la reintentaba y llegaba al máximo de
+        # pasos sin contestar (visto en la ECS).
+        "If the search tool FAILS (an error instead of phrases), do NOT call it again: go straight to the PPLTool "
+        "of that source and filter the field by the key words of the topic.\n\n"
     )
 
 

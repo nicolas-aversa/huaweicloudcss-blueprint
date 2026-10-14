@@ -9862,6 +9862,26 @@ def _revisar_meses_de_seguridad(cluster: dict, user: str, password: str, https_e
                       "todos los meses del dataset tenían su índice antes que los detectores")
 
 
+def _casos_a_activar(pedidos: "list[str] | None", pipe_reg: dict) -> list[str]:
+    """Los casos de una activación: los pedidos o, sin pedido, los del entorno.
+    Antes, sin pedido, eran TODOS los casos curados: en la ECS una activación
+    así armó ciclo de vida, rollups y analistas de casos que no estaban
+    desplegados. Los curados quedan solo para un entorno de antes del registro."""
+    import capabilities as _caps
+
+    return list(pedidos or []) or list(pipe_reg) or _caps.get_capability_slugs()
+
+
+def _registro_con_apagados(pipe_reg: dict, slugs: list[str], apagados: set) -> dict:
+    """El registro de la activación con lo apagado marcado en CADA caso que se
+    activa, esté o no en el registro: cada paso mira `excluir` del caso, y uno
+    que no estaba (un curado) se quedaba sin la marca y corría todo, aunque se
+    hubiera pedido un solo plugin."""
+    return {s: {**(pipe_reg.get(s) or {}),
+                "excluir": sorted(set((pipe_reg.get(s) or {}).get("excluir") or []) | set(apagados))}
+            for s in dict.fromkeys(list(pipe_reg) + list(slugs))}
+
+
 @app.post(
     "/api/v1/onboarding/provision-capabilities",
     response_model=ProvisionCapabilitiesResponse,
@@ -9899,10 +9919,8 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     password = request.opensearch_password or _cluster_admin_password(terraform_dir)
     user = request.opensearch_user or "admin"
 
-    slugs = request.slugs or _caps.get_capability_slugs()
-    # Incluir también slugs productivos del registry (fields persistidos, sin spec
-    # curado) — si el frontend los manda, se provisionan.
     pipe_reg = _read_pipelines_registry(terraform_dir)
+    slugs = _casos_a_activar(request.slugs, pipe_reg)
     caps_result: dict = {}
     any_ok = False
     con_plugins = [s for s in slugs if _caps.get_capability_spec(s) is not None
@@ -9921,8 +9939,7 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         if cambio:
             _write_pipelines_registry(terraform_dir, pipe_reg)
     pide = lambda p: p not in apagados  # noqa: E731
-    pipe_reg = {s: {**(e or {}), "excluir": sorted(set((e or {}).get("excluir") or []) | apagados)}
-                for s, e in pipe_reg.items()}
+    pipe_reg = _registro_con_apagados(pipe_reg, slugs, apagados)
     # Con una lista, `force` rehace solo lo pedido (cada plugin con el suyo):
     # bajar el caso entero se llevaba también lo que no se pidió.
     if request.force and not solo:
