@@ -65,10 +65,16 @@ def test_el_conector_de_ppl_se_pone_generico(monkeypatch):
             return _R(200, {"parameters": {"model": "deepseek", "system_prompt": prompt["actual"]}})
         if m == "PUT":
             assert json_body["parameters"] == {"model": "deepseek", "system_prompt": caps.PPL_SISTEMA}
+            assert json_body["credential"] == {"maas_key": "CLAVE"}, "sin ella el conector pierde la clave de MaaS"
         return _R(200, {})
 
     monkeypatch.setattr(main, "_os_req", req)
     monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    import maas_integrator
+    monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "")
+    assert "sin la API key" in main._conector_de_ppl_al_dia("http://x:9200", "a", "p", "PPL")
+    assert not [p for p in pedidos if p[0] in ("POST", "PUT")], "sin clave no se toca"
+    monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "CLAVE")
     assert main._conector_de_ppl_al_dia("http://x:9200", "a", "p", "PPL") == ""
     hechos = [p for p in pedidos if p[0] in ("POST", "PUT")]
     assert hechos == [("POST", "/_plugins/_ml/models/PPL/_undeploy"), ("PUT", "/_plugins/_ml/connectors/C1"),

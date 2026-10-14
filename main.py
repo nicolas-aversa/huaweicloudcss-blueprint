@@ -7105,6 +7105,18 @@ def _resolve_capability_spec(slug: str, base: str = "", user: str = "",
     return spec
 
 
+def _ventana_para_el_ppl(base: str, user: str, password: str, index_pattern: str) -> str:
+    """De cuándo a cuándo hay datos, para el prompt de PPL de un caso: con "julio"
+    sin año el PPLTool del agente elegía 2025 y no había nada (emergencias, en la
+    ECS); el chat directo ya lo tenía. Sin ventana, nada. Por día y no por
+    segundo: la firma del agente no cambia con cada evento que entra."""
+    tw = _index_time_window(base, user, password, index_pattern) if base else None
+    if not tw:
+        return ""
+    return (f"\n\nDATA TIME WINDOW: @timestamp ranges from {str(tw[0])[:10]} to {str(tw[1])[:10]}. "
+            "If the user names a month or period without a year, choose the year that falls within this window.")
+
+
 def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path,
                         slug_actual: str = "") -> list[dict]:
     """Un PPLTool por caso del entorno con datos: el spec curado si lo tiene,
@@ -7140,7 +7152,8 @@ def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path
             "operations": spec2["operations"], "fields": spec2["fields"],
             "success_code": spec2.get("success_code", ""),
             "ppl_system_prompt": caps.build_ppl_system_prompt(
-                ip2, spec2["operations"], spec2["fields"], spec2.get("success_code", ""), spec2.get("label", slug2)),
+                ip2, spec2["operations"], spec2["fields"], spec2.get("success_code", ""), spec2.get("label", slug2))
+            + _ventana_para_el_ppl(base, user, password, ip2),
         })
     for slug2, entry2 in pipe_reg.items():
         if slug2 in seen_slugs:
@@ -7164,7 +7177,8 @@ def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path
             "operations": spec2["operations"], "fields": spec2["fields"],
             "success_code": spec2.get("success_code", ""),
             "ppl_system_prompt": caps.build_ppl_system_prompt(
-                ip2, spec2["operations"], spec2["fields"], spec2.get("success_code", ""), spec2.get("label", slug2)),
+                ip2, spec2["operations"], spec2["fields"], spec2.get("success_code", ""), spec2.get("label", slug2))
+            + _ventana_para_el_ppl(base, user, password, ip2),
         })
     return agent_verticals
 
@@ -7206,9 +7220,17 @@ def _conector_de_ppl_al_dia(base: str, user: str, password: str, ppl_model: str)
         return f"no se pudo leer el conector del modelo de PPL: {_resp_motivo(rc if cid else rm)}"[:300]
     if params.get("system_prompt") == caps.PPL_SISTEMA:
         return ""
+    # La credencial va SIEMPRE: un PUT sin ella deja el conector sin la clave
+    # de MaaS ("ModelArts.81002: Failed to get the authorization header", visto
+    # en la ECS) y el modelo de PPL deja de andar.
+    from maas_integrator import get_maas_api_key
+    clave = get_maas_api_key()
+    if not clave:
+        return "sin la API key de MaaS no se toca el conector del modelo de PPL"
     _os_req("POST", f"{base}/_plugins/_ml/models/{ppl_model}/_undeploy", user, password, timeout=60)
     ru = _os_req("PUT", f"{base}/_plugins/_ml/connectors/{cid}", user, password, timeout=30,
-                 json_body={"parameters": {**params, "system_prompt": caps.PPL_SISTEMA}})
+                 json_body={"parameters": {**params, "system_prompt": caps.PPL_SISTEMA},
+                            "credential": {"maas_key": clave}})
     _os_req("POST", f"{base}/_plugins/_ml/models/{ppl_model}/_deploy", user, password, timeout=60)
     estado = ""
     for _ in range(_ML_TASK_POLL_RETRIES):   # recién pedido puede seguir UNDEPLOYED un momento

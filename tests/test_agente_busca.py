@@ -192,3 +192,17 @@ def test_las_sugeridas_y_la_evaluacion_dependen_del_campo():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     assert 'and previa.get("campo") == caso.get("campo")' in src
     assert 'and anterior.get("campo") == res.get("campo"):' in src
+
+
+
+def test_la_plantilla_dice_de_cuando_son_los_datos(monkeypatch):
+    """Con «julio» sin año, el PPLTool del agente elegía 2025 (emergencias, en la
+    ECS). Cada caso lleva su ventana de datos, por día."""
+    monkeypatch.setattr(main, "_index_time_window", lambda b, u, p, ip: ("2026-01-01 03:00:00", "2026-10-12 23:59:58"))
+    v = main._ventana_para_el_ppl("http://x", "a", "p", "emergencias-*")
+    assert "DATA TIME WINDOW: @timestamp ranges from 2026-01-01 to 2026-10-12" in v
+    assert "choose the year that falls within this window" in v
+    monkeypatch.setattr(main, "_index_time_window", lambda *a: None)
+    assert main._ventana_para_el_ppl("http://x", "a", "p", "x-*") == ""
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    assert src.count("+ _ventana_para_el_ppl(base, user, password, ip2),") == 2, "en las dos clases de fuente"
