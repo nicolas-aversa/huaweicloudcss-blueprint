@@ -93,6 +93,54 @@ def test_crea_el_conector_y_los_dos_modelos(monkeypatch):
     assert len(_creados(pedidos, "/_predict")) == 1, "un vector de prueba: ¿llega el cluster a NVIDIA?"
 
 
+def test_se_espera_el_despliegue_del_registro(monkeypatch):
+    """Visto en la ECS: el registro con `?deploy=true` terminó, pero su despliegue
+    (otra tarea) seguía en DEPLOYING. Se pedía otro despliegue, ml-commons lo
+    rechazaba como duplicado, el modelo se daba por fallido un segundo antes de
+    quedar y el de las consultas no se llegaba a crear."""
+    pedidos = _cluster(monkeypatch)
+    simulado = main._os_req
+    lecturas: dict = {}
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        if m == "GET" and "/_plugins/_ml/models/M-" in url:
+            mid = url.rsplit("/", 1)[-1]
+            lecturas[mid] = lecturas.get(mid, 0) + 1
+            if lecturas[mid] <= 2:
+                return _R(200, {"model_state": "DEPLOYING"})
+        if url.endswith("/_deploy"):
+            pedidos.append((m, url, json_body))
+            return _R(200, {"task_id": "DUP"})
+        if url.endswith("/_plugins/_ml/tasks/DUP"):
+            return _R(200, {"state": "FAILED", "error": '{"nodo":"Duplicate deploy model task"}'})
+        return simulado(m, url, user, password, json_body=json_body, timeout=timeout, headers=headers)
+
+    monkeypatch.setattr(main, "_os_req", req)
+    ids, motivo = main._preparar_los_modelos("http://x", "a", "p", "")
+    assert motivo == "" and ids == {"passage": "M-plataforma-embeddings-textos", "query": "M-plataforma-embeddings-consultas"}
+    assert not [u for m, u, b in pedidos if u.endswith("/_deploy")], "no pide otro despliegue mientras corre el del registro"
+
+
+def test_un_despliegue_duplicado_espera_al_que_esta_en_curso(monkeypatch):
+    """Un modelo que ya se está desplegando (otro pedido): el `_deploy` de
+    este falla como duplicado al instante, y el modelo queda unos segundos después."""
+    lecturas = {"n": 0}
+
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        if url.endswith("/_deploy"):
+            return _R(200, {"task_id": "DUP"})
+        if url.endswith("/tasks/DUP"):
+            return _R(200, {"state": "FAILED", "error": "Duplicate deploy model task"})
+        lecturas["n"] += 1
+        return _R(200, {"model_state": "DEPLOYING" if lecturas["n"] < 3 else "DEPLOYED"})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    assert main._desplegar("http://x", "a", "p", "T1") is True
+    lecturas["n"] = -100   # nunca queda: se rinde, no espera para siempre
+    assert main._desplegar("http://x", "a", "p", "T1") is False
+
+
 def test_reusa_los_que_ya_estan(monkeypatch):
     pedidos = _cluster(monkeypatch, existentes={"plataforma-embeddings-textos": [("T1", "DEPLOYED")],
                                                 "plataforma-embeddings-consultas": [("Q1", "DEPLOYED")]})

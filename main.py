@@ -8430,7 +8430,9 @@ def _desplegar(base: str, user: str, password: str, model_id: str) -> bool:
         tarea = ""
     if tarea:
         _esperar_tarea(base, user, password, tarea)
-    return _estado_del_modelo(base, user, password, model_id) == "DEPLOYED"
+    # Hasta que quede: si ya había un despliegue en curso, la tarea de este
+    # pedido falla al instante ("Duplicate deploy model task") y el otro termina después.
+    return _ml_wait_deployed(base, user, password, model_id)[0]
 
 
 def _borrar_modelo_remoto(base: str, user: str, password: str, model_id: str) -> None:
@@ -8488,7 +8490,12 @@ def _preparar_los_modelos(base: str, user: str, password: str, huella_previa: st
         mid = mid or str(cuerpo.get("model_id") or "")
         if not mid:
             return {}, f"no se pudo registrar el modelo de NVIDIA: {motivo}"
-        if _estado_del_modelo(base, user, password, mid) != "DEPLOYED" and not _desplegar(base, user, password, mid):
+        # `?deploy=true` despliega en otra tarea, que puede seguir corriendo
+        # cuando termina la del registro: se espera a que termine antes de
+        # pedir otro despliegue. Visto en la ECS: el segundo pedido se rechazaba
+        # como duplicado y el modelo se daba por fallido un segundo antes de
+        # quedar desplegado (y el de las consultas no se llegaba a crear).
+        if not _ml_wait_deployed(base, user, password, mid)[0] and not _desplegar(base, user, password, mid):
             return {}, "el modelo de NVIDIA no quedó desplegado"
         ids[tipo] = mid
     rp = _os_req("POST", f"{base}/_plugins/_ml/models/{ids['passage']}/_predict", user, password, timeout=60,
