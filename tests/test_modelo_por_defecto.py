@@ -6,7 +6,7 @@ import capabilities as caps
 def test_el_modelo_por_defecto_es_el_sucesor():
     assert caps.DEFAULT_MAAS_LLM_MODEL == caps.DEFAULT_MAAS_PPL_MODEL == "deepseek-v4.1-flash"
     assert caps.build_llm_connector("K")["parameters"]["model"] == "deepseek-v4.1-flash"
-    assert caps.build_ppl_connector("K", "p")["parameters"]["model"] == "deepseek-v4.1-flash"
+    assert caps.build_ppl_connector("K")["parameters"]["model"] == "deepseek-v4.1-flash"
 
 
 def test_los_rankings_descartan_los_vacios():
@@ -29,7 +29,7 @@ def test_el_ppl_nunca_razona():
     """Dentro del PPLTool, razonando contestaba con explicaciones y bloques de
     código alrededor de la consulta, y el PPLTool la ejecutaba tal cual."""
     for m in ("deepseek-v4.1-flash", "glm-5.2"):
-        assert '"chat_template_kwargs": {"thinking": false}' in caps.build_ppl_connector("K", "p", model=m)["actions"][0]["request_body"]
+        assert '"chat_template_kwargs": {"thinking": false}' in caps.build_ppl_connector("K", model=m)["actions"][0]["request_body"]
 
 
 def _agente():

@@ -3901,18 +3901,18 @@ def test_capability_builders_wellformed():
     for body in (
         C.build_cluster_settings(),
         C.build_llm_connector("KEY"),
-        C.build_ppl_connector("KEY", ppl),
+        C.build_ppl_connector("KEY"),
         C.build_model_group(),
         C.build_remote_model("m", "C1", "MG", "d"),
         C.build_forecaster(ip, spec["volume_field"]),
     ):
         _json.dumps(body)
-    # El connector PPL toma el prompt por PARÁMETRO (${parameters.system_prompt}),
-    # con el default en parameters: así cada PPLTool pasa el prompt de SU vertical
-    # y un solo modelo PPL sirve a todas las fuentes. Los newlines van ESCAPADOS
-    # (\\n) para no romper el JSON del request_body al sustituir el parámetro.
-    conn = C.build_ppl_connector("KEY", ppl)
-    assert conn["parameters"]["system_prompt"] == ppl.replace("\n", "\\n")
+    # El connector PPL lleva un mensaje de sistema GENÉRICO: el PPLTool no manda
+    # un system_prompt propio, así que el de un caso servía a todos (en la ECS,
+    # el de pozos). Lo de cada caso va en la plantilla de su PPLTool; un
+    # `_predict` directo lo pasa por parámetro (${parameters.system_prompt}).
+    conn = C.build_ppl_connector("KEY")
+    assert conn["parameters"]["system_prompt"] == C.PPL_SISTEMA
     assert "${parameters.system_prompt}" in conn["actions"][0]["request_body"]
 
     # Los specs están completos: fields, operations y forecasts.
@@ -3942,6 +3942,7 @@ def test_capability_builders_wellformed():
                 s.get("success_code", ""), s["label"]),
         })
     # UN solo agente multi-fuente: un PPLTool por vertical, cada uno con su prompt.
+    s_por_tool = {v["tool_name"]: f"source={v['index_pattern']}" for v in verticals}
     instr = C.build_agent_system_instruction(verticals)
     agent = C.build_conversational_agent("LLM_ID", "PPL_ID", instr, verticals)
     _json.dumps(agent)
@@ -3950,7 +3951,10 @@ def test_capability_builders_wellformed():
     assert {t["name"] for t in agent["tools"]} == {f"PPLTool-{s}" for s in C.get_capability_slugs()}
     for t in agent["tools"]:
         assert t["type"] == "PPLTool" and t["parameters"]["model_id"] == "PPL_ID"
-        assert t["parameters"]["execute"] == "true" and t["parameters"]["system_prompt"]
+        assert t["parameters"]["execute"] == "true" and "system_prompt" not in t["parameters"]
+        # Las instrucciones de SU caso y la pregunta, en la plantilla del PPLTool.
+        assert t["parameters"]["prompt"].endswith("QUESTION: ${indexInfo.question}\\nPPL:")
+        assert s_por_tool[t["name"]] in t["parameters"]["prompt"] and "\n" not in t["parameters"]["prompt"]
     assert "Producción de pozos" in instr and "Encuentros clínicos" in instr
 
 
@@ -3968,7 +3972,7 @@ def test_model_descriptions_are_ascii_safe():
     for d in (
         C.build_model_group()["description"],
         C.build_llm_connector("KEY")["description"],
-        C.build_ppl_connector("KEY", "filter {}")["description"],
+        C.build_ppl_connector("KEY")["description"],
     ):
         assert allowed.match(d), f"description con chars inválidos: {d!r}"
 

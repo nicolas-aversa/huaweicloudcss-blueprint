@@ -35,3 +35,50 @@ def test_el_span_siempre_con_alias():
         assert "ALWAYS alias the span" in p and "NEVER refer to `span(...)` by name" in p
         assert "stats count() as total by span(@timestamp, 1d) as dia | sort dia" in p
         assert "by span(@timestamp, 1d)\"" not in p
+
+
+
+class _R:
+    def __init__(self, status, data=None):
+        import json
+        self.status_code, self._d = status, data or {}
+        self.text = json.dumps(self._d)
+
+    def json(self):
+        return self._d
+
+
+def test_el_conector_de_ppl_se_pone_generico(monkeypatch):
+    """Un conector con el prompt de un caso (los de antes) se repliega, se
+    cambia y se vuelve a desplegar; con el genérico, no se toca."""
+    import main
+    pedidos = []
+    estados = iter(["UNDEPLOYED", "DEPLOYING", "DEPLOYED"])
+    prompt = {"actual": "You are a PPL query generator... source=pozos-vaca-muerta-*"}
+
+    def req(m, url, user, password, json_body=None, timeout=30):
+        ruta = url.split(":9200", 1)[1]
+        pedidos.append((m, ruta))
+        if m == "GET" and ruta == "/_plugins/_ml/models/PPL":
+            return _R(200, {"connector_id": "C1", "model_state": next(estados, "DEPLOYED")})
+        if m == "GET" and ruta == "/_plugins/_ml/connectors/C1":
+            return _R(200, {"parameters": {"model": "deepseek", "system_prompt": prompt["actual"]}})
+        if m == "PUT":
+            assert json_body["parameters"] == {"model": "deepseek", "system_prompt": caps.PPL_SISTEMA}
+        return _R(200, {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    assert main._conector_de_ppl_al_dia("http://x:9200", "a", "p", "PPL") == ""
+    hechos = [p for p in pedidos if p[0] in ("POST", "PUT")]
+    assert hechos == [("POST", "/_plugins/_ml/models/PPL/_undeploy"), ("PUT", "/_plugins/_ml/connectors/C1"),
+                      ("POST", "/_plugins/_ml/models/PPL/_deploy")]
+    pedidos.clear()
+    prompt["actual"] = caps.PPL_SISTEMA
+    assert main._conector_de_ppl_al_dia("http://x:9200", "a", "p", "PPL") == ""
+    assert not [p for p in pedidos if p[0] in ("POST", "PUT")], "ya estaba: no se repliega"
+
+
+def test_la_plantilla_del_ppltool():
+    t = caps.plantilla_del_ppltool("line 1\nsource=pozos-*")
+    assert t == "line 1\\nsource=pozos-*\\n\\nQUESTION: ${indexInfo.question}\\nPPL:"

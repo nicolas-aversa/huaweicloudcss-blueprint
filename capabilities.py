@@ -220,13 +220,30 @@ def build_llm_connector(api_key: str, endpoint: str | None = None, model: str | 
     }
 
 
-def build_ppl_connector(api_key: str, ppl_system_prompt: str,
-                        endpoint: str | None = None, model: str | None = None) -> dict[str, Any]:
-    """Connector del PPLTool. El system prompt entra por `${parameters.system_prompt}`
-    (mismo patrón que `system_instruction` en el connector LLM): así UN solo modelo
-    PPL sirve a TODOS los verticales — cada PPLTool del agente pasa el prompt de SU
-    vertical como parámetro del tool. `ppl_system_prompt` queda como default del
-    connector (para `_predict` directo sin parámetro)."""
+# El mensaje de sistema del modelo de PPL: el mismo para todos los casos. El
+# PPLTool de ml-commons NO manda el `system_prompt` de la herramienta: el modelo
+# recibía siempre el default del conector, armado para UN caso (en la ECS, el de
+# pozos, viejo: el PPLTool de emergencias generaba consultas sobre el índice de
+# pozos y las reglas nuevas no llegaban). Las instrucciones de cada caso van en
+# la plantilla `prompt` de su PPLTool (ver plantilla_del_ppltool); el `_predict`
+# directo del chat sigue pasando el suyo como `system_prompt`.
+PPL_SISTEMA = ("You are a PPL query generator for OpenSearch. The user message gives the data source, its fields, "
+               "the rules and the question: follow them. Output ONLY the raw PPL query, with no explanation and no "
+               "markdown code fences.")
+
+
+def plantilla_del_ppltool(ppl_system_prompt: str) -> str:
+    """La plantilla `prompt` de un PPLTool: las instrucciones de su caso y la
+    pregunta, que el PPLTool pone en `${indexInfo.question}`. Los saltos de
+    línea, escapados: el texto entra tal cual en el JSON del request_body."""
+    return ppl_system_prompt.replace("\n", "\\n") + "\\n\\nQUESTION: ${indexInfo.question}\\nPPL:"
+
+
+def build_ppl_connector(api_key: str, endpoint: str | None = None, model: str | None = None) -> dict[str, Any]:
+    """Connector del modelo de PPL: UN solo modelo para TODOS los casos. El
+    mensaje de sistema es genérico (`PPL_SISTEMA`) y lo de cada caso llega en
+    el mensaje: la plantilla de su PPLTool o, en un `_predict` directo, su
+    `system_prompt` como parámetro."""
     endpoint = endpoint or maas_connector_endpoint()
     model = model or maas_ppl_model()
     request_body = (
@@ -245,7 +262,7 @@ def build_ppl_connector(api_key: str, ppl_system_prompt: str,
         "protocol": "http",
         "parameters": {"endpoint": endpoint, "model": model,
                        "response_filter": "$.choices[0].message.content",
-                       "system_prompt": ppl_system_prompt.replace("\n", "\\n")},
+                       "system_prompt": PPL_SISTEMA},
         "credential": {"maas_key": api_key},
         "actions": [_connector_action(request_body, endpoint)],
         "client_config": _CLIENT_CONFIG,
@@ -530,7 +547,9 @@ def build_conversational_agent(llm_model_id: str, ppl_model_id: str,
                 "index": v["index_pattern"],
                 "model_id": ppl_model_id,
                 "execute": "true",
-                "system_prompt": v["ppl_system_prompt"].replace("\n", "\\n"),
+                # Lo de SU caso va en la plantilla: el PPLTool ignora un
+                # `system_prompt` propio (ver PPL_SISTEMA).
+                "prompt": plantilla_del_ppltool(v["ppl_system_prompt"]),
             },
             "include_output_in_agent_response": False,
         })

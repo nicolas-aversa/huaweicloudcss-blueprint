@@ -7187,6 +7187,44 @@ def _buscadores_del_agente(terraform_dir: Path, agent_verticals: list[dict]) -> 
     return out
 
 
+def _conector_de_ppl_al_dia(base: str, user: str, password: str, ppl_model: str) -> str:
+    """El conector del modelo de PPL con el mensaje de sistema genérico. Los de
+    antes tenían el prompt de un caso (el que se activó primero) y el PPLTool de
+    los demás generaba sobre ese. ml-commons solo deja cambiar el conector de un
+    modelo replegado: se repliega, se cambia y se vuelve a desplegar (medio
+    minuto sin chat, durante la activación). "" si quedó o ya estaba; si no, el motivo."""
+    import capabilities as caps
+
+    rm = _os_req("GET", f"{base}/_plugins/_ml/models/{ppl_model}", user, password, timeout=20)
+    try:
+        cid = (rm.json() or {}).get("connector_id") if _resp_ok(rm) else None
+        rc = _os_req("GET", f"{base}/_plugins/_ml/connectors/{cid}", user, password, timeout=20) if cid else None
+        params = ((rc.json() or {}).get("parameters") or {}) if _resp_ok(rc) else None
+    except ValueError:
+        params = None
+    if params is None:
+        return f"no se pudo leer el conector del modelo de PPL: {_resp_motivo(rc if cid else rm)}"[:300]
+    if params.get("system_prompt") == caps.PPL_SISTEMA:
+        return ""
+    _os_req("POST", f"{base}/_plugins/_ml/models/{ppl_model}/_undeploy", user, password, timeout=60)
+    ru = _os_req("PUT", f"{base}/_plugins/_ml/connectors/{cid}", user, password, timeout=30,
+                 json_body={"parameters": {**params, "system_prompt": caps.PPL_SISTEMA}})
+    _os_req("POST", f"{base}/_plugins/_ml/models/{ppl_model}/_deploy", user, password, timeout=60)
+    estado = ""
+    for _ in range(_ML_TASK_POLL_RETRIES):   # recién pedido puede seguir UNDEPLOYED un momento
+        r = _os_req("GET", f"{base}/_plugins/_ml/models/{ppl_model}", user, password, timeout=15)
+        try:
+            estado = (r.json() or {}).get("model_state", "") if _resp_ok(r) else ""
+        except ValueError:
+            estado = ""
+        if estado == "DEPLOYED":
+            break
+        time.sleep(_ML_TASK_POLL_DELAY)
+    if not _resp_ok(ru):
+        return f"no se pudo cambiar el conector del modelo de PPL: {_resp_motivo(ru)}"[:300]
+    return "" if estado == "DEPLOYED" else f"el modelo de PPL quedó {estado or 'sin estado'} después de cambiar su conector"
+
+
 def _firma_del_agente(cuerpo: dict) -> str:
     """Lo que identifica la configuración de un agente: si cambia (un caso, un
     prompt de PPL, una búsqueda, un modelo), hay que volver a registrarlo."""
@@ -7209,6 +7247,9 @@ def _registrar_agente(base: str, user: str, password: str, api_key: str, terrafo
     # quedarían duplicados.
     for aid in _search_ids(base, user, password, "/_plugins/_ml/agents/_search", "Platform Conversational Root"):
         _os_req("DELETE", f"{base}/_plugins/_ml/agents/{aid}", user, password, timeout=20)
+    motivo = _conector_de_ppl_al_dia(base, user, password, ppl_model)
+    if motivo:
+        print(f"[capabilities] {motivo}")
     cuerpo = caps.build_conversational_agent(
         llm_model, ppl_model, caps.build_agent_system_instruction(agent_verticals, buscadores), agent_verticals,
         buscadores=buscadores)
@@ -7441,11 +7482,10 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                 # Agente conversacional ml-commons con PPLTool, en OpenSearch (se consulta
                 # por Dev Tools con `_execute`). `platform-ppl` (usado por los PPLTools)
                 # traduce NL→PPL y la ejecuta; `platform-llm` es el LLM que razona en el
-                # agente. El prompt del vertical actual queda como default del connector;
-                # cada PPLTool pasa el suyo por parámetro.
-                ppl_prompt = caps.build_ppl_system_prompt(ip, spec["operations"], spec["fields"], spec.get("success_code", ""), spec.get("label", slug))
+                # agente. El conector lleva un mensaje de sistema genérico; lo de
+                # cada caso va en la plantilla de su PPLTool (ver caps.PPL_SISTEMA).
                 ppl_conn = _ml_create(base, user, password, "/_plugins/_ml/connectors/_create",
-                                      caps.build_ppl_connector(api_key, ppl_prompt), "connector_id")
+                                      caps.build_ppl_connector(api_key), "connector_id")
                 llm_conn = _ml_create(base, user, password, "/_plugins/_ml/connectors/_create",
                                       caps.build_llm_connector(api_key), "connector_id")
             # Persistir group + connectors YA (antes del register de modelos, que puede
