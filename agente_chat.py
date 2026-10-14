@@ -38,7 +38,13 @@ def respuesta(resp: dict[str, Any]) -> dict[str, str]:
     for o in ((resp or {}).get("inference_results") or [{}])[0].get("output") or []:
         nombre = o.get("name")
         if nombre == "response":
-            fuera["respuesta"] = str((o.get("dataAsMap") or {}).get("response") or o.get("result") or "").strip()
+            texto = str((o.get("dataAsMap") or {}).get("response") or o.get("result") or "").strip()
+            # A veces el LLM del agente escribe los saltos de línea escapados
+            # ("…:\\n\\n- **Último día**", visto en la ECS) y el chat los
+            # mostraba tal cual: si no hay ningún salto real, son esos.
+            if "\\n" in texto and "\n" not in texto:
+                texto = texto.replace("\\n", "\n")
+            fuera["respuesta"] = texto
         elif nombre in ("memory_id", "parent_interaction_id"):
             fuera[nombre] = str(o.get("result") or "")
     return fuera

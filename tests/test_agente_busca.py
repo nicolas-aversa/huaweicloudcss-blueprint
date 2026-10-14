@@ -206,3 +206,14 @@ def test_la_plantilla_dice_de_cuando_son_los_datos(monkeypatch):
     assert main._ventana_para_el_ppl("http://x", "a", "p", "x-*") == ""
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     assert src.count("+ _ventana_para_el_ppl(base, user, password, ip2),") == 2, "en las dos clases de fuente"
+
+
+def test_los_saltos_escapados_de_la_respuesta():
+    """El LLM del agente a veces devuelve «\\n» literal: en el chat se veía tal cual."""
+    def r(texto):
+        return {"inference_results": [{"output": [{"name": "response", "dataAsMap": {"response": texto}}]}]}
+    escapado = "Producción:\\n\\n- **Máximo:** 1.585"
+    assert agente_chat.respuesta(r(escapado))["respuesta"] == "Producción:\n\n- **Máximo:** 1.585"
+    mezcla = "una línea\ny un \\n literal"
+    assert agente_chat.respuesta(r(mezcla))["respuesta"] == mezcla, "con saltos reales no se toca"
+
