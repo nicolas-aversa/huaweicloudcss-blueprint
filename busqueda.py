@@ -286,9 +286,8 @@ def resultados(cuerpo: dict[str, Any]) -> list[dict[str, Any]]:
 # plataforma las corre en el cluster y sugiere solo las que lo prueban. Sale de
 # los datos: anda con cualquier dataset, sin una lista a mano por caso.
 MUESTRA_PARA_SUGERIR = 40
-CANDIDATAS = 10
-# Cinco: son también las preguntas de búsqueda por significado del asistente.
-SUGERENCIAS = 5
+CANDIDATAS = 8
+SUGERENCIAS = 3
 PUESTO_MAXIMO = 5
 _LARGO_DE_BUSQUEDA = (3, 80)
 _LARGO_EN_EL_PROMPT = 200
@@ -302,13 +301,7 @@ Cada una apunta a UNO de estos textos (uno distinto cada vez) y lo describe **si
 sinónimos, contando la situación o el problema de otra forma, o en castellano si el texto está en otro \
 idioma. Sin comillas, códigos, números ni nombres propios del texto.
 
-Para cada búsqueda, además, una pregunta en castellano que le haría alguien del negocio a un asistente de \
-datos sobre ese tema: que use la búsqueda tal cual (con esas mismas palabras, no las del texto) y pida contar \
-o agrupar {cortes}. Por ejemplo, para "fiebre en un nene": "¿Cuántos llamados hubo por fiebre en un nene y en \
-qué zona?".
-
-Respondé solo JSON: {{"busquedas": [{{"busqueda": "...", "texto": "<el texto al que apunta, copiado tal cual>", \
-"pregunta": "..."}}]}}
+Respondé solo JSON: {{"busquedas": [{{"busqueda": "...", "texto": "<el texto al que apunta, copiado tal cual>"}}]}}
 
 Textos:
 {textos}
@@ -325,71 +318,11 @@ def _en_una_linea(texto: Any) -> str:
     return " ".join(str(texto or "").split())[:_LARGO_EN_EL_PROMPT]
 
 
-def prompt_de_busquedas(textos: list[str], campo: str = "", label: str = "",
-                        cortes: "list[str] | None" = None) -> str:
-    """El pedido al LLM, con de dónde son los textos (sin eso, "Health" en los
-    logs de un firewall volvía como "bienestar físico") y por qué se puede
-    agrupar: sin los cortes, las preguntas pedían "en qué barrios" o "en qué
-    rango de edad" a datos que no los tienen."""
-    return _PROMPT_DE_BUSQUEDAS.format(
-        n=CANDIDATAS, de_donde=_de_donde(campo, label), textos="\n".join(_en_una_linea(t) for t in textos),
-        cortes=(f"por uno de los campos que tienen los datos ({', '.join(cortes)}) o por fecha" if cortes
-                else "(cuántos, cuándo)"))
-
-
-_CORTES_EN_EL_PROMPT = 8
-
-
-def cortes_de(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
-    """Por qué se puede agrupar: las dimensiones del caso (su nombre de
-    negocio si lo tiene), sin el campo de los textos."""
-    fuera: list[str] = []
-    for f in fields or []:
-        ruta = (f.get("field_path") or "").strip()
-        if not f.get("dimension") or not ruta or ruta == campo:
-            continue
-        nombre = (f.get("business_label") or "").strip() or ruta.rsplit(".", 1)[-1].replace("_", " ")
-        if nombre.lower() not in (x.lower() for x in fuera):
-            fuera.append(nombre)
-    return fuera[:_CORTES_EN_EL_PROMPT]
-
-
-def _raices(texto: Any) -> set[str]:
-    """Las palabras con contenido, sin acentos y cortadas a cinco letras: así
-    "cargas" y "Carga" cuentan como la misma."""
-    return {w[:5] for w in re.findall(r"[a-z]{4,}", _plano(texto))}
-
-
-def pregunta_valida(pregunta: str, busqueda: str, objetivo: str) -> bool:
-    """La pregunta muestra la búsqueda por significado si habla con las
-    palabras de la búsqueda y no con las del texto. El LLM a veces la armaba con
-    el texto ("¿Cuántas cargas de combustible en la estación de mina…?" para
-    «Carga de combustible en la estación de mina»): por palabras también la
-    contestaba."""
-    de_la_pregunta, de_la_busqueda = _raices(pregunta), _raices(busqueda)
-    copiadas = (de_la_pregunta & _raices(objetivo)) - de_la_busqueda
-    return len(copiadas) < 2 and 2 * len(de_la_pregunta & de_la_busqueda) >= len(de_la_busqueda)
-
-
-def _plano(texto: Any) -> str:
-    return unicodedata.normalize("NFKD", str(texto or "").lower()).encode("ascii", "ignore").decode()
-
-
-def corte_de(pregunta: str, cortes: "list[str] | None") -> str:
-    """El corte que nombra la pregunta del LLM (el primero, si nombra varios):
-    aunque la arme con las palabras del texto, el corte suele estar bien."""
-    plana = _plano(pregunta)
-    hallados = [(plana.find(_plano(c)), c) for c in cortes or [] if c and _plano(c) in plana]
-    return min(hallados)[1] if hallados else ""
-
-
-def pregunta_por_defecto(busqueda: str, corte: str = "") -> str:
-    """La pregunta cuando la del LLM no sirve: la búsqueda tal cual, con el
-    corte que había elegido."""
-    if corte:
-        corte = corte if corte[:2].isupper() else corte[:1].lower() + corte[1:]
-        return f"¿Cuántos casos de «{busqueda}» hubo por {corte}?"
-    return f"¿Cuántos casos hay de «{busqueda}» y dónde se concentran?"
+def prompt_de_busquedas(textos: list[str], campo: str = "", label: str = "") -> str:
+    """El pedido al LLM, con de dónde son los textos: sin eso, "Health" en los
+    logs de un firewall volvía como "bienestar físico"."""
+    return _PROMPT_DE_BUSQUEDAS.format(n=CANDIDATAS, de_donde=_de_donde(campo, label),
+                                       textos="\n".join(_en_una_linea(t) for t in textos))
 
 
 def _de_donde(campo: str, label: str) -> str:
@@ -407,10 +340,9 @@ def _la_lista(datos: Any, clave: str) -> "list | None":
     return next((v for v in datos.values() if isinstance(v, list)), None)
 
 
-def candidatas(datos: Any, textos: list[str], cortes: "list[str] | None" = None) -> list[dict[str, str]]:
+def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
     """Las búsquedas que propuso el LLM, validadas: cada una apunta a uno de
-    los textos (como quedó en el prompt) y a uno distinto. `cortes`, los del
-    prompt: si la pregunta no sirve, la de reemplazo agrupa por el que nombraba."""
+    los textos (como quedó en el prompt) y a uno distinto."""
     por_linea = {_en_una_linea(t): t for t in textos}
     propuestas = _la_lista(datos, "busquedas")
     fuera: list[dict[str, str]] = []
@@ -424,10 +356,7 @@ def candidatas(datos: Any, textos: list[str], cortes: "list[str] | None" = None)
                 or not _LARGO_DE_BUSQUEDA[0] <= len(q) <= _LARGO_DE_BUSQUEDA[1]):
             continue
         usados.add(objetivo)
-        pregunta = " ".join(str(x.get("pregunta") or "").split())
-        if not pregunta or not pregunta_valida(pregunta, q, objetivo):
-            pregunta = pregunta_por_defecto(q, corte_de(pregunta, cortes))
-        fuera.append({"busqueda": q, "objetivo": objetivo, "pregunta": pregunta})
+        fuera.append({"busqueda": q, "objetivo": objetivo})
         if len(fuera) >= CANDIDATAS:
             break
     return fuera
@@ -454,14 +383,167 @@ def probar(candidata: dict[str, str], por_palabras: list[dict[str, Any]],
     if puesto_por_palabras and puesto_por_palabras < puesto + VENTAJA_MINIMA:
         return None
     return {"busqueda": candidata["busqueda"], "encuentra": objetivo, "puesto": puesto,
-            "por_palabras": len(lexica), "puesto_por_palabras": puesto_por_palabras,
-            **({"pregunta": candidata["pregunta"]} if candidata.get("pregunta") else {})}
+            "por_palabras": len(lexica), "puesto_por_palabras": puesto_por_palabras}
 
 
 def elegir(probadas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Las mejores: el texto más arriba en la híbrida, y por palabras ausente o
     lo más abajo posible."""
     return sorted(probadas, key=lambda p: (p["puesto"], -(p.get("puesto_por_palabras") or 99), p["por_palabras"]))[:SUGERENCIAS]
+
+
+# ── Preguntas del asistente que muestran la búsqueda por significado ────────
+# Una búsqueda que apunta a UN texto ("traslado para examen médico agendado" →
+# «traslado para estudio programado») hace preguntas que parecen un filtro, como
+# las de "Sobre los datos". Lo que la búsqueda por significado agrega es juntar
+# un TEMA que en los datos está escrito de muchas formas («El producto llegó
+# roto», «Caja golpeada en una esquina», «La caja llegó aplastada»…). El LLM
+# propone temas con sus formas; la plataforma busca cada tema en el cluster como
+# lo hace el agente y se queda con los que el significado encuentra y las
+# palabras no.
+MUESTRA_PARA_TEMAS = 120
+TEMAS_CANDIDATOS = 8
+PREGUNTAS_POR_SIGNIFICADO = 5
+MIN_FORMAS = 3
+# Cuántas frases trae la búsqueda del agente (el `k` de su VectorDBTool).
+RESULTADOS_DEL_AGENTE = 25
+_LARGO_DE_PREGUNTA = (15, 220)
+
+_PROMPT_DE_TEMAS = """Estos son textos {de_donde}, uno por línea, con cuántas veces aparece cada uno entre \
+paréntesis.
+
+Quiero preguntas para un asistente de datos que muestren lo que agrega buscar por SIGNIFICADO: la persona \
+pregunta por un tema con sus palabras, el asistente encuentra todas las formas en que ese tema está escrito en \
+los datos y recién ahí cuenta. Una búsqueda por palabras encontraría una sola forma, o ninguna.
+
+Proponé {n} temas. Cada tema:
+- junta AL MENOS 3 textos de la lista que hablan de lo mismo pero están escritos con palabras distintas entre sí \
+(sinónimos, término técnico y coloquial, otra forma de contar la misma situación). No valen variantes de la misma \
+frase ("X" y "X, control").
+- se pregunta como lo diría alguien del negocio que NO sabe cómo está escrito el dato: con palabras que no están \
+en esos textos.
+
+La pregunta: una duda real del negocio (un problema, un riesgo, un reclamo, algo que conviene vigilar) que se \
+responde contando esos registros y repartiéndolos {cortes}. Una sola cosa a contar y un solo corte. Ejemplo, si \
+los textos fueran de guardias médicas: «¿Cuántos pacientes llegaron con problemas para respirar y en qué zona \
+pasa más?» junta «disnea súbita», «falta de aire al caminar», «broncoespasmo», «le cuesta respirar».
+
+Respondé solo JSON: {{"temas": [{{"pregunta": "...", "busqueda": "<el tema en 2 a 5 palabras, sin palabras de \
+los textos>", "textos": ["<copiado tal cual de la lista, sin la cuenta>", "...", "..."]}}]}}
+
+Textos:
+{textos}
+"""
+
+
+def muestra_para_temas() -> dict[str, Any]:
+    """Los textos más frecuentes, con su cuenta: más que para las búsquedas de
+    Search, porque un tema necesita varias formas de decir lo mismo."""
+    return {"size": MUESTRA_PARA_TEMAS, "_source": ["texto", "cuenta"], "query": CON_TEXTO,
+            "sort": [{"cuenta": "desc"}]}
+
+
+def _plano(texto: Any) -> str:
+    """Para comparar textos: sin mayúsculas, acentos ni espacios de más."""
+    sin_acentos = unicodedata.normalize("NFKD", str(texto or "").lower()).encode("ascii", "ignore").decode()
+    return " ".join(sin_acentos.split())
+
+
+_CUENTA_AL_FINAL = re.compile(r"\s*\(\d+\)\s*$")
+
+
+def _clave(texto: Any) -> str:
+    """El texto como quedó en el prompt, sin la cuenta: el LLM a veces la
+    copia ("La caja llegó aplastada (85)") y a veces no."""
+    return _plano(_CUENTA_AL_FINAL.sub("", _en_una_linea(texto)))
+
+
+_CORTES_EN_EL_PROMPT = 8
+
+
+def cortes_de(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
+    """Por qué se puede repartir: las dimensiones del caso (su nombre de
+    negocio si lo tiene), sin el campo de los textos. Sin la lista, las
+    preguntas pedían "en qué barrios" o "en qué rango de edad" a datos que no
+    los tienen."""
+    fuera: list[str] = []
+    for f in fields or []:
+        ruta = (f.get("field_path") or "").strip()
+        if not f.get("dimension") or not ruta or ruta == campo:
+            continue
+        nombre = (f.get("business_label") or "").strip() or ruta.rsplit(".", 1)[-1].replace("_", " ")
+        if nombre.lower() not in (x.lower() for x in fuera):
+            fuera.append(nombre)
+    return fuera[:_CORTES_EN_EL_PROMPT]
+
+
+def prompt_de_temas(filas: list[dict[str, Any]], campo: str = "", label: str = "",
+                    cortes: "list[str] | None" = None) -> str:
+    """`filas`: [{texto, cuenta}] del índice de búsqueda del caso."""
+    de_donde = (f"del campo «{campo}» de «{label}»" if campo and label
+                else f"del campo «{campo}»" if campo else "de un caso")
+    return _PROMPT_DE_TEMAS.format(
+        de_donde=de_donde, n=TEMAS_CANDIDATOS,
+        cortes=(f"por uno de estos campos: {', '.join(cortes)}; o por fecha" if cortes else "en el tiempo"),
+        textos="\n".join(f"{_en_una_linea(f.get('texto'))} ({int(f.get('cuenta') or 0)})" for f in filas))
+
+
+def _variante_de(texto: str, otro: str) -> bool:
+    """«litiasis vesicular, control» es la misma forma que «litiasis vesicular»."""
+    return _plano(texto).startswith(_plano(otro) + ",")
+
+
+def temas(datos: Any, filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Los temas que propuso el LLM, validados: cada forma es un texto de la
+    lista, sin variantes de una misma frase, y al menos MIN_FORMAS."""
+    por_clave = {_clave(f.get("texto")): f["texto"] for f in filas if f.get("texto")}
+    fuera: list[dict[str, Any]] = []
+    propuestos = _la_lista(datos, "temas")
+    for t in propuestos if isinstance(propuestos, list) else []:
+        if not isinstance(t, dict):
+            continue
+        pregunta = " ".join(str(t.get("pregunta") or "").split())
+        q = " ".join(str(t.get("busqueda") or "").split())
+        formas: list[str] = []
+        for x in t.get("textos") if isinstance(t.get("textos"), list) else []:
+            forma = por_clave.get(_clave(x))
+            if forma and not any(forma == f or _variante_de(forma, f) or _variante_de(f, forma) for f in formas):
+                formas.append(forma)
+        if (len(formas) >= MIN_FORMAS and _LARGO_DE_BUSQUEDA[0] <= len(q) <= _LARGO_DE_BUSQUEDA[1]
+                and _LARGO_DE_PREGUNTA[0] <= len(pregunta) <= _LARGO_DE_PREGUNTA[1]):
+            fuera.append({"pregunta": pregunta, "busqueda": q, "formas": formas})
+        if len(fuera) >= TEMAS_CANDIDATOS:
+            break
+    return fuera
+
+
+def consulta_por_significado(q: str, model_id: str, n: int = RESULTADOS_DEL_AGENTE) -> dict[str, Any]:
+    """La búsqueda del agente: solo por vector (su VectorDBTool), sin palabras."""
+    return {"size": n, "_source": ["texto", "cuenta"],
+            "query": {"neural": {"embedding": {"query_text": q, "model_id": model_id, "k": n}}}}
+
+
+def _cuantas_trae(formas: list[str], encontrados: list[dict[str, Any]]) -> int:
+    textos = [r.get("texto") or "" for r in encontrados]
+    return sum(any(h == f or _variante_de(h, f) for h in textos) for f in formas)
+
+
+def medir(tema: dict[str, Any], por_significado: list[dict[str, Any]],
+          por_palabras: list[dict[str, Any]]) -> "dict[str, Any] | None":
+    """El tema, con cuántas de sus formas trae cada búsqueda; None si no
+    muestra la diferencia (el significado trae menos de MIN_FORMAS, o las
+    palabras traen las mismas)."""
+    n, m = _cuantas_trae(tema["formas"], por_significado), _cuantas_trae(tema["formas"], por_palabras)
+    if n < MIN_FORMAS or n <= m:
+        return None
+    return {**tema, "por_significado": n, "por_palabras": m}
+
+
+def elegir_preguntas(medidas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Las que más diferencia muestran: más formas que el significado trae y
+    las palabras no; a igual diferencia, más formas."""
+    return sorted(medidas, key=lambda t: (-(t["por_significado"] - t["por_palabras"]),
+                                          -t["por_significado"]))[:PREGUNTAS_POR_SIGNIFICADO]
 
 
 # ── La evaluación en Search Relevance ───────────────────────────────────────

@@ -2711,6 +2711,7 @@
       transition: border-color var(--t-fast), background var(--t-fast);
     }
     .cap-chat__idea .icon { flex: none; width: 14px; height: 14px; color: var(--accent); }
+    .cap-chat__idea-nota { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--text-muted); }
     .cap-chat__idea:hover { border-color: var(--accent); background: var(--accent-tint); }
     /* Un solo campo, con el enviar adentro. */
     .cap-chat__composer {
@@ -6391,12 +6392,17 @@
         ? `<details class="cap-chat__det"><summary>ver PPL / datos</summary>${data.ppl ? `<div class="cap-chat__ppl"><code>${escapeHtml(data.ppl)}</code></div>` : ''}${table}</details>`
         : '';
     }
-    // Preguntas sugeridas, como tarjetas.
+    // Preguntas sugeridas, como tarjetas. Las de búsqueda por significado
+    // llevan debajo cuántas formas del tema junta.
     function capChatIdeasHTML(ideas, etiqueta) {
       if (!ideas.length) return '';
       return `<div class="cap-chat__ideas"><span class="cap-chat__ideas-lbl">${etiqueta}</span>`
-        + ideas.map(q => `<button type="button" class="cap-chat__idea lp-q-btn" data-q="${escapeHtml(q)}">`
-          + `<span>${escapeHtml(q)}</span>${icon('arrow-right')}</button>`).join('')
+        + ideas.map(q => {
+          const nota = capBusquedaNotas[_normPregunta(q)];
+          return `<button type="button" class="cap-chat__idea lp-q-btn" data-q="${escapeHtml(q)}">`
+            + `<span>${escapeHtml(q)}${nota ? `<small class="cap-chat__idea-nota">${escapeHtml(nota)}</small>` : ''}</span>`
+            + `${icon('arrow-right')}</button>`;
+        }).join('')
         + `</div>`;
     }
     // Para comparar preguntas: sin mayúsculas, signos ni espacios de más.
@@ -6428,19 +6434,32 @@
         + capChatIdeasHTML(busqueda.slice(0, 5), 'Búsqueda por significado')
         + `</div>`;
     }
-    // Las preguntas de búsqueda por significado de cada caso: salen de las
-    // búsquedas que la híbrida encuentra y la búsqueda por palabras no (cada una
-    // con su pregunta, o una armada con la búsqueda). Llegan aparte.
+    // Las preguntas de búsqueda por significado de cada caso: por un tema que
+    // en los datos está escrito de muchas formas, probadas en el cluster (el
+    // significado trae esas formas y las palabras no). Llegan aparte. Debajo de
+    // cada una, cuántas formas junta y cuántas encontraría la búsqueda por
+    // palabras: es lo que el SA cuenta en la demo.
     const capBusquedaPreguntas = {};
-    function preguntasDeBusqueda(sugerencias) {
-      return (sugerencias || []).map(s => String(s.pregunta || '').trim()
-        || (s.busqueda ? `¿Cuántos casos hay de «${s.busqueda}» y dónde se concentran?` : ''))
-        .filter(Boolean).slice(0, 5);
+    const capBusquedaNotas = {};
+    function notaDeBusqueda(p) {
+      const n = Number(p.por_significado) || 0;
+      const m = Number(p.por_palabras) || 0;
+      if (!n) return '';
+      return `Junta ${n} formas de escribirlo · por palabras, `
+        + (m ? `${m} de ${n}` : 'ninguna');
+    }
+    function preguntasDeBusqueda(preguntas) {
+      return (preguntas || []).filter(p => p && String(p.pregunta || '').trim()).slice(0, 5).map(p => {
+        const q = String(p.pregunta).trim();
+        const nota = notaDeBusqueda(p);
+        if (nota) capBusquedaNotas[_normPregunta(q)] = nota;
+        return q;
+      });
     }
     async function cargarPreguntasDeBusqueda(slug) {
-      const res = await fetch('/api/v1/plugins/busqueda/sugerencias?slug=' + encodeURIComponent(slug));
+      const res = await fetch('/api/v1/plugins/busqueda/preguntas?slug=' + encodeURIComponent(slug));
       if (!res.ok) throw new Error('sin búsqueda');
-      return preguntasDeBusqueda((await res.json()).sugerencias);
+      return preguntasDeBusqueda((await res.json()).preguntas);
     }
 
     // El desplegable del caso, con el estilo de la plataforma (el <select>
@@ -9075,6 +9094,15 @@
           return json(fuera);
         }
         // La búsqueda híbrida: lo que agrega el significado a la búsqueda por palabras.
+        if (u.includes('/api/v1/plugins/busqueda/preguntas')) {
+          await espera(700);
+          return json({ motivo: '', preguntas: [
+            { pregunta: '¿Cuántos envíos terminaron dañados o rotos y en qué servicio pasa más?', busqueda: 'paquete dañado',
+              formas: ['El producto llegó roto', 'Caja golpeada en una esquina', 'La caja llegó aplastada'], por_significado: 6, por_palabras: 1 },
+            { pregunta: '¿Cuántos envíos no se pudieron entregar por problemas con la dirección y en qué localidad se concentran?',
+              busqueda: 'dirección problemática', formas: ['Falta el número de departamento', 'La dirección no existe', 'Numeración inexistente en la cuadra'],
+              por_significado: 4, por_palabras: 0 }] });
+        }
         if (u.includes('/api/v1/plugins/busqueda/sugerencias')) {
           await espera(900);
           return json({ motivo: '', ejemplos: [], sugerencias: [

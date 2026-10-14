@@ -254,25 +254,35 @@ def test_el_endpoint_de_activacion_sigue_siendo_el_de_activacion():
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no está instalado")
 def test_el_chat_ofrece_cinco_y_cinco(tmp_path):
-    """Cinco preguntas sobre los datos y cinco de búsqueda por significado."""
+    """Cinco preguntas sobre los datos y cinco de búsqueda por significado;
+    debajo de estas, cuántas formas del tema junta y cuántas encontraría la
+    búsqueda por palabras (también entre las de "Podés seguir con")."""
     html = _INDEX.read_text(encoding="utf-8")
-    i = html.index("    function capChatLogHTML(slug, label, sugerencias = [], busqueda = []) {")
+    i = html.index("    // Preguntas sugeridas, como tarjetas.")
     fuente = html[i:html.index("    async function cargarPreguntasDeBusqueda(slug) {", i)]
     js = tmp_path / "cinco.mjs"
     js.write_text("const icon = (n) => `<svg data-i=\"${n}\"></svg>`;\n"
                   "const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n"
-                  "const capChats = {}; const capChatFilaHTML = () => ''; const capChatSeguirHTML = () => '';\n"
-                  "function capChatIdeasHTML(ideas, etiqueta) { return ideas.length ? `<div data-lbl=\"${etiqueta}\">${ideas.join('|')}</div>` : ''; }\n"
+                  "const capChats = {}; const capChatFilaHTML = () => '';\n"
                   + fuente + r"""
 const f = [];
 const datos = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7'];
-const busq = preguntasDeBusqueda([{ busqueda: 'fiebre en un nene', pregunta: '¿Cuántos llamados por fiebre en un nene?' },
-                                  { busqueda: 'caja aplastada' }, {}]);
-if (busq.length !== 2 || busq[1] !== '¿Cuántos casos hay de «caja aplastada» y dónde se concentran?') f.push(JSON.stringify(busq));
+const busq = preguntasDeBusqueda([
+  { pregunta: '¿Cuántos envíos llegaron rotos?', busqueda: 'paquete dañado', por_significado: 6, por_palabras: 1 },
+  { pregunta: '¿Cuántos pacientes con problemas para respirar?', por_significado: 5, por_palabras: 0 },
+  { busqueda: 'sin pregunta' }, {}, null]);
+if (JSON.stringify(busq) !== JSON.stringify(['¿Cuántos envíos llegaron rotos?', '¿Cuántos pacientes con problemas para respirar?'])) f.push(JSON.stringify(busq));
 const h = capChatLogHTML('s', 'S', datos, busq);
-if (!h.includes('<div data-lbl="Sobre los datos">d1|d2|d3|d4|d5</div>')) f.push('datos ' + h);
-if (!h.includes('<div data-lbl="Búsqueda por significado">¿Cuántos llamados por fiebre en un nene?|')) f.push('busqueda ' + h);
+const lbl = (l) => h.indexOf(`<span class="cap-chat__ideas-lbl">${l}</span>`);
+if (lbl('Sobre los datos') < 0 || !h.includes('data-q="d5"') || h.includes('data-q="d6"')) f.push('datos ' + h);
+if (lbl('Búsqueda por significado') < lbl('Sobre los datos')) f.push('busqueda ' + h);
+if (!h.includes('¿Cuántos envíos llegaron rotos?<small class="cap-chat__idea-nota">Junta 6 formas de escribirlo · por palabras, 1 de 6</small>')) f.push('nota ' + h);
+if (!h.includes('<small class="cap-chat__idea-nota">Junta 5 formas de escribirlo · por palabras, ninguna</small>')) f.push('ninguna ' + h);
+if (h.includes('d1<small')) f.push('las de datos no llevan nota');
 if (capChatLogHTML('s', 'S', datos, []).includes('Búsqueda por significado')) f.push('sin búsqueda, sin el bloque');
+capChats.s = [{ who: 'user', pregunta: 'd1' }, { who: 'bot' }];
+const seguir = capChatSeguirHTML('s', [...datos.slice(0, 5), ...busq]);
+if (!seguir.includes('data-q="d2"')) f.push('seguir ' + seguir);
 console.log(f.join('\n')); process.exit(f.length ? 1 : 0);
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")

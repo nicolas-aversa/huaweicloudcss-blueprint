@@ -9015,9 +9015,8 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
         guardadas = {}
     guardadas = guardadas if isinstance(guardadas, dict) else {}
     previa = guardadas.get(slug) or {}
-    # Las guardadas antes de las preguntas del asistente se rehacen una vez.
     if not nuevas and previa.get("model_id") == model_id and previa.get("campo") == caso.get("campo") \
-            and previa.get("sugerencias") and all(s.get("pregunta") for s in previa["sugerencias"]):
+            and previa.get("sugerencias"):
         return {"sugerencias": previa["sugerencias"], "ejemplos": previa.get("ejemplos") or [], "motivo": ""}
     base, user, password = _cluster_del_entorno("busqueda")
     ruta = f"{base}/{busqueda.indice(slug)}/_search"
@@ -9026,15 +9025,12 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
         return {"sugerencias": [], "ejemplos": [], "motivo": "El índice todavía no tiene textos"}
     ejemplos = textos[:busqueda.SUGERENCIAS]
     try:
-        entry = _read_pipelines_registry(terraform_dir).get(slug) or {}
-        label = _label_del_caso(slug, entry)
-        cortes = busqueda.cortes_de(_campos_del_caso(slug, entry), caso.get("campo", ""))
-        datos = semantica._json_de(semantica._llamar_al_llm(
-            busqueda.prompt_de_busquedas(textos, caso.get("campo", ""), label, cortes)))
+        label = _label_del_caso(slug, _read_pipelines_registry(terraform_dir).get(slug) or {})
+        datos = semantica._json_de(semantica._llamar_al_llm(busqueda.prompt_de_busquedas(textos, caso.get("campo", ""), label)))
     except Exception as exc:  # noqa: BLE001 — sin el LLM quedan los ejemplos
         return {"sugerencias": [], "ejemplos": ejemplos, "motivo": f"El LLM no propuso búsquedas ({type(exc).__name__})"}
     probadas = []
-    for c in busqueda.candidatas(datos, textos, cortes):
+    for c in busqueda.candidatas(datos, textos):
         lexica = _os_req("POST", ruta, user, password, json_body=busqueda.consulta_lexica(c["busqueda"], 10), timeout=30)
         hibrida = _os_req("POST", f"{ruta}?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}", user, password,
                           json_body=busqueda.consulta_hibrida(c["busqueda"], model_id, 10), timeout=60)
@@ -9055,6 +9051,69 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
             print(f"[busqueda] no se pudieron guardar las sugerencias: {exc!r}")
     return {"sugerencias": sugerencias, "ejemplos": ejemplos,
             "motivo": "" if sugerencias else "Ninguna de las búsquedas propuestas mostró la diferencia"}
+
+
+# Las preguntas del asistente por significado, por caso: como las sugeridas,
+# llevan al LLM y una búsqueda por tema, no se rehacen cada vez que se abre el chat.
+_PREGUNTAS_NAME = ".preguntas_por_significado.json"
+
+
+@app.get("/api/v1/plugins/busqueda/preguntas", tags=["capabilities"],
+         summary="Preguntas para el asistente que muestran la búsqueda por significado, probadas contra el índice")
+def preguntas_por_significado(slug: str, nuevas: bool = False) -> dict:
+    """Preguntas por un TEMA que en los datos está escrito de muchas formas: el
+    LLM propone temas con sus formas (textos del caso) y cada uno se busca como
+    lo hace el agente (por vector, sus mismos resultados) y por palabras. Quedan
+    los que el significado encuentra y las palabras no, con cuántas formas trae
+    cada una (el chat lo muestra). `nuevas` las rehace."""
+    terraform_dir = _active_terraform_dir()
+    model_id, caso = _busqueda_lista(terraform_dir, slug)
+    archivo = terraform_dir / _PREGUNTAS_NAME
+    try:
+        guardadas = json.loads(archivo.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        guardadas = {}
+    guardadas = guardadas if isinstance(guardadas, dict) else {}
+    previa = guardadas.get(slug) or {}
+    if not nuevas and previa.get("model_id") == model_id and previa.get("campo") == caso.get("campo") \
+            and previa.get("preguntas"):
+        return {"preguntas": previa["preguntas"], "motivo": ""}
+    base, user, password = _cluster_del_entorno("busqueda")
+    ruta = f"{base}/{busqueda.indice(slug)}/_search"
+    r = _os_req("POST", ruta, user, password, json_body=busqueda.muestra_para_temas(), timeout=30)
+    try:
+        filas = [x for x in busqueda.resultados(r.json()) if x.get("texto")] if _resp_ok(r) else []
+    except ValueError:
+        filas = []
+    if not filas:
+        return {"preguntas": [], "motivo": "El índice todavía no tiene textos"}
+    entry = _read_pipelines_registry(terraform_dir).get(slug) or {}
+    try:
+        prompt = busqueda.prompt_de_temas(filas, caso.get("campo", ""), _label_del_caso(slug, entry),
+                                          busqueda.cortes_de(_campos_del_caso(slug, entry), caso.get("campo", "")))
+        datos = semantica._json_de(semantica._llamar_al_llm(prompt))
+    except Exception as exc:  # noqa: BLE001 — sin el LLM, sin preguntas
+        return {"preguntas": [], "motivo": f"El LLM no propuso temas ({type(exc).__name__})"}
+    medidas = []
+    for t in busqueda.temas(datos, filas):
+        por_significado = _os_req("POST", ruta, user, password, timeout=60,
+                                  json_body=busqueda.consulta_por_significado(t["busqueda"], model_id))
+        por_palabras = _os_req("POST", ruta, user, password, timeout=30,
+                               json_body=busqueda.consulta_lexica(t["busqueda"], busqueda.RESULTADOS_DEL_AGENTE))
+        if not (_resp_ok(por_significado) and _resp_ok(por_palabras)):
+            continue
+        m = busqueda.medir(t, busqueda.resultados(por_significado.json()), busqueda.resultados(por_palabras.json()))
+        if m:
+            medidas.append(m)
+    preguntas = busqueda.elegir_preguntas(medidas)
+    if preguntas:
+        guardadas[slug] = {"model_id": model_id, "campo": caso.get("campo"), "preguntas": preguntas}
+        try:
+            archivo.write_text(json.dumps(guardadas, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            print(f"[busqueda] no se pudieron guardar las preguntas: {exc!r}")
+    return {"preguntas": preguntas,
+            "motivo": "" if preguntas else "Ningún tema propuesto mostró la diferencia"}
 
 
 # ── Los datos de la demo, en un snapshot ────────────────────────────────────
