@@ -9024,7 +9024,7 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
     except Exception as exc:  # noqa: BLE001 — sin el LLM quedan los ejemplos
         return {"sugerencias": [], "ejemplos": ejemplos, "motivo": f"El LLM no propuso búsquedas ({type(exc).__name__})"}
     probadas = []
-    for c in busqueda.candidatas(datos, textos):
+    for c in busqueda.candidatas(datos, textos, cortes):
         lexica = _os_req("POST", ruta, user, password, json_body=busqueda.consulta_lexica(c["busqueda"], 10), timeout=30)
         hibrida = _os_req("POST", f"{ruta}?search_pipeline={busqueda.PIPELINE_DE_BUSQUEDA}", user, password,
                           json_body=busqueda.consulta_hibrida(c["busqueda"], model_id, 10), timeout=60)

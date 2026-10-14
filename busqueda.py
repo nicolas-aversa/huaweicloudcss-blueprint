@@ -357,8 +357,7 @@ def cortes_de(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
 def _raices(texto: Any) -> set[str]:
     """Las palabras con contenido, sin acentos y cortadas a cinco letras: así
     "cargas" y "Carga" cuentan como la misma."""
-    plano = unicodedata.normalize("NFKD", str(texto or "").lower()).encode("ascii", "ignore").decode()
-    return {w[:5] for w in re.findall(r"[a-z]{4,}", plano)}
+    return {w[:5] for w in re.findall(r"[a-z]{4,}", _plano(texto))}
 
 
 def pregunta_valida(pregunta: str, busqueda: str, objetivo: str) -> bool:
@@ -372,8 +371,24 @@ def pregunta_valida(pregunta: str, busqueda: str, objetivo: str) -> bool:
     return len(copiadas) < 2 and 2 * len(de_la_pregunta & de_la_busqueda) >= len(de_la_busqueda)
 
 
-def pregunta_por_defecto(busqueda: str) -> str:
-    """La pregunta cuando la del LLM no sirve: la búsqueda, tal cual."""
+def _plano(texto: Any) -> str:
+    return unicodedata.normalize("NFKD", str(texto or "").lower()).encode("ascii", "ignore").decode()
+
+
+def corte_de(pregunta: str, cortes: "list[str] | None") -> str:
+    """El corte que nombra la pregunta del LLM (el primero, si nombra varios):
+    aunque la arme con las palabras del texto, el corte suele estar bien."""
+    plana = _plano(pregunta)
+    hallados = [(plana.find(_plano(c)), c) for c in cortes or [] if c and _plano(c) in plana]
+    return min(hallados)[1] if hallados else ""
+
+
+def pregunta_por_defecto(busqueda: str, corte: str = "") -> str:
+    """La pregunta cuando la del LLM no sirve: la búsqueda tal cual, con el
+    corte que había elegido."""
+    if corte:
+        corte = corte if corte[:2].isupper() else corte[:1].lower() + corte[1:]
+        return f"¿Cuántos casos de «{busqueda}» hubo por {corte}?"
     return f"¿Cuántos casos hay de «{busqueda}» y dónde se concentran?"
 
 
@@ -392,9 +407,10 @@ def _la_lista(datos: Any, clave: str) -> "list | None":
     return next((v for v in datos.values() if isinstance(v, list)), None)
 
 
-def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
+def candidatas(datos: Any, textos: list[str], cortes: "list[str] | None" = None) -> list[dict[str, str]]:
     """Las búsquedas que propuso el LLM, validadas: cada una apunta a uno de
-    los textos (como quedó en el prompt) y a uno distinto."""
+    los textos (como quedó en el prompt) y a uno distinto. `cortes`, los del
+    prompt: si la pregunta no sirve, la de reemplazo agrupa por el que nombraba."""
     por_linea = {_en_una_linea(t): t for t in textos}
     propuestas = _la_lista(datos, "busquedas")
     fuera: list[dict[str, str]] = []
@@ -410,7 +426,7 @@ def candidatas(datos: Any, textos: list[str]) -> list[dict[str, str]]:
         usados.add(objetivo)
         pregunta = " ".join(str(x.get("pregunta") or "").split())
         if not pregunta or not pregunta_valida(pregunta, q, objetivo):
-            pregunta = pregunta_por_defecto(q)
+            pregunta = pregunta_por_defecto(q, corte_de(pregunta, cortes))
         fuera.append({"busqueda": q, "objetivo": objetivo, "pregunta": pregunta})
         if len(fuera) >= CANDIDATAS:
             break

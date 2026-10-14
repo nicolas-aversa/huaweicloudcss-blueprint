@@ -753,6 +753,12 @@ def test_la_pregunta_habla_con_la_busqueda_no_con_el_texto():
         "¿Cuántos casos hay de «reabastecer gasoil en el yacimiento» y dónde se concentran?",
         "¿Cuántos relevos de turno hubo y en qué equipo?",
         "¿Cuántos casos hay de «camión sin frenos» y dónde se concentran?"], "sin pregunta, la de la búsqueda"
+    # El corte que nombraba (bien elegido aunque copiara el texto) se conserva.
+    relevo = {"busquedas": [{"busqueda": "cambio de personal al terminar la jornada", "texto": "Relevo de operadores",
+                             "pregunta": "¿Cuántos relevos de operadores hubo en qué frente y por turno?"}]}
+    assert busqueda.candidatas(relevo, ["Relevo de operadores"], ["Turno", "Frente", "IP de origen"])[0]["pregunta"] == \
+        "¿Cuántos casos de «cambio de personal al terminar la jornada» hubo por frente?", "el primero que nombra"
+    assert busqueda.pregunta_por_defecto("acceso raro", "IP de origen") == "¿Cuántos casos de «acceso raro» hubo por IP de origen?"
     # Una palabra del texto se tolera ("semana" en "¿… y en qué semana?").
     assert busqueda.pregunta_valida("¿Cuántas consultas por dolor lumbar hubo y en qué semana?",
                                     "dolor lumbar", "dolor de espalda baja desde hace una semana")
