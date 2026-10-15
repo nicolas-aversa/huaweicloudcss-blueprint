@@ -8439,6 +8439,16 @@ def _desplegar(base: str, user: str, password: str, model_id: str) -> bool:
     return _ml_wait_deployed(base, user, password, model_id)[0]
 
 
+def _desplegado_tras_registrar(base: str, user: str, password: str, model_id: str) -> bool:
+    """Un modelo recién registrado con `?deploy=true` queda desplegado. Ese
+    despliegue es otra tarea, que puede seguir corriendo cuando termina la del
+    registro: primero se espera a que termine y solo si no queda se pide otro.
+    Pedirlo antes fallaba como duplicado y el modelo se daba por fallido un
+    segundo antes de quedar (visto en la ECS con los modelos de NVIDIA y con
+    el juez de Search Relevance)."""
+    return _ml_wait_deployed(base, user, password, model_id)[0] or _desplegar(base, user, password, model_id)
+
+
 def _borrar_modelo_remoto(base: str, user: str, password: str, model_id: str) -> None:
     """El modelo y su conector (llevan la clave vieja)."""
     r = _os_req("GET", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=20)
@@ -8494,12 +8504,7 @@ def _preparar_los_modelos(base: str, user: str, password: str, huella_previa: st
         mid = mid or str(cuerpo.get("model_id") or "")
         if not mid:
             return {}, f"no se pudo registrar el modelo de NVIDIA: {motivo}"
-        # `?deploy=true` despliega en otra tarea, que puede seguir corriendo
-        # cuando termina la del registro: se espera a que termine antes de
-        # pedir otro despliegue. Visto en la ECS: el segundo pedido se rechazaba
-        # como duplicado y el modelo se daba por fallido un segundo antes de
-        # quedar desplegado (y el de las consultas no se llegaba a crear).
-        if not _ml_wait_deployed(base, user, password, mid)[0] and not _desplegar(base, user, password, mid):
+        if not _desplegado_tras_registrar(base, user, password, mid):
             return {}, "el modelo de NVIDIA no quedó desplegado"
         ids[tipo] = mid
     rp = _os_req("POST", f"{base}/_plugins/_ml/models/{ids['passage']}/_predict", user, password, timeout=60,
@@ -8840,7 +8845,7 @@ def _asegurar_juez(base: str, user: str, password: str) -> "tuple[str, str]":
     mid = mid or str(cuerpo.get("model_id") or "")
     if not mid:
         return "", f"no se pudo registrar el juez: {motivo}"[:300]
-    if _estado_del_modelo(base, user, password, mid) != "DEPLOYED" and not _desplegar(base, user, password, mid):
+    if not _desplegado_tras_registrar(base, user, password, mid):
         return "", "el juez no quedó desplegado"
     if not _el_juez_contesta(base, user, password, mid):
         return "", "el juez no contesta (¿la API key de MaaS?)"

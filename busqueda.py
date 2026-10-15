@@ -107,7 +107,9 @@ def campo_de_texto_libre(fields: list[dict[str, Any]]) -> str:
 # acción, una operación, un paso, un evento): un modelo de teléfono o un user
 # agent también tienen palabras, pero no son lo que alguien busca.
 _PALABRAS_DE_CODIGO = {"action", "accion", "operation", "operacion", "activity", "actividad", "step", "paso",
-                       "task", "tarea", "method", "metodo", "function", "funcion"}
+                       "task", "tarea", "method", "metodo", "function", "funcion",
+                       # el evento (la ALyC: `evt` = ORDER_REJECT, SETTLEMENT_FAIL…)
+                       "event", "evt", "evento"}
 # "name" solo dice qué pasó junto a una de estas (`trace_name`, `eventName`):
 # `user_name` o `resource_name` son de quién o de qué, no de lo que se hizo.
 _NOMBRE_DE_LO_QUE_PASO = {"trace", "event", "api"}

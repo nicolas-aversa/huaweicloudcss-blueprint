@@ -572,13 +572,42 @@ def test_el_juez_se_reusa_si_contesta_y_si_no_se_rehace(monkeypatch):
         if url.endswith("/_predict"):
             return _R(200, {"inference_results": [{"output": [{"dataAsMap": {"choices": [{"message": {"content": "ok"}}]}}]}]}) \
                 if next(contesta) else _R(500, {})
-        return _R(200, {"model_id": "NUEVO"})
+        return _R(200, {"model_id": "NUEVO", "model_state": "DEPLOYED"})
 
     monkeypatch.setattr(main, "_os_req", req)
     assert main._asegurar_juez("http://x", "a", "p") == ("NUEVO", "")
     assert borrados == ["VIEJO"] and creados[0]["credential"] == {"maas_key": "k"}
     monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "")
     assert main._asegurar_juez("http://x", "a", "p") == ("", "sin API key de MaaS")
+
+
+def test_el_juez_espera_su_despliegue_en_vez_de_pedir_otro(monkeypatch):
+    """Visto en la ECS: el registro del juez terminó con su despliegue todavía
+    en curso; se pedía otro, ml-commons lo rechazaba como duplicado y la
+    evaluación de los tres casos decía «el juez no quedó desplegado»."""
+    import maas_integrator
+    monkeypatch.setattr(maas_integrator, "get_maas_api_key", lambda: "k")
+    monkeypatch.setattr(main, "_modelos_por_nombre", lambda *a: [])
+    monkeypatch.setattr(main, "_ml_create", lambda *a: "CON")
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    lecturas, desplegar = [], []
+
+    def req(m, url, *a, json_body=None, **k):
+        if url.endswith("/_register?deploy=true"):
+            return _R(200, {"model_id": "JUEZ"})
+        if url.endswith("/_deploy"):
+            desplegar.append(url)
+            return _R(200, {"task_id": "DUP"})
+        if url.endswith("/models/JUEZ"):
+            lecturas.append(1)
+            return _R(200, {"model_state": "DEPLOYING" if len(lecturas) < 3 else "DEPLOYED"})
+        if url.endswith("/_predict"):
+            return _R(200, {"inference_results": [{"output": [{"dataAsMap": {"choices": [{"message": {"content": "ok"}}]}}]}]})
+        return _R(200, {})
+
+    monkeypatch.setattr(main, "_os_req", req)
+    assert main._asegurar_juez("http://x", "a", "p") == ("JUEZ", "")
+    assert desplegar == [], "no pide otro despliegue mientras corre el del registro"
 
 
 def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_path):
@@ -896,6 +925,12 @@ def test_billetera_y_cts_tienen_donde_buscar():
         nombres = " ".join(busqueda.campos_de_codigo(fields))
         assert "device_model" not in nombres and "user_agent" not in nombres and "carrier" not in nombres
     assert busqueda.campo_de_texto_libre(cts) == "trace_name"
+    # La ALyC: sus motivos tienen 3 valores (una categoría); el evento sí sirve.
+    alyc = verticals.get_vertical("transacciones-alyc")["fields"]
+    assert busqueda.campos_de_codigo(alyc) == ["evt"]
+    assert busqueda.son_codigos_con_palabras(["ORDER_NEW", "ORDER_FILL", "SETTLEMENT_OK", "ORDER_CANCEL", "PARTIAL_FILL",
+                                              "ORDER_REJECT", "SETTLEMENT_FAIL"])
+    assert busqueda.campos_de_codigo([F("event_type"), F("user.type")]) == ["event_type"], "el tipo de evento entra; lo descarta el cluster si son pocos valores"
     # Con texto libre, los códigos no son candidatos de ese nivel.
     assert busqueda.campos_de_codigo([F("comentario", "text"), F("event.action")]) == ["event.action"]
 
