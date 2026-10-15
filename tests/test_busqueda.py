@@ -32,6 +32,11 @@ F = lambda path, tipo="keyword", **kw: {"field_path": path, "type": tipo, **kw} 
     ([F("reject_reason"), F("title")], "title"),                              # un nombre antes que un motivo
     ([F("cancel_reason"), F("order_id")], "cancel_reason"),
     ([F("transaction.response_code"), F("customer_id")], ""),                 # códigos e ids: no
+    # Sin texto libre, el código de lo que pasó (billetera, CTS); el texto libre gana siempre.
+    ([F("transaction.response_code"), F("transaction.operation_code")], "transaction.operation_code"),
+    ([F("user_agent"), F("trace_name")], "trace_name"),
+    ([F("event.action"), F("comentario", "text")], "comentario"),
+    ([F("device_model"), F("user_agent"), F("carrier")], ""),                 # tienen palabras, pero no son lo que se busca
     ([F("message_id"), F("msg_code")], ""),
     ([F("desc", role="entity_id")], ""),
     ([F("monto", "float")], ""),
@@ -862,3 +867,81 @@ def test_preguntas_por_significado(monkeypatch, tmp_path):
     monkeypatch.setattr(semantica, "_llamar_al_llm", caido)
     r = c.get(url + "&nuevas=1").json()
     assert r["preguntas"] == [] and "El LLM no propuso temas" in r["motivo"]
+
+
+# ── Sin texto libre: los códigos de lo que pasó ─────────────────────────────
+# Billetera y CTS no tienen un mensaje ni un comentario, y se quedaban sin
+# búsqueda (ni preguntas por significado). Sus códigos dicen qué pasó con
+# palabras: «¿quién borró recursos de red?» junta deletePort y deleteEip.
+def test_los_codigos_con_palabras():
+    assert busqueda.legible("createSecurityGroupRule") == "create Security Group Rule"
+    assert busqueda.legible("BILL_PAYMENT") == "BILL PAYMENT"
+    assert busqueda.legible("createSecurity-group-rule") == "create Security group rule"
+    assert busqueda.son_codigos_con_palabras(["LOGIN", "BALANCE_INQUIRY", "TRANSFER", "QR_PAYMENT", "BILL_PAYMENT"])
+    assert busqueda.son_codigos_con_palabras(["deletePort", "createDnatRule", "submitJob", "executeSql"])
+    assert busqueda.son_codigos_con_palabras(["verify_funds", "confirm", "request_authorization"])
+    assert not busqueda.son_codigos_con_palabras(["000", "E30", "E48", "E10"]), "códigos opacos"
+    assert not busqueda.son_codigos_con_palabras(["SM-A525M", "moto e7", "SM-A115M", "Redmi Note 10"]), "modelos"
+    assert not busqueda.son_codigos_con_palabras([])
+
+
+def test_billetera_y_cts_tienen_donde_buscar():
+    import verticals
+    billetera = verticals.get_vertical("transacciones-billetera")["fields"]
+    cts = verticals.get_vertical("cts")["fields"]
+    assert busqueda.campos_de_texto_libre(billetera) == [] and busqueda.campos_de_texto_libre(cts) == []
+    assert {"transaction.operation_code", "transaction.funnel.last_step_code"} <= set(busqueda.campos_de_codigo(billetera))
+    assert "trace_name" in busqueda.campos_de_codigo(cts)
+    for fields in (billetera, cts):
+        nombres = " ".join(busqueda.campos_de_codigo(fields))
+        assert "device_model" not in nombres and "user_agent" not in nombres and "carrier" not in nombres
+    assert busqueda.campo_de_texto_libre(cts) == "trace_name"
+    # Con texto libre, los códigos no son candidatos de ese nivel.
+    assert busqueda.campos_de_codigo([F("comentario", "text"), F("event.action")]) == ["event.action"]
+
+
+def _cluster_de_campos(monkeypatch, campos: dict):
+    """`campos`: {campo: (cardinalidad, muestra)}; lo que se crea, se acepta."""
+    def req(m, url, user, password, json_body=None, timeout=30, headers=None):
+        if url.endswith("/_search") and json_body and "aggs" in json_body:
+            n, muestra = campos[json_body["aggs"]["n"]["cardinality"]["field"]]
+            return _R(200, {"aggregations": {"n": {"value": n}, "muestra": {"buckets": [{"key": k} for k in muestra]}}})
+        if m == "GET" and "/_transform/" in url:
+            return _R(404)
+        return _R(200, {"acknowledged": True})
+    monkeypatch.setattr(main, "_os_req", req)
+
+
+def test_sin_texto_libre_busca_en_el_codigo_con_mas_valores(monkeypatch):
+    _cluster_de_campos(monkeypatch, {
+        "trace_name": (271, ["deletePort", "createDnatRule", "submitJob", "executeSql"]),
+        "api_version": (6, ["v1.0", "v2", "v3"]),
+    })
+    r = main._provisionar_busqueda("http://x", "a", "p", "cts", "cts-*", [F("api_version"), F("trace_name")], "M1", False)
+    assert r["ok"] and r["campo"] == "trace_name" and r["textos"] == 271
+    _cluster_de_campos(monkeypatch, {
+        "transaction.operation_code": (7, ["LOGIN", "BALANCE_INQUIRY", "QR_PAYMENT", "BILL_PAYMENT"]),
+        "transaction.funnel.last_step_code": (17, ["confirm", "verify_funds", "request_authorization"]),
+        "transaction.response_code": (9, ["000", "E30"]),
+    })
+    campos = [F("transaction.operation_code"), F("transaction.funnel.last_step_code"), F("transaction.response_code")]
+    r = main._provisionar_busqueda("http://x", "a", "p", "billetera", "billetera-*", campos, "M1", False)
+    assert r["ok"] and r["campo"] == "transaction.funnel.last_step_code" and r["textos"] == 17
+
+
+def test_un_texto_libre_que_sirve_gana_a_un_codigo(monkeypatch):
+    """Aunque el código tenga más valores: el texto libre es lo que se lee."""
+    _cluster_de_campos(monkeypatch, {
+        "comentario": (40, ["llegó roto", "tardó un mes", "excelente atención"]),
+        "event.action": (300, ["deletePort", "createDnatRule"]),
+    })
+    r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("event.action"), F("comentario")], "M1", False)
+    assert r["ok"] and r["campo"] == "comentario"
+    # Si el texto libre no sirve (una categoría), entra el código.
+    _cluster_de_campos(monkeypatch, {"comentario": (3, ["a b", "c d"]), "event.action": (300, ["deletePort", "createDnatRule"])})
+    r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("event.action"), F("comentario")], "M1", False)
+    assert r["ok"] and r["campo"] == "event.action"
+    # Ningún candidato sirve: no aplica, con el porqué de cada uno.
+    _cluster_de_campos(monkeypatch, {"event.action": (300, ["E30", "E48"])})
+    r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("event.action")], "M1", False)
+    assert not r["ok"] and r["no_aplica"] and "sin palabras" in r["reason"]

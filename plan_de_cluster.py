@@ -151,7 +151,8 @@ def plan(slug: str, fields: list[dict], label: str = "",
     texto = busqueda.campo_de_texto_libre(fields)
     items.append(_item("busqueda", "Búsqueda híbrida (por palabras y por significado)", bool(texto),
                        f"sobre {_nombre_de(texto, fields)}: encuentra también lo que está dicho con otras palabras"
-                       if texto else "no hay un campo de texto libre (un mensaje, una descripción, un motivo)",
+                       if texto else "no hay un campo de texto libre (un mensaje, una descripción, un motivo) "
+                                     "ni un código de lo que pasó (una acción, una operación, un paso)",
                        {"campo": texto, "tipo": busqueda.tipo_del_campo(fields, texto)} if texto else None))
 
     reglas = (seguridad or {}).get("reglas") or []

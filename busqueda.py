@@ -91,9 +91,65 @@ def campos_de_texto_libre(fields: list[dict[str, Any]]) -> list[str]:
 
 
 def campo_de_texto_libre(fields: list[dict[str, Any]]) -> str:
-    """El primer candidato; '' si el caso no tiene texto libre."""
-    candidatos = campos_de_texto_libre(fields)
+    """El campo donde se busca: el primer texto libre o, si el caso no tiene,
+    el primer código con palabras (ver `campos_de_codigo`). '' si no hay ninguno."""
+    candidatos = campos_de_texto_libre(fields) or campos_de_codigo(fields)
     return candidatos[0] if candidatos else ""
+
+
+# Un caso sin texto libre (una billetera, un log de auditoría) igual tiene qué
+# buscar por significado: los códigos de lo que pasó, escritos con palabras
+# (`deletePort`, `verify_funds`, `BILL_PAYMENT`). «¿Quién borró recursos de
+# red?» junta `deletePort`, `deleteEip` y `deleteDnatRule`, y por palabras no
+# encuentra ninguno. Solo los campos que por el nombre dicen qué se hizo (una
+# acción, una operación, un paso, un evento): un modelo de teléfono o un user
+# agent también tienen palabras, pero no son lo que alguien busca.
+_PALABRAS_DE_CODIGO = {"action", "accion", "operation", "operacion", "activity", "actividad", "step", "paso",
+                       "task", "tarea", "method", "metodo", "function", "funcion"}
+# "name" solo dice qué pasó junto a una de estas (`trace_name`, `eventName`):
+# `user_name` o `resource_name` son de quién o de qué, no de lo que se hizo.
+_NOMBRE_DE_LO_QUE_PASO = {"trace", "event", "api"}
+
+
+def _dice_que_paso(path: str) -> bool:
+    """Por las palabras del nombre del campo (el último tramo): `last_step_code`,
+    `operation_code`, `event.action`, `trace_name`. Palabras enteras: «action»
+    dentro de `transaction` no cuenta."""
+    hoja = path.rsplit(".", 1)[-1]
+    palabras = [w[:-1] if w.endswith("s") else w for w in _plano(legible(hoja)).split()]
+    return bool(_PALABRAS_DE_CODIGO.intersection(palabras)
+                or ("name" in palabras and _NOMBRE_DE_LO_QUE_PASO.intersection(palabras)))
+
+
+def campos_de_codigo(fields: list[dict[str, Any]]) -> list[str]:
+    """Los campos de código donde se podría buscar por significado, si el caso
+    no tiene texto libre. Al provisionar se queda con el que tiene más valores
+    escritos con palabras (`son_codigos_con_palabras`)."""
+    libres = set(campos_de_texto_libre(fields))
+    return list(dict.fromkeys(
+        f["field_path"].strip() for f in fields or []
+        if (f.get("field_path") or "").strip() and f["field_path"].strip() not in libres
+        and (f.get("type") or "") in ("text", "string", "keyword")
+        and f.get("role") not in ("entity_id", "timestamp")
+        and _dice_que_paso(f["field_path"].strip())))
+
+
+def legible(valor: Any) -> str:
+    """Un código con sus palabras separadas: `createSecurityGroupRule` →
+    "create Security Group Rule", `BILL_PAYMENT` → "BILL PAYMENT"."""
+    texto = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(valor or ""))
+    return " ".join(re.sub(r"[_\-./:]+", " ", texto).split())
+
+
+def son_codigos_con_palabras(valores: list[Any]) -> bool:
+    """Si al menos la mitad de los códigos tienen dos palabras o más (de letras):
+    `verify_funds` sí; `E30`, `51` o `SM-A525M` no."""
+    valores = [v for v in valores or [] if str(v).strip()]
+    if not valores:
+        return False
+    con_palabras = sum(1 for v in valores
+                       if sum(1 for w in legible(v).split() if w.isalpha() and len(w) >= 2) >= 2)
+    return 2 * con_palabras >= len(valores)
 
 
 def son_frases(valores: list[Any]) -> bool:

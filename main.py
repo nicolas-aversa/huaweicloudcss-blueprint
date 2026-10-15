@@ -8540,34 +8540,43 @@ def _provisionar_busqueda(base: str, user: str, password: str, slug: str, index_
     queda con el de más textos distintos (a igual cantidad, el primero): una
     categoría (pocos valores), demasiados textos o códigos cortos no aplican (y
     se dice por qué). Quedarse con el primero que calificaba elegía, en la
-    prepaga, la observación del auditor (13 textos) antes que el diagnóstico (375)."""
-    candidatos = busqueda.campos_de_texto_libre(fields)
+    prepaga, la observación del auditor (13 textos) antes que el diagnóstico (375).
+
+    Sin texto libre que sirva, los códigos de lo que pasó escritos con palabras
+    (`deletePort`, `verify_funds`): billetera y CTS se quedaban sin búsqueda."""
+    libres, codigos = busqueda.campos_de_texto_libre(fields), busqueda.campos_de_codigo(fields)
+    candidatos = libres + codigos
     if not candidatos:
-        return {"ok": False, "no_aplica": True, "reason": "no hay un campo de texto libre"}
+        return {"ok": False, "no_aplica": True,
+                "reason": "no hay un campo de texto libre ni un código de acción, operación o paso"}
     descartes = []
     elegido = None
-    for campo in candidatos:
-        tipo = busqueda.tipo_del_campo(fields, campo)
-        agrupable = busqueda.campo_agrupable(campo, tipo)
-        rc = _os_req("POST", f"{base}/{index_pattern}/_search", user, password, timeout=60, json_body={
-            "size": 0, "aggs": {"n": {"cardinality": {"field": agrupable}},
-                                "muestra": {"terms": {"field": agrupable, "size": 50}}}})
-        try:
-            aggs = ((rc.json() or {}).get("aggregations") or {}) if _resp_ok(rc) else {}
-            n = int(aggs.get("n", {}).get("value")) if aggs else None
-        except (ValueError, TypeError):
-            n = None
-        if n is None:
-            return {"ok": False, "campo": campo, "reason": f"no se pudieron contar los textos de {campo}: {_resp_motivo(rc)}"}
-        muestra = [b.get("key") for b in (aggs.get("muestra") or {}).get("buckets") or []]
-        if n < busqueda.MIN_TEXTOS:
-            descartes.append(f"{campo} tiene {n} valores distintos: es una categoría, no texto libre")
-        elif n > busqueda.MAX_TEXTOS:
-            descartes.append(f"{campo} tiene {n} textos distintos: vectorizarlos tardaría demasiado")
-        elif not busqueda.son_frases(muestra):
-            descartes.append(f"{campo} son códigos cortos ({', '.join(map(str, muestra[:3]))}…), no frases")
-        elif elegido is None or n > elegido[3]:
-            elegido = (campo, tipo, agrupable, n)
+    for nivel, sirve, que in ((libres, busqueda.son_frases, "no frases"),
+                              (codigos, busqueda.son_codigos_con_palabras, "sin palabras")):
+        for campo in nivel:
+            tipo = busqueda.tipo_del_campo(fields, campo)
+            agrupable = busqueda.campo_agrupable(campo, tipo)
+            rc = _os_req("POST", f"{base}/{index_pattern}/_search", user, password, timeout=60, json_body={
+                "size": 0, "aggs": {"n": {"cardinality": {"field": agrupable}},
+                                    "muestra": {"terms": {"field": agrupable, "size": 50}}}})
+            try:
+                aggs = ((rc.json() or {}).get("aggregations") or {}) if _resp_ok(rc) else {}
+                n = int(aggs.get("n", {}).get("value")) if aggs else None
+            except (ValueError, TypeError):
+                n = None
+            if n is None:
+                return {"ok": False, "campo": campo, "reason": f"no se pudieron contar los textos de {campo}: {_resp_motivo(rc)}"}
+            muestra = [b.get("key") for b in (aggs.get("muestra") or {}).get("buckets") or []]
+            if n < busqueda.MIN_TEXTOS:
+                descartes.append(f"{campo} tiene {n} valores distintos: es una categoría, no texto libre")
+            elif n > busqueda.MAX_TEXTOS:
+                descartes.append(f"{campo} tiene {n} textos distintos: vectorizarlos tardaría demasiado")
+            elif not sirve(muestra):
+                descartes.append(f"{campo} son códigos cortos ({', '.join(map(str, muestra[:3]))}…), {que}")
+            elif elegido is None or n > elegido[3]:
+                elegido = (campo, tipo, agrupable, n)
+        if elegido:
+            break   # un texto libre que sirve gana siempre a un código, aunque tenga menos valores
     if not elegido:
         # Si antes aplicaba (otro campo, otros datos), lo que quedó armado se
         # va: el Transform seguía corriendo cada hora para nada.
