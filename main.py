@@ -7816,7 +7816,9 @@ def _perfil_de(slug: str, entry: dict) -> "dict | None":
         return None
     v = verticals.get_vertical(slug)
     if v is not None:
-        return v.get("perfil")
+        # El que declara la vertical o, si no declara, el de sus campos, como un
+        # dataset nuevo: cinco verticales se quedaban sin perfil.
+        return v.get("perfil") or perfiles.perfil_desde_campos(v.get("fields") or [])
     return perfiles.perfil_desde_campos((entry or {}).get("fields") or [])
 
 
@@ -7829,7 +7831,9 @@ def _enmascarados_de(slug: str, entry: dict) -> list[str]:
         return []
     v = verticals.get_vertical(slug)
     if v is not None:
-        return list((v.get("analista") or {}).get("enmascarados") or [])
+        # Los que declara la vertical o, si no declara, los de sus campos.
+        return list((v.get("analista") or {}).get("enmascarados") or []) \
+            or accesos.enmascarados_desde_campos(v.get("fields") or [])
     return accesos.enmascarados_desde_campos((entry or {}).get("fields") or [])
 
 

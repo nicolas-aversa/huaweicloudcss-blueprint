@@ -124,7 +124,8 @@ def plan(slug: str, fields: list[dict], label: str = "",
     dims, medidas = cdv.dimensiones_y_medidas(fields, spec, enums)
     items.append(_item(
         "rollup", "Resumen por hora (Rollup)", bool(fecha and medidas),
-        (", ".join(_nombre_de(m, fields) for m in medidas) + " por hora"
+        (", ".join("cantidad de eventos" if cdv.solo_para_contar(m) else _nombre_de(m, fields) for m in medidas)
+         + " por hora"
          + (f" y por {', '.join(_nombre_de(d, fields) for d in dims)}" if dims else "")
          + ": queda aunque se borren los datos crudos")
         if fecha and medidas else (sin_fecha if not fecha else "no hay medidas numéricas para resumir"),

@@ -281,14 +281,23 @@ def test_el_paso_2_ya_no_pide_la_retencion():
 
 @pytest.mark.parametrize("slug, medidas", [
     ("transacciones-billetera", ["transaction.funnel.steps_total", "transaction.funnel.steps_completed"]),
-    ("cts", []),                                   # su único número es el `code` HTTP: sin rollup
+    ("cts", ["code"]),                             # su único número es el `code` HTTP: solo cuenta
     ("siem", ["source.bytes", "destination.bytes", "event.risk_score"]),
 ])
 def test_un_codigo_no_es_una_medida(slug, medidas):
     """Visto en CSS 3.4: el rollup de billetera sumaba `message_type` y
-    `sequence_number`, y el de CTS el `code` HTTP."""
+    `sequence_number`, y el de CTS el `code` HTTP. Ahora CTS tiene resumen
+    (cuántas acciones por hora), pero el `code` solo cuenta: no se suma."""
     v = verticals.get_vertical(slug)
     assert cdv.dimensiones_y_medidas(v["fields"], v["capability"])[1] == medidas
+    metricas = {m["source_field"]: [list(x)[0] for x in m["metrics"]]
+                for m in cdv.rollup(slug, f"{slug}-*", [], medidas, 0)["rollup"]["metrics"]}
+    for campo, tipos in metricas.items():
+        assert tipos == (["value_count"] if campo == "code" else ["sum", "avg", "min", "max", "value_count"])
+
+
+def test_sin_numeros_no_hay_resumen():
+    assert cdv.dimensiones_y_medidas([{"field_path": "accion", "type": "keyword"}])[1] == []
 
 
 def test_las_dimensiones_las_dice_el_cluster_tambien_en_los_curados():

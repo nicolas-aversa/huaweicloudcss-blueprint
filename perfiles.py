@@ -80,6 +80,11 @@ import re as _re
 _PISTA_DE_ENTIDAD = _re.compile(
     r"(^|[._])(id|ids|user|usuario|cliente|customer|client|account|cuenta|ip|host|device|dispositivo|"
     r"patient|paciente|comitente|sesion|session|merchant|comercio|well|pozo)($|[._])", _re.I)
+_NIVELES_DE_ENTIDAD = (
+    _re.compile(r"(^|[._])(user|usuario|cliente|customer|client|account|cuenta|patient|paciente|comitente|"
+                r"merchant|comercio)($|[._])", _re.I),
+    _re.compile(r"(^|[._])(device|dispositivo|host|well|pozo|ip)($|[._])", _re.I),
+)
 _NUMERICOS = ("integer", "long", "float", "double")
 
 
@@ -94,11 +99,16 @@ def entidad_propuesta(fields: list[dict]) -> str:
     marcado = next((_ruta(f) for f in fields or [] if f.get("entity")), "")
     if marcado:
         return marcado
-    for f in fields or []:
-        if f.get("type") in ("string", "keyword", "ip") and f.get("dimension", True) and \
-                (_PISTA_DE_ENTIDAD.search(_ruta(f)) or _PISTA_DE_ENTIDAD.search(f.get("raw_name") or "")):
+    candidatos = [f for f in fields or [] if f.get("type") in ("string", "keyword", "ip") and f.get("dimension", True)
+                  and (_PISTA_DE_ENTIDAD.search(_ruta(f)) or _PISTA_DE_ENTIDAD.search(f.get("raw_name") or ""))]
+    # Primero quién (el cliente, el usuario), después el equipo y al final un
+    # id cualquiera: por el orden de los campos, en una ALyC salía la orden (un
+    # perfil de uno o dos eventos cada una) antes que el comitente.
+    for nivel in _NIVELES_DE_ENTIDAD:
+        f = next((f for f in candidatos if nivel.search(_ruta(f)) or nivel.search(f.get("raw_name") or "")), None)
+        if f:
             return _ruta(f)
-    return ""
+    return _ruta(candidatos[0]) if candidatos else ""
 
 
 # Números que no son una medida de la entidad: coordenadas, edades, fechas
@@ -107,12 +117,20 @@ def entidad_propuesta(fields: list[dict]) -> str:
 # afiliado con 58 llamadas daba -2012 y su "edad", 2276.
 _NO_ES_MEDIDA = _re.compile(
     r"(^|[._])(lat|latitud|latitude|lon|lng|long|longitud|longitude|edad|age|anio|año|year|mes|month|dia|day|"
-    r"hora|hour|puerto|port|codigo|code|cod|id|nro|numero|number|zip|cp)($|[._])", _re.I)
+    r"hora|hour|puerto|port|srcport|dstport|sport|dport|codigo|code|cod|id|nro|numero|number|zip|cp|"
+    r"type|tipo|status|estado|sequence|secuencia|index|indice|counter|contador|orden|order|"
+    r"policyid|ruleid|sessionid|devid|proto|protocol|protocolo)($|[._])", _re.I)
 # Las duraciones se promedian (la suma de los tiempos de respuesta no dice nada);
 # montos y cantidades, se suman.
 _ES_DURACION = _re.compile(
     r"(^|[._])(tiempo|duracion|duration|latencia|latency|demora|delay|espera|wait|time|seg|segundos|seconds|"
     r"min|minutos|minutes|ms|horas|hours)($|[._])", _re.I)
+
+
+# Un precio o una tasa tampoco se suman (el "precio total" de las órdenes de un
+# comitente no dice nada): se promedian, como las duraciones.
+_ES_PRECIO_O_TASA = _re.compile(
+    r"(^|[._])(price|precio|tarifa|rate|tasa|kbps|bitrate|pct|porcentaje|percent|ratio|score)($|[._])", _re.I)
 
 
 def medidas_de_la_entidad(fields: list[dict], entidad: str = "") -> list[tuple[dict, str]]:
@@ -123,7 +141,8 @@ def medidas_de_la_entidad(fields: list[dict], entidad: str = "") -> list[tuple[d
     numericos = [f for f in fields or [] if f.get("type") in _NUMERICOS and _ruta(f) != entidad]
     elegidas = [f for f in numericos if f.get("role") == "measure"] or \
                [f for f in numericos if not (_NO_ES_MEDIDA.search(_ruta(f)) or _NO_ES_MEDIDA.search(f.get("raw_name") or ""))]
-    duracion = lambda f: bool(_ES_DURACION.search(_ruta(f)) or _ES_DURACION.search(f.get("raw_name") or ""))  # noqa: E731
+    duracion = lambda f: any(r.search(_ruta(f)) or r.search(f.get("raw_name") or "")  # noqa: E731
+                             for r in (_ES_DURACION, _ES_PRECIO_O_TASA))
     return ([(f, "sum") for f in elegidas if not duracion(f)] + [(f, "avg") for f in elegidas if duracion(f)])[:3]
 
 

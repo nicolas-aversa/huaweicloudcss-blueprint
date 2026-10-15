@@ -419,7 +419,12 @@ def test_lo_que_no_anda_se_dice(monkeypatch):
 def test_el_analista_y_lo_que_el_caso_no_tiene(monkeypatch):
     _cluster_verificable(monkeypatch, {"internalusers/analista-transacciones-billetera": (200, {})})
     v = main._verificar_en_el_cluster("http://x:9200", "a", "p", "transacciones-billetera", {"agent_id": "A"}, {}, {})
-    assert v == {"analista": {"ok": True, "detalle": "usuario en el cluster"}}, "solo lo que el caso tiene"
+    # El perfil sale de sus campos (por cliente): también se comprueba.
+    assert v == {"analista": {"ok": True, "detalle": "usuario en el cluster"},
+                 "perfil": {"ok": False, "detalle": "el transform no está en el cluster"}}, "solo lo que el caso tiene"
+    sin_perfil = main._verificar_en_el_cluster("http://x:9200", "a", "p", "transacciones-billetera",
+                                               {"agent_id": "A"}, {}, {"excluir": ["perfil"]})
+    assert "perfil" not in sin_perfil
     # Antes de provisionar (sin IDs) no se comprueba nada.
     assert main._verificar_en_el_cluster("http://x:9200", "a", "p", "transacciones-billetera", {}, {}, {}) == {}
 

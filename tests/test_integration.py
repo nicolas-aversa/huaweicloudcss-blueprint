@@ -4535,10 +4535,15 @@ def test_provision_capabilities_endpoint(monkeypatch):
     data = resp.json()
     assert data["status"] == "success"
     assert "transacciones-billetera" in data["capabilities"]
-    # Solo los casos que declaran un analista (salud y fintech), con sus campos.
-    assert {s for s, _, _ in analistas} == {"encuentros-clinicos", "transacciones-billetera", "transacciones-alyc"}
+    # Los que declaran un analista (salud y fintech), con sus campos, y los que
+    # no lo declaran pero tienen quién identificar (un usuario, un cliente).
+    assert {s for s, _, _ in analistas} == {"encuentros-clinicos", "transacciones-billetera", "transacciones-alyc",
+                                            "siem", "fortianalyzer", "streaming-ott", "ventas-ecommerce", "cts"}
     assert ("encuentros-clinicos", "encuentros-clinicos-*", ["patient"]) in analistas
-    assert set(perfiles_creados) == {"siem", "ventas-ecommerce", "produccion-pozos"}
+    # El perfil: el que declara la vertical o, si no declara, el de sus campos.
+    import capabilities as _c
+    assert set(perfiles_creados) == {s for s in _c.get_capability_slugs() if main._perfil_de(s, {})}
+    assert {"siem", "ventas-ecommerce", "produccion-pozos", "cts", "transacciones-alyc"} <= set(perfiles_creados)
 
 
 def test_provision_capabilities_endpoint_no_cluster_503(monkeypatch):

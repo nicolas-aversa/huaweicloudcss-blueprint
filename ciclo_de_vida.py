@@ -137,7 +137,18 @@ def dimensiones_y_medidas(fields: list[dict], spec: "dict | None" = None,
     if not medidas:
         medidas = [_ruta(f) for f in fields if (f.get("type") or "") in _NUMERICOS and not _parece_id(_ruta(f))
                    and not _NO_ES_MEDIDA.search(_ruta(f).rsplit(".", 1)[-1])]
+    if not medidas:
+        # Sin nada que sumar, un número cualquiera para CONTAR los eventos (en
+        # `rollup`, solo `value_count`): CTS se quedaba sin resumen, y "cuántas
+        # acciones por servicio y por hora" es lo que conviene guardar.
+        medidas = [_ruta(f) for f in fields if (f.get("type") or "") in _NUMERICOS][:1]
     return dims[:_MAX_DIMENSIONES], medidas[:_MAX_MEDIDAS]
+
+
+def solo_para_contar(ruta: str) -> bool:
+    """Un número que no se suma ni se promedia (un código, un id): en el
+    rollup solo cuenta los eventos."""
+    return _parece_id(ruta) or bool(_NO_ES_MEDIDA.search(ruta.rsplit(".", 1)[-1]))
 
 
 def rollup(slug: str, index_pattern: str, dimensiones: list[str], medidas: list[str],
@@ -156,6 +167,6 @@ def rollup(slug: str, index_pattern: str, dimensiones: list[str], medidas: list[
         "dimensions": [{"date_histogram": {"source_field": "@timestamp", "fixed_interval": intervalo,
                                            "timezone": "UTC"}}]
                       + [{"terms": {"source_field": d}} for d in dimensiones],
-        "metrics": [{"source_field": m, "metrics": [{"sum": {}}, {"avg": {}}, {"min": {}}, {"max": {}},
-                                                    {"value_count": {}}]} for m in medidas],
+        "metrics": [{"source_field": m, "metrics": [{"value_count": {}}] if solo_para_contar(m) else
+                     [{"sum": {}}, {"avg": {}}, {"min": {}}, {"max": {}}, {"value_count": {}}]} for m in medidas],
     }}

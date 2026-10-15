@@ -14,6 +14,7 @@ orquestación REST vive en `main.py`.
 
 from __future__ import annotations
 
+import re
 import secrets
 import string
 
@@ -63,7 +64,47 @@ def contrasena(largo: int = 16) -> str:
             return p
 
 
+# Quién es la persona: su usuario, su documento, cómo contactarla, su cuenta.
+# Para los campos que no traen la marca de sensible (las verticales, que no
+# pasan por el análisis del paso 2): sin esto, cuatro se quedaban sin analista.
+_DE_UNA_PERSONA = {"user", "users", "usuario", "username", "email", "mail", "correo", "dni", "cuit", "cuil",
+                   "documento", "document", "passport", "pasaporte", "phone", "telefono", "tel", "celular",
+                   "mobile", "customer", "cliente", "client", "comitente", "account", "cuenta", "patient",
+                   "paciente", "afiliado", "card", "tarjeta", "iban", "cbu"}
+# Lo que nombra algo de la persona sin identificarla: su navegador, su tipo.
+_NO_LA_IDENTIFICA = {"agent", "type", "tipo", "role", "rol", "group", "grupo"}
+
+
+def _palabras(tramo: str) -> set[str]:
+    """`user_agent` → {user, agent}; `accountId` → {account, id}."""
+    return {w.lower() for w in re.split(r"[_\-\s]+|(?<=[a-z0-9])(?=[A-Z])", tramo) if w}
+
+
+def _es_sensible(ruta: str) -> bool:
+    """Por las palabras del último tramo del nombre (`operador_dni`,
+    `user.user_name`); un `name` o un `id` a secas, si el tramo de antes es de
+    una persona (`user.name` sí; `user.domain.name` no). `user_agent` y
+    `user.type` no identifican a nadie."""
+    tramos = [t for t in ruta.split(".") if t]
+    if not tramos:
+        return False
+    hoja = _palabras(tramos[-1])
+    if hoja & _NO_LA_IDENTIFICA:
+        return False
+    if hoja & _DE_UNA_PERSONA:
+        return True
+    return hoja <= {"name", "nombre", "id"} and len(tramos) > 1 and bool(_palabras(tramos[-2]) & _DE_UNA_PERSONA)
+
+
+def _ruta(f: dict) -> str:
+    return f.get("field_path") or f.get("ecs_path") or f.get("raw_name") or ""
+
+
 def enmascarados_desde_campos(fields: list[dict]) -> list[str]:
-    """Los campos que el usuario marcó como sensibles en el paso 2."""
-    return [f.get("field_path") or f.get("ecs_path") or f.get("raw_name") or ""
-            for f in fields or [] if f.get("sensitive") and (f.get("field_path") or f.get("raw_name"))]
+    """Los campos sensibles: los que se marcaron en el paso 2 o, si ningún
+    campo trae la marca (una vertical), los que por el nombre identifican a una
+    persona. Si alguno la trae, manda la marca, aunque no haya ninguno sensible."""
+    fields = [f for f in fields or [] if _ruta(f)]
+    if any("sensitive" in f for f in fields):
+        return [_ruta(f) for f in fields if f.get("sensitive")]
+    return [_ruta(f) for f in fields if (f.get("type") or "") in ("string", "keyword", "text") and _es_sensible(_ruta(f))]

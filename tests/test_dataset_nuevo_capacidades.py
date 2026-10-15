@@ -35,11 +35,12 @@ def test_la_entidad_propuesta_y_la_marcada():
 def test_el_perfil_sale_de_los_campos():
     p = perfiles.perfil_desde_campos(CAMPOS)
     assert p["campo"] == "data.customer_id" and p["etiqueta"] == "Cliente"
+    # La cantidad se suma; el precio se promedia (el "precio total" no dice nada).
     assert p["medidas"] == {"eventos": {"value_count": {"field": "@timestamp"}},
-                            "data_price": {"sum": {"field": "data.price"}},
                             "data_qty": {"sum": {"field": "data.qty"}},
+                            "data_price": {"avg": {"field": "data.price"}},
                             "ultimo": {"max": {"field": "@timestamp"}}}
-    assert p["nombres"]["data_price"] == "Precio" and p["fechas"] == ["ultimo"]
+    assert p["nombres"]["data_price"] == "Precio (promedio)" and p["fechas"] == ["ultimo"]
     t = perfiles.build_transform("mi-dataset", "mi-dataset-*", p)["transform"]
     assert t["target_index"] == "perfil-mi-dataset" and t["groups"][0]["terms"]["source_field"] == "data.customer_id"
     assert perfiles.perfil_desde_campos([{"field_path": "x", "type": "float"}]) is None
@@ -73,12 +74,39 @@ def test_los_sensibles_son_los_marcados():
 
 def test_un_vertical_usa_lo_suyo_y_un_dataset_nuevo_lo_derivado():
     assert main._perfil_de("siem", {"fields": CAMPOS})["campo"] == "source.ip"
-    assert main._perfil_de("cts", {"fields": CAMPOS}) is None, "un vertical sin perfil no lo deriva"
+    # Una vertical que no declara perfil ni sensibles los deriva de SUS campos,
+    # como un dataset nuevo (cinco verticales se quedaban sin perfil y cuatro sin analista).
+    assert main._perfil_de("cts", {"fields": CAMPOS})["campo"] == "user.user_name"
+    assert main._perfil_de("transacciones-alyc", {})["campo"] == "comitente", "el comitente, no la orden"
     assert main._perfil_de("mi-dataset", {"fields": CAMPOS})["campo"] == "data.customer_id"
     assert main._perfil_de("mi-dataset", {}) is None
     assert main._enmascarados_de("encuentros-clinicos", {"fields": CAMPOS}) == ["patient"]
     assert main._enmascarados_de("mi-dataset", {"fields": CAMPOS}) == ["data.dni"]
-    assert main._enmascarados_de("siem", {"fields": CAMPOS}) == []
+    assert main._enmascarados_de("siem", {"fields": CAMPOS}) == ["user.name"]
+    assert main._enmascarados_de("cts", {}) == ["user.user_name", "user.name", "user.account_id"]
+    assert main._perfil_de("cts", {"excluir": ["perfil"]}) is None and main._enmascarados_de("cts", {"excluir": ["analista"]}) == []
+
+
+def test_lo_sensible_por_el_nombre_si_nadie_lo_marco():
+    """Sin la marca en ningún campo (una vertical), lo que identifica a una
+    persona; con la marca en alguno, manda la marca (aunque no haya ninguno)."""
+    F = lambda p, t="keyword", **kw: {"field_path": p, "type": t, **kw}  # noqa: E731
+    campos = [F("user.name"), F("user.domain.name"), F("user_agent"), F("user.type"), F("operador_dni"),
+              F("destinatario.telefono"), F("accountId"), F("trace_name"), F("monto", "float")]
+    assert accesos.enmascarados_desde_campos(campos) == ["user.name", "operador_dni", "destinatario.telefono", "accountId"]
+    marcados = [dict(f, sensitive=False) for f in campos]
+    assert accesos.enmascarados_desde_campos(marcados) == [], "el análisis dijo que ninguno"
+
+
+def test_el_perfil_elige_a_quien_antes_que_al_equipo_o_un_id():
+    F = lambda p, t="keyword": {"field_path": p, "type": t}  # noqa: E731
+    assert perfiles.entidad_propuesta([F("order_id"), F("device"), F("comitente")]) == "comitente"
+    assert perfiles.entidad_propuesta([F("order_id"), F("source_ip", "ip")]) == "source_ip"
+    assert perfiles.entidad_propuesta([F("session_id"), F("order_id")]) == "session_id", "sin nada mejor, el primero"
+    medidas = [f["field_path"] for f, _ in perfiles.medidas_de_la_entidad(
+        [F("srcport", "integer"), F("policyid", "integer"), F("proto", "integer"), F("message_type", "integer"),
+         F("steps.index", "integer"), F("sentbyte", "long"), F("price", "float")])]
+    assert medidas == ["sentbyte", "price"], "puertos, ids, tipos y órdenes no son medidas; el precio va al final (promedio)"
 
 
 def test_el_mapa_por_pais_desde_los_campos():
