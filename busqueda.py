@@ -23,8 +23,10 @@ Cómo:
   adentro del cluster: los textos no pasan por la plataforma. Solo "Probar una
   búsqueda" trae los resultados de esa prueba para mostrarlos (como el
   asistente), sin guardarlos.
-* Solo en casos con un campo de texto libre (un mensaje, una descripción, un
-  motivo): sobre códigos o categorías no aporta, y el plan lo dice.
+* Sobre el campo de texto libre del caso (un mensaje, una descripción, un
+  motivo) o, si no tiene, sobre el código de lo que pasó escrito con palabras
+  (`deletePort`, `verify_funds`: ver `campos_de_codigo`). Sobre categorías o
+  códigos opacos (`E30`) no aporta, y el plan lo dice.
 """
 from __future__ import annotations
 
