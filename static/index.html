@@ -3920,6 +3920,14 @@
       }
 
       if (isPredefinedDemo) {
+        // Un caso elegido cuyos campos se borraron en el camino: los suyos.
+        const elegido = state.selectedExamples.length === 1 ? EXAMPLE_DATA[state.selectedExamples[0]] : null;
+        if (!state.fields.length && elegido && (elegido.fields || []).length) {
+          state.fields = elegido.fields;
+          state.filterCode = elegido.filterCode || '';
+          state.generatedFromLog = elegido.sample || '';
+          if (!state.rawLog) state.rawLog = elegido.sample || '';
+        }
         renderMappingTable(state.fields);
         const confirmBtn = document.getElementById('mapping-confirm-btn');
         const regenBtn = document.getElementById('mapping-regenerate-btn');
@@ -8331,6 +8339,11 @@
         if (idxInput) idxInput.value = `logs-ej${state.reuseCount}-%{+YYYY.MM}`;
         const prefixInput = document.getElementById('input-prefix');
         if (prefixInput) prefixInput.value = `ej${state.reuseCount}-logs/`;
+        // Un pipeline nuevo arranca sin nada elegido. Antes quedaba marcada la
+        // tarjeta del flujo anterior (ej. el caso recién guardado) con los
+        // campos ya borrados, y el paso 2 decía "No se detectaron campos".
+        state.selectedExamples = [];
+        _applySelectionState();
       }
       // Resetear el CTA de "Desplegar" (la secuencia restante vive en infra).
       document.getElementById('deploy-status-1')?.classList.add('hidden');
