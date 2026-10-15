@@ -42,6 +42,8 @@ from . import (
 GROUPS: list[dict] = [
     {"id": "seguridad", "label": "Seguridad", "icon": "shield"},
     {"id": "fintech", "label": "Fintech", "icon": "activity"},
+    # Su caso curado (ventas-ecommerce) está oculto: los de retail se crean con
+    # el Builder (ej. build_retail_dataset.py) y eligen este grupo al guardarse.
     {"id": "retail", "label": "Retail", "icon": "shopping-cart"},
     {"id": "media", "label": "Media", "icon": "play"},
     {"id": "energia", "label": "Oil & Gas + Mining", "icon": "droplet"},
