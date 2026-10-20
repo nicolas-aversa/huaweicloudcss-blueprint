@@ -7,6 +7,7 @@ la validación y ese merge — y que el registro built-in quede intacto.
 """
 
 import json
+import os
 import pytest
 from fastapi.testclient import TestClient
 
@@ -268,12 +269,15 @@ def _fake_obs(calls, ya_estan=()):
             return key in self._keys
         def prefix_has_objects(self, prefix):
             return any(k.startswith(prefix) for k in self._keys)
+        def objetos_bajo(self, prefix):
+            return {k: t for k, t in self._keys.items() if k.startswith(prefix)}
         def put_file(self, key, path):
             calls.setdefault("put", []).append(key)
-            self._keys.add(key)          # lo subido pasa a estar
+            self._keys[key] = os.path.getsize(path)   # lo subido pasa a estar
         def close(self):
             pass
-    _FakeObs._keys = set(ya_estan)
+    # `ya_estan`: keys (con un tamaño que no coincide con nada) o {key: bytes}.
+    _FakeObs._keys = dict(ya_estan) if isinstance(ya_estan, dict) else dict.fromkeys(ya_estan, 1)
     return _FakeObs
 
 
@@ -498,6 +502,129 @@ def test_el_guard_no_toca_el_flujo_productivo(monkeypatch):
     monkeypatch.setattr("obs_client.OBSClient", _Explota)
 
     main._check_demo_datasets_present(_deploy_req_unico("acme-prod"))
+
+
+def test_el_guard_resube_un_dataset_custom_desactualizado(store, monkeypatch):
+    """El caso se rehízo con el mismo nombre y otro contenido: la carpeta tiene
+    un archivo, pero no ESTE. Antes alcanzaba con que tuviera algo y la demo
+    arrancaba con los datos viejos."""
+    custom_cases.save_case(_meta(), LOG)
+    clave = "firewall-de-acme-logs/firewall-de-acme.log"
+    calls = {}
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls, ya_estan={clave: 3}))
+
+    main._check_demo_datasets_present(_deploy_req_unico("firewall-de-acme"))
+
+    assert calls.get("put") == [clave]
+
+
+def test_el_guard_no_resube_un_dataset_custom_al_dia(store, monkeypatch):
+    custom_cases.save_case(_meta(), LOG)
+    src = custom_cases.dataset_path("firewall-de-acme")
+    clave = f"firewall-de-acme-logs/{src.name}"
+    calls = {}
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs(calls, ya_estan={clave: src.stat().st_size}))
+
+    main._check_demo_datasets_present(_deploy_req_unico("firewall-de-acme"))
+
+    assert not calls.get("put")
+
+
+# ── ¿El bucket del SA está al día? (aviso de ⚙ Configuración) ───────────────
+# Los casos los ve toda la instancia; los datasets viven en el bucket de cada SA.
+# Quien preparó el suyo antes de que existiera un caso no se entera hasta que
+# despliega. El aviso lo dice antes.
+def test_comparar_bucket_separa_lo_que_falta_de_lo_viejo(store):
+    custom_cases.save_case(_meta(), LOG)
+    catalogo = {"siem": ["a.log", "b.log"], "firewall-de-acme": ["firewall-de-acme.log"],
+                "ventas": ["ventas.log"]}
+    en_el_bucket = {"siem": {"siem-logs/a.log": 10},                       # le falta b.log
+                    "firewall-de-acme": {"firewall-de-acme-logs/firewall-de-acme.log": 3},
+                    "ventas": {"ventas-logs/ventas.log": 99}}
+    locales = {"firewall-de-acme": {"firewall-de-acme.log": 40}}            # otro tamaño
+
+    r = main._comparar_bucket(catalogo, en_el_bucket, locales)
+
+    assert [(f["slug"], f["archivos"]) for f in r["faltan"]] == [("siem", ["b.log"])]
+    assert [d["slug"] for d in r["desactualizados"]] == ["firewall-de-acme"]
+    assert r["desactualizados"][0]["nombre"] == "Firewall de ACME"
+    assert r["al_dia"] == 1                                                 # ventas
+
+
+def test_comparar_bucket_un_builtin_no_se_compara_por_tamano():
+    """Los `.log` del repo no cambian bajo el mismo nombre: si está, está."""
+    r = main._comparar_bucket({"ventas": ["ventas.log"]}, {"ventas": {"ventas-logs/ventas.log": 5}}, {})
+    assert r == {"faltan": [], "desactualizados": [], "al_dia": 1}
+
+
+@pytest.fixture
+def cuenta(monkeypatch):
+    """Credenciales y bucket guardados, sin tocar el settings real."""
+    main._ESTADO_BUCKET.clear()
+    monkeypatch.setattr(maas_integrator, "resolve_obs_creds", lambda ak, sk: ("AK", "SK"))
+    monkeypatch.setattr(main, "get_huawei_settings", lambda: {"demo_bucket": "mis-demos"})
+    yield
+    main._ESTADO_BUCKET.clear()
+
+
+def test_estado_sin_cuenta_no_mira_el_bucket(client, monkeypatch):
+    main._ESTADO_BUCKET.clear()
+    monkeypatch.setattr(maas_integrator, "resolve_obs_creds", lambda ak, sk: ("", ""))
+    class _Explota:
+        def __init__(self, **kw):
+            raise AssertionError("no tenía que abrir OBS")
+    monkeypatch.setattr("obs_client.OBSClient", _Explota)
+
+    r = client.get("/api/v1/datasets/estado").json()
+
+    assert r["configurado"] is False and r["faltan"] == []
+
+
+def test_estado_avisa_el_caso_nuevo_que_el_bucket_no_tiene(client, store, cuenta, monkeypatch):
+    monkeypatch.setattr(main, "_demo_dataset_files", lambda: {"ventas": ["ventas.log"], **custom_cases.dataset_files()})
+    custom_cases.save_case(_meta(), LOG)
+    monkeypatch.setattr("obs_client.OBSClient", _fake_obs({}, ya_estan={"ventas-logs/ventas.log": 9}))
+
+    r = client.get("/api/v1/datasets/estado").json()
+
+    assert r["configurado"] is True and r["error"] is None
+    assert [(f["slug"], f["nombre"]) for f in r["faltan"]] == [("firewall-de-acme", "Firewall de ACME")]
+    assert r["al_dia"] == 1
+
+
+def test_estado_se_guarda_un_rato_y_preparar_lo_olvida(client, store, cuenta, monkeypatch):
+    monkeypatch.setattr(main, "_demo_dataset_files", lambda: dict(custom_cases.dataset_files()))
+    custom_cases.save_case(_meta(), LOG)
+    aperturas = []
+    Fake = _fake_obs({})
+    original = Fake.__init__
+    def _contar(self, **kw):
+        aperturas.append(1)
+        original(self, **kw)
+    Fake.__init__ = _contar
+    monkeypatch.setattr("obs_client.OBSClient", Fake)
+
+    assert client.get("/api/v1/datasets/estado").json()["faltan"]
+    client.get("/api/v1/datasets/estado")
+    assert len(aperturas) == 1, "la segunda consulta tenía que salir de lo guardado"
+
+    client.post("/api/v1/datasets/preload", json={"access_key": "AK", "secret_key": "SK", "bucket": "mis-demos"})
+    despues = client.get("/api/v1/datasets/estado").json()
+    assert despues["faltan"] == [] and despues["desactualizados"] == [], despues
+
+
+def test_estado_si_obs_falla_lo_dice_y_no_inventa_faltantes(client, store, cuenta, monkeypatch):
+    from obs_client import OBSUploadError
+    custom_cases.save_case(_meta(), LOG)
+    Fake = _fake_obs({})
+    def _falla(self, prefix):
+        raise OBSUploadError("AccessDenied")
+    Fake.objetos_bajo = _falla
+    monkeypatch.setattr("obs_client.OBSClient", Fake)
+
+    r = client.get("/api/v1/datasets/estado").json()
+
+    assert "AccessDenied" in r["error"] and r["faltan"] == []
 
 
 # ── Un input s3 sin bucket no llega a Terraform ─────────────────────────────

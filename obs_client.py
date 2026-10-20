@@ -241,6 +241,33 @@ class OBSClient:
             for o in contents
         )
 
+    def objetos_bajo(self, prefix: str, tope: int = 5000) -> dict[str, int]:
+        """`{key: bytes}` de los objetos REALES bajo ``prefix`` (sin marcadores
+        de carpeta), paginado hasta ``tope``. Sirve para comparar el bucket con
+        lo que debería tener sin descargar nada: un HEAD por archivo serían
+        decenas de requests; esto es uno por carpeta."""
+        objetos: dict[str, int] = {}
+        marker = None
+        while len(objetos) < tope:
+            try:
+                resp = self._client.listObjects(self._bucket, prefix=prefix, marker=marker, max_keys=1000)
+            except Exception as exc:
+                raise OBSUploadError(f"Fallo listando `{prefix}` en OBS: {exc}") from exc
+            if getattr(resp, "status", 500) >= 300:
+                err_msg = getattr(resp, "errorMessage", "") or getattr(resp, "reason", "") or "(sin detalle)"
+                raise OBSUploadError(f"OBS rechazó el listado de `{prefix}`: {err_msg}")
+            body = getattr(resp, "body", None)
+            contents = list(getattr(body, "contents", None) or [])
+            for o in contents:
+                key = str(getattr(o, "key", "") or "")
+                tam = int(getattr(o, "size", 0) or 0)
+                if key and not key.endswith("/") and tam > 0:
+                    objetos[key] = tam
+            if not getattr(body, "is_truncated", False) or not contents:
+                break
+            marker = getattr(body, "next_marker", None) or contents[-1].key
+        return objetos
+
     def delete_prefix(self, prefix: str) -> int:
         """Borra todos los objetos bajo ``prefix`` (paginado). Devuelve cuántos
         borró. Best-effort: loguea y sigue si algo falla (no rompe el deploy).

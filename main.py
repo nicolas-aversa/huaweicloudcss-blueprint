@@ -2297,6 +2297,89 @@ def _dataset_source(slug: str, fname: str) -> Path | None:
     return custom_cases.dataset_path(slug)
 
 
+# ── ¿El bucket del SA está al día con los casos? ────────────────────────────
+# Los casos se crean una vez y los ve toda la instancia, pero el dataset vive en
+# el bucket de CADA SA. Quien preparó su bucket hace un mes no tiene los casos
+# nuevos, ni la versión nueva de un caso que se rehízo con el mismo nombre. El
+# deploy se arregla solo en parte (sube el custom que falte; un built-in que
+# falte lo corta); esto lo dice ANTES, en ⚙ Configuración.
+def _nombre_del_caso(slug: str) -> str:
+    return custom_cases.label_for(slug) or (verticals.get_vertical(slug) or {}).get("label") or slug
+
+
+def _comparar_bucket(catalogo: dict[str, list[str]], en_el_bucket: dict[str, dict[str, int]],
+                     locales: dict[str, dict[str, int]]) -> dict:
+    """Qué le falta al bucket. `catalogo`: slug → archivos que debería tener;
+    `en_el_bucket`: slug → {key: bytes} de `<slug>-logs/`; `locales`: slug →
+    {archivo: bytes} de los casos creados desde la plataforma, los únicos que
+    cambian de contenido bajo el mismo nombre (los `.log` del repo no). Un caso
+    al que le falta un archivo va a `faltan`; uno custom con otro tamaño, a
+    `desactualizados`."""
+    faltan, desactualizados = [], []
+    for slug, archivos in sorted(catalogo.items()):
+        objetos = en_el_bucket.get(slug) or {}
+        prefijo = f"{slug}-logs/"
+        sin_subir = [a for a in archivos if prefijo + a not in objetos]
+        if sin_subir:
+            faltan.append({"slug": slug, "nombre": _nombre_del_caso(slug), "archivos": sin_subir})
+        elif slug in locales and any(objetos.get(prefijo + a) != locales[slug].get(a) for a in archivos):
+            desactualizados.append({"slug": slug, "nombre": _nombre_del_caso(slug)})
+    return {"faltan": faltan, "desactualizados": desactualizados,
+            "al_dia": len(catalogo) - len(faltan) - len(desactualizados)}
+
+
+# (AK, bucket) → (cuándo, firma del catálogo, resultado). Mirar el bucket son
+# ~25 listados; la vista lo pide al cargar y al entrar a Configuración.
+_ESTADO_BUCKET: dict[tuple[str, str], tuple[float, tuple, dict]] = {}
+_ESTADO_BUCKET_TTL_S = 600
+
+
+def _olvidar_estado_del_bucket(bucket: str) -> None:
+    for clave in [c for c in _ESTADO_BUCKET if c[1] == bucket]:
+        _ESTADO_BUCKET.pop(clave, None)
+
+
+@app.get("/api/v1/datasets/estado", tags=["settings"],
+         summary="Qué casos le faltan (o tienen viejos) al bucket de demos del SA")
+def estado_de_datasets(refrescar: bool = False) -> dict:
+    """`{configurado, bucket, faltan: [{slug, nombre, archivos}], desactualizados:
+    [{slug, nombre}], al_dia, error}`. Sin credenciales o sin bucket no mira nada
+    (`configurado: false`). Si OBS falla, lo dice en `error` y no inventa faltantes."""
+    from obs_client import OBSClient, OBSConfigError, OBSUploadError
+
+    import maas_integrator as _mi2
+    ak, sk = _mi2.resolve_obs_creds("", "")
+    bucket = get_huawei_settings().get("demo_bucket", "")
+    vacio = {"faltan": [], "desactualizados": [], "al_dia": 0}
+    if not ak or not sk or not bucket:
+        return {"configurado": False, "bucket": bucket, "error": None, **vacio}
+    catalogo = _demo_dataset_files()
+    locales: dict[str, dict[str, int]] = {}
+    for slug, archivos in custom_cases.dataset_files().items():
+        src = custom_cases.dataset_path(slug)
+        if src is not None:
+            locales[slug] = {a: src.stat().st_size for a in archivos}
+    firma = (tuple(sorted((s, tuple(a)) for s, a in catalogo.items())),
+             tuple(sorted((s, tuple(sorted(t.items()))) for s, t in locales.items())))
+    guardado = _ESTADO_BUCKET.get((ak, bucket))
+    if not refrescar and guardado and guardado[1] == firma and time.time() - guardado[0] < _ESTADO_BUCKET_TTL_S:
+        return guardado[2]
+    region = get_region()
+    try:
+        client = OBSClient(access_key_id=ak, secret_access_key=sk,
+                           endpoint=f"https://obs.{region}.myhuaweicloud.com", bucket=bucket)
+        try:
+            en_el_bucket = {slug: client.objetos_bajo(f"{slug}-logs/") for slug in catalogo}
+        finally:
+            client.close()
+    except (OBSConfigError, OBSUploadError) as exc:
+        return {"configurado": True, "bucket": bucket, "error": str(exc), **vacio}
+    resultado = {"configurado": True, "bucket": bucket, "error": None,
+                 **_comparar_bucket(catalogo, en_el_bucket, locales)}
+    _ESTADO_BUCKET[(ak, bucket)] = (time.time(), firma, resultado)
+    return resultado
+
+
 @app.post(
     "/api/v1/datasets/preload",
     tags=["settings"],
@@ -2381,6 +2464,9 @@ def preload_datasets(request: dict):
                             "state": "live",
                             "detail": "lee de " + custom_cases.source_label(case["slug"])
                                       + " en cada deploy: no hay dataset que subir"})
+            # Lo que se sabía del bucket ya no vale: el aviso de Configuración
+            # tiene que volver a mirarlo.
+            _olvidar_estado_del_bucket(bucket)
             yield _sse({"type": "complete",
                         "uploaded": uploaded, "skipped": skipped, "errors": errors})
         finally:
@@ -4634,16 +4720,25 @@ def _check_demo_datasets_present(request: "TerraformDeployRequest") -> None:
         try:
             for slug, prefix in demo_cases:
                 prefix = (prefix or f"{slug}-logs/").rstrip("/") + "/"
-                if client.prefix_has_objects(prefix):
-                    continue
                 src = custom_cases.dataset_path(slug)
-                if src is not None:
-                    try:
-                        client.put_file(f"{prefix}{src.name}", str(src))
-                        print(f"[deploy] el dataset de '{slug}' faltaba en el bucket: subido")
-                        continue
-                    except (OBSConfigError, OBSUploadError) as exc:
-                        print(f"[deploy] no se pudo subir el dataset de '{slug}': {exc!r}")
+                if src is None:
+                    if not client.prefix_has_objects(prefix):
+                        missing.append(slug)
+                    continue
+                # Un caso custom se puede rehacer con el mismo nombre y otro
+                # contenido: que la carpeta tenga algo no alcanza, tiene que ser
+                # ESTE archivo. Si no, la demo arranca con los datos de antes.
+                key = f"{prefix}{src.name}"
+                en_el_bucket = client.objetos_bajo(prefix)
+                if en_el_bucket.get(key) == src.stat().st_size:
+                    continue
+                try:
+                    client.put_file(key, str(src))
+                    que = "estaba desactualizado" if key in en_el_bucket else "faltaba"
+                    print(f"[deploy] el dataset de '{slug}' {que} en el bucket: subido")
+                    continue
+                except (OBSConfigError, OBSUploadError) as exc:
+                    print(f"[deploy] no se pudo subir el dataset de '{slug}': {exc!r}")
                 missing.append(slug)
         finally:
             client.close()

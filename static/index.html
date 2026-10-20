@@ -662,6 +662,13 @@
     .nav-item__icon { font-size: var(--fs-lg); line-height: 1; width: 22px; display: inline-flex; align-items: center; justify-content: center; }
     .nav-item__icon .icon { width: 18px; height: 18px; }
     .nav-item__label { flex: 1; }
+    /* Algo de esa vista pide atención (hoy: al bucket de demos le faltan casos).
+       Un punto sobre el ícono, que se ve también con la barra contraída. */
+    .nav-item--aviso .nav-item__icon { position: relative; }
+    .nav-item--aviso .nav-item__icon::after {
+      content: ''; position: absolute; top: 0; right: 0; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-primary);
+    }
     /* Chevron del item que despliega sub-pasos. Apunta abajo en reposo y gira
        180° cuando los sub-pasos están a la vista, igual que el de las cards
        plegables de "Entorno desplegado" (.setup-card__chevron). `flex: none`
@@ -1198,6 +1205,12 @@
     .settings-field__row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
     .settings-field__row .form-input { flex: 1 1 150px; min-width: 0; }
     .settings-field__row .btn { flex: 0 0 auto; white-space: nowrap; }
+    /* Qué le falta al bucket de demos. Va debajo de la grilla, como los estados. */
+    .settings-aviso {
+      margin-top: 8px; padding: 8px 12px; border-radius: var(--radius-sm, 6px);
+      background: var(--accent-tint); color: var(--text-primary);
+      font-size: var(--fs-sm); line-height: var(--lh-base);
+    }
     /* `setFieldError` inserta el mensaje como hermano inmediato del input, o sea
        ENTRE el input y el botón. Acá eso sería un item más de la fila: `order`
        lo manda al final y el 100% de base lo baja a su propio renglón, debajo de
@@ -3259,6 +3272,7 @@
                    su celda: las filas de un grid comparten altura, así que un
                    estado de dos líneas estiraba también al campo de al lado. -->
               <div id="settings-maas-test-status" style="font-size:var(--fs-sm);"></div>
+              <div id="settings-bucket-aviso" class="settings-aviso hidden" role="status"></div>
               <div id="settings-preload-progress" class="hidden" style="margin-top:8px; font-size:var(--fs-sm); color:var(--text-secondary); max-height:96px; overflow-y:auto;"></div>
               <!-- Al pie queda sola la acción de la card. Guardar no es de la AK/SK:
                    postea todos los campos (OBS, MaaS, NVIDIA y el bucket); la de
@@ -9283,7 +9297,7 @@
     (function maybePreviewDeployAnim() {
       const params = new URLSearchParams(location.search);
       if (params.get('preview') === 'entorno') { _vistaPreviaEntorno(params); return; }
-      if (params.get('preview') !== 'deploy') { hydrateActiveEnv(); return; }
+      if (params.get('preview') !== 'deploy') { hydrateActiveEnv(); avisarBucketAlEntrar(); return; }
       state.previewMode = true;
       state.provisioning = 'new';
       showView('infra');
@@ -10519,6 +10533,8 @@
       refreshNvidiaKeyStatus();
       refreshHuaweiSettings();
       renderConfigChecklist();
+      pintarAvisoBucket();   // lo que ya se sabe, al toque
+      revisarBucket();       // y lo de ahora (el servidor lo guarda unos minutos)
     }
 
     // (El checklist de primer uso se removió: los botones Guardar validan que estén
@@ -10746,6 +10762,64 @@
       return resumen;
     }
 
+    // ── ¿El bucket de demos está al día con los casos? ──
+    // Los casos los ve toda la instancia, pero el dataset vive en el bucket de
+    // cada SA: quien lo preparó antes de que existiera un caso (o antes de que
+    // alguien lo rehiciera) no se enteraba hasta desplegar. El servidor compara
+    // el bucket con el catálogo; acá se marca ⚙ Configuración en el menú, se
+    // dice qué falta debajo del bucket y "Preparar" pasa a ser el botón principal.
+    let estadoBucket = null;
+    async function revisarBucket() {
+      if (state.previewMode) return;
+      try {
+        const r = await fetch('/api/v1/datasets/estado', { credentials: 'same-origin' });
+        if (!r.ok) return;
+        estadoBucket = await r.json();
+      } catch (_) { return; }
+      pintarAvisoBucket();
+    }
+    function _bucketPendiente() {
+      const e = estadoBucket || {};
+      return !!e.configurado && !e.error && ((e.faltan || []).length + (e.desactualizados || []).length) > 0;
+    }
+    function pintarAvisoBucket() {
+      const e = estadoBucket || {};
+      const hay = _bucketPendiente();
+      const nav = document.querySelector('.nav-item[data-view="settings"]');
+      if (nav) {
+        nav.classList.toggle('nav-item--aviso', hay);
+        if (hay) nav.title = 'A tu bucket de demos le faltan casos'; else nav.removeAttribute('title');
+      }
+      const btn = document.getElementById('settings-hw-preload');
+      if (btn) { btn.classList.toggle('btn-primary', hay); btn.classList.toggle('btn-muted', !hay); }
+      const el = document.getElementById('settings-bucket-aviso');
+      if (!el) return;
+      if (!hay) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+      const nombres = (l) => l.map(c => `<strong>${escapeHtml(c.nombre)}</strong>`).join(', ');
+      const faltan = e.faltan || [], viejos = e.desactualizados || [];
+      const frases = [];
+      if (faltan.length) {
+        frases.push(`A tu bucket <code>${escapeHtml(e.bucket)}</code> ${faltan.length === 1 ? 'le falta 1 caso' : `le faltan ${faltan.length} casos`}`
+          + ` que se agregaron después de prepararlo: ${nombres(faltan)}.`);
+      }
+      if (viejos.length) {
+        frases.push(`${viejos.length === 1 ? '1 caso cambió' : `${viejos.length} casos cambiaron`} desde que`
+          + ` ${viejos.length === 1 ? 'lo subiste' : 'los subiste'}: ${nombres(viejos)}.`);
+      }
+      el.innerHTML = frases.join(' ') + ' Apretá <strong>Preparar</strong> para ponerlo al día.';
+      el.classList.remove('hidden');
+    }
+    // Una vez por sesión del navegador, al entrar: el punto en el menú solo no
+    // alcanza si nadie mira la barra.
+    async function avisarBucketAlEntrar() {
+      await revisarBucket();
+      if (!_bucketPendiente()) return;
+      try { if (sessionStorage.getItem('avisoBucket')) return; sessionStorage.setItem('avisoBucket', '1'); } catch (_) {}
+      const n = (estadoBucket.faltan || []).length + (estadoBucket.desactualizados || []).length;
+      toast(`A tu bucket de demos le ${n === 1 ? 'falta 1 caso' : `faltan ${n} casos`} (nuevos o actualizados).`, 'info', 10000,
+        { label: 'Ver', onClick: () => showView('settings') });
+    }
+
     // Preparar bucket: sube los datasets de demo que falten (SSE con progreso).
     document.getElementById('settings-hw-preload')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -10787,6 +10861,7 @@
         toast(`No se pudo preparar el bucket: ${err.message}`, 'error');
       } finally {
         btn.disabled = false;
+        revisarBucket();   // el servidor olvidó lo que sabía del bucket: el aviso se recalcula
       }
     });
 
