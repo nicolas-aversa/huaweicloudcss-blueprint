@@ -8854,6 +8854,10 @@
             ${conAsistente ? `<button type="button" class="btn btn-primary btn-sm" id="infra-preguntar">${icon('chat')} Preguntarle a los datos</button>` : ''}
             <a class="btn ${conAsistente ? 'btn-secondary' : 'btn-primary'} btn-sm ${dashUrl ? '' : 'hidden'}" id="infra-dashboards-btn"
                href="${dashUrl}" target="_blank" rel="noopener">${icon('dashboard')} Abrir Dashboards</a>
+            ${/* Lo que los SAs arman o corrigen en Dashboards vive en el cluster y se
+                 perdía al destruirlo: esto lo guarda por caso para los próximos deploys. */ ''}
+            <button type="button" class="btn btn-secondary btn-sm ${dashUrl ? '' : 'hidden'}" id="infra-guardar-dashboards"
+                    title="Guarda, por caso, los dashboards y visualizaciones que se armaron o cambiaron en Dashboards. El próximo deploy de ese caso, de cualquier SA, los carga solos.">${icon('check')} Guardar dashboards</button>
             ${/* Lo que se usa poco, en un menú: otro pipeline, destruir y los endpoints. */ ''}
             <details class="env-menu" id="infra-menu">
               <summary class="btn btn-ghost btn-sm" title="Más acciones del entorno" aria-label="Más acciones del entorno">${icon('settings')}</summary>
@@ -8912,6 +8916,7 @@
         goToStep(1);
       });
       body.querySelector('#infra-destroy-btn')?.addEventListener('click', destroyEnvironment);
+      body.querySelector('#infra-guardar-dashboards')?.addEventListener('click', (e) => guardarDashboards(e.currentTarget));
       // Secuencia de puesta en marcha.
       body.querySelector('#infra-apply-schema-btn')?.addEventListener('click', (e) =>
         infraApplySchema(e.currentTarget));
@@ -8997,6 +9002,35 @@
           };
         }
         renderCapabilitiesResult(capsBySlug);
+      }
+    }
+
+    // "Guardar dashboards": lo que se armó o cambió en Dashboards queda guardado
+    // por caso (en la plataforma, para todos los SAs) y el próximo deploy de ese
+    // caso lo carga encima de los de la plataforma. Dice qué guardó y qué no.
+    async function guardarDashboards(btn) {
+      const antes = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `${icon('refresh')} Guardando…`;
+      try {
+        const r = await fetch('/api/v1/dashboards/guardar', { method: 'POST', credentials: 'same-origin' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error((d.detail && d.detail.message) || d.detail || `HTTP ${r.status}`);
+        const conCambios = (d.casos || []).filter(c => (c.guardados || []).length);
+        let msg = d.guardados
+          ? 'Guardado para los próximos deploys: ' + conCambios.map(c => `${c.nombre}: `
+              + c.guardados.map(g => `«${g.titulo}» (${g.estado})`).join(', ')).join('; ') + '.'
+          : 'No hay cambios nuevos: lo que ves en Dashboards ya está guardado o es lo que carga la plataforma.';
+        const sueltos = d.sueltos || [];
+        if (sueltos.length) {
+          msg += ` No se guardó ${sueltos.map(t => `«${t}»`).join(', ')}: no usa los datos de ningún caso de este entorno.`;
+        }
+        toast(msg, d.guardados ? 'success' : 'info', 12000);
+      } catch (err) {
+        toast(`No se pudieron guardar los dashboards: ${err.message}`, 'error', 0);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = antes;
       }
     }
 

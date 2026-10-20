@@ -5980,6 +5980,62 @@ def _import_dashboards_via_opensearch(
     return False
 
 
+def _ndjson_de_la_plataforma(slug: str, terraform_dir: Path | None, fields: list[dict[str, Any]] | None,
+                             index_name: str | None) -> "tuple[str | None, str]":
+    """Los saved objects que la plataforma carga para un caso, como NDJSON, y el
+    id de su dashboard. Sale, en orden, de docs/dashboards/<slug>.ndjson (disco)
+    → spec hecho a mano (`build_ndjson`) → genérico de los campos detectados; con
+    el panel del perfil y las búsquedas de Discover. Lo usan la carga y "Guardar
+    cambios" (que necesita saber qué objetos son de la plataforma)."""
+    from dashboards import build_ndjson, build_ndjson_from_fields, get_available_slugs
+
+    ndjson_content: str | None = None
+    if terraform_dir:
+        ndjson_file = terraform_dir.parent / "docs" / "dashboards" / f"{slug}.ndjson"
+        if ndjson_file.exists():
+            try:
+                ndjson_content = ndjson_file.read_text(encoding="utf-8")
+                print(f"[dashboards] usando NDJSON de disco: {ndjson_file}")
+            except OSError as exc:
+                print(f"[dashboards] error leyendo {ndjson_file}: {exc!r}")
+    if ndjson_content is None and slug in get_available_slugs():
+        try:
+            ndjson_content = build_ndjson(slug)
+            print(f"[dashboards] NDJSON generado (spec) para '{slug}'")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[dashboards] error generando NDJSON de spec: {exc!r}")
+    if ndjson_content is None and fields:
+        try:
+            ndjson_content = build_ndjson_from_fields(slug, index_name or f"{slug}-*", fields)
+            print(f"[dashboards] NDJSON auto-generado de {len(fields)} campos para '{slug}'")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[dashboards] error generando NDJSON de campos: {exc!r}")
+    if ndjson_content is None:
+        print(f"[dashboards] '{slug}' sin spec, sin disco y sin campos — skip import")
+        return None, ""
+    from dashboards import con_panel_de_perfil, id_del_dashboard
+    dashboard_id = id_del_dashboard(ndjson_content)
+    # El perfil por entidad, como una tabla más del dashboard: se mira en
+    # Dashboards, no en una vista propia de la plataforma.
+    if terraform_dir:
+        try:
+            ndjson_content = con_panel_de_perfil(
+                ndjson_content, slug, _perfil_de(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
+        except Exception as exc:  # noqa: BLE001 — el dashboard va igual, sin la tabla
+            print(f"[dashboards] '{slug}': sin el panel del perfil ({exc!r})")
+        # Las búsquedas de Discover del caso (todos los eventos y los críticos).
+        try:
+            from dashboards import con_busquedas_guardadas
+            entrada = _read_pipelines_registry(terraform_dir).get(slug) or {}
+            ndjson_content = con_busquedas_guardadas(
+                ndjson_content, slug, _resolve_capability_spec(slug, terraform_dir=terraform_dir),
+                fields or entrada.get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or [],
+                entrada.get("label") or (verticals.get_vertical(slug) or {}).get("label", ""))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[dashboards] '{slug}': sin las búsquedas guardadas ({exc!r})")
+    return ndjson_content, dashboard_id
+
+
 def _import_dashboards(
     slug: str,
     cluster: dict[str, str],
@@ -6009,59 +6065,17 @@ def _import_dashboards(
         True si la importación fue exitosa, False si falló.
     """
     import requests
-    from dashboards import build_ndjson, build_ndjson_from_fields, get_available_slugs
 
     if not password:
         print("[dashboards] no hay password de OpenSearch — skip import")
         return False
 
-    # NDJSON: disco → spec hecho a mano → genérico de los campos detectados.
-    ndjson_content: str | None = None
-    if terraform_dir:
-        ndjson_file = terraform_dir.parent / "docs" / "dashboards" / f"{slug}.ndjson"
-        if ndjson_file.exists():
-            try:
-                ndjson_content = ndjson_file.read_text(encoding="utf-8")
-                print(f"[dashboards] usando NDJSON de disco: {ndjson_file}")
-            except OSError as exc:
-                print(f"[dashboards] error leyendo {ndjson_file}: {exc!r}")
-    if ndjson_content is None and slug in get_available_slugs():
-        try:
-            ndjson_content = build_ndjson(slug)
-            print(f"[dashboards] NDJSON generado (spec) para '{slug}'")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[dashboards] error generando NDJSON de spec: {exc!r}")
-    if ndjson_content is None and fields:
-        try:
-            ndjson_content = build_ndjson_from_fields(slug, index_name or f"{slug}-*", fields)
-            print(f"[dashboards] NDJSON auto-generado de {len(fields)} campos para '{slug}'")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[dashboards] error generando NDJSON de campos: {exc!r}")
+    ndjson_content, dashboard_id = _ndjson_de_la_plataforma(slug, terraform_dir, fields, index_name)
     if ndjson_content is None:
-        print(f"[dashboards] '{slug}' sin spec, sin disco y sin campos — skip import")
         return False
-    from dashboards import con_panel_de_perfil, id_del_dashboard
-    dashboard_id = id_del_dashboard(ndjson_content)
-    # El perfil por entidad, como una tabla más del dashboard: se mira en
-    # Dashboards, no en una vista propia de la plataforma.
-    if terraform_dir:
-        try:
-            ndjson_content = con_panel_de_perfil(
-                ndjson_content, slug, _perfil_de(slug, _read_pipelines_registry(terraform_dir).get(slug) or {}))
-        except Exception as exc:  # noqa: BLE001 — el dashboard va igual, sin la tabla
-            print(f"[dashboards] '{slug}': sin el panel del perfil ({exc!r})")
-        # Las búsquedas de Discover del caso (todos los eventos y los críticos).
-        try:
-            from dashboards import con_busquedas_guardadas
-            entrada = _read_pipelines_registry(terraform_dir).get(slug) or {}
-            ndjson_content = con_busquedas_guardadas(
-                ndjson_content, slug, _resolve_capability_spec(slug, terraform_dir=terraform_dir),
-                fields or entrada.get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or [],
-                entrada.get("label") or (verticals.get_vertical(slug) or {}).get("label", ""))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[dashboards] '{slug}': sin las búsquedas guardadas ({exc!r})")
     from dashboards import busquedas_del_ndjson
     busquedas = busquedas_del_ndjson(ndjson_content)
+
 
     def importado() -> bool:
         # El id del dashboard (y de las búsquedas), para que la vista Plugins
@@ -9347,6 +9361,67 @@ def restaurar_snapshot_de_demo(snapshot_id: str) -> dict:
     return {"restaurando": snapshot_id, "indices": indices}
 
 
+# ── Los dashboards que los SAs mejoran, guardados por caso ──────────────────
+# Ver dashboards_guardados.py: qué cuenta como cambio y dónde queda. La carga
+# va en apply-schema, después de los dashboards de la plataforma.
+@app.post("/api/v1/dashboards/guardar", tags=["infra"],
+          summary="Guarda, por caso, los dashboards que se crearon o cambiaron en este entorno")
+def guardar_dashboards_del_entorno() -> dict:
+    """`{casos: [{slug, nombre, guardados: [{titulo, estado, tipo}], total}], sueltos: [titulos],
+    guardados: n}`. `sueltos`: lo que alguien armó y no es de ningún caso del
+    entorno (no se guarda: no hay a qué caso llevarlo)."""
+    import dashboards_guardados as dg
+
+    terraform_dir = _active_terraform_dir()
+    cluster = _cluster_with_public_access(terraform_dir)
+    if not cluster.get("public_endpoint") and not cluster.get("endpoint"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"stage": "dashboards", "message": "No hay un cluster alcanzable."})
+    base = _os_base(cluster, _read_https_enabled_from_state(terraform_dir))
+    user, password = "admin", _cluster_admin_password(terraform_dir)
+    r = _os_req("POST", f"{base}/.kibana/_search", user, password, timeout=30,
+                json_body={"size": 5000, "query": {"terms": {"type": list(dg.TIPOS)}}})
+    if not _resp_ok(r):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail={
+            "stage": "dashboards", "message": f"No se pudieron leer los dashboards del cluster: {_resp_motivo(r)}"})
+    en_kibana = dg.de_kibana(((r.json() or {}).get("hits") or {}).get("hits") or [])
+    ctx = auth.current_user_var.get()
+    quien = ctx.email if ctx is not None else "local"
+    casos, de_la_plataforma, de_algun_caso = [], set(), set()
+    for slug, entrada in _read_pipelines_registry(terraform_dir).items():
+        contenido, _ = _ndjson_de_la_plataforma(slug, terraform_dir, entrada.get("fields"), entrada.get("index"))
+        plataforma = dg.objetos_del_ndjson(contenido or "")
+        if not plataforma:
+            continue          # sin dashboards de la plataforma no hay cómo saber qué es del caso
+        de_la_plataforma |= set(plataforma)
+        elegidos = dg.del_caso(en_kibana, plataforma)
+        de_algun_caso |= set(elegidos)
+        nuevos = dg.pendientes(elegidos, dg.leer(slug))
+        if nuevos:
+            dg.guardar(slug, nuevos, quien)
+        casos.append({"slug": slug, "nombre": entrada.get("label") or _nombre_del_caso(slug),
+                      "guardados": [{"titulo": o["titulo"], "estado": o["estado"], "tipo": o["type"]}
+                                    for o in nuevos if o["type"] != "index-pattern"],
+                      "total": len(dg.leer(slug))})
+    total = sum(len(c["guardados"]) for c in casos)
+    if total:
+        audit.record("dashboards_guardados", ", ".join(f"{c['slug']}: {len(c['guardados'])}" for c in casos if c["guardados"]))
+    return {"casos": casos, "sueltos": dg.sueltos(en_kibana, de_la_plataforma, de_algun_caso), "guardados": total}
+
+
+def _cargar_dashboards_guardados(slug: str, cluster: dict[str, str], password: str, https_enabled: bool,
+                                 user: str = "admin") -> "bool | None":
+    """Lo que los SAs guardaron para el caso, encima de lo de la plataforma.
+    None si no hay nada guardado."""
+    import dashboards_guardados as dg
+
+    contenido = dg.ndjson(slug)
+    if not contenido:
+        return None
+    endpoint = cluster.get("public_endpoint", "") or cluster.get("endpoint", "")
+    return bool(endpoint) and _import_dashboards_via_opensearch(contenido, slug, endpoint, password, https_enabled, user)
+
+
 @app.get("/api/v1/plugins/numeros", tags=["capabilities"])
 def numeros_de_plugins(slug: str = "") -> dict:
     """El número clave de cada plugin de un caso, en vivo (o de todo el cluster,
@@ -9931,6 +10006,12 @@ def apply_schema(request: TerraformDeployRequest) -> ApplySchemaResponse:
             ):
                 dashboards_imported = True
                 runs.step(run, f"Dashboards · {s}", True)
+                # Lo que los SAs mejoraron y guardaron para este caso va encima.
+                guardados = _cargar_dashboards_guardados(s, cluster, request.opensearch_password,
+                                                         request.https_enabled, os_user)
+                if guardados is not None:
+                    runs.step(run, f"Dashboards guardados · {s}", guardados,
+                              "" if guardados else "no se pudieron cargar")
                 registry = _read_pipelines_registry(terraform_dir)
                 if s in registry:
                     registry[s]["dashboards_imported"] = True
