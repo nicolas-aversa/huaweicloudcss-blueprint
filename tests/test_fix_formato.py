@@ -71,7 +71,7 @@ def test_el_catalogo_lo_toma_antes_que_log4j_y_el_perfilador_no_lo_toma():
 # ── Decodificación ──────────────────────────────────────────────────────────
 def test_una_orden_nueva():
     d = ff.decodificar(ORDEN, "slf4j")
-    assert d["fix.msg_type"] == "NewOrderSingle" and d["fix.msg_type_code"] == "D"
+    assert d["fix.msg_type"] == "Orden nueva" and d["fix.msg_type_code"] == "D"
     assert d["fix.side"] == "Compra" and d["fix.ord_type"] == "Límite" and d["fix.time_in_force"] == "Día"
     assert d["fix.settl_type"] == "24 horas" and d["fix.currency"] == "ARS" and d["fix.account"] == "12345"
     assert d["fix.order_qty"] == 500.0 and d["fix.price"] == 6200.0 and d["fix.msg_seq_num"] == 12
@@ -83,7 +83,7 @@ def test_una_orden_nueva():
 
 def test_una_ejecucion_trae_el_monto():
     d = ff.decodificar(EJECUCION, "slf4j")
-    assert d["fix.exec_type"] == "Operación" and d["fix.ord_status"] == "Ejecutada"
+    assert d["fix.tipo_ejecucion"] == "Operación" and d["fix.ord_status"] == "Ejecutada"
     assert d["fix.monto_ejecutado"] == round(500 * 6198.5, 2)
     assert d["fix.direccion"] == "entrante" and d["fix.contraparte"] == "BYMA"
     assert "fix.rechazo_motivo" not in d
@@ -92,7 +92,7 @@ def test_una_ejecucion_trae_el_monto():
 def test_el_motivo_del_rechazo_sale_del_texto_o_del_codigo():
     assert ff.decodificar(RECHAZO_SIN_TEXTO, "slf4j")["fix.rechazo_motivo"] == "Precio fuera de rango"
     cxl = ff.decodificar(RECHAZO_CANCELACION, "slf4j")
-    assert cxl["fix.msg_type"] == "OrderCancelReject" and cxl["fix.rechazo_motivo"] == "Too late to cancel"
+    assert cxl["fix.msg_type"] == "Rechazo de cancelación" and cxl["fix.rechazo_motivo"] == "Too late to cancel"
     assert cxl["fix.cxl_rej_reason"] == "Demasiado tarde para cancelar"
 
 

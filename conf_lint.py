@@ -408,6 +408,24 @@ def _pila_en(conf: str, pos: int, mascara: str | None = None) -> list[str]:
 # `f.call 1` y `f[1]` pasan. Lo destapó el ruby de limpieza de un dataset nuevo
 # (`limpiar.call(v)`), que CSS rechazó a los 7 minutos del apply.
 _PROHIBIDO_CSS = re.compile(r"call\(")
+# Lo demás que rechaza (la-south-2, 2026-10-21, buscado línea por línea con el
+# decodificador de FIX contra la API de CSS): las puertas de Ruby al sistema,
+# también dentro de cualquier palabra y sin importar mayúsculas. `io.` es el que
+# más sorprende: `inicio.nil?` o un campo `servicio.nombre` se rechazan por
+# contener `IO.`. (Pasan `eval`, `spawn`, `fork`, `require`, `load(`, `exit`,
+# `send`, `method` e `IO` sin punto.) Cada uno con qué hacer.
+_RENOMBRAR = "renombrá esa variable, campo o valor"
+_VETADOS_CSS = [
+    (_PROHIBIDO_CSS, "`call(`", "invocá con `x[…]` o `x.call …` sin paréntesis"),
+    (re.compile(r"exec", re.I), "`exec`", f"también dentro de una palabra (`exec_type`, `ExecutionReport`): {_RENOMBRAR}"),
+    (re.compile(r"system", re.I), "`system`", f"también dentro de una palabra (`source_system`): {_RENOMBRAR}"),
+    (re.compile(r"io\.", re.I), "`io.`", f"también al final de una palabra (`inicio.nil?`, `servicio.nombre`): {_RENOMBRAR}"),
+    (re.compile(r"file\.", re.I), "`file.`", _RENOMBRAR),
+    (re.compile(r"dir\.", re.I), "`dir.`", _RENOMBRAR),
+    (re.compile(r"process\.", re.I), "`process.`", f"en un campo, usá corchetes (`[process][name]`): {_RENOMBRAR}"),
+    (re.compile(r"kernel", re.I), "`kernel`", _RENOMBRAR),
+    (re.compile(r"open\(", re.I), "`open(`", _RENOMBRAR),
+]
 # `x.call(args)` → `x[args]`: lo mismo en Ruby para un lambda o un proc. Solo
 # con argumentos sin paréntesis adentro: lo demás no se adivina.
 _LLAMADA = re.compile(r"\b([A-Za-z_]\w*)\.call\(([^()\n]*)\)")
@@ -1159,9 +1177,9 @@ def lint(conf: str, *, marcador_hosts: bool = False) -> list[Problema]:
     # Antes que la gramática: CSS lo rechaza aunque compile.
     vetados = [Problema(
         ERROR, _linea(conf, m.start()),
-        "CSS rechaza todo configuration file con el texto `call(` («config is forbidden»), "
-        "aunque esté en un string o un comentario: invocá con `x[…]` o `x.call …` sin paréntesis.")
-        for m in _PROHIBIDO_CSS.finditer(conf)]
+        f"CSS rechaza todo configuration file con el texto {texto} («config is forbidden»), "
+        f"aunque esté en un string o un comentario: {arreglo}.")
+        for rx, texto, arreglo in _VETADOS_CSS for m in rx.finditer(conf)]
     try:
         arbol = parse(conf)
     except ErrorDeSintaxis as exc:

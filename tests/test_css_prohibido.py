@@ -62,8 +62,29 @@ def test_lint_marca_call_donde_este(codigo):
     assert any("call(" in p.mensaje and "config is forbidden" in p.mensaje for p in errores), errores
 
 
+@pytest.mark.parametrize("codigo,palabra", [
+    ('event.set("[fix][exec_type]", 1)', "`exec`"),          # dentro de un nombre de campo
+    ('t = "ExecutionReport"', "`exec`"),                    # en mayúscula, dentro de un valor
+    ("# source_system\nb = 1", "`system`"),                  # en un comentario
+    ("d = 1\nif inicio.nil?\nend", "`io.`"),                  # IO. dentro de `inicio.`
+    ('x = event.get("servicio.nombre")', "`io.`"),
+    ('f = File.basename("a")', "`file.`"),
+    ("d = Dir.pwd", "`dir.`"),
+    ("p = Process.pid", "`process.`"),
+    ("k = Kernel", "`kernel`"),
+    ('o = open("x")', "`open(`"),
+])
+def test_lint_marca_las_puertas_de_ruby_al_sistema_dentro_de_cualquier_palabra(codigo, palabra):
+    """Lo que CSS rechazó (la-south-2, 2026-10-21), buscado línea por línea
+    contra su API: el decodificador de FIX tenía `exec_type`,
+    `ExecutionReport` e `inicio.nil?`, y la ingesta no arrancó."""
+    errores = [p for p in conf_lint.lint(_BASE % _ruby(codigo)) if p.nivel == conf_lint.ERROR]
+    assert any(palabra in p.mensaje and "config is forbidden" in p.mensaje for p in errores), errores
+
+
 @pytest.mark.parametrize("codigo", ["f = lambda { |x| x }\nf[1]", "f = lambda { |x| x }\nf.call 1",
-                                    'a = "llamada"'])
+                                    'a = "llamada"', 'x = obj.send(:size)', 'm = "method"',
+                                    'r = "require"', "e = 1 # eval spawn fork exit", "i = IO"])
 def test_lint_deja_pasar_lo_que_css_acepta(codigo):
     assert not [p for p in conf_lint.lint(_BASE % _ruby(codigo)) if p.nivel == conf_lint.ERROR]
 
