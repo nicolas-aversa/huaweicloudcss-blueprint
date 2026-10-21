@@ -167,7 +167,8 @@ def test_la_zona_del_log_y_la_de_fix():
 def test_el_generador_arma_mensajes_fix_validos():
     """BodyLength y CheckSum calculados sobre SOH, como los valida un motor FIX."""
     from datetime import datetime
-    m = gen.Msg(gen.BYMA, True, datetime(2026, 10, 7, 11), datetime(2026, 10, 7, 11),
+    sesion = gen.Sesion("AL017", "BYMA", "FIX.4.4")
+    m = gen.Msg(sesion, True, datetime(2026, 10, 7, 11), datetime(2026, 10, 7, 11),
                 [("35", "D"), ("11", "X"), ("55", "GGAL")], seq=7)
     texto = gen.armar(m).replace("|", "\x01")
     cuerpo = texto.split("\x019=", 1)[1].split("\x01", 1)[1].rsplit("10=", 1)[0]
@@ -175,3 +176,68 @@ def test_el_generador_arma_mensajes_fix_validos():
     sin_suma = texto.rsplit("10=", 1)[0]
     assert int(texto.rsplit("10=", 1)[1].strip("\x01")) == sum(sin_suma.encode()) % 256
     assert "|34=7|" in gen.armar(m) and "|52=20261007-14:00:00.000|" in gen.armar(m)
+    assert "|49=AL017|56=BYMA|" in gen.armar(m) and sesion.nombre == "FIX.4.4:AL017->BYMA"
+
+
+def test_los_heartbeats_no_logueados_igual_consumen_secuencias():
+    """Con `SLF4JLogHeartbeats=N` no se ven, pero cada intervalo sin mensajes
+    consume un número: los saltos de a varios son normales, no un problema."""
+    from datetime import datetime, timedelta
+    s = gen.Sesion("AL001", "A3", "FIXT.1.1")
+    t0 = datetime(2026, 10, 13, 10)
+    dia = gen.Dia(msgs=[gen.Msg(s, True, t0, t0, [("35", "A")]),
+                        gen.Msg(s, True, t0 + timedelta(seconds=5), t0, [("35", "D")]),
+                        gen.Msg(s, True, t0 + timedelta(seconds=95), t0, [("35", "D")])])
+    gen.secuencias(dia)
+    assert [m.seq for m in dia.msgs] == [1, 2, 6]       # 90 s sin mensajes = 3 heartbeats
+
+
+# ── Un OMS que opera para muchos participantes ──────────────────────────────
+def _de(participante, linea=ORDEN):
+    return linea.replace("ALYC", participante)
+
+
+def test_el_participante_propio_sale_de_la_sesion_o_de_la_direccion():
+    assert ff.decodificar(_de("AL017"), "slf4j")["fix.comp_id_propio"] == "AL017"
+    assert ff.decodificar(_de("AL017", EJECUCION), "slf4j")["fix.comp_id_propio"] == "AL017"
+    filelog = _filelog(_de("AL017"))
+    sin_sesion = ff.decodificar(filelog.replace("20261007-14:00:00.512: ", ""), "crudo")
+    assert "fix.comp_id_propio" not in sin_sesion, "sin sesión ni logger no se sabe de qué lado está"
+
+
+def test_con_varios_participantes_la_entidad_es_el_participante():
+    """El log de una firma tiene un solo CompID propio: la entidad es la cuenta.
+    El de un OMS tiene muchos: la entidad es el participante (la ALyC)."""
+    una = {f["field_path"]: f for f in ff.generar(LOG_SLF4J)["fields"]}
+    assert una["fix.account"].get("entity") and una["fix.account"]["role"] == "entity_id"
+    assert not una["fix.comp_id_propio"].get("entity")
+    oms = [_de(f"AL{i:03d}", l) for i in range(1, 6) for l in (ORDEN, EJECUCION)]
+    varias = {f["field_path"]: f for f in ff.generar(oms)["fields"]}
+    assert varias["fix.comp_id_propio"].get("entity") and varias["fix.comp_id_propio"]["role"] == "entity_id"
+    assert not varias["fix.account"].get("entity") and varias["fix.account"]["role"] is None
+    assert varias["fix.account"]["sensitive"], "el comitente se enmascara igual"
+
+
+def test_la_demora_es_el_envio_menos_la_transaccion():
+    """En la orden que un OMS manda al mercado, 60 es cuándo entró la orden: la
+    demora es el tiempo adentro del OMS."""
+    linea = ORDEN.replace("|60=20261007-14:00:00.512|", "|60=20261007-14:00:00.130|")
+    assert ff.decodificar(linea, "slf4j")["fix.demora_ms"] == 382
+    assert ff.demora_ms("2026-10-07T14:00:00.512Z", "2026-10-07T12:00:00.000Z") is None   # una hora: no es creíble
+    assert "fix.demora_ms" not in ff.decodificar(HEARTBEAT, "slf4j")
+
+
+def test_un_rechazo_del_oms_en_castellano_es_un_rechazo():
+    linea = ("2026-10-13 11:00:01.000 INFO  [riesgo-2] oms.riesgo - Orden AL017-1 rechazada por control de riesgo: "
+             "Saldo insuficiente")
+    d = ff.decodificar(linea, "slf4j")
+    assert d["fix.tipo_evento"] == "rechazo" and d["log.logger"] == "oms.riesgo"
+
+
+def test_el_rechazo_del_oms_se_cuenta_con_los_del_mercado():
+    """El motivo del rechazo es el indicador crítico y el campo de la búsqueda:
+    los del control de riesgo propio (una línea de texto) tienen que estar."""
+    linea = ("2026-10-13 11:00:01.000 INFO  [riesgo-2] oms.riesgo - Orden AL017-1 rechazada por control de riesgo: "
+             "Saldo insuficiente")
+    assert "Saldo insuficiente" in ff.decodificar(linea, "slf4j")["fix.rechazo_motivo"]
+    assert "fix.rechazo_motivo" not in ff.decodificar(EVENTO_HB, "slf4j")

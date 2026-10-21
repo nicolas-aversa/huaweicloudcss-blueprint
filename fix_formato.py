@@ -163,7 +163,7 @@ EVENTOS: list[tuple[str, str]] = [
     (r"Disconnect|disconnect", "desconexion"),
     (r"Initiated logon request|Received logon|Logon contains|[Ll]ogon response", "logon"),
     (r"[Ll]ogout", "logout"),
-    (r"[Rr]eject", "rechazo"),
+    (r"[Rr]eject|[Rr]echaz", "rechazo"),
     (r"Created session|Session .* schedule|Session state", "sesion"),
 ]
 
@@ -234,6 +234,10 @@ def decodificar(linea: str, tipo_de_envoltorio: str) -> dict:
         out["fix.evento"] = payload
         out["fix.capa"] = "evento"
         out["fix.tipo_evento"] = next((t for rx, t in EVENTOS if re.search(rx, payload)), "otro")
+        if out["fix.tipo_evento"] == "rechazo":
+            # Un rechazo que no viene en un mensaje FIX (el control de riesgo del
+            # propio sistema) se cuenta y se busca junto con los del mercado.
+            out["fix.rechazo_motivo"] = payload
         salto = re.search(r"expecting (\d+) but received (\d+)", payload, re.I)
         if salto:
             out["fix.salto_secuencia"] = int(salto.group(2)) - int(salto.group(1))
@@ -277,13 +281,32 @@ def decodificar(linea: str, tipo_de_envoltorio: str) -> dict:
         out["fix.direccion"] = "saliente"
     if out.get("fix.direccion"):
         out["fix.contraparte"] = pares.get("56" if out["fix.direccion"] == "saliente" else "49", "")
+        # Quién opera de este lado: en el log de una firma, siempre el mismo; en
+        # el de un OMS que opera para muchos participantes, cada uno de ellos.
+        out["fix.comp_id_propio"] = nuestro or pares.get("49" if out["fix.direccion"] == "saliente" else "56", "")
     if codigo in _MOTIVO and (codigo != "8" or pares.get("150") == "8"):
         motivo = pares.get("58") or ENUMS.get(_MOTIVO[codigo], {}).get(pares.get(_MOTIVO[codigo], ""), "")
         if motivo:
             out["fix.rechazo_motivo"] = motivo
     if "fix.last_qty" in out and "fix.last_px" in out and out["fix.last_qty"]:
         out["fix.monto_ejecutado"] = round(out["fix.last_qty"] * out["fix.last_px"], 2)
+    demora = demora_ms(out.get("fix.sending_time", ""), out.get("fix.transact_time", ""))
+    if demora is not None:
+        out["fix.demora_ms"] = demora
     return out
+
+
+def demora_ms(sending_iso: str, transact_iso: str) -> int | None:
+    """Envío (tag 52) menos transacción (tag 60), en ms: lo que tardó el mensaje
+    en salir desde que pasó lo que cuenta. En las órdenes que un OMS manda al
+    mercado (con la hora en que la orden entró), es el tiempo adentro del OMS."""
+    try:
+        a = datetime.strptime(sending_iso, "%Y-%m-%dT%H:%M:%S.%fZ")
+        b = datetime.strptime(transact_iso, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        return None
+    ms = round((a - b).total_seconds() * 1000)
+    return ms if -60_000 <= ms <= 60_000 else None
 
 
 def latencia_ms(momento_utc: datetime, sending_time_iso: str) -> int | None:
@@ -343,6 +366,7 @@ _RUBY_CODIGO = r"""
               end
             end
             event.set("[fix][tipo_evento]", tipo)
+            event.set("[fix][rechazo_motivo]", payload) if tipo == "rechazo"
             s = payload.match(/expecting (\d+) but received (\d+)/i)
             event.set("[fix][salto_secuencia]", s[2].to_i - s[1].to_i) if s
           else
@@ -373,6 +397,7 @@ _RUBY_CODIGO = r"""
             codigo = pares["35"].to_s
             event.set("[fix][capa]", FIX_ADMIN.include?(codigo) ? "sesión" : "aplicación")
             direccion = nil
+            nuestro = nil
             if g["session"]
               nuestro = g["session"].split(":", 2)[1].to_s.split("->")[0]
               direccion = pares["49"] == nuestro ? "saliente" : "entrante"
@@ -384,6 +409,8 @@ _RUBY_CODIGO = r"""
             if direccion
               event.set("[fix][direccion]", direccion)
               event.set("[fix][contraparte]", pares[direccion == "saliente" ? "56" : "49"].to_s)
+              propio = g["session"] ? nuestro : pares[direccion == "saliente" ? "49" : "56"].to_s
+              event.set("[fix][comp_id_propio]", propio)
             end
             if FIX_MOTIVO.key?(codigo) && (codigo != "8" || pares["150"] == "8")
               cod = pares[FIX_MOTIVO[codigo]]
@@ -400,6 +427,17 @@ _RUBY_CODIGO = r"""
 # Después del `date`: la latencia de lo que entra (recibido menos el tag 52).
 _RUBY_LATENCIA = r"""
         enviado = event.get("[fix][sending_time]")
+        hecho = event.get("[fix][transact_time]")
+        if enviado && hecho
+          a = enviado.match(/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z\z/)
+          b = hecho.match(/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z\z/)
+          if a && b
+            ta = Time.utc(a[1].to_i, a[2].to_i, a[3].to_i, a[4].to_i, a[5].to_i, a[6].to_i, a[7].to_i * 1000)
+            tb = Time.utc(b[1].to_i, b[2].to_i, b[3].to_i, b[4].to_i, b[5].to_i, b[6].to_i, b[7].to_i * 1000)
+            d = ((ta - tb) * 1000).round
+            event.set("[fix][demora_ms]", d) if d >= -60000 && d <= 60000
+          end
+        end
         if event.get("[fix][direccion]") == "entrante" && enviado
           f = enviado.match(/\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z\z/)
           if f
@@ -446,6 +484,8 @@ _DERIVADOS: dict[str, tuple[str, str]] = {
     "fix.rechazo_motivo": ("Motivo del rechazo", "text"),
     "fix.monto_ejecutado": ("Monto ejecutado", "float"),
     "fix.latencia_ms": ("Latencia (ms)", "long"),
+    "fix.demora_ms": ("Demora desde la transacción (ms)", "long"),
+    "fix.comp_id_propio": ("Participante (CompID propio)", "keyword"),
     "fix.evento": ("Evento de la sesión", "text"),
     "fix.tipo_evento": ("Tipo de evento", "keyword"),
     "fix.salto_secuencia": ("Salto de secuencia", "long"),
@@ -454,24 +494,25 @@ _TIPO_OS = {"s": "keyword", "t": "text", "f": "float", "i": "long", "d": "date"}
 _ROLES = {
     "fix.account": "entity_id", "fix.symbol": "primary_dimension", "fix.ord_status": "success_indicator",
     "fix.rechazo_motivo": "critical_indicator", "fix.latencia_ms": "measure", "fix.monto_ejecutado": "measure",
-    "fix.order_qty": "measure", "fix.last_qty": "measure",
+    "fix.order_qty": "measure", "fix.last_qty": "measure", "fix.demora_ms": "measure",
 }
 _DIMENSIONES = {"fix.msg_type", "fix.side", "fix.ord_type", "fix.time_in_force", "fix.settl_type", "fix.currency",
                 "fix.contraparte", "fix.sesion", "fix.direccion", "fix.capa", "fix.tipo_evento", "fix.tipo_ejecucion",
                 "fix.ord_status", "fix.symbol", "fix.security_type", "fix.security_exchange", "log.level",
-                "fix.begin_string", "fix.msg_type_code"}
+                "fix.begin_string", "fix.msg_type_code", "fix.comp_id_propio"}
 
 
 # Lo que tiene cualquier log FIX de ruteo de órdenes, aunque la muestra (unas
 # doscientas líneas) no lo haya mostrado: un rechazo o un plazo de liquidación
 # pueden no caer en ella, y sin declararlos se pierden su etiqueta y su rol.
 _NUCLEO = {"fix.msg_type", "fix.msg_type_code", "fix.capa", "fix.direccion", "fix.contraparte",
-           "fix.sender_comp_id", "fix.target_comp_id", "fix.msg_seq_num", "fix.sending_time", "fix.poss_dup_flag"}
+           "fix.sender_comp_id", "fix.target_comp_id", "fix.msg_seq_num", "fix.sending_time", "fix.poss_dup_flag",
+           "fix.comp_id_propio"}
 _NUCLEO_ORDENES = {"fix.cl_ord_id", "fix.orig_cl_ord_id", "fix.order_id", "fix.id_ejecucion", "fix.account", "fix.symbol",
                    "fix.side", "fix.order_qty", "fix.price", "fix.ord_type", "fix.time_in_force", "fix.tipo_ejecucion",
                    "fix.ord_status", "fix.last_qty", "fix.last_px", "fix.cum_qty", "fix.leaves_qty", "fix.avg_px",
                    "fix.text", "fix.ord_rej_reason", "fix.rechazo_motivo", "fix.monto_ejecutado", "fix.latencia_ms",
-                   "fix.settl_type", "fix.currency"}
+                   "fix.settl_type", "fix.currency", "fix.demora_ms", "fix.transact_time"}
 _NUCLEO_SLF4J = {"fix.sesion", "fix.evento", "fix.tipo_evento", "fix.salto_secuencia", "log.level", "log.logger"}
 _ORDENES = {"D", "8", "F", "G", "9"}
 
@@ -479,8 +520,15 @@ _ORDENES = {"D", "8", "F", "G", "9"}
 def campos(lineas: list[str], tipo_de_envoltorio: str) -> list[dict]:
     """Los campos de la muestra más el núcleo de FIX, en el orden del diccionario."""
     vistos: set[str] = set()
+    propios: set[str] = set()
     for l in lineas[:3000]:
-        vistos |= set(decodificar(l, tipo_de_envoltorio))
+        d = decodificar(l, tipo_de_envoltorio)
+        vistos |= set(d)
+        if d.get("fix.comp_id_propio"):
+            propios.add(d["fix.comp_id_propio"])
+    # Con varios participantes (un OMS que opera para muchos), la entidad es el
+    # participante; con uno solo (el log de una firma), la cuenta.
+    entidad = "fix.comp_id_propio" if len(propios) >= 3 else "fix.account"
     vistos |= _NUCLEO
     if any(decodificar(l, tipo_de_envoltorio).get("fix.msg_type_code") in _ORDENES for l in lineas[:3000]):
         vistos |= _NUCLEO_ORDENES
@@ -494,14 +542,19 @@ def campos(lineas: list[str], tipo_de_envoltorio: str) -> list[dict]:
             continue
         etiqueta, tipo = por_nombre.get(ruta) or _DERIVADOS.get(ruta) or (f"Tag {ruta.split('_')[-1]}", "keyword")
         rol = _ROLES.get(ruta)
+        if ruta in ("fix.account", "fix.comp_id_propio"):
+            rol = "entity_id" if ruta == entidad else None
         if tipo == "date":
             rol = None             # la fecha del evento es @timestamp, no la del mensaje
         campo = {"raw_name": ruta.split(".", 1)[1], "field_path": ruta, "ecs_path": ruta, "normalized_path": ruta,
-                 "type": tipo, "business_label": etiqueta, "unit": "ms" if ruta == "fix.latencia_ms" else None,
+                 "type": tipo, "business_label": etiqueta,
+                 "unit": "ms" if ruta in ("fix.latencia_ms", "fix.demora_ms") else None,
                  "dimension": ruta in _DIMENSIONES, "role": rol, "is_ecs": ruta.startswith("log."),
                  "ecs_type_official": None, "ecs_overlay_path": None}
+        if ruta == entidad:
+            campo["entity"] = True
         if ruta == "fix.account":
-            campo.update({"entity": True, "sensitive": True})
+            campo["sensitive"] = True           # el comitente es un dato del cliente: va enmascarado
         salida.append(campo)
     return salida
 
@@ -510,8 +563,8 @@ def campos(lineas: list[str], tipo_de_envoltorio: str) -> list[dict]:
 # la que se pronostica y vigila (sumada), así que va el monto ejecutado (el
 # volumen del negocio) y no la latencia, que sumada no significa nada (el
 # rollup sí la guarda con su promedio y su máximo por hora).
-_PRIMERO = ["fix.msg_type", "fix.ord_status", "fix.tipo_ejecucion", "fix.symbol", "fix.side", "fix.account",
-            "fix.monto_ejecutado", "fix.latencia_ms", "fix.last_qty", "fix.last_px", "fix.order_qty", "fix.price",
+_PRIMERO = ["fix.msg_type", "fix.ord_status", "fix.tipo_ejecucion", "fix.symbol", "fix.side",
+            "fix.comp_id_propio", "fix.account", "fix.monto_ejecutado", "fix.latencia_ms", "fix.demora_ms", "fix.last_qty", "fix.last_px", "fix.order_qty", "fix.price",
             "fix.rechazo_motivo", "fix.text", "fix.contraparte", "fix.direccion", "fix.capa", "fix.sesion",
             "fix.tipo_evento", "fix.evento", "fix.salto_secuencia", "fix.settl_type", "fix.currency", "fix.ord_type",
             "fix.time_in_force"]
