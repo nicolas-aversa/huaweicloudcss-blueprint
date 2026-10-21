@@ -1632,6 +1632,50 @@ def delete_custom_case(slug: str) -> dict:
     return {"status": "deleted", "slug": slug}
 
 
+@app.post("/api/v1/cases/{slug}/dataset", tags=["verticals"],
+          summary="Reemplaza el dataset de un caso por otro con la misma estructura")
+def replace_case_dataset(slug: str, request: dict) -> dict:
+    """Body: ``{log_content, forzar?}``. Cambia SOLO el archivo del caso: la
+    definición (campos, roles, nombres, plugins) y los dashboards guardados
+    quedan como están, y con la misma estructura todo eso se adapta solo a los
+    datos nuevos. Si la estructura no coincide, 400 con qué difiere; si el
+    formato no se puede verificar (un log que parsea el grok del caso), 409 y
+    hay que confirmar con ``forzar``. Lo sube al bucket de quien lo reemplaza;
+    a los demás se lo avisa Configuración y se los sube el deploy."""
+    ctx = auth.current_user_var.get()
+    email = ctx.email if ctx is not None else None
+    case = custom_cases.get_case(slug)
+    if case is None:
+        raise HTTPException(status_code=404,
+                            detail={"stage": "case", "message": f"No existe el caso '{slug}'."})
+    if not custom_cases.can_delete(slug, email):
+        raise HTTPException(status_code=403, detail={
+            "stage": "case", "message": "Solo quien creó el caso (o un admin) puede reemplazarle el dataset."})
+    nuevo = str(request.get("log_content", "") or "")
+    src = custom_cases.dataset_path(slug)
+    actual = src.read_text(encoding="utf-8", errors="replace") if src is not None else ""
+    comp = custom_cases.comparar_estructura(actual, nuevo)
+    if not comp["verificable"] and not request.get("forzar"):
+        raise HTTPException(status_code=409, detail={
+            "stage": "dataset_sin_verificar", "comparacion": comp,
+            "message": "No se puede verificar automáticamente que el archivo nuevo tenga la misma estructura "
+                       "(el formato de este caso lo lee el filtro de Logstash, no el perfilador). "
+                       "Si estás seguro de que tiene los mismos campos, confirmá para reemplazarlo igual."})
+    if comp["verificable"] and not comp["compatible"]:
+        raise HTTPException(status_code=400, detail={
+            "stage": "dataset_incompatible", "comparacion": comp,
+            "message": custom_cases.explicar_diferencias(comp)})
+    try:
+        case = custom_cases.replace_dataset(slug, nuevo, replaced_by=email or "")
+    except custom_cases.CaseError as exc:
+        raise HTTPException(status_code=400, detail={"stage": "case", "message": str(exc)}) from exc
+    antes = case["dataset_reemplazado"]["lineas_antes"]
+    audit.record("case_dataset", f"{slug}: {antes} → {case['lines']} líneas", user=email or None)
+    uploaded, upload_error = _upload_case_dataset(slug)
+    return {"case": case, "comparacion": comp, "lineas_antes": antes,
+            "uploaded": uploaded, "upload_error": upload_error}
+
+
 def _upload_case_dataset(slug: str) -> tuple[bool, str]:
     """Sube el dataset del caso a `<slug>-logs/` en el bucket de demos del
     usuario actual. Best-effort: si faltan creds o falla OBS devuelve el motivo y

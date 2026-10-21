@@ -495,6 +495,119 @@ def case_type_for(slug: str) -> str:
     return str(case.get("case_type", "dataset")) if case else ""
 
 
+# ── Reemplazar el dataset (misma estructura, otros valores) ─────────────────
+# Un caso se arma una vez (campos, roles, nombres, plugins) y los SAs le guardan
+# dashboards encima. Para mejorarle los datos sin rehacerlo —rehacerlo vuelve a
+# pasar por la IA y los nombres pueden cambiar, rompiendo lo guardado— se le
+# cambia SOLO el archivo, si tiene la misma estructura que el actual. La
+# definición no se toca: todo lo que sale de ella sigue igual.
+_MUESTRA_PARA_COMPARAR = 2000
+# Un valor nuevo que el .conf del caso igual procesa bien: la columna era texto
+# (acepta cualquier cosa) o decimal (acepta enteros).
+_ACEPTA = {"string": None, "text": None, "float": {"float", "integer"}}
+_TIPO_EN_PALABRAS = {"string": "texto", "text": "texto", "integer": "número entero", "float": "número decimal",
+                     "date": "fecha", "boolean": "sí/no", "ip": "IP"}
+
+
+def _perfil_para_comparar(texto: str):
+    """El perfil del archivo con una muestra repartida en todo el archivo (no
+    solo el principio): una clave de JSON que aparece recién al final también
+    cuenta. Un delimitado se lee desde el principio (el header manda y un
+    registro con saltos de línea no se puede cortar al medio)."""
+    import perfilador
+
+    lineas = (texto or "").splitlines()
+    n = _MUESTRA_PARA_COMPARAR
+    perfil = perfilador.perfilar(lineas[:n])
+    if perfil.formato in ("json", "kv") and len(lineas) > n:
+        paso = len(lineas) / (n - 1)
+        perfil = perfilador.perfilar([lineas[min(len(lineas) - 1, int(i * paso))] for i in range(n)])
+    return perfil
+
+
+def _tipo(col) -> str:
+    return col.tipo + (f" ({col.formato_fecha})" if col.tipo == "date" else "")
+
+
+def comparar_estructura(actual: str, nuevo: str) -> dict:
+    """¿El archivo nuevo tiene la estructura del actual? `{verificable,
+    compatible, formato, faltan, sobran, cambian: [{campo, antes, ahora}],
+    vacias}`. `verificable` es False si el formato no se puede perfilar (un log
+    que parsea el grok del caso): ahí no se puede afirmar nada."""
+    pa, pn = _perfil_para_comparar(actual), _perfil_para_comparar(nuevo)
+    base = {"verificable": bool(pa.formato), "formato": pa.formato, "faltan": [], "sobran": [],
+            "cambian": [], "vacias": []}
+    if not pa.formato:
+        return {**base, "compatible": False}
+    if pn.formato != pa.formato or (pa.formato == "delimitado" and pn.separador != pa.separador):
+        return {**base, "compatible": False, "formato_nuevo": pn.formato or "sin estructura"}
+    antes = {c.nombre: c for c in pa.columnas}
+    ahora = {c.nombre: c for c in pn.columnas}
+    base["faltan"] = sorted(set(antes) - set(ahora))
+    base["sobran"] = sorted(set(ahora) - set(antes))
+    for nombre in sorted(set(antes) & set(ahora)):
+        a, n = antes[nombre], ahora[nombre]
+        if n.vacios >= len(n.valores):
+            base["vacias"].append(nombre)          # sin un valor en la muestra: no hay tipo que comparar
+            continue
+        # Sigue siendo número, pero ahora trae símbolos, miles o coma decimal
+        # ("55%", "1.234,5") que el filtro del caso no limpia: no se indexaría.
+        if (a.tipo in ("integer", "float") and n.tipo in ("integer", "float") and n.limpiar_numero
+                and (not a.limpiar_numero or n.decimal != a.decimal)):
+            base["cambian"].append({"campo": nombre, "antes": _tipo(a), "ahora": "número con símbolos o separadores"})
+            continue
+        if a.tipo in _ACEPTA and (_ACEPTA[a.tipo] is None or n.tipo in _ACEPTA[a.tipo]):
+            continue
+        if _tipo(a) != _tipo(n):
+            base["cambian"].append({"campo": nombre, "antes": _tipo(a), "ahora": _tipo(n)})
+    return {**base, "compatible": not (base["faltan"] or base["sobran"] or base["cambian"])}
+
+
+def explicar_diferencias(comp: dict) -> str:
+    """La comparación en una frase para el SA."""
+    if not comp.get("verificable"):
+        return "No se puede verificar automáticamente la estructura de este formato."
+    if comp.get("formato_nuevo"):
+        return (f"El archivo nuevo no tiene el formato del caso ({comp['formato']}, y el nuevo es "
+                f"{comp['formato_nuevo']}): eso es un caso nuevo, no otros datos para este.")
+    partes = []
+    if comp["faltan"]:
+        partes.append("le faltan " + ", ".join(comp["faltan"]))
+    if comp["sobran"]:
+        partes.append("trae campos que el caso no tiene: " + ", ".join(comp["sobran"]))
+    for c in comp["cambian"]:
+        palabra = lambda t: _TIPO_EN_PALABRAS.get(t.split(" ")[0], t) + (" " + t.split(" ", 1)[1] if " " in t else "")  # noqa: E731
+        partes.append(f"{c['campo']} era {palabra(c['antes'])} y ahora es {palabra(c['ahora'])}")
+    return ("El archivo nuevo no tiene la misma estructura: " + "; ".join(partes) + ".") if partes else ""
+
+
+def replace_dataset(slug: str, log_text: str, replaced_by: str = "") -> dict:
+    """Le cambia el archivo al caso (mismo nombre, así en el bucket queda uno
+    solo) sin tocar su definición. La estructura la verifica quien llama."""
+    case = get_case(slug)
+    if case is None:
+        raise CaseError(f"No existe el caso '{slug}'.")
+    if case.get("case_type", "dataset") != "dataset":
+        raise CaseError("Este caso no tiene dataset: lee los datos de su fuente en cada deploy.")
+    if len((log_text or "").encode("utf-8")) > _MAX_LOG_BYTES:
+        raise CaseError("El dataset supera los 50 MB.")
+    lineas = _data_lines(log_text)
+    if not lineas:
+        raise CaseError("El archivo no tiene datos.")
+    d = cases_dir()
+    destino = dataset_path(slug)
+    if destino is None:
+        nombre = (case.get("dataset_files") or [f"{slug}.log"])[0]
+        (d / slug).mkdir(parents=True, exist_ok=True)
+        destino = d / slug / nombre
+    destino.write_bytes(log_text.encode("utf-8"))      # bytes: en Windows write_text traduce los \n
+    case["dataset_reemplazado"] = {"por": (replaced_by or "").lower(), "en": int(time.time()),
+                                   "lineas_antes": case.get("lines", 0)}
+    case["lines"] = len(lineas)
+    (d / f"{slug}.json").write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
+    return case
+
+
 def delete_case(slug: str) -> bool:
     """Borra el caso y su dataset. True si existía."""
     case = get_case(slug)

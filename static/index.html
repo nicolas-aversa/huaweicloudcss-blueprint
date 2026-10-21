@@ -5008,6 +5008,63 @@
       }
     }
 
+    // Reemplazar el dataset de un caso creado: otros datos con la MISMA
+    // estructura. La definición del caso (campos, roles, nombres, plugins) y los
+    // dashboards guardados no se tocan, así que todo lo armado se adapta solo a
+    // los datos nuevos. El backend verifica la estructura y revalida creador/admin.
+    async function reemplazarDataset(slug) {
+      const label = LOG_EXAMPLES.find(x => x.id === slug)?.label || slug;
+      const ok = await confirmModal({
+        title: 'Reemplazar el dataset',
+        message: `Elegí el archivo nuevo de "${label}". Tiene que tener los mismos campos que el actual: `
+          + 'se verifica antes de reemplazar. El cambio es para todos los que despliegan este caso; '
+          + 'lo que se armó sobre él (dashboards guardados, plugins) se adapta a los datos nuevos.',
+        confirmLabel: 'Elegir archivo',
+      });
+      if (!ok) return;
+      const archivo = await new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.addEventListener('change', () => resolve(input.files && input.files[0]), { once: true });
+        input.click();
+      });
+      if (!archivo) return;
+      if (archivo.size > 50 * 1024 * 1024) { toast('El archivo supera los 50 MB.', 'error'); return; }
+      const contenido = await archivo.text();
+      const enviar = (forzar) => fetch(`/api/v1/cases/${encodeURIComponent(slug)}/dataset`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ log_content: contenido, forzar }),
+      });
+      try {
+        toast(`Verificando "${archivo.name}"…`, 'info', 2500);
+        let res = await enviar(false);
+        let d = await res.json().catch(() => ({}));
+        if (res.status === 409 && d?.detail?.stage === 'dataset_sin_verificar') {
+          const igual = await confirmModal({ title: 'No se pudo verificar', message: d.detail.message, confirmLabel: 'Reemplazar igual' });
+          if (!igual) return;
+          res = await enviar(true);
+          d = await res.json().catch(() => ({}));
+        }
+        if (!res.ok) {
+          if (d?.detail?.stage === 'dataset_incompatible') {
+            await confirmModal({ title: 'No se reemplazó', message: d.detail.message, confirmLabel: 'Entendido' });
+            return;
+          }
+          throw new Error(d?.detail?.message || d?.detail || `HTTP ${res.status}`);
+        }
+        await refreshVerticals();
+        revisarBucket();
+        const n = (x) => Number(x || 0).toLocaleString('es-AR');
+        const vacias = (d.comparacion?.vacias || []);
+        toast(`Dataset de "${label}" reemplazado (${n(d.lineas_antes)} → ${n(d.case?.lines)} líneas).`
+          + (d.uploaded ? ' Ya está en tu bucket.' : ` No se pudo subir a tu bucket (${d.upload_error}): lo sube el próximo deploy.`)
+          + ' Si el caso está en tu entorno: Reiniciar ingesta borrando los índices y después Volver a activar los plugins.'
+          + (vacias.length ? ` Ojo: en el archivo nuevo vienen vacíos ${vacias.join(', ')}.` : ''), 'success', 0);
+      } catch (err) {
+        toast('No se pudo reemplazar el dataset: ' + err.message, 'error', 0);
+      }
+    }
+
     // Autosugiere índice + prefijo OBS según el tipo de caso.
     function _setExampleIndex(indexBase) {
       const idx = document.getElementById('output-index');
@@ -9707,6 +9764,8 @@
       menu.setAttribute('role', 'menu');
       menu.innerHTML = `<button type="button" role="menuitem" class="card-menu__item" data-accion="runbook" data-caso="${escapeHtml(id)}">`
         + `${icon('download')}<span><strong>Exportar runbook</strong><small>Los pasos y los archivos para que el cliente lo despliegue en su cluster</small></span></button>`
+        + (e && e.custom && !FAMILIAS[id] ? `<button type="button" role="menuitem" class="card-menu__item" data-accion="reemplazar" data-caso="${escapeHtml(id)}">`
+          + `${icon('upload')}<span><strong>Reemplazar dataset</strong><small>Otros datos con la misma estructura: lo que se armó sobre el caso se adapta solo</small></span></button>` : '')
         + (propio ? `<button type="button" role="menuitem" class="card-menu__item card-menu__item--peligro" data-accion="borrar" data-caso="${escapeHtml(id)}">`
           + `${icon('trash')}<span><strong>Borrar dataset</strong></span></button>` : '');
       document.body.appendChild(menu);
@@ -9743,6 +9802,7 @@
         const id = item.dataset.caso;
         cerrarMenuDeCard();
         if (item.dataset.accion === 'runbook') return exportarRunbook(id);
+        if (item.dataset.accion === 'reemplazar') return reemplazarDataset(id);
         if (FAMILIAS[id]) return deleteCustomCase(FAMILIAS[id].miembros, FAMILIAS[id].label);
         return deleteCustomCase(id, LOG_EXAMPLES.find(x => x.id === id)?.label || id);
       }
