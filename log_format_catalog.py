@@ -706,6 +706,21 @@ CATALOG: list[FormatEntry] = [
 ]
 
 
+def detect_fix(lines: list[str]) -> bool:
+    import fix_formato
+    return fix_formato.es_fix(lines)
+
+
+def generate_fix(lines: list[str]) -> dict:
+    import fix_formato
+    return fix_formato.generar(lines)
+
+
+# FIX va primero: un log de QuickFIX/J por SLF4J empieza como un log4j (fecha,
+# nivel, hilo, logger) y log4j se lo llevaría sin decodificar un solo tag.
+CATALOG.insert(0, FormatEntry("fix", detect_fix, generate_fix, True))
+
+
 def try_match(lines: list[str]) -> dict | None:
     """Itera el catálogo y devuelve el primer formato que matchee.
 
