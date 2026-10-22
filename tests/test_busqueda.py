@@ -1017,3 +1017,19 @@ def test_la_cobertura_se_mide_en_el_cluster(monkeypatch):
                                     ["fix.msg_type", "fix.contraparte"])
     assert cob == {"fix.msg_type": 0.0, "fix.contraparte": 0.95}
     assert main._cobertura_de_cortes("http://x", "u", "p", {}, "x", "", ["a"]) is None
+
+
+def test_reiniciar_la_ingesta_borrando_indices_descarta_las_preguntas(tmp_path):
+    """Se guardan la primera vez y no hay otro momento en que se rehagan: con los
+    datos nuevos, las de antes podían preguntar por cosas que ya no están."""
+    import json as _json
+    archivo = tmp_path / main._PREGUNTAS_NAME
+    archivo.write_text(_json.dumps({"fix-oms": {"preguntas": ["vieja"]}, "otro": {"preguntas": ["sigue"]}}),
+                       encoding="utf-8")
+    main._olvidar_preguntas_por_significado(tmp_path, ["fix-oms"])
+    assert _json.loads(archivo.read_text(encoding="utf-8")) == {"otro": {"preguntas": ["sigue"]}}
+    main._olvidar_preguntas_por_significado(tmp_path / "no-existe", ["x"])     # sin archivo: nada
+    import inspect
+    fuente = inspect.getsource(main)
+    assert fuente.index("_clear_case_indices(request, _cluster_with_public_access(terraform_dir))") < \
+        fuente.index("_olvidar_preguntas_por_significado(\n                terraform_dir")

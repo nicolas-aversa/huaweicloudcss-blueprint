@@ -3979,6 +3979,11 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
                 _clear_case_indices(request, _cluster_with_public_access(terraform_dir))
             except Exception as exc:
                 print(f"[deploy-stream] clear-index falló (best-effort): {exc!r}")
+            # Los datos cambian: las preguntas de búsqueda que se armaron con los
+            # de antes ya no valen (no hay otro momento en que se rehagan).
+            _olvidar_preguntas_por_significado(
+                terraform_dir, [c.slug for c in request.cases] if request.cases
+                else [(request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)])
         # Security Analytics: sus índices y sus detectores, ANTES de que Logstash
         # arranque (el detector solo sigue a un índice que ya existía).
         yield from _preparar_seguridad_para_ingesta(request, terraform_dir)
@@ -9240,6 +9245,20 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
 # Las preguntas del asistente por significado, por caso: como las sugeridas,
 # llevan al LLM y una búsqueda por tema, no se rehacen cada vez que se abre el chat.
 _PREGUNTAS_NAME = ".preguntas_por_significado.json"
+
+
+def _olvidar_preguntas_por_significado(terraform_dir: Path, slugs: list[str]) -> None:
+    """Las preguntas guardadas de esos casos se descartan: la próxima vez que se
+    abra el chat se arman con los datos que hay ahora."""
+    archivo = terraform_dir / _PREGUNTAS_NAME
+    try:
+        guardadas = json.loads(archivo.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return
+    if isinstance(guardadas, dict) and any(s in guardadas for s in slugs):
+        for s in slugs:
+            guardadas.pop(s, None)
+        archivo.write_text(json.dumps(guardadas, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _cobertura_de_cortes(base: str, user: str, password: str, entry: dict, slug: str, campo: str,
