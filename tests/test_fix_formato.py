@@ -241,3 +241,13 @@ def test_el_rechazo_del_oms_se_cuenta_con_los_del_mercado():
              "Saldo insuficiente")
     assert "Saldo insuficiente" in ff.decodificar(linea, "slf4j")["fix.rechazo_motivo"]
     assert "fix.rechazo_motivo" not in ff.decodificar(EVENTO_HB, "slf4j")
+
+
+def test_un_evento_hereda_de_la_sesion_el_mercado_y_el_participante():
+    """"¿Cuántas desconexiones por mercado?" daba todo null: el evento no tenía
+    contraparte. La sesión (`FIXT.1.1:AL042->A3`) la dice."""
+    d = ff.decodificar("2026-10-20 17:15:00.085 INFO  [QFJ Timer] quickfixj.event - FIXT.1.1:AL042->A3: Disconnecting",
+                       "slf4j")
+    assert (d["fix.contraparte"], d["fix.comp_id_propio"]) == ("A3", "AL042")
+    sin_sesion = ff.decodificar("2026-10-13 11:00:01.000 WARN  [jvm] oms.jvm - GC pause 1.1 s", "slf4j")
+    assert "fix.contraparte" not in sin_sesion

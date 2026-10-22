@@ -9242,6 +9242,34 @@ def sugerencias_de_busqueda(slug: str, nuevas: bool = False) -> dict:
 _PREGUNTAS_NAME = ".preguntas_por_significado.json"
 
 
+def _cobertura_de_cortes(base: str, user: str, password: str, entry: dict, slug: str, campo: str,
+                         rutas: list[str]) -> "dict[str, float] | None":
+    """Ruta → qué parte de los registros del caso con texto en `campo` la trae.
+    None si no se pudo medir (se ofrecen todas, como antes)."""
+    if not campo or not rutas:
+        return None
+    indice = index_pattern_from_name(entry.get("index") or f"{slug}-%{{+YYYY.MM}}")
+
+    def contar(*campos: str) -> "int | None":
+        r = _os_req("POST", f"{base}/{indice}/_count", user, password, timeout=20, json_body={
+            "query": {"bool": {"filter": [{"exists": {"field": c}} for c in campos]}}})
+        try:
+            return int(r.json().get("count")) if _resp_ok(r) else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    total = contar(campo)
+    if not total:
+        return None
+    cobertura: dict[str, float] = {}
+    for ruta in rutas[:12]:
+        n = contar(campo, ruta)
+        if n is None:
+            return None
+        cobertura[ruta] = n / total
+    return cobertura
+
+
 @app.get("/api/v1/plugins/busqueda/preguntas", tags=["capabilities"],
          summary="Preguntas para el asistente que muestran la búsqueda por significado, probadas contra el índice")
 def preguntas_por_significado(slug: str, nuevas: bool = False) -> dict:
@@ -9273,7 +9301,10 @@ def preguntas_por_significado(slug: str, nuevas: bool = False) -> dict:
         return {"preguntas": [], "motivo": "El índice todavía no tiene textos"}
     entry = _read_pipelines_registry(terraform_dir).get(slug) or {}
     label = _label_del_caso(slug, entry)
-    cortes = busqueda.cortes_de(_campos_del_caso(slug, entry), caso.get("campo", ""))
+    campos_del_caso = _campos_del_caso(slug, entry)
+    cortes = busqueda.cortes_de(campos_del_caso, caso.get("campo", ""),
+                                _cobertura_de_cortes(base, user, password, entry, slug, caso.get("campo", ""),
+                                                     busqueda.candidatos_a_corte(campos_del_caso, caso.get("campo", ""))))
     medidas: list[dict] = []
     vistos: list[dict] = []
     for tanda in range(busqueda.TANDAS_DE_TEMAS):

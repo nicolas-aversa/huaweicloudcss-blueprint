@@ -844,6 +844,8 @@ def test_preguntas_por_significado(monkeypatch, tmp_path):
     rotos = [x["texto"] for x in _FILAS[:3]]
 
     def req(m, u, user, password, json_body=None, timeout=30, headers=None):
+        if u.endswith("/_count"):           # la cobertura de los cortes: el servicio está en todos
+            return _R(200, {"count": 10})
         pedidos.append(u.replace("http://x", ""))
         if json_body.get("sort"):
             assert json_body["size"] == busqueda.MUESTRA_PARA_TEMAS
@@ -980,3 +982,38 @@ def test_un_texto_libre_que_sirve_gana_a_un_codigo(monkeypatch):
     _cluster_de_campos(monkeypatch, {"event.action": (300, ["E30", "E48"])})
     r = main._provisionar_busqueda("http://x", "a", "p", "s", "s-*", [F("event.action")], "M1", False)
     assert not r["ok"] and r["no_aplica"] and "sin palabras" in r["reason"]
+
+
+# ── Cortes que acompañan al texto ───────────────────────────────────────────
+def test_los_cortes_son_las_dimensiones_que_acompanan_al_texto():
+    """En un log con registros de varias clases (eventos y mensajes), el texto de
+    los eventos no tiene "tipo de mensaje": la pregunta salía «¿… por tipo de
+    mensaje?» y el agente se quedaba sin vueltas contando nulls."""
+    fields = [{"field_path": "fix.evento", "type": "text"},
+              {"field_path": "fix.msg_type", "dimension": True, "business_label": "Tipo de mensaje"},
+              {"field_path": "fix.contraparte", "dimension": True, "business_label": "Mercado"}]
+    assert busqueda.candidatos_a_corte(fields, "fix.evento") == ["fix.msg_type", "fix.contraparte"]
+    assert busqueda.cortes_de(fields, "fix.evento") == ["Tipo de mensaje", "Mercado"]
+    assert busqueda.cortes_de(fields, "fix.evento", {"fix.msg_type": 0.0, "fix.contraparte": 1.0}) == ["Mercado"]
+
+
+def test_la_cobertura_se_mide_en_el_cluster(monkeypatch):
+    import main
+
+    class _R:
+        def __init__(self, n):
+            self.status_code, self.text, self._n = 200, "{}", n
+
+        def json(self):
+            return {"count": self._n}
+
+    def _contar(metodo, url, user, password, timeout=0, json_body=None):
+        campos = [f["exists"]["field"] for f in json_body["query"]["bool"]["filter"]]
+        return _R({("fix.evento",): 100, ("fix.evento", "fix.msg_type"): 0,
+                   ("fix.evento", "fix.contraparte"): 95}[tuple(campos)])
+
+    monkeypatch.setattr(main, "_os_req", _contar)
+    cob = main._cobertura_de_cortes("http://x", "u", "p", {"index": "fix-oms-%{+YYYY.MM}"}, "fix-oms", "fix.evento",
+                                    ["fix.msg_type", "fix.contraparte"])
+    assert cob == {"fix.msg_type": 0.0, "fix.contraparte": 0.95}
+    assert main._cobertura_de_cortes("http://x", "u", "p", {}, "x", "", ["a"]) is None

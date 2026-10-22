@@ -20,8 +20,8 @@ def test_el_comentario_entra_como_texto_libre():
     spec = capabilities.build_spec_from_fields("reviews-ordenes", "reviews-ordenes-*", RESENAS, "Reseñas")
     campos = spec["fields"]
     assert "free text" in campos["review_comment_message"]
-    assert "match(review_comment_message.es, 'palabras')" in campos["review_comment_message"]
-    assert "match(review_comment_message.en, 'words')" in campos["review_comment_message"]
+    assert "multi_match(['review_comment_message.es'], 'palabras')" in campos["review_comment_message"]
+    assert "multi_match(['review_comment_message.en'], 'words')" in campos["review_comment_message"]
     assert "fields review_comment_message | head 30" in campos["review_comment_message"]
     # Un string (keyword) se lee, pero `match` es para campos de texto.
     assert "free text" in campos["review_comment_title"] and "match(" not in campos["review_comment_title"]

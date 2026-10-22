@@ -233,6 +233,11 @@ def decodificar(linea: str, tipo_de_envoltorio: str) -> dict:
     if not _HAY_FIX.search(" " + payload):
         out["fix.evento"] = payload
         out["fix.capa"] = "evento"
+        if g.get("session"):
+            # La sesión dice quién opera y con quién: un evento (una desconexión,
+            # un salto de secuencia) también se reparte por mercado y participante.
+            propio, _, contra = g["session"].split(":", 1)[-1].partition("->")
+            out["fix.comp_id_propio"], out["fix.contraparte"] = propio, contra
         out["fix.tipo_evento"] = next((t for rx, t in EVENTOS if re.search(rx, payload)), "otro")
         if out["fix.tipo_evento"] == "rechazo":
             # Un rechazo que no viene en un mensaje FIX (el control de riesgo del
@@ -358,6 +363,11 @@ _RUBY_CODIGO = r"""
           if desde.nil?
             event.set("[fix][evento]", payload)
             event.set("[fix][capa]", "evento")
+            if g["session"]
+              lados = g["session"].split(":", 2)[1].to_s.split("->")
+              event.set("[fix][comp_id_propio]", lados[0].to_s)
+              event.set("[fix][contraparte]", lados[1].to_s)
+            end
             tipo = "otro"
             FIX_EVENTOS.each do |par|
               if payload =~ par[0]

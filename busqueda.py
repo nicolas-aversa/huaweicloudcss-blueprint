@@ -527,15 +527,32 @@ def _clave(texto: Any) -> str:
 _CORTES_EN_EL_PROMPT = 8
 
 
-def cortes_de(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
+# Qué parte de los registros con el texto tiene que traer la dimensión para
+# ofrecerla como corte. En un log con registros de varias clases (en FIX, los
+# eventos de la sesión y los mensajes), el texto de los eventos no tiene "tipo
+# de mensaje": la pregunta salía "¿… por tipo de mensaje?" y todo daba null.
+COBERTURA_DEL_CORTE = 0.5
+
+
+def candidatos_a_corte(fields: list[dict[str, Any]], campo: str = "") -> list[str]:
+    """Las rutas de las dimensiones del caso, sin el campo de los textos."""
+    return [r for r in ((f.get("field_path") or "").strip() for f in fields or [] if f.get("dimension"))
+            if r and r != campo]
+
+
+def cortes_de(fields: list[dict[str, Any]], campo: str = "",
+              cobertura: "dict[str, float] | None" = None) -> list[str]:
     """Por qué se puede repartir: las dimensiones del caso (su nombre de
     negocio si lo tiene), sin el campo de los textos. Sin la lista, las
     preguntas pedían "en qué barrios" o "en qué rango de edad" a datos que no
-    los tienen."""
+    los tienen. Con `cobertura` (ruta → qué parte de los registros con texto la
+    trae, medida en el cluster), solo las que acompañan al texto."""
     fuera: list[str] = []
     for f in fields or []:
         ruta = (f.get("field_path") or "").strip()
         if not f.get("dimension") or not ruta or ruta == campo:
+            continue
+        if cobertura is not None and cobertura.get(ruta, 0.0) < COBERTURA_DEL_CORTE:
             continue
         nombre = (f.get("business_label") or "").strip() or ruta.rsplit(".", 1)[-1].replace("_", " ")
         if nombre.lower() not in (x.lower() for x in fuera):
