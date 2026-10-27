@@ -7823,6 +7823,10 @@
             body: JSON.stringify({
               question, slug, history, investigar, contexto, memory_id: capChatMemoria[slug] || '',
               explicar_desde: explicar?.desde || '', explicar_hasta: explicar?.hasta || '',
+              // La hora del navegador: los datos están en UTC y el dashboard
+              // muestra la hora local; la respuesta tiene que coincidir.
+              utc_offset_min: -new Date().getTimezoneOffset(),
+              zona_horaria: (Intl.DateTimeFormat().resolvedOptions().timeZone || '').slice(0, 60),
               opensearch_password: state.osPassword || '',
               opensearch_user: state.osUser || 'admin',
               https_enabled: state.httpsEnabled,   // undefined → el backend lo deriva del state

@@ -10514,6 +10514,11 @@ class PplChatRequest(BaseModel):
     explicar_hasta: str = Field(default="", max_length=30)
     # La conversación con el agente de OpenSearch (la guarda ml-commons).
     memory_id: str = Field(default="", max_length=100)
+    # La hora del usuario (la del navegador): los datos están en UTC y el
+    # dashboard muestra la hora local; las respuestas tienen que coincidir.
+    # Minutos por delante de UTC (-180 en Argentina) y el nombre de la zona.
+    utc_offset_min: int | None = Field(default=None, ge=-840, le=840)
+    zona_horaria: str = Field(default="", max_length=60)
 
 
 class PplChatResponse(BaseModel):
@@ -10979,7 +10984,9 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
     # para que el modelo apunte al vertical correcto. Sin esto, el _predict directo usa
     # el default del connector (que quedó con OTRO vertical) y responde sobre el índice
     # equivocado. El agente/DevTools no tiene el problema: cada PPLTool pasa su prompt.
+    import agente_chat
     import capabilities as caps
+    zona = agente_chat.aviso_de_zona(request.utc_offset_min, request.zona_horaria)
     predict_params: dict = {"prompt": request.question}
     # Por `_resolve_capability_spec` y no por `_CAPABILITY_SPECS`: ese dict solo
     # tiene los verticals del repo, así que un caso creado desde el Builder se
@@ -11009,13 +11016,15 @@ def ppl_chat(request: PplChatRequest) -> PplChatResponse:
                 "If the user names a month or period without a year, choose the year that falls within this window."
             )
         _sp += _reglas_del_chat(ppl_v3)
+        if zona:
+            _sp += f"\n\nUSER TIME ZONE: {zona}"
         predict_params["system_prompt"] = _sp.replace("\n", "\\n")
 
     def _predecir_ppl(prompt: str):
         return _ml_predict(base, user, password, ppl_model, {**predict_params, "prompt": prompt})
 
     def _predecir_llm(prompt: str):
-        return _ml_predict(base, user, password, llm_model, {"prompt": prompt})
+        return _ml_predict(base, user, password, llm_model, {"prompt": prompt + (f"\n\n{zona}" if zona else "")})
 
     def _ejecutar(ppl: str):
         r = _os_req("POST", f"{base}/_plugins/_ppl", user, password, json_body={"query": ppl}, timeout=30)
@@ -11058,7 +11067,9 @@ def _conversar_con_el_agente(base: str, user: str, password: str, agente: str, r
     (tabla y gráfico) y los documentos. None si el agente no contestó."""
     import agente_chat
 
-    params = {"question": agente_chat.pregunta_para_el_agente(request.question, fuente, indice, request.contexto)}
+    params = {"question": agente_chat.pregunta_para_el_agente(
+        request.question, fuente, indice, request.contexto,
+        agente_chat.aviso_de_zona(request.utc_offset_min, request.zona_horaria))}
     if request.memory_id:
         params["memory_id"] = request.memory_id
 

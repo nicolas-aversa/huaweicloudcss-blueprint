@@ -20,15 +20,48 @@ from typing import Any
 _FALLO = "Failed to run the tool"
 
 
-def pregunta_para_el_agente(pregunta: str, fuente: str = "", indice: str = "", contexto: str = "") -> str:
+_NOMBRE_DE_ZONA = re.compile(r"^[A-Za-z0-9_/+\-]{1,60}$")
+
+
+def _duracion(minutos: int) -> str:
+    h, m = divmod(abs(minutos), 60)
+    if not m:
+        return "1 hora" if h == 1 else f"{h} horas"
+    return f"{h} h {m} min" if h else f"{m} min"
+
+
+def aviso_de_zona(offset_min: "int | None", zona: str = "") -> str:
+    """Cómo pasar entre las fechas de los datos (`@timestamp` en UTC) y la
+    hora del usuario. Sin esto el asistente contestaba "18:00 UTC" a quien
+    mira el dashboard en Argentina, que muestra 15:00, y filtraba "el 15 de
+    octubre" como día UTC. "" si el usuario está en UTC o no se sabe.
+    `offset_min`: minutos que la hora local está por delante de UTC (-180 en
+    Argentina)."""
+    if not offset_min:
+        return ""
+    h, m = divmod(abs(offset_min), 60)
+    utc = f"UTC{'+' if offset_min > 0 else '-'}{h:02d}:{m:02d}"
+    nombre = f"{zona} ({utc})" if zona and _NOMBRE_DE_ZONA.match(zona) else utc
+    a_local = ("sumá " if offset_min > 0 else "restá ") + _duracion(offset_min)
+    a_utc = ("restá " if offset_min > 0 else "sumá ") + _duracion(offset_min)
+    return (f"Las fechas de los datos están en UTC y el usuario está en {nombre}. Si nombra un día o una hora, "
+            f"es en su zona: para filtrar, pasala a UTC ({a_utc}). En la respuesta, mostrá las horas en su zona "
+            f"({a_local} a las de los datos) sin decir UTC; un día de un agrupamiento por día queda como está.")
+
+
+def pregunta_para_el_agente(pregunta: str, fuente: str = "", indice: str = "", contexto: str = "",
+                            zona: str = "") -> str:
     """La pregunta con lo que el usuario está mirando: el agente decide la
-    herramienta, pero "¿cuántos hay?" sin fuente es ambiguo."""
+    herramienta, pero "¿cuántos hay?" sin fuente es ambiguo. `zona`: el
+    `aviso_de_zona` del usuario."""
     partes = [pregunta.strip()]
     if fuente:
         partes.append(f"(El usuario está mirando los datos de {fuente}" + (f", índice {indice}" if indice else "") +
                       "; si la pregunta no dice otra cosa, se refiere a esos datos.)")
     if contexto:
         partes.append(f"(Contexto: {contexto.strip()})")
+    if zona:
+        partes.append(f"({zona})")
     return "\n".join(partes)
 
 
