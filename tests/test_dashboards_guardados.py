@@ -101,6 +101,20 @@ def test_un_index_pattern_de_un_sa_viaja_con_lo_que_lo_usa():
     assert set(elegidos) == {"visualization:v-2026", "index-pattern:billetera-2026*"}
 
 
+def test_un_panel_de_texto_viaja_con_el_dashboard_que_lo_usa():
+    # Un markdown no apunta a nada: es del caso porque lo usa un dashboard del caso.
+    texto = _obj("visualization", "v-texto", visState=json.dumps({"type": "markdown"}))
+    otro_texto = _obj("visualization", "v-texto-2", visState=json.dumps({"type": "markdown"}))
+    tablero = _obj("dashboard", "d-mio", [("visualization", "v-texto"), ("visualization", "v-montos")])
+    editado = {"dashboard:d-billetera": {"updated_at": DESPUES, "attributes": {"title": "d-billetera", "panelsJSON": "[1,2]"},
+                                         "references": [{"type": "visualization", "id": "v-montos", "name": "r0"},
+                                                        {"type": "visualization", "id": "v-texto-2", "name": "r1"}]}}
+    suelto = _obj("visualization", "v-texto-de-nadie", visState=json.dumps({"type": "markdown"}))
+    elegidos = dg.del_caso(_en_kibana(texto, otro_texto, tablero, suelto, cambios=editado), _plataforma())
+    assert _estados(elegidos) == {"dashboard:d-mio": "nuevo", "visualization:v-texto": "nuevo",
+                                  "dashboard:d-billetera": "modificado", "visualization:v-texto-2": "nuevo"}
+
+
 def test_lo_ya_guardado_igual_no_se_vuelve_a_guardar():
     viz = _obj("visualization", "v-mia", [("index-pattern", "billetera-*")])
     elegidos = dg.del_caso(_en_kibana(viz), _plataforma())

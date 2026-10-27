@@ -148,11 +148,18 @@ def del_caso(en_kibana: dict[str, dict], plataforma: dict[str, dict]) -> dict[st
                 elegidos[k] = _limpio(o, "nuevo")
                 del_caso.add(k)
                 agregado = True
-    # Un index pattern que creó un SA y usa algo de lo elegido viaja con ello.
-    usados = {f"{r.get('type')}:{r.get('id')}" for o in elegidos.values() for r in o["references"]}
-    for k in usados:
-        if k.startswith("index-pattern:") and k in en_kibana and k not in plataforma:
-            elegidos[k] = _limpio(en_kibana[k], "nuevo")
+    # Lo que usa algo de lo elegido viaja con ello, aunque no apunte al caso: un
+    # index pattern que creó un SA, o un panel de texto (markdown, sin
+    # referencias) que un SA puso en un dashboard del caso. Sin esto, el
+    # dashboard guardado quedaba con un panel roto en el próximo deploy.
+    pendientes = list(elegidos.values())
+    while pendientes:
+        o = pendientes.pop()
+        for r in o["references"]:
+            k = f"{r.get('type')}:{r.get('id')}"
+            if k in en_kibana and k not in plataforma and k not in elegidos:
+                elegidos[k] = _limpio(en_kibana[k], "nuevo")
+                pendientes.append(elegidos[k])
     return elegidos
 
 
