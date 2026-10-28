@@ -121,6 +121,47 @@ def _sujeto(filas: str) -> tuple[str, str]:
     return "registros", "Cuántos"
 
 
+def _agrupa(f: dict) -> bool:
+    """Un id único por fila (el perfil no le encontró valores frecuentes) no
+    agrupa: "¿qué ID de trabajo tuvo más fallas?" no tiene respuesta."""
+    return bool(f.get("frecuentes")) or "frecuentes" not in f
+
+
+def _de_incidentes(fields: list[dict], critico: "dict | None", primaria: "dict | None", hay_fecha: bool,
+                   cosas: str, cuantas: str, _et) -> list[str]:
+    from capabilities import _NIVELES_DE_PROBLEMA
+    from dashboards import _NIVEL_DE_LOG, _clasificar
+
+    quien = next((f for f in fields if (f.get("entity") or f.get("role") == "entity_id")
+                  and f.get("type") not in _NUMERICOS and _agrupa(f)), None)
+    nivel = next((f for f in fields if f.get("type") in ("string", "keyword", "text")
+                  and _NIVEL_DE_LOG.search(f.get("field_path") or "")), None)
+    malos = [str(v) for v in (nivel or {}).get("frecuentes") or [] if _NIVELES_DE_PROBLEMA.match(str(v))]
+    por_ruta = {(f.get("field_path") or "").strip(): f for f in fields}
+    duracion = next((por_ruta.get(c["path"]) for c in _clasificar(fields)["duraciones"]), None)
+    qs: list[str] = []
+    if critico:
+        # "con motivo del rechazo" / "marcadas como fraude" (un 0/1 no "tiene" nada).
+        if critico.get("type") in _NUMERICOS:
+            con = f"marcad{'as' if cuantas == 'Cuántas' else 'os'} como {_et(critico)}"
+        else:
+            con = f"con {_et(critico)}"
+        if quien:
+            qs.append(f"¿Qué {_et(quien)} tuvo más {cosas} {con}"
+                      + (", y cuál fue el más frecuente?" if critico.get("type") not in _NUMERICOS else "?"))
+        if hay_fecha:
+            qs.append(f"¿Qué día hubo más {cosas} {con}" + (f", y de qué {_et(quien)}?" if quien else "?"))
+    if malos and hay_fecha:
+        qs.append(f"¿{cuantas} {cosas} con {_et(nivel)} {' o '.join(malos[:2])} hubo por día?")
+    if duracion and primaria:
+        qs.append(f"¿Cuál fue el promedio y el máximo de {_et(duracion)} por {_et(primaria)}?")
+    if critico and primaria and hay_fecha and primaria is not quien:
+        qs.append(f"¿{cuantas} {cosas} {con} hubo por {_et(primaria)} cada día?")
+    if duracion and quien and hay_fecha:
+        qs.append(f"¿Cuándo hubo picos de {_et(duracion)} y qué {_et(quien)} tuvo los valores más altos?")
+    return qs
+
+
 def plantillas(fields: list[dict], filas: str = "") -> list[str]:
     fields = [f for f in fields or [] if isinstance(f, dict) and _etiqueta(f)]
     exito = _con_rol(fields, "success_indicator")
@@ -166,6 +207,11 @@ def plantillas(fields: list[dict], filas: str = "") -> list[str]:
         return f"¿Cuál es el total de {' '.join(sin_total or palabras)}{donde}?"
 
     qs: list[str] = []
+    # Primero las de un incidente, las que mejor contestó el asistente en un
+    # OMS: quién tuvo más problemas y de qué, qué día hubo un pico, cuántos
+    # errores por día, cuánto tarda y cuándo tardó más. Salen de los mismos
+    # roles que el dashboard (Problemas y Tiempos).
+    qs += _de_incidentes(fields, critico, primaria, hay_fecha, cosas, cuantas, _et)
     if exito:
         qs.append(f"¿{cuantas} {cosas} hay de cada {_et(exito)}?")
     if hay_fecha:

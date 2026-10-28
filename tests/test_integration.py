@@ -4779,17 +4779,20 @@ def test_el_indicador_de_exito_parte_la_serie_en_el_tiempo():
 
 
 def test_el_indicador_critico_sale_como_metrica_y_como_barras():
-    """Es el campo que SOLO aparece cuando algo salió mal: cuántos fallaron y
-    dónde fallan."""
-    paneles = _paneles([
+    """Es el campo que SOLO aparece cuando algo salió mal: cuántos fallaron (en
+    el Resumen) y dónde fallan (en Problemas, con sus motivos)."""
+    from dashboards import _tableros_desde_campos
+    resumen, problemas = _tableros_desde_campos("my-log", "logs-%{+YYYY.MM}", [
         _campo("data.error_code", "keyword", role="critical_indicator"),
         _campo("data.canal", "keyword", role="primary_dimension"),
     ])
 
-    metrica = [p for p in paneles if p["type"] == "metric" and p.get("query") == "data.error_code:*"]
-    barras = [p for p in paneles if p["type"] == "bar" and p.get("field") == "data.error_code"]
-    assert metrica, [p for p in paneles if p["type"] == "metric"]
-    assert barras, [p["type"] for p in paneles]
+    metrica = [p for p in resumen["panels"] if p["type"] == "metric" and p.get("query") == "data.error_code:*"]
+    barras = [p for p in problemas["panels"] if p["type"] == "bar" and p.get("field") == "data.error_code"]
+    assert metrica, [p for p in resumen["panels"] if p["type"] == "metric"]
+    assert barras, [p["type"] for p in problemas["panels"]]
+    por_canal = [p for p in problemas["panels"] if p["type"] == "bar" and p.get("field") == "data.canal"]
+    assert por_canal and por_canal[0]["query"] == "data.error_code:*", "dónde fallan"
 
 
 def test_una_entidad_sale_como_tabla_y_no_como_torta():
@@ -5043,8 +5046,9 @@ def test_build_spec_success_code_fallback_most_common():
     assert spec["success_code"] == "OK_CUSTOM"  # primer bucket = más frecuente
 
 
-def test_spec_from_fields_has_pie_chart():
-    """_spec_from_fields agrega un pie chart de la dimensión primaria."""
+def test_la_dimension_principal_tiene_su_tabla_y_no_una_torta():
+    """La dimensión principal ya no es una torta (un ranking más): tiene su
+    tabla con los eventos y las medidas, y parte la serie en el tiempo."""
     from dashboards import _spec_from_fields
 
     fields = [
@@ -5052,9 +5056,9 @@ def test_spec_from_fields_has_pie_chart():
         {"field_path": "data.category", "type": "keyword", "business_label": "Categoría", "dimension": True},
     ]
     spec = _spec_from_fields("my-log", "logs-%{+YYYY.MM}", fields)
-    pie_panels = [p for p in spec["panels"] if p["type"] == "pie"]
-    assert len(pie_panels) >= 1
-    assert "data.status" in str(pie_panels[0])
+    assert [p for p in spec["panels"] if p["type"] == "table" and p.get("field") == "data.status"]
+    assert not [p for p in spec["panels"] if p["type"] == "pie"], "sin booleanos no hay tortas"
+    assert [p for p in spec["panels"] if p["type"] == "bar" and p.get("field") == "data.category"]
 
 
 def test_spec_from_fields_has_crosstab_bar():
@@ -5142,20 +5146,19 @@ def test_build_spec_role_overrides_regex():
     assert "critical" in fc_names
 
 
-def test_spec_from_fields_uses_role_for_pie():
-    """_spec_from_fields usa role=primary_dimension para el pie chart."""
+def test_la_dimension_principal_sale_del_rol():
+    """role=primary_dimension decide cuál tiene la tabla, aunque no sea la primera."""
     from dashboards import _spec_from_fields
 
     fields = [
-        {"field_path": "data.category", "type": "keyword", "business_label": "Categoría",
-         "dimension": True, "role": "primary_dimension"},
         {"field_path": "data.status", "type": "keyword", "business_label": "Estado",
          "dimension": True},
+        {"field_path": "data.category", "type": "keyword", "business_label": "Categoría",
+         "dimension": True, "role": "primary_dimension"},
     ]
     spec = _spec_from_fields("shop", "logs-%{+YYYY.MM}", fields)
-    pies = [p for p in spec["panels"] if p["type"] == "pie"]
-    assert len(pies) >= 1
-    assert "data.category" in str(pies[0])
+    tablas = [p for p in spec["panels"] if p["type"] == "table"]
+    assert tablas and tablas[0]["field"] == "data.category"
 
 
 def test_spec_from_fields_uses_role_for_crosstab():

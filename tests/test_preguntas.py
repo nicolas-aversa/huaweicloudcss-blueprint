@@ -197,15 +197,53 @@ def test_nombrar_las_filas_alcanza_para_que_una_pregunta_del_llm_entre():
     assert qs[0] == "¿Cuántas facturas hubo?"
 
 
+# ── Primero las de un incidente (las que mejor contestó el asistente en un OMS)
+OMS = [{"field_path": "@timestamp", "type": "date", "role": "timestamp", "frecuentes": []},
+       {"field_path": "fix.msg_type", "type": "keyword", "dimension": True, "business_label": "Tipo de mensaje",
+        "role": "primary_dimension", "frecuentes": ["Orden nueva", "Reporte de ejecución"]},
+       {"field_path": "fix.rechazo_motivo", "type": "text", "role": "critical_indicator",
+        "business_label": "Motivo del rechazo", "frecuentes": []},
+       {"field_path": "fix.orden", "type": "keyword", "role": "entity_id", "business_label": "Orden", "frecuentes": []},
+       {"field_path": "fix.comp_id_propio", "type": "keyword", "role": "entity_id", "business_label": "Participante",
+        "frecuentes": ["AL067", "AL010"]},
+       {"field_path": "fix.latencia_ms", "type": "long", "role": "measure", "business_label": "Latencia (ms)"},
+       {"field_path": "log.level", "type": "keyword", "business_label": "Nivel", "frecuentes": ["INFO", "ERROR", "WARN"]}]
+
+
+def test_primero_las_de_un_incidente():
+    qs = preguntas.armar(OMS, [], "los mensajes")
+    assert qs[:6] == [
+        "¿Qué participante tuvo más mensajes con motivo del rechazo, y cuál fue el más frecuente?",
+        "¿Qué día hubo más mensajes con motivo del rechazo, y de qué participante?",
+        "¿Cuántos mensajes con nivel ERROR o WARN hubo por día?",
+        "¿Cuál fue el promedio y el máximo de latencia (ms) por tipo de mensaje?",
+        "¿Cuántos mensajes con motivo del rechazo hubo por tipo de mensaje cada día?",
+        "¿Cuándo hubo picos de latencia (ms) y qué participante tuvo los valores más altos?"], qs
+    assert not any("orden tuvo" in q for q in qs), "un id por fila no agrupa: la entidad es el participante"
+
+
+def test_las_de_incidente_dependen_de_los_datos():
+    sin_errores = [dict(f, frecuentes=["INFO", "DEBUG"]) if f["field_path"] == "log.level" else f for f in OMS]
+    assert not any("ERROR" in q or "por día" in q and "nivel" in q for q in preguntas.plantillas(sin_errores))
+    fraude = [{"field_path": "fecha", "type": "date", "role": "timestamp"},
+              {"field_path": "is_fraud", "type": "integer", "role": "critical_indicator", "business_label": "Fraude"},
+              {"field_path": "cliente", "type": "keyword", "entity": True, "frecuentes": ["Ana", "Beto"]}]
+    qs = preguntas.plantillas(fraude, "las transacciones")
+    assert "¿Qué cliente tuvo más transacciones marcadas como fraude?" in qs, "un 0/1 no tiene motivo"
+    assert "¿Qué día hubo más transacciones marcadas como fraude, y de qué cliente?" in qs
+
+
 # ── El dashboard y las preguntas dicen lo mismo ─────────────────────────────
 def test_el_dashboard_de_telemetria():
     spec = dashboards._spec_from_fields("telemetria", "telemetria-2026.09", _campos(TELEMETRIA))
     titulos = [(p["type"], p["title"]) for p in spec["panels"]]
     metricas = [t for tipo, t in titulos if tipo == "metric"]
-    # La fila de métricas entra entera: con `< 36` la medida quedaba afuera.
-    assert metricas == ["Total", "Únicos ID Trabajo", "Con Código Error", "Suma Páginas Totales"]
-    assert ("area", "Estado en el tiempo") in titulos
-    assert ("table", "Top ID Trabajo") in titulos
+    # La fila de métricas entra entera: antes la medida quedaba afuera.
+    # La entidad es Cliente y no ID Trabajo: un id por fila no agrupa (su
+    # perfil no tiene valores frecuentes), y su tabla tendría una fila por trabajo.
+    assert metricas == ["Eventos", "Con Código Error", "Cliente (distintos)", "Páginas Totales total"]
+    assert ("area", "Eventos en el tiempo por Estado") in titulos
+    assert ("table", "Por Cliente") in titulos and ("table", "Por ID Trabajo") not in titulos
     assert ("line", "Páginas Totales en el tiempo") in titulos
 
 

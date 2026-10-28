@@ -327,6 +327,96 @@ def _vs_region_map(title: str, field: str, size: int = 100) -> dict[str, Any]:
     }
 
 
+# ── Paneles del dashboard automático: series con varias métricas o partidas por
+#    consultas, percentiles, tablas de varias columnas y mapa de calor ─────────
+def _agg_metrica(_id: str, agg: str, field: "str | None", label: "str | None",
+                 percents: "list[int] | None" = None) -> dict[str, Any]:
+    a = _metric_agg(agg, field, label, _id)
+    if agg == "percentiles":
+        a["params"]["percents"] = list(percents or [50, 95, 99])
+    return a
+
+
+def _agg_filtros(_id: str, schema: str, filtros: list) -> dict[str, Any]:
+    """Una serie (o una barra) por consulta KQL: `[(consulta, nombre)]`."""
+    return {"id": _id, "enabled": True, "type": "filters", "schema": schema,
+            "params": {"filters": [{"input": {"query": q, "language": "kuery"}, "label": l} for q, l in filtros]}}
+
+
+def _metricas_del_panel(panel: dict[str, Any]) -> list[tuple]:
+    """`[(agg, campo, etiqueta, percents)]`: las de `metricas` o la única de siempre."""
+    if panel.get("metricas"):
+        return [tuple(m) + (None,) * (4 - len(m)) for m in panel["metricas"]]
+    return [(panel.get("metric") or panel.get("agg") or "count", panel.get("field") if panel.get("metric") not in
+             (None, "count") else None, panel.get("label"), panel.get("percents"))]
+
+
+def _vs_serie(panel: dict[str, Any]) -> dict[str, Any]:
+    """area / line / histogram con varias métricas (un promedio y un p99),
+    percentiles, o partida por consultas (`filtros`) o por un campo (`split`)."""
+    kind = panel["type"]
+    metricas = _metricas_del_panel(panel)
+    aggs = [_agg_metrica("1" if i == 0 else str(10 + i), agg, campo, etiqueta, percents)
+            for i, (agg, campo, etiqueta, percents) in enumerate(metricas)]
+    fecha = _datehist_agg("2")
+    partida = None
+    if panel.get("filtros"):
+        partida = _agg_filtros("3", "group", panel["filtros"])
+    elif panel.get("split"):
+        partida = _terms_agg("3", panel["split"], "group", panel.get("size", 6))
+    etiqueta = metricas[0][2] or _agg_label(metricas[0][0], metricas[0][1])
+    tipo_serie = "line" if kind == "line" else kind
+    modo = "stacked" if kind in ("area", "histogram") and partida else "normal"
+    return {
+        "title": panel["title"], "type": kind, "aggs": aggs + [fecha] + ([partida] if partida else []),
+        "params": {
+            "type": kind, "grid": {"categoryLines": False},
+            "categoryAxes": _category_axis("bottom"), "valueAxes": _value_axis(etiqueta, "left"),
+            "seriesParams": [{
+                "show": True, "type": tipo_serie, "mode": modo,
+                "data": {"label": a["params"].get("customLabel") or etiqueta, "id": a["id"]}, "valueAxis": "ValueAxis-1",
+                "drawLinesBetweenPoints": True, "lineWidth": 2, "showCircles": True, "interpolate": "linear",
+            } for a in aggs],
+            "addTooltip": True, "addLegend": True, "legendPosition": "right", "times": [], "addTimeMarker": False,
+        },
+    }
+
+
+def _vs_tabla(panel: dict[str, Any]) -> dict[str, Any]:
+    """Una tabla con varias columnas (eventos, monto, tiempo promedio…) por un
+    campo y, opcional, partida por otro (`sub_field`)."""
+    metricas = _metricas_del_panel(panel)
+    aggs = [_agg_metrica("1" if i == 0 else str(10 + i), agg, campo, etiqueta, percents)
+            for i, (agg, campo, etiqueta, percents) in enumerate(metricas)]
+    filas = _terms_agg("2", panel["field"], "bucket", panel.get("size", 15))
+    filas["params"]["orderBy"] = panel.get("orden", "1")
+    if panel.get("label_filas"):
+        filas["params"]["customLabel"] = panel["label_filas"]
+    sub = []
+    if panel.get("sub_field"):
+        s = _terms_agg("3", panel["sub_field"], "bucket", panel.get("sub_size", 3))
+        if panel.get("label_sub"):
+            s["params"]["customLabel"] = panel["label_sub"]
+        sub = [s]
+    return {"title": panel["title"], "type": "table", "aggs": aggs + [filas] + sub,
+            "params": {"perPage": 10, "showPartialRows": False, "showMetricsAtAllLevels": False,
+                       "showTotal": False, "totalFunc": "sum", "percentageCol": ""}}
+
+
+def _vs_mapa_de_calor(title: str, field: str, size: int = 12) -> dict[str, Any]:
+    """Filas = los valores de `field` (una entidad), columnas = el tiempo."""
+    return {"title": title, "type": "heatmap",
+            "aggs": [_metric_agg("count", None, "Eventos"), _datehist_agg("2"),
+                     _terms_agg("3", field, "group", size)],
+            "params": {"type": "heatmap", "addTooltip": True, "addLegend": True, "enableHover": False,
+                       "legendPosition": "right", "times": [], "colorsNumber": 5, "colorSchema": "Reds",
+                       "setColorRange": False, "colorsRange": [], "invertColors": False, "percentageMode": False,
+                       "valueAxes": [{"show": False, "id": "ValueAxis-1", "type": "value",
+                                      "scale": {"type": "linear", "defaultYExtents": False},
+                                      "labels": {"show": False, "rotate": 0, "overwriteColor": False,
+                                                 "color": "black"}}]}}
+
+
 def _panel_to_vis_state(panel: dict[str, Any]) -> dict[str, Any]:
     """Despacha un panel (spec rich) a su visState."""
     t = panel["type"]
@@ -340,18 +430,28 @@ def _panel_to_vis_state(panel: dict[str, Any]) -> dict[str, Any]:
     if t == "region_map":
         return _vs_region_map(title, panel["field"])
     if t == "metric":
-        return _vs_metric(title, panel["agg"], panel.get("field"), panel.get("label"))
+        vs = _vs_metric(title, panel["agg"], panel.get("field"), panel.get("label"))
+        if panel["agg"] == "percentiles":
+            vs["aggs"][0]["params"]["percents"] = list(panel.get("percents") or [50, 95, 99])
+        return vs
     if t == "pie":
         return _vs_pie(title, panel["field"], panel.get("size", 10))
     if t == "bar":
         return _vs_bar(title, panel["field"], panel.get("horizontal", False), panel.get("size", 10),
                        panel.get("metric", "count"), panel.get("agg_field"))
+    if t == "histogram" or (t in ("area", "line") and (panel.get("metricas") or panel.get("filtros")
+                                                        or panel.get("percents"))):
+        return _vs_serie(panel)
     if t in ("area", "line"):
         return _vs_timeseries(title, t, panel.get("metric", "count"),
                               panel.get("field"), panel.get("split"), panel.get("size", 5))
     if t == "table":
+        if panel.get("metricas") or panel.get("sub_field"):
+            return _vs_tabla(panel)
         return _vs_table(title, panel["field"], panel.get("size", 10),
                          panel.get("metric", "count"), panel.get("agg_field"))
+    if t == "heatmap":
+        return _vs_mapa_de_calor(title, panel["field"], panel.get("size", 12))
     if t == "tagcloud":
         return _vs_tagcloud(title, panel["field"], panel.get("size", 15))
     raise ValueError(f"tipo de panel desconocido: {t!r}")
@@ -478,24 +578,32 @@ def _flow_grid(panels: list[dict[str, Any]]) -> list[list[int]]:
 
 
 def _dashboard_obj(slug: str, title: str, dash_id: str,
-                   panels_meta: list[tuple[str, list[int]]]) -> dict[str, Any]:
+                   panels_meta: list[tuple], restaurar_tiempo: bool = True) -> dict[str, Any]:
+    """`panels_meta`: `(vis_id, grid)` o `(tipo, id, grid)` (una búsqueda
+    guardada va como `("search", id, grid)`). Sin `restaurar_tiempo` el
+    dashboard abre con el rango del momento (el de los datos, que la
+    plataforma deja de default): uno de los de al lado, al que se llega desde el
+    principal, no tiene su propio rango que quede viejo."""
     panels = []
     refs = []
-    for i, (vis_id, grid) in enumerate(panels_meta):
+    for i, meta in enumerate(panels_meta):
+        tipo, obj_id, grid = meta if len(meta) == 3 else ("visualization", *meta)
         x, y, w, h = grid
         pname = f"panel_{i}"
         panels.append({
             "version": "7.10.0", "gridData": {"x": x, "y": y, "w": w, "h": h, "i": str(i)},
             "panelIndex": str(i), "embeddableConfig": {}, "panelRefName": pname,
         })
-        refs.append({"name": pname, "type": "visualization", "id": vis_id})
+        refs.append({"name": pname, "type": tipo, "id": obj_id})
+    tiempo: dict[str, Any] = ({"timeRestore": True, "timeFrom": "2025-07-01T00:00:00.000Z",
+                               "timeTo": "2026-07-02T00:00:00.000Z", "refreshInterval": {"pause": True, "value": 0}}
+                              if restaurar_tiempo else {"timeRestore": False})
     return {
         "attributes": {
             "title": f"[{slug}] {title}", "hits": 0, "description": "",
             "panelsJSON": json.dumps(panels),
             "optionsJSON": json.dumps({"useMargins": True, "hidePanelTitles": False}),
-            "version": 1, "timeRestore": True, "timeFrom": "2025-07-01T00:00:00.000Z", "timeTo": "2026-07-02T00:00:00.000Z",
-            "refreshInterval": {"pause": True, "value": 0},
+            "version": 1, **tiempo,
             "kibanaSavedObjectMeta": {
                 "searchSourceJSON": json.dumps(
                     {"query": {"query": "", "language": "kuery"}, "filter": []}
@@ -648,18 +756,39 @@ _UNIDADES_DE_PROMEDIO = frozenset({
 })
 
 
-def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
-    """Arma un spec rich (title/ip_id/index_fields/panels) a partir de los campos
-    detectados, eligiendo viz por tipo y calculando el layout en la grilla de 48."""
-    from index_template import index_pattern_from_name
+# ── El dashboard automático: un Resumen y, si los campos lo justifican,
+#    Problemas y Tiempos ─────────────────────────────────────────────────────
+# Era un tablero de rankings ("Top X" de cada columna). Ahora sigue el modelo de
+# los que se armaron a mano para un OMS: qué pasa en el tiempo, qué falla y a
+# quién, cuánto tarda, con filtros arriba y los tableros enlazados entre sí.
+# Todo sale de los roles de los campos (dimensión principal, entidad, crítico,
+# éxito, medidas) y de lo que delatan sus nombres (el nivel del log, las
+# duraciones): sirve para cualquier dataset, no para uno.
+
+# El nivel de un log (log.level, severity) y el componente que lo escribió.
+_NIVEL_DE_LOG = re.compile(r"(^|[._])(level|loglevel|log_level|severity|severidad|nivel|priority|prioridad)$", re.I)
+_COMPONENTE = re.compile(r"(^|[._])(logger|component|componente|service|servicio|module|modulo|app|application|"
+                         r"aplicacion)$", re.I)
+# Lo informativo de un nivel: lo demás (WARN, ERROR o una severidad propia,
+# como "Alta") es un problema, aunque no se conozcan los valores del índice.
+_NIVELES_INFORMATIVOS = ("INFO", "Info", "info", "DEBUG", "Debug", "debug", "TRACE", "Trace", "trace",
+                         "NOTICE", "Notice", "notice")
+_UNIDADES_DE_TIEMPO = frozenset({"ms", "milisegundos", "s", "sec", "seg", "segundos", "min", "minutos",
+                                 "h", "hs", "horas", "dias", "días", "days"})
+
+
+def _clasificar(fields: list[dict[str, Any]]) -> dict[str, Any]:
+    """Los campos del dataset por lo que cuentan. Cada uno como
+    `{path, es, agg, label, dim, role, unit, raw, entity}` (`agg`: por dónde
+    se agrupa; un texto, por su `.keyword`)."""
+    import perfiles
 
     index_fields: list[tuple[str, str]] = [("@timestamp", "date")]
-    # (path, es, agg_path, label, dimension, role, unit)
-    typed: list[tuple[str, str, str, str, bool, "str | None", "str | None"]] = []
-    has_event_date = False
+    campos: list[dict[str, Any]] = []
+    hay_fecha = False
     for f in fields or []:
         path = _field_path(f)
-        if not path or path == "@timestamp":
+        if not path:
             continue
         wiz_type = (f.get("type") or "").strip()
         es = _WIZ_TO_ES.get(wiz_type, "keyword")
@@ -668,15 +797,19 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
         # significa algo (si no, `@timestamp` es la hora de ingesta y el gráfico
         # es un pico en el momento del deploy). Vale también `role: timestamp`:
         # el prompt le pide al modelo que mande la fecha a `@timestamp` y borre
-        # el campo original, y cuando lo hacía el dashboard perdía el área y la
-        # línea aunque el índice tuviera una serie temporal perfecta.
+        # el campo original, y cuando lo hacía el dashboard perdía las series
+        # aunque el índice tuviera una serie temporal perfecta. Y un campo que ya
+        # se llama `@timestamp` es esa fecha: se salteaba antes de mirarlo, y un
+        # dataset sin otra fecha se quedaba sin series.
         if es == "date" or role == "timestamp":
-            has_event_date = True
+            hay_fecha = True
+        if path == "@timestamp":
+            continue
         index_fields.append((path, es))
-        agg_path = path
+        agg = path
         if es == "text":
-            agg_path = f"{path}.keyword"
-            index_fields.append((agg_path, "keyword"))
+            agg = f"{path}.keyword"
+            index_fields.append((agg, "keyword"))
         dim = f.get("dimension")
         if not isinstance(dim, bool):
             try:
@@ -684,195 +817,393 @@ def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) 
                 dim = is_dimension(path, wiz_type)
             except Exception:  # noqa: BLE001
                 dim = es in ("keyword", "text", "boolean")
-        unit = f.get("unit")
-        typed.append((path, es, agg_path, (f.get("business_label") or path), bool(dim), role,
-                      unit if isinstance(unit, str) else None))
+        unit = f.get("unit") if isinstance(f.get("unit"), str) else None
+        campos.append({"path": path, "es": es, "agg": agg, "label": (f.get("business_label") or path),
+                       "dim": bool(dim), "role": role, "unit": unit, "raw": f.get("raw_name") or "",
+                       "entity": bool(f.get("entity")),
+                       # Un id que no se repite (cada fila trae el suyo) no agrupa: el
+                       # perfil no le encontró valores frecuentes.
+                       "agrupa": not ("frecuentes" in f and not f.get("frecuentes"))})
 
-    # Selección por role. Va ANTES de los buckets porque el rol le gana al tipo:
-    # un `entity_id` es un keyword como cualquier otro, pero tiene miles de
-    # valores distintos y su panel es una tabla de los top, no una torta ni un
-    # ranking de barras con una barra por documento.
-    def _con_role(nombre: str):
-        t = next((t for t in typed if t[5] == nombre), None)
-        return (t[0], t[2], t[3]) if t else None
+    def con_rol(rol: str):
+        return next((c for c in campos if c["role"] == rol), None)
 
-    entity_field = _con_role("entity_id")
-    exito_field = _con_role("success_indicator")
-    critico_field = _con_role("critical_indicator")
-    _con_panel_propio = {entity_field[0]} if entity_field else set()
+    texto = ("keyword", "text")
+    # La entidad: la marcada en el paso 2 o la del rol, y entre varias, una que
+    # agrupe ("Cliente" y no el id de cada trabajo: una tabla de ids de una
+    # fila cada uno no dice nada).
+    candidatas = [c for c in campos if c["es"] in texto + ("ip",) and (c["entity"] or c["role"] == "entity_id")]
+    candidatas.sort(key=lambda c: not c["entity"])
+    entidad = next((c for c in candidatas if c["agrupa"]), None) or (candidatas[0] if candidatas else None)
+    ips = [c for c in campos if c["es"] == "ip"]
+    if entidad is None and ips:
+        entidad = ips[0]          # sin entidad, la IP es "quién"
+    critico = con_rol("critical_indicator")
+    exito = con_rol("success_indicator")
+    nivel = next((c for c in campos if c["es"] in texto and _NIVEL_DE_LOG.search(c["path"])), None)
+    usados = {id(x) for x in (entidad, critico, exito, nivel) if x}
+    componente = next((c for c in campos if c["es"] in texto and id(c) not in usados
+                       and _COMPONENTE.search(c["path"])), None)
+    if componente:
+        usados.add(id(componente))
+    categorias = [c for c in campos if c["es"] in texto and c["dim"] and id(c) not in usados]
+    principal = con_rol("primary_dimension")
+    if principal is None or id(principal) in usados:
+        principal = categorias[0] if categorias else None
+    otras = [c for c in categorias if c is not principal]
 
-    ip_fields = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed if es == "ip"]
-    num_fields = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed if es in ("long", "double")]
-    # Los booleanos salen de acá: son dos valores, y eso es una torta, no un
-    # ranking de barras con dos barras.
-    cat_fields = [(p, ap, lbl) for (p, es, ap, lbl, d, _r, _u) in typed
-                  if es in ("keyword", "text") and d and p not in _con_panel_propio]
-    bool_fields = [(p, ap, lbl) for (p, es, ap, lbl, d, _r, _u) in typed if es == "boolean" and d]
-    geo_campos = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed if es == "geo_point"]
+    # Los números: los que marcó el análisis o, sin marca, los que no son
+    # identificadores, coordenadas ni códigos. Cada uno con su agregación: un
+    # monto se suma; una duración, un precio o una tasa no ("las latencias
+    # suman 40 segundos" no significa nada).
+    numeros = [c for c in campos if c["es"] in ("long", "double") and c is not entidad and c is not critico]
+    medidas = [c for c in numeros if c["role"] == "measure"] or \
+              [c for c in numeros if not (perfiles._NO_ES_MEDIDA.search(c["path"])
+                                          or perfiles._NO_ES_MEDIDA.search(c["raw"]))]
 
-    primary_cat = _con_role("primary_dimension") or (cat_fields[0] if cat_fields else None)
-    primary_num = _con_role("measure") or (num_fields[0] if num_fields else None)
-    # Sumar latencias o porcentajes no dice nada: de 200 ms y 300 ms lo que
-    # importa es que el promedio es 250, no que "suman 500".
-    unidad_medida = next((u for (p, _e, _a, _l, _d, _r, u) in typed
-                          if primary_num and p == primary_num[0]), None)
-    agg_medida = "avg" if (unidad_medida or "").strip().lower() in _UNIDADES_DE_PROMEDIO else "sum"
-    verbo_medida = "Promedio" if agg_medida == "avg" else "Suma"
+    def es_duracion(c):
+        return (c["unit"] or "").strip().lower() in _UNIDADES_DE_TIEMPO or any(
+            perfiles._ES_DURACION.search(x) for x in (c["path"], c["raw"]) if x)
 
-    _seen: set[str] = set()
-    def _uniq(base: str, path: str) -> str:  # noqa: E306 — títulos únicos (ids = uuid5(título))
-        t = base if base not in _seen else f"{base} ({path})"
-        _seen.add(t)
-        return t
+    def es_promedio(c):
+        return (c["unit"] or "").strip().lower() in _UNIDADES_DE_PROMEDIO or any(
+            perfiles._ES_PRECIO_O_TASA.search(x) for x in (c["path"], c["raw"]) if x)
 
-    # Un campo que ya tiene su panel no se repite más abajo en los breakdowns:
-    # antes el primer categórico salía dos veces (torta y barras), y solo se
-    # notaba porque `_uniq` le cambiaba el título al segundo.
-    graficados: set[str] = set()
-
-    title = slug.replace("-", " ").replace("_", " ").title()
-    panels: list[dict[str, Any]] = [
-        {"type": "markdown", "title": "Header", "grid": [0, 0, 48, 4],
-         "md": f"## {title}\nDashboard auto-generado de tu log (campos detectados)."},
-    ]
-
-    # Fila de métricas (w12 h8, hasta 4): Total + cardinality de entity_id +
-    # cardinality de IP + los eventos críticos + la medida principal.
-    mx = 0
-    panels.append({"type": "metric", "title": "Total", "agg": "count", "grid": [mx, 4, 12, 8]})
-    mx += 12
-    if entity_field:
-        p, ap, lbl = entity_field
-        panels.append({"type": "metric", "title": _uniq(f"Únicos {lbl}", p), "agg": "cardinality",
-                       "field": ap, "label": f"Únicos {lbl}", "grid": [mx, 4, 12, 8]})
-        mx += 12
-    elif ip_fields:
-        p, ap, lbl = ip_fields[0]
-        panels.append({"type": "metric", "title": _uniq(f"Únicos {lbl}", p), "agg": "cardinality",
-                       "field": ap, "label": f"Únicos {lbl}", "grid": [mx, 4, 12, 8]})
-        mx += 12
-    # `critical_indicator` es el campo que SOLO aparece cuando algo salió mal
-    # (un código de error, un motivo de cancelación): contar los documentos que
-    # lo traen es "cuántos fallaron", el número que se mira primero.
-    if critico_field and mx < 36:
-        p, ap, lbl = critico_field
-        panels.append({"type": "metric", "title": _uniq(f"Con {lbl}", p), "agg": "count",
-                       "label": f"Con {lbl}", "query": f"{p}:*", "grid": [mx, 4, 12, 8]})
-        mx += 12
-    # `<=`: la cuarta métrica entra justo (36 + 12 = 48). Con `<` la fila se
-    # cortaba en tres y la medida principal —la que más se mira— quedaba
-    # afuera siempre que el log trajera una entidad y un campo crítico.
-    if primary_num and mx <= 36:
-        p, ap, lbl = primary_num
-        panels.append({"type": "metric", "title": _uniq(f"{verbo_medida} {lbl}", p), "agg": agg_medida,
-                       "field": p, "label": f"{verbo_medida} {lbl}", "grid": [mx, 4, 12, 8]})
-        mx += 12
-
-    # Serie temporal SOLO si el log trae su propia fecha.
-    y = 12
-    if has_event_date:
-        panels.append({"type": "area", "title": "Eventos en el tiempo", "metric": "count",
-                       "grid": [0, y, 48, 12]})
-        y += 12
-        # `success_indicator` partiendo la serie: éxitos contra fallos en el
-        # tiempo, que es el gráfico que mira primero cualquiera que opera esto.
-        if exito_field:
-            p, ap, lbl = exito_field
-            panels.append({"type": "area", "title": _uniq(f"{lbl} en el tiempo", p),
-                           "metric": "count", "split": ap, "grid": [0, y, 48, 12]})
-            graficados.add(p)
-            y += 12
-
-    # El mapa: un log con coordenadas se entiende acá y en ningún otro lado.
-    for (p, ap, lbl) in geo_campos[:1]:
-        panels.append({"type": "map", "title": _uniq(f"Mapa · {lbl}", p),
-                       "field": p, "grid": [0, y, 48, 18]})
-        graficados.add(p)
-        y += 18
-
-    # Sin coordenadas pero con el NOMBRE del país (country, país…): mapa por
-    # país, unido por nombre con la capa de países. Un código (ISO) no une.
-    paises = [(p, ap, lbl) for (p, es, ap, lbl, _d, _r, _u) in typed
-              if es == "keyword" and p not in graficados
-              and _PISTA_DE_PAIS.search(f"{p} {lbl}") and not _CODIGO_DE_PAIS.search(f"{p} {lbl}")]
-    for (p, ap, lbl) in paises[:1]:
-        panels.append({"type": "region_map", "title": _uniq(f"Por país · {lbl}", p),
-                       "field": p, "grid": [0, y, 48, 18]})
-        graficados.add(p)
-        y += 18
-
-    # Pie chart de la dimensión primaria (role → primer cat_fields).
-    if primary_cat:
-        p0, ap0, lbl0 = primary_cat
-        panels.append({"type": "pie", "title": _uniq(f"Distribución por {lbl0}", p0),
-                       "field": ap0, "grid": [0, y, 24, 12]})
-        graficados.add(p0)
-        restantes = [c for c in cat_fields if c[0] not in graficados]
-        if restantes:
-            p1, ap1, lbl1 = restantes[0]
-            panels.append({"type": "bar", "title": _uniq(f"Top {lbl1}", p1),
-                           "field": ap1, "horizontal": True, "grid": [24, y, 24, 12]})
-            graficados.add(p1)
-        y += 12
-
-    # Los booleanos, a torta: dos valores no son un ranking.
-    for (p, ap, lbl) in bool_fields[:2]:
-        if p in graficados:
-            continue
-        panels.append({"type": "pie", "title": _uniq(f"Distribución por {lbl}", p),
-                       "field": ap, "grid": [0, y, 24, 12]})
-        graficados.add(p)
-        y += 12
-
-    # Breakdowns: categóricos (horizontal_bar top-N) + IPs y entidades (table,
-    # que es lo que sirve cuando los valores son casi únicos). 2 por fila.
-    breakdowns: list[dict[str, Any]] = []
-    for (p, ap, lbl) in [c for c in cat_fields if c[0] not in graficados][:8]:
-        breakdowns.append({"type": "bar", "title": _uniq(f"Top {lbl}", p), "field": ap, "horizontal": True})
-    if critico_field and critico_field[0] not in graficados:
-        p, ap, lbl = critico_field
-        breakdowns.append({"type": "bar", "title": _uniq(f"Dónde aparece {lbl}", p),
-                           "field": ap, "horizontal": True})
-        graficados.add(p)
-    if entity_field and entity_field[0] not in graficados:
-        p, ap, lbl = entity_field
-        breakdowns.append({"type": "table", "title": _uniq(f"Top {lbl}", p), "field": ap})
-        graficados.add(p)
-    for (p, ap, lbl) in ip_fields[:2]:
-        breakdowns.append({"type": "table", "title": _uniq(f"Top {lbl}", p), "field": ap})
-    col = 0
-    for b in breakdowns[:10]:
-        b["grid"] = [col * 24, y, 24, 15]
-        panels.append(b)
-        col += 1
-        if col == 2:
-            col = 0
-            y += 15
-    if col == 1:
-        y += 15
-
-    # Numérico over time: role measure → primer numérico. Solo con fecha real.
-    if primary_num and has_event_date:
-        p, ap, lbl = primary_num
-        panels.append({"type": "line", "title": _uniq(f"{lbl} en el tiempo", p), "metric": agg_medida,
-                       "field": p, "grid": [0, y, 48, 12]})
-        y += 12
-
-    # Cross-tab: "Top dimensión por medida" — role primary_dimension × role measure.
-    if primary_cat and primary_num:
-        p_cat, ap_cat, lbl_cat = primary_cat
-        p_num, ap_num, lbl_num = primary_num
-        panels.append({"type": "bar", "title": _uniq(f"Top {lbl_cat} por {lbl_num}", p_cat),
-                       "field": ap_cat, "horizontal": True, "metric": agg_medida, "agg_field": p_num,
-                       "grid": [0, y, 48, 15]})
-        y += 15
-
+    duraciones = [c for c in medidas if es_duracion(c)]
+    promedios = [c for c in medidas if c not in duraciones and es_promedio(c)]
+    montos = [c for c in medidas if c not in duraciones and c not in promedios]
+    paises = [c for c in campos if c["es"] == "keyword" and _PISTA_DE_PAIS.search(f"{c['path']} {c['label']}")
+              and not _CODIGO_DE_PAIS.search(f"{c['path']} {c['label']}")]
     return {
-        "title": title,
-        "ip_id": index_pattern_from_name(index_name),
-        "index_fields": index_fields,
-        "panels": panels,
+        "index_fields": index_fields, "hay_fecha": hay_fecha, "entidad": entidad, "critico": critico,
+        "exito": exito, "nivel": nivel, "componente": componente, "principal": principal, "otras": otras,
+        "booleanos": [c for c in campos if c["es"] == "boolean" and c["dim"]],
+        "montos": montos, "duraciones": duraciones, "promedios": promedios,
+        "geo": [c for c in campos if c["es"] == "geo_point"], "paises": paises,
+        "textos_libres": [c for c in campos if c["es"] == "text" and not c["dim"]],
     }
+
+
+def _consulta_critica(c: dict[str, Any]) -> str:
+    """Los eventos críticos: un indicador 0/1 vale 1; un código o un motivo
+    solo aparece cuando algo salió mal."""
+    return f"{c['path']} > 0" if c["es"] in ("long", "double") else f"{c['path']}:*"
+
+
+def _consulta_de_problemas_del_nivel(nivel: dict[str, Any]) -> str:
+    informativos = " or ".join(f'"{v}"' for v in _NIVELES_INFORMATIVOS)
+    return f"{nivel['path']}:* and not {nivel['path']}:({informativos})"
+
+
+def _en_fila(paneles: list[dict[str, Any]], y: int, alto: int) -> int:
+    """Reparte los paneles en una fila de 48 columnas (cada uno con su `w`, o
+    partes iguales de lo que queda). Devuelve la `y` de la fila siguiente."""
+    if not paneles:
+        return y
+    libres = [p for p in paneles if "w" not in p]
+    resto = 48 - sum(p["w"] for p in paneles if "w" in p)
+    x = 0
+    for p in paneles:
+        w = p.pop("w", None) or max(1, resto // max(1, len(libres)))
+        p["grid"] = [x, y, w, alto]
+        x += w
+    return y + alto
+
+
+def _tableros_desde_campos(slug: str, index_name: str, fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Los dashboards del dataset: el Resumen siempre y, si los campos lo
+    justifican, Problemas (un crítico o el nivel del log) y Tiempos (alguna
+    duración). El Resumen va primero (es el que abre la plataforma) y conserva
+    el id del dashboard de antes: un dashboard guardado que lo reemplaza sigue
+    reemplazándolo."""
+    from index_template import index_pattern_from_name
+
+    k = _clasificar(fields)
+    entidad, critico, exito, nivel = k["entidad"], k["critico"], k["exito"], k["nivel"]
+    componente, principal, hay_fecha = k["componente"], k["principal"], k["hay_fecha"]
+    monto = k["montos"][0] if k["montos"] else None
+    promedio = k["promedios"][0] if k["promedios"] else None
+    duracion = k["duraciones"][0] if k["duraciones"] else None
+    q_critico = _consulta_critica(critico) if critico else ""
+    q_nivel = _consulta_de_problemas_del_nivel(nivel) if nivel else ""
+    critico_texto = bool(critico and critico["es"] in ("keyword", "text"))
+
+    titulo = slug.replace("-", " ").replace("_", " ").title()
+    claves = [("resumen", "Resumen")]
+    if critico or nivel:
+        claves.append(("problemas", "Problemas"))
+    if k["duraciones"]:
+        claves.append(("tiempos", "Tiempos"))
+    ids = {"resumen": _stable_id(slug, "dashboard", titulo)}
+    ids.update({c: _stable_id(slug, "dashboard", f"{titulo}:{c}") for c, _ in claves[1:]})
+
+    def encabezado(clave: str, bajada: str) -> dict[str, Any]:
+        nav = " · ".join(f"**{n}**" if c == clave else f"[{n}](#/view/{ids[c]})" for c, n in claves)
+        return {"type": "markdown", "title": "Encabezado",
+                "md": f"### {titulo} · {dict(claves)[clave]}\n" + (f"{nav}\n\n" if len(claves) > 1 else "\n") + bajada}
+
+    def filtros(*cs) -> list[dict[str, Any]]:
+        controles = [{"field": c["agg"], "label": c["label"]} for c in cs if c and c["es"] != "ip"][:3]
+        return [{"type": "controls", "title": "Filtros", "controls": controles}] if controles else []
+
+    def metrica(nombre: str, agg: str, campo: "dict | None" = None, query: str = "", **kw) -> dict[str, Any]:
+        p = {"type": "metric", "title": nombre, "agg": agg, "label": nombre, "query": query, **kw}
+        if campo:
+            p["field"] = campo["agg"] if agg == "cardinality" else campo["path"]
+        return p
+
+    def fila_de_metricas(metricas: list[dict[str, Any]], y: int) -> int:
+        metricas = metricas[:6]
+        for m in metricas:
+            m["w"] = 48 // len(metricas)
+        return _en_fila(metricas, y, 6)
+
+    def columnas_de(*cs) -> list[tuple]:
+        """Las columnas de una tabla: eventos y, si hay, el monto (sumado) y un
+        tiempo o un precio (promediado)."""
+        cols: list[tuple] = [("count", None, "Eventos")]
+        for c in cs:
+            if c and c is monto:
+                cols.append(("sum", c["path"], c["label"]))
+            elif c:
+                cols.append(("avg", c["path"], f"{c['label']} (promedio)"))
+        return cols
+
+    tableros: list[dict[str, Any]] = []
+
+    # ═══ Resumen ═══
+    partes = ["cuánto entra"] + (["qué falla"] if (critico or nivel) else []) + \
+             (["cuánto tarda"] if duracion else []) + ["quién o qué pesa más"]
+    cab = encabezado("resumen", "Panorama del dataset: " + ", ".join(partes[:-1]) + " y " + partes[-1] + ".")
+    y = _en_fila([cab], 0, 6)
+    fil = filtros(entidad, principal, (k["otras"] or [componente])[0])
+    y = _en_fila(fil, y, 5)
+    kpis = [metrica("Eventos", "count")]
+    if critico:
+        kpis.append(metrica(f"Con {critico['label']}", "count", query=q_critico))
+    if nivel:
+        kpis.append(metrica("Errores y advertencias", "count", query=q_nivel))
+    if entidad:
+        kpis.append(metrica(f"{entidad['label']} (distintos)", "cardinality", entidad))
+    if monto:
+        kpis.append(metrica(f"{monto['label']} total", "sum", monto))
+    elif promedio:
+        kpis.append(metrica(f"{promedio['label']} promedio", "avg", promedio))
+    if duracion:
+        kpis.append(metrica(f"{duracion['label']} promedio", "avg", duracion))
+    y = fila_de_metricas(kpis, y)
+    resumen = [cab] + fil + kpis[:6]
+    # Lo que pasa en el tiempo: partido por el éxito (éxitos contra fallos, lo
+    # primero que mira cualquiera que opera esto) y por la dimensión principal.
+    if hay_fecha:
+        series = []
+        if exito:
+            series.append({"type": "area", "title": f"Eventos en el tiempo por {exito['label']}", "metric": "count",
+                           "split": exito["agg"]})
+        if principal and principal is not exito:
+            series.append({"type": "area", "title": f"Eventos en el tiempo por {principal['label']}",
+                           "metric": "count", "split": principal["agg"]})
+        if not series:
+            series.append({"type": "area", "title": "Eventos en el tiempo", "metric": "count"})
+        y = _en_fila(series, y, 13)
+        resumen += series
+    # La medida: dónde se concentra y cómo se mueve.
+    medida = []
+    if monto and principal:
+        medida.append({"type": "bar", "title": f"{monto['label']} por {principal['label']}",
+                       "field": principal["agg"], "horizontal": True, "size": 12,
+                       "metric": "sum", "agg_field": monto["path"]})
+    en_el_tiempo = monto or promedio or duracion
+    if en_el_tiempo and hay_fecha:
+        medida.append({"type": "line", "title": f"{en_el_tiempo['label']} en el tiempo",
+                       "metric": "sum" if en_el_tiempo is monto else "avg", "field": en_el_tiempo["path"]})
+    y = _en_fila(medida, y, 14)
+    resumen += medida
+    # Las tablas: por la dimensión principal y por la entidad, con los eventos,
+    # el monto y el tiempo de cada una.
+    tablas = []
+    if principal:
+        tablas.append({"type": "table", "title": f"Por {principal['label']}", "field": principal["agg"], "size": 15,
+                       "metricas": columnas_de(monto, duracion or promedio), "label_filas": principal["label"]})
+    if entidad:
+        tablas.append({"type": "table", "title": f"Por {entidad['label']}", "field": entidad["agg"], "size": 20,
+                       "metricas": columnas_de(monto, duracion or promedio), "label_filas": entidad["label"]})
+    y = _en_fila(tablas, y, 16)
+    resumen += tablas
+    # Hasta dos categorías más y los booleanos (dos valores son una torta, no
+    # un ranking). El resto queda en los filtros y en el asistente.
+    resto = [{"type": "bar", "title": f"Eventos por {c['label']}", "field": c["agg"], "horizontal": True, "size": 10}
+             for c in k["otras"][:2]]
+    resto += [{"type": "pie", "title": c["label"], "field": c["agg"], "size": 5} for c in k["booleanos"][:2]]
+    for i in range(0, len(resto), 2):
+        y = _en_fila(resto[i:i + 2], y, 13)
+    resumen += resto
+    # El mapa: un log con coordenadas se entiende acá y en ningún otro lado. Sin
+    # coordenadas pero con el NOMBRE del país, mapa por país (un código no une).
+    mapas = [{"type": "map", "title": f"Mapa · {c['label']}", "field": c["path"]} for c in k["geo"][:1]] or \
+            [{"type": "region_map", "title": f"Por país · {c['label']}", "field": c["path"]} for c in k["paises"][:1]]
+    for m in mapas:
+        y = _en_fila([m], y, 18)
+    resumen += mapas
+    tableros.append({"clave": "resumen", "title": titulo, "titulo": f"{titulo} · Resumen", "id": ids["resumen"],
+                     "ip_id": index_pattern_from_name(index_name), "index_fields": k["index_fields"],
+                     "panels": resumen})
+
+    # ═══ Problemas: qué falló, cuándo, dónde y a quién ═══
+    if critico or nivel:
+        cab = encabezado("problemas", "Qué falló, cuándo, dónde y a quién. Para ver uno solo, elegilo en los "
+                                      "filtros.")
+        y = _en_fila([cab], 0, 6)
+        fil = filtros(entidad, principal, componente)
+        y = _en_fila(fil, y, 5)
+        kpis = []
+        if critico:
+            kpis.append(metrica(f"Con {critico['label']}", "count", query=q_critico))
+        if nivel:
+            kpis.append(metrica("Errores y advertencias", "count", query=q_nivel))
+        if critico and entidad:
+            kpis.append(metrica(f"{entidad['label']} con {critico['label']} (distintos)", "cardinality", entidad, q_critico))
+        if critico and principal:
+            kpis.append(metrica(f"{principal['label']} con {critico['label']} (distintos)", "cardinality", principal,
+                                    q_critico))
+        y = fila_de_metricas(kpis, y)
+        problemas = [cab] + fil + kpis
+        if hay_fecha:
+            series = []
+            if critico_texto:
+                series.append({"type": "histogram", "title": f"{critico['label']} en el tiempo", "metric": "count",
+                               "split": critico["agg"], "size": 8, "query": q_critico})
+            elif critico:
+                series.append({"type": "histogram", "title": f"Con {critico['label']} en el tiempo"
+                               + (f" por {principal['label']}" if principal else ""), "metric": "count",
+                               "query": q_critico, **({"split": principal["agg"]} if principal else {})})
+            if nivel:
+                por = componente or nivel
+                series.append({"type": "histogram", "title": f"Errores y advertencias por {por['label']}",
+                               "metric": "count", "split": por["agg"], "size": 8, "query": q_nivel})
+            for s in series:
+                y = _en_fila([s], y, 13)
+            problemas += series
+        barras = []
+        if critico_texto:
+            barras.append({"type": "bar", "title": f"{critico['label']}: los más frecuentes", "field": critico["agg"],
+                           "horizontal": True, "size": 15, "query": q_critico})
+        if principal and (critico or nivel):
+            barras.append({"type": "bar", "title": (f"Con {critico['label']}" if critico else "Errores y advertencias")
+                           + f" por {principal['label']}", "field": principal["agg"], "horizontal": True,
+                           "size": 12, "query": q_critico or q_nivel})
+        y = _en_fila(barras, y, 15)
+        problemas += barras
+        if entidad and hay_fecha:
+            calor = {"type": "heatmap", "title": (f"Con {critico['label']}" if critico else "Errores y advertencias")
+                     + f" por {entidad['label']} y hora", "field": entidad["agg"], "size": 12,
+                     "query": q_critico or q_nivel}
+            y = _en_fila([calor], y, 15)
+            problemas.append(calor)
+        if entidad and critico_texto:
+            tabla = {"type": "table", "title": f"{entidad['label']} y {critico['label']}", "field": entidad["agg"],
+                     "size": 15, "sub_field": critico["agg"], "sub_size": 3, "metricas": [("count", None, "Eventos")],
+                     "label_filas": entidad["label"], "label_sub": critico["label"], "query": q_critico}
+            y = _en_fila([tabla], y, 15)
+            problemas.append(tabla)
+        columnas = [c["path"] for c in (entidad, principal, critico, nivel, componente) if c]
+        columnas += [c["path"] for c in k["textos_libres"][:1] if c["path"] not in columnas]
+        lista = {"type": "search", "title": "Eventos con problemas", "columns": columnas[:6],
+                 "query": " or ".join(f"({q})" for q in (q_critico, q_nivel) if q), "sort": [["@timestamp", "desc"]]}
+        _en_fila([lista], y, 15)
+        problemas.append(lista)
+        tableros.append({"clave": "problemas", "titulo": f"{titulo} · Problemas", "id": ids["problemas"],
+                         "panels": problemas})
+
+    # ═══ Tiempos: cuánto tarda y quién tiene los más lentos ═══
+    if k["duraciones"]:
+        durs = k["duraciones"][:2]
+        cab = encabezado("tiempos", "Cuánto tarda: el valor típico (p50), los altos (p95 y p99) y quién tiene "
+                                    "los más lentos.")
+        y = _en_fila([cab], 0, 6)
+        fil = filtros(entidad, principal)
+        y = _en_fila(fil, y, 5)
+        kpis = [metrica(f"{d['label']} (p50, p95 y p99)", "percentiles", d, percents=[50, 95, 99]) for d in durs]
+        y = fila_de_metricas(kpis, y)
+        tiempos = [cab] + fil + kpis
+        if hay_fecha:
+            lineas = [{"type": "line", "title": f"{d['label']}: p50, p95 y p99", "metric": "percentiles",
+                       "field": d["path"], "percents": [50, 95, 99], "label": d["label"]} for d in durs]
+            y = _en_fila(lineas, y, 13)
+            tiempos += lineas
+            if principal:
+                p95 = {"type": "line", "title": f"{duracion['label']} p95 por {principal['label']}",
+                       "metric": "percentiles", "field": duracion["path"], "percents": [95],
+                       "label": duracion["label"], "split": principal["agg"], "size": 6}
+                y = _en_fila([p95], y, 13)
+                tiempos.append(p95)
+        lento = [("max", duracion["path"], f"{duracion['label']} máximo"),
+                 ("avg", duracion["path"], f"{duracion['label']} promedio"), ("count", None, "Eventos")]
+        tablas = []
+        if entidad:
+            tablas.append({"type": "table", "title": f"{entidad['label']} con más {duracion['label']}",
+                           "field": entidad["agg"], "size": 15, "metricas": lento, "label_filas": entidad["label"]})
+        if principal:
+            tablas.append({"type": "table", "title": f"{duracion['label']} por {principal['label']}",
+                           "field": principal["agg"], "size": 15, "metricas": lento,
+                           "label_filas": principal["label"]})
+        y = _en_fila(tablas, y, 15)
+        tiempos += tablas
+        lista = {"type": "search", "title": f"Eventos con más {duracion['label']}", "query": f"{duracion['path']}:*",
+                 "columns": [c["path"] for c in (entidad, principal) if c] + [d["path"] for d in durs],
+                 "sort": [[duracion["path"], "desc"]]}
+        _en_fila([lista], y, 15)
+        tiempos.append(lista)
+        tableros.append({"clave": "tiempos", "titulo": f"{titulo} · Tiempos", "id": ids["tiempos"],
+                         "panels": tiempos})
+    return tableros
+
+
+def _spec_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
+    """El Resumen del dashboard automático (title/ip_id/index_fields/panels):
+    ver `_tableros_desde_campos`."""
+    return _tableros_desde_campos(slug, index_name, fields)[0]
+
+
+def _busqueda_obj(slug: str, busq_id: str, panel: dict[str, Any], ip_id: str) -> dict[str, Any]:
+    ssj = json.dumps({"query": {"query": panel.get("query", ""), "language": "kuery"}, "filter": [],
+                      "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"})
+    return {"id": busq_id, "type": "search",
+            "references": [{"name": "kibanaSavedObjectMeta.searchSourceJSON.index", "type": "index-pattern",
+                            "id": ip_id}],
+            "attributes": {"title": f"[{slug}] {panel['title']}", "description": "", "hits": 0,
+                           "columns": panel.get("columns") or [], "sort": panel.get("sort") or [["@timestamp", "desc"]],
+                           "version": 1, "kibanaSavedObjectMeta": {"searchSourceJSON": ssj}}}
+
+
+def _build_tableros(slug: str, tableros: list[dict[str, Any]]) -> str:
+    """El NDJSON de los dashboards del dataset: un index pattern y, por
+    dashboard, sus visualizaciones (y búsquedas) y el dashboard. Los ids salen
+    del título de cada panel; los de los dashboards de al lado llevan su clave
+    adelante (dos dashboards pueden tener un panel con el mismo nombre)."""
+    principal = tableros[0]
+    ip_id = principal.get("ip_id") or f"{slug}-*"
+    lines = [json.dumps(_index_pattern_obj(slug, principal.get("index_fields"), ip_id))]
+    for n, t in enumerate(tableros):
+        meta: list[tuple] = []
+        for panel, grid in zip(t["panels"], _flow_grid(t["panels"])):
+            clave = panel["title"] if n == 0 else f"{t['clave']}:{panel['title']}"
+            if panel["type"] == "search":
+                sid = _stable_id(slug, "search", clave)
+                lines.append(json.dumps(_busqueda_obj(slug, sid, panel, ip_id)))
+                meta.append(("search", sid, grid))
+                continue
+            vis_id = _stable_id(slug, "vis", clave)
+            vis_state = _panel_to_vis_state(panel)
+            if panel["type"] == "controls":
+                lines.append(json.dumps(_controls_viz_obj(slug, vis_id, panel["title"], vis_state, ip_id,
+                                                          len(_normalize_controls(panel["controls"])))))
+            else:
+                lines.append(json.dumps(_viz_obj(slug, vis_id, panel["title"], vis_state, ip_id,
+                                                 panel["type"] != "markdown", panel.get("query", ""))))
+            meta.append(("visualization", vis_id, grid))
+        lines.append(json.dumps(_dashboard_obj(slug, t["titulo"], t["id"], meta, restaurar_tiempo=(n == 0))))
+    return "\n".join(lines)
 
 
 _ROLES_DE_COLUMNA = ("entity_id", "primary_dimension", "critical_indicator", "success_indicator", "measure", "dimension")
@@ -1034,14 +1365,15 @@ def id_del_dashboard(ndjson: str) -> str:
 
 
 def build_ndjson_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) -> str:
-    """Genera el NDJSON de un dashboard AUTO-derivado de los campos detectados (custom).
+    """Genera el NDJSON de los dashboards AUTO-derivados de los campos detectados
+    (custom): el Resumen y, si aplican, Problemas y Tiempos.
 
-    Mismo formato/back-door que los predefinidos (1 index-pattern + N viz + 1
-    dashboard). El index-pattern matchea el índice real (`index_pattern_from_name`)
-    y trae los `fields` poblados; las viz referencian el `field_path` real.
+    Mismo formato/back-door que los predefinidos (1 index-pattern + viz +
+    dashboards; el Resumen primero). El index-pattern matchea el índice real
+    (`index_pattern_from_name`) y trae los `fields` poblados; las viz
+    referencian el `field_path` real.
     """
-    spec = _spec_from_fields(slug, index_name, fields)
-    return _build_rich_ndjson(slug, spec)
+    return _build_tableros(slug, _tableros_desde_campos(slug, index_name, fields))
 
 
 # ── Regeneración de los .ndjson de disco ─────────────────────────────────────
