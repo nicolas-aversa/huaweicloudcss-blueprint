@@ -35,15 +35,31 @@ def indice_destino(slug: str) -> str:
 _PUEDEN_QUEDAR_VACIAS = ("max", "min", "avg")
 
 
+def promedio_de_los_que_lo_tienen(campo: str) -> dict[str, Any]:
+    """El promedio de `campo` en los eventos que lo traen, 0 si ninguno. Con
+    `missing: 0` los eventos sin el dato contaban como ceros: en un OMS, la
+    latencia promedio de un participante daba 3,5 ms y era 5,6 (la traen solo
+    los mensajes que entran). Vacío, el Transform no puede indexar la fila."""
+    c = campo.replace("\\", "\\\\").replace("'", "\\'")
+    return {"scripted_metric": {
+        "init_script": "state.s = 0.0; state.n = 0L;",
+        "map_script": f"if (doc.containsKey('{c}') && doc['{c}'].size() > 0) {{ state.s += doc['{c}'].value; state.n++; }}",
+        "combine_script": "return state;",
+        "reduce_script": "double s = 0.0; long n = 0L; for (st in states) { if (st != null) { s += st.s; n += st.n; } } "
+                         "return n > 0 ? s / n : 0.0;"}}
+
+
 def medidas_sin_vacios(perfil: dict) -> dict[str, Any]:
-    """Las medidas del perfil con `missing: 0` en las que pueden quedar vacías.
-    Las fechas no: un 0 ahí sería 1970 (todos los eventos tienen fecha)."""
+    """Las medidas del perfil sin valores vacíos: el máximo y el mínimo con
+    `missing: 0`; el promedio, de los eventos que traen el dato. Las fechas no:
+    un 0 ahí sería 1970 (todos los eventos tienen fecha)."""
     fechas = set(perfil.get("fechas", []))
     fuera: dict[str, Any] = {}
     for nombre, agg in perfil["medidas"].items():
         tipo, cuerpo = next(iter(agg.items()))
         if tipo in _PUEDEN_QUEDAR_VACIAS and nombre not in fechas and "missing" not in cuerpo:
-            agg = {tipo: {**cuerpo, "missing": 0}}
+            agg = (promedio_de_los_que_lo_tienen(cuerpo["field"]) if tipo == "avg" and "field" in cuerpo
+                   else {tipo: {**cuerpo, "missing": 0}})
         fuera[nombre] = agg
     return fuera
 
@@ -134,22 +150,42 @@ _ES_PRECIO_O_TASA = _re.compile(
 
 
 def medidas_de_la_entidad(fields: list[dict], entidad: str = "") -> list[tuple[dict, str]]:
-    """Hasta tres `(campo, agregación)` para el perfil: las medidas que marcó el
-    análisis (rol `measure`) o, si no marcó ninguna, los números que no son
-    coordenadas, edades ni identificadores. Montos primero (suma) y después
-    duraciones (promedio)."""
+    """Las `(campo, agregación)` del perfil: las medidas que marcó el análisis
+    (rol `measure`) o, si no marcó ninguna, los números que no son
+    coordenadas, edades ni identificadores. Montos sumados y duraciones
+    promediadas: hasta dos de cada una (cuatro en total) o, si hay de una sola
+    clase, tres. Con tres montos primero, las duraciones no entraban nunca (en
+    un OMS: monto, cantidad ejecutada y cantidad ordenada, sin la latencia)."""
     numericos = [f for f in fields or [] if f.get("type") in _NUMERICOS and _ruta(f) != entidad]
     elegidas = [f for f in numericos if f.get("role") == "measure"] or \
                [f for f in numericos if not (_NO_ES_MEDIDA.search(_ruta(f)) or _NO_ES_MEDIDA.search(f.get("raw_name") or ""))]
     duracion = lambda f: any(r.search(_ruta(f)) or r.search(f.get("raw_name") or "")  # noqa: E731
                              for r in (_ES_DURACION, _ES_PRECIO_O_TASA))
-    return ([(f, "sum") for f in elegidas if not duracion(f)] + [(f, "avg") for f in elegidas if duracion(f)])[:3]
+    sumas = [(f, "sum") for f in elegidas if not duracion(f)]
+    promedios = [(f, "avg") for f in elegidas if duracion(f)]
+    if sumas and promedios:
+        return sumas[:2] + promedios[:2]
+    return (sumas or promedios)[:3]
+
+
+def eventos_criticos(fields: list[dict]) -> "tuple[dict, dict] | None":
+    """`(campo, agregación)` que cuenta los eventos críticos de cada entidad
+    (rechazos, fallos, fraudes): el indicador que marcó el análisis. None si
+    no hay. Uno numérico (0/1) se suma; uno de texto está solo en los eventos
+    críticos y se cuenta."""
+    f = next((f for f in fields or [] if f.get("role") == "critical_indicator"), None)
+    if f is None:
+        return None
+    if f.get("type") in _NUMERICOS:
+        return f, {"sum": {"field": _ruta(f)}}
+    ruta = f"{_ruta(f)}.keyword" if f.get("type") == "text" else _ruta(f)
+    return f, {"value_count": {"field": ruta}}
 
 
 def perfil_desde_campos(fields: list[dict]) -> "dict | None":
     """El perfil de un dataset nuevo: agrupado por su entidad, con los eventos,
-    hasta tres medidas (montos sumados, duraciones promediadas) y el último
-    evento. None si no hay entidad."""
+    los críticos, sus medidas (montos sumados, duraciones promediadas, ver
+    `medidas_de_la_entidad`) y el último evento. None si no hay entidad."""
     entidad = entidad_propuesta(fields)
     if not entidad:
         return None
@@ -157,6 +193,11 @@ def perfil_desde_campos(fields: list[dict]) -> "dict | None":
                      for f in fields if _ruta(f) == entidad), entidad)
     medidas: dict = {"eventos": {"value_count": {"field": "@timestamp"}}}
     nombres = {"eventos": "Eventos"}
+    criticos = eventos_criticos(fields)
+    if criticos:
+        f, agg = criticos
+        medidas["criticos"] = agg
+        nombres["criticos"] = f"{f.get('business_label') or f.get('raw_name') or _ruta(f)} (cantidad)"
     for f, agg in medidas_de_la_entidad(fields, entidad):
         clave = _re.sub(r"[^a-z0-9_]", "_", _ruta(f).lower())
         medidas[clave] = {agg: {"field": _ruta(f)}}
@@ -164,4 +205,7 @@ def perfil_desde_campos(fields: list[dict]) -> "dict | None":
         nombres[clave] = f"{nombre} (promedio)" if agg == "avg" else nombre
     medidas["ultimo"] = {"max": {"field": "@timestamp"}}
     nombres["ultimo"] = "Último evento"
-    return {"campo": entidad, "etiqueta": etiqueta, "medidas": medidas, "nombres": nombres, "fechas": ["ultimo"]}
+    # Solo los eventos que tienen entidad: los demás (en un OMS, los del propio
+    # sistema) armaban una fila vacía, la más grande de la tabla.
+    return {"campo": entidad, "etiqueta": etiqueta, "medidas": medidas, "nombres": nombres, "fechas": ["ultimo"],
+            "filtro": {"exists": {"field": entidad}}}

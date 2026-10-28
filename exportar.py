@@ -177,7 +177,7 @@ def _armar(slug: str, fields: list[dict], *, label: str = "", index_name: str = 
     feats = caps.features_de_anomalias(spec)
     if aplica.get("anomalias"):
         seccion("Detección de anomalías", motivo("anomalias"), "anomalias")
-        bloques += [_req("POST", "_plugins/_anomaly_detection/detectors", caps.build_ad_detector(slug, ip, feats, 10)),
+        bloques += [_req("POST", "_plugins/_anomaly_detection/detectors", caps.build_ad_detector(slug, ip, feats, 10, shingle_size=spec.get("ventana_ad", 8))),
                     _req("POST", "_plugins/_anomaly_detection/detectors/<DETECTOR_ID>/_start")]
         if aplica.get("alertas"):
             seccion("Alerta de anomalías (Alerting)", motivo("alertas"), "alertas")

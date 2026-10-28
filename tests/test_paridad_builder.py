@@ -125,6 +125,8 @@ def _forecasts(campos, plan) -> dict[str, tuple[str, str]]:
     fuera = {}
     for fc in plan["forecasting"]["config"] or []:
         op, cuerpo = next(iter(next(iter(fc["aggregation_query"].values())).items()))
+        if op == "filter":       # un conteo de los que cumplen algo: el campo del `terms`
+            cuerpo = {"field": next(iter(next(iter(cuerpo.values())).keys())).removesuffix(".keyword")}
         fuera[fc["feature_name"]] = (op, _nombre(campos, cuerpo["field"]))
     return fuera
 

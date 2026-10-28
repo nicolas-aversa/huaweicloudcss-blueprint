@@ -50,6 +50,90 @@ def test_el_detector_de_una_entidad_sobre_el_pattern():
     assert "category_field" not in d, "de una entidad: con datos sintéticos, las HC no entrenan"
 
 
+# ── Dataset nuevo: qué vigila el detector (medido sobre un OMS, 2026-10-28) ──
+def _campos_de_un_oms():
+    return [{"field_path": "fix.msg_type", "type": "keyword", "dimension": True},
+            {"field_path": "fix.rechazo_motivo", "type": "text", "role": "critical_indicator",
+             "business_label": "Motivo del rechazo"},
+            {"field_path": "fix.comp_id_propio", "type": "keyword", "entity": True, "role": "entity_id"},
+            {"field_path": "fix.monto_ejecutado", "type": "float", "role": "measure"},
+            {"field_path": "fix.latencia_ms", "type": "long", "role": "measure"},
+            {"field_path": "log.level", "type": "keyword", "business_label": "Nivel"},
+            {"field_path": "@timestamp", "type": "date", "role": "timestamp"}]
+
+
+def test_el_detector_vigila_criticos_y_errores_con_ventana_corta():
+    # Con volumen, entidades y medida juntos encontraba 1 de 5 incidentes
+    # conocidos, con 2 falsos positivos; con críticos y errores, 3 y ninguno.
+    spec = caps.build_spec_from_fields("oms", "oms-*", _campos_de_un_oms(), "OMS",
+                                       {"log.level": ["INFO", "ERROR", "WARN"]})
+    feats = caps.features_de_anomalias(spec)
+    assert [f["feature_name"] for f in feats] == ["critical_events", "error_events"]
+    assert feats[0]["aggregation_query"] == {"critical_events": {"value_count": {"field": "fix.rechazo_motivo.keyword"}}}
+    assert feats[1]["aggregation_query"] == {"error_events": {
+        "filter": {"terms": {"log.level": ["ERROR", "WARN"]}},
+        "aggs": {"n": {"value_count": {"field": "@timestamp"}}}}}, "los valores del índice, no los de por defecto"
+    assert spec["ventana_ad"] == 4
+    assert caps.build_ad_detector("oms", "oms-*", feats, 10, shingle_size=spec["ventana_ad"])["shingle_size"] == 4
+    assert caps.build_ad_detector("oms", "oms-*", feats, 10)["shingle_size"] == 8, "el de siempre"
+
+
+def test_los_pronosticos_suman_los_errores_y_el_volumen_es_de_todo():
+    spec = caps.build_spec_from_fields("oms", "oms-*", _campos_de_un_oms(), "OMS", {"log.level": ["INFO", "ERROR"]})
+    fcs = {fc["feature_name"]: fc["aggregation_query"] for fc in spec["forecasts"]}
+    assert list(fcs) == ["event_volume", "critical_events", "unique_entities", "error_events", "measure_sum"]
+    assert fcs["event_volume"] == {"event_volume": {"value_count": {"field": "@timestamp"}}}, \
+        "contando la dimensión principal quedaban afuera los eventos sin ella"
+
+
+def test_sin_senales_de_problema_el_detector_de_siempre():
+    campos = [f for f in _campos_de_un_oms() if f["field_path"] not in ("fix.rechazo_motivo", "log.level")]
+    spec = caps.build_spec_from_fields("ventas", "ventas-*", campos, "Ventas")
+    assert "anomalias" not in spec and "ventana_ad" not in spec
+    assert [f["feature_name"] for f in caps.features_de_anomalias(spec)] == ["event_volume", "unique_entities", "measure_sum"]
+
+
+def test_un_nivel_sin_errores_en_los_datos_no_se_vigila():
+    spec = caps.build_spec_from_fields("oms", "oms-*", _campos_de_un_oms(), "OMS", {"log.level": ["INFO", "DEBUG"]})
+    assert "error_events" not in [fc["feature_name"] for fc in spec["forecasts"]]
+    assert "anomalias" not in spec, "sin errores no es un log operativo: el detector de siempre"
+    assert [f["feature_name"] for f in caps.features_de_anomalias(spec)] == \
+        ["event_volume", "critical_events", "unique_entities", "measure_sum"]
+    sin_valores = caps.build_spec_from_fields("oms", "oms-*", _campos_de_un_oms(), "OMS")
+    errores = next(fc for fc in sin_valores["forecasts"] if fc["feature_name"] == "error_events")
+    assert {"ERROR", "error", "WARN"} <= set(errores["aggregation_query"]["error_events"]["filter"]["terms"]["log.level"])
+
+
+def test_una_dimension_con_valores_criticos_cuenta_esos_valores():
+    # Antes: value_count del campo = todos los registros que lo tienen (el volumen).
+    campos = [{"field_path": "estado", "type": "keyword", "dimension": True},
+              {"field_path": "@timestamp", "type": "date", "role": "timestamp"}]
+    spec = caps.build_spec_from_fields("x", "x-*", campos, "X", {"estado": ["ok", "failed", "timeout"]})
+    criticos = next(fc for fc in spec["forecasts"] if fc["feature_name"] == "critical_events")
+    assert criticos["aggregation_query"] == {"critical_events": caps.contar_si({"terms": {"estado": ["failed", "timeout"]}})}
+    # El nivel que ya es el campo crítico no se cuenta dos veces.
+    nivel = [{"field_path": "level", "type": "keyword", "dimension": True},
+             {"field_path": "@timestamp", "type": "date", "role": "timestamp"}]
+    spec = caps.build_spec_from_fields("x", "x-*", nivel, "X", {"level": ["info", "error"]})
+    assert [fc["feature_name"] for fc in spec["forecasts"]].count("error_events") == 0
+
+
+def test_un_filter_solo_lleva_su_conteo_adentro():
+    # AD rechaza el `filter` solo ("Feature has an invalid query causing a
+    # runtime exception", CSS 3.4); las verticales curadas lo usaban así.
+    spec = {"forecasts": [{"feature_name": "utm", "aggregation_query": {"utm": {"filter": {"term": {"type": "utm"}}}}}]}
+    assert caps.features_de_anomalias(spec)[0]["aggregation_query"] == {"utm": {
+        "filter": {"term": {"type": "utm"}}, "aggs": {"n": {"value_count": {"field": "@timestamp"}}}}}
+
+
+def test_el_aprovisionamiento_usa_la_ventana_del_caso(monkeypatch):
+    pedidos, _ = _preparar(monkeypatch)
+    spec = {**_SPEC, "ventana_ad": 4}
+    main._provisionar_anomalias("http://x", "admin", "pw", "siem", "siem-*", spec, {})
+    crear = next(b for m, u, b in pedidos if u.endswith("/detectors"))
+    assert crear["shingle_size"] == 4
+
+
 def test_el_monitor_mira_los_resultados_del_detector():
     m = caps.build_monitor_de_anomalias("siem", "D1")
     assert m["name"] == "siem-anomalias-alerta" and m["monitor_type"] == "query_level_monitor" and m["enabled"]

@@ -67,6 +67,33 @@ def test_el_perfil_no_suma_coordenadas_ni_edades_y_promedia_los_tiempos():
 
 
 
+def test_el_perfil_trae_los_criticos_las_duraciones_y_no_la_fila_sin_entidad():
+    """Un OMS: entraban monto, cantidad ejecutada y cantidad ordenada (tres
+    sumas) y nunca la latencia; no había rechazos por participante; y los 1.172
+    eventos del propio sistema, sin participante, eran la fila más grande."""
+    F = lambda path, tipo, **kw: {"field_path": path, "type": tipo, "business_label": path, **kw}  # noqa: E731
+    campos = [F("fix.comp_id_propio", "keyword", entity=True),
+              F("fix.rechazo_motivo", "text", role="critical_indicator", business_label="Motivo del rechazo"),
+              F("fix.monto_ejecutado", "float", role="measure"), F("fix.last_qty", "float", role="measure"),
+              F("fix.order_qty", "float", role="measure"), F("fix.latencia_ms", "long", role="measure"),
+              F("fix.demora_ms", "long", role="measure")]
+    p = perfiles.perfil_desde_campos(campos)
+    assert list(p["medidas"]) == ["eventos", "criticos", "fix_monto_ejecutado", "fix_last_qty",
+                                  "fix_latencia_ms", "fix_demora_ms", "ultimo"]
+    assert p["medidas"]["criticos"] == {"value_count": {"field": "fix.rechazo_motivo.keyword"}}
+    assert p["nombres"]["criticos"] == "Motivo del rechazo (cantidad)"
+    assert p["medidas"]["fix_latencia_ms"] == {"avg": {"field": "fix.latencia_ms"}}
+    t = perfiles.build_transform("oms", "oms-*", p)["transform"]
+    assert t["data_selection_query"] == {"exists": {"field": "fix.comp_id_propio"}}
+    # Un indicador 0/1 está en todos los eventos: se suma.
+    fraude = [F("cliente", "keyword", entity=True), F("is_fraud", "integer", role="critical_indicator")]
+    assert perfiles.perfil_desde_campos(fraude)["medidas"]["criticos"] == {"sum": {"field": "is_fraud"}}
+    # De una sola clase, tres como antes.
+    sumas = [F("a", "float", role="measure"), F("b", "float", role="measure"), F("c", "float", role="measure"),
+             F("d", "float", role="measure")]
+    assert [f["field_path"] for f, _ in perfiles.medidas_de_la_entidad(sumas)] == ["a", "b", "c"]
+
+
 def test_los_sensibles_son_los_marcados():
     assert accesos.enmascarados_desde_campos(CAMPOS) == ["data.dni"]
     assert accesos.enmascarados_desde_campos([]) == []

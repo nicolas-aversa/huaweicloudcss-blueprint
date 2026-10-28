@@ -51,6 +51,21 @@ def test_entre_varias_medidas_y_entidades_gana_la_principal():
     assert len(fcs) == 4
 
 
+def test_un_dataset_de_negocio_sigue_vigilando_la_medida():
+    # Críticos y errores solos es para un log operativo (con nivel de errores):
+    # en reservas, el importe sigue en el detector.
+    feats = [f["feature_name"] for f in _plan(HOTEL)["anomalias"]["config"]]
+    assert "measure_sum" in feats and "critical_events" in feats
+
+
+def test_el_plan_dice_que_errores_vigila():
+    log = HOTEL + [{"field_path": "log.level", "raw_name": "level", "type": "keyword", "business_label": "Nivel"}]
+    p = {i["plugin"]: i for i in pc.plan("hotel", log, enums={"log.level": ["INFO", "ERROR", "WARN"]})}
+    assert "registros con Nivel ERROR o WARN" in p["anomalias"]["motivo"], p["anomalias"]["motivo"]
+    assert "registros con Nivel ERROR o WARN" in p["forecasting"]["motivo"]
+    assert [f["feature_name"] for f in p["anomalias"]["config"]] == ["critical_events", "error_events"]
+
+
 def test_sin_fecha_del_evento_no_hay_series_y_lo_dice():
     p = _plan([f for f in HOTEL if f["field_path"] != "fecha_reserva"])
     for plugin in ("forecasting", "anomalias", "alertas", "explicar"):

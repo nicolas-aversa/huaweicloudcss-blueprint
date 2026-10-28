@@ -4657,6 +4657,30 @@ def test_discover_enums_keeps_low_cardinality_discards_ids(monkeypatch):
     assert "data.user_id" not in result  # 16 > 15 → descartado
 
 
+def test_discover_enums_trae_el_nivel_del_log_aunque_no_sea_dimension(monkeypatch):
+    """Con los valores reales del nivel se cuentan los errores que hay (no una
+    lista adivinada que puede no coincidir en nada)."""
+    pedidos = []
+
+    def fake_request(method, url, **kwargs):
+        pedidos.append(kwargs.get("json") or {})
+
+        class _R:
+            status_code = 200
+            text = "{}"
+
+            def json(self):
+                return {"aggregations": {"f0": {"buckets": [{"key": "INFO", "doc_count": 9},
+                                                            {"key": "ERROR", "doc_count": 1}]}}}
+
+        return _R()
+
+    monkeypatch.setattr("requests.request", fake_request)
+    fields = [{"field_path": "log.level", "type": "keyword"}, {"field_path": "fix.monto", "type": "float"}]
+    assert main._discover_enums("http://x:9200", "admin", "pw", "fix-*", fields) == {"log.level": ["INFO", "ERROR"]}
+    assert [a["terms"]["field"] for a in pedidos[0]["aggs"].values()] == ["log.level"], "el monto no"
+
+
 def test_spec_from_fields_no_date_no_temporal_panels():
     """(d) _spec_from_fields sin campos date no emite paneles temporales."""
     from dashboards import _spec_from_fields

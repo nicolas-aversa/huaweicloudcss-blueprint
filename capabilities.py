@@ -708,14 +708,32 @@ def build_forecaster(index_pattern: str, volume_field: str,
 # demos (fechas del pasado). Ahora se dimensionan del rango real del índice y se
 # corre un análisis HISTÓRICO sobre ese rango.
 
+def contar_si(condicion: dict[str, Any]) -> dict[str, Any]:
+    """Una agregación que cuenta los eventos que cumplen `condicion`. El
+    `filter` solo, AD lo rechaza ("Feature has an invalid query causing a
+    runtime exception", CSS 3.4): necesita adentro una métrica."""
+    return {"filter": condicion, "aggs": {"n": {"value_count": {"field": "@timestamp"}}}}
+
+
+def _con_conteo(aggregation_query: dict[str, Any]) -> dict[str, Any]:
+    """La misma agregación, con la métrica adentro si es un `filter` solo (los
+    de las verticales curadas)."""
+    return {nombre: (contar_si(agg["filter"]) if isinstance(agg, dict) and set(agg) == {"filter"} else agg)
+            for nombre, agg in aggregation_query.items()}
+
+
 def features_de_anomalias(spec: dict[str, Any]) -> list[dict[str, Any]]:
-    """Las features del detector: las de los forecasts del caso (volumen,
-    fallos, entidades únicas, la medida), que ya están probadas contra sus
-    datos. Sin forecasts, el volumen. Hasta cuatro (el plugin acepta cinco)."""
+    """Las features del detector. Un dataset nuevo trae las suyas
+    (`anomalias`: volumen, críticos, errores, duraciones…); una vertical
+    curada usa las de sus forecasts, que ya están probadas contra sus datos.
+    Sin nada, el volumen. Hasta cinco, lo que acepta el plugin."""
+    if spec.get("anomalias"):
+        return [{"feature_name": f["feature_name"], "aggregation_query": _con_conteo(f["aggregation_query"])}
+                for f in spec["anomalias"]][:5]
     out = []
     for fc in spec.get("forecasts") or []:
         agg = fc.get("aggregation_query") or {fc["feature_name"]: {"value_count": {"field": spec.get("volume_field", "")}}}
-        out.append({"feature_name": fc["feature_name"], "aggregation_query": agg})
+        out.append({"feature_name": fc["feature_name"], "aggregation_query": _con_conteo(agg)})
     if not out and spec.get("volume_field"):
         out = [{"feature_name": "volumen", "aggregation_query": {"volumen": {"value_count": {"field": spec["volume_field"]}}}}]
     return out[:4]
@@ -729,9 +747,14 @@ def nombre_de_monitor_ad(slug: str) -> str:
     return f"{slug}-anomalias-alerta"
 
 
+# La ventana (shingle) del detector cuando vigila señales de problema: son
+# ráfagas de minutos, y con 8 intervalos el pico se pierde entre los vecinos.
+VENTANA_DE_PROBLEMAS = 4
+
+
 def build_ad_detector(slug: str, index_pattern: str, features: list[dict[str, Any]],
                       interval_minutes: int, window_delay_minutes: int = 1,
-                      time_field: str = "@timestamp") -> dict[str, Any]:
+                      time_field: str = "@timestamp", shingle_size: int = 8) -> dict[str, Any]:
     """`POST _plugins/_anomaly_detection/detectors`, de una sola entidad (sin
     category_field): con datos sintéticos, los de alta cardinalidad no llegan a
     entrenar."""
@@ -744,7 +767,7 @@ def build_ad_detector(slug: str, index_pattern: str, features: list[dict[str, An
                                 "aggregation_query": f["aggregation_query"]} for f in features],
         "detection_interval": {"period": {"interval": interval_minutes, "unit": "Minutes"}},
         "window_delay": {"period": {"interval": window_delay_minutes, "unit": "Minutes"}},
-        "shingle_size": 8,
+        "shingle_size": shingle_size,
     }
 
 
@@ -856,6 +879,38 @@ _CRITICAL_VALUES = frozenset(
     {"failed", "error", "denied", "blocked", "rejected", "cancelled", "canceled",
      "down", "critical", "emergency", "alarm", "alert", "fault", "timeout", "invalid"}
 )
+
+# El nivel de un log (log.level, severity, nivel) y los valores que son un
+# problema. Casi todo log lo trae, y es lo primero que se mueve cuando algo
+# anda mal: en FIX, el corte de un mercado son 174 ERROR en un minuto.
+_NIVEL_DE_LOG = re.compile(r"(^|[._])(level|loglevel|log_level|severity|severidad|nivel|priority|prioridad)$", re.I)
+_NIVELES_DE_PROBLEMA = re.compile(r"^(err|error|errors|fatal|crit|critical|severe|alert|emerg|emergency|panic|"
+                                  r"warn|warning)$", re.I)
+# Sin los valores del índice, las formas habituales (el `terms` distingue mayúsculas).
+_NIVELES_POR_DEFECTO = ("ERROR", "Error", "error", "FATAL", "fatal", "CRITICAL", "critical",
+                        "WARN", "warn", "WARNING", "Warning", "warning")
+
+
+def nivel_de_problemas(fields: list[dict[str, Any]], enums: "dict[str, list[str]] | None" = None
+                       ) -> "tuple[str, list[str]] | None":
+    """`(campo, valores)` del nivel del log que marca un problema, o None si no
+    hay nivel o si en los datos no aparece ningún valor de problema."""
+    enums = enums or {}
+    for f in fields or []:
+        path = (f.get("field_path") or "").strip()
+        tipo = f.get("type") or ""
+        if tipo not in ("keyword", "string", "text") or not _NIVEL_DE_LOG.search(path):
+            continue
+        conocidos = enums.get(path)
+        valores = [v for v in conocidos if _NIVELES_DE_PROBLEMA.match(str(v))] if conocidos else list(_NIVELES_POR_DEFECTO)
+        if valores:
+            return (f"{path}.keyword" if tipo == "text" else path), valores
+    return None
+
+
+def _clave(path: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", path.lower()).strip("_")[:40]
+
 
 # Campos que parecen un código de respuesta/estado → candidato a success_code.
 _RESPONSE_CODE_RE = re.compile(
@@ -1018,10 +1073,13 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
 
     forecasts: list[dict[str, Any]] = []
     if volume_field:
+        # Todos los eventos: contando la dimensión principal quedaban afuera los
+        # que no la tienen (en FIX, logons, desconexiones y errores: en el corte
+        # de un mercado el volumen daba 0 y el detector veía una caída).
         forecasts.append({
             "name": f"{slug}-volume-forecast",
             "feature_name": "event_volume",
-            "aggregation_query": {"event_volume": {"value_count": {"field": volume_field}}},
+            "aggregation_query": {"event_volume": {"value_count": {"field": "@timestamp"}}},
             "description": "Forecast de volumen de eventos por intervalo",
         })
 
@@ -1029,25 +1087,45 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
     critical_field = _by_role("critical_indicator")
     if not critical_field:
         critical_field = next((f for f in usable if _CRITICAL_FIELD_RE.search(f["field_path"])), None)
+    valores_criticos: list[str] = []
     if not critical_field:
         for f in dims:
             vals = enums.get(f["field_path"], [])
             if vals and any(v.lower() in _CRITICAL_VALUES for v in vals):
                 critical_field = f
+                valores_criticos = [v for v in vals if v.lower() in _CRITICAL_VALUES]
                 break
     if critical_field:
         cf_path = critical_field["field_path"]
         if (critical_field.get("type") or "") == "text":
             cf_path = f"{cf_path}.keyword"
         # Un indicador numérico (`is_fraud` 0/1) está en todos los registros:
-        # contarlo da el volumen. Sumado, da los casos.
-        operacion = "sum" if (critical_field.get("type") or "") in _MEASURE_TYPES else "value_count"
+        # contarlo da el volumen. Sumado, da los casos. Una dimensión con valores
+        # críticos (estado = error) también está en todos: se cuentan esos valores.
+        if valores_criticos:
+            agg_critico = contar_si({"terms": {cf_path: valores_criticos}})
+        else:
+            operacion = "sum" if (critical_field.get("type") or "") in _MEASURE_TYPES else "value_count"
+            agg_critico = {operacion: {"field": cf_path}}
         forecasts.append({
             "name": f"{slug}-critical-forecast",
             "feature_name": "critical_events",
-            "aggregation_query": {"critical_events": {operacion: {"field": cf_path}}},
+            "aggregation_query": {"critical_events": agg_critico},
             "description": f"Forecast de eventos criticos/fallidos ({critical_field.get('business_label') or 'campo critico'}) por intervalo",
         })
+
+    # ── Errores del log: el nivel (ERROR, FATAL, WARN…), si no es el campo crítico ──
+    nivel = nivel_de_problemas(usable, enums)
+    if nivel and critical_field is not None and nivel[0].removesuffix(".keyword") == critical_field["field_path"].strip():
+        nivel = None
+    errores = None
+    if nivel:
+        errores = {
+            "name": f"{slug}-errors-forecast",
+            "feature_name": "error_events",
+            "aggregation_query": {"error_events": contar_si({"terms": {nivel[0]: nivel[1]}})},
+            "description": f"Forecast de eventos con nivel {', '.join(nivel[1][:3])} por intervalo",
+        }
 
     # ── Forecast de entidades únicas: role → regex ──
     # La Entidad marcada en el paso 2 primero: es la misma que sigue el perfil.
@@ -1069,6 +1147,8 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
             "description": f"Forecast de {entity.get('business_label') or 'entidades'} únicos por intervalo",
             "history": 2000,
         })
+    if errores:
+        forecasts.append(errores)
 
     # ── Forecast de medida: role → primer numérico ──
     measure_field = _by_role("measure")
@@ -1082,8 +1162,20 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
             "description": f"Forecast de {measure_field.get('business_label') or 'la medida principal'} por intervalo",
         })
 
-    # Entran los cuatro (volumen, críticos, entidades, medida): con tope 3 se
-    # caía la medida, que es justo la facturación o la producción del caso.
+    # Entran todos (volumen, críticos, entidades, errores, medida): con tope 3
+    # se caía la medida, que es justo la facturación o la producción del caso.
+
+    # ── Anomalías: las señales de problema, solas ──
+    # Medido sobre un OMS con 5 incidentes conocidos (2026-10-28): volumen,
+    # críticos, entidades y medida juntos encontraban 1, con 2 falsos positivos
+    # (la apertura y el cierre del mercado). Críticos y errores solos, con una
+    # ventana de 4 intervalos, encuentran 3 sin falsos positivos. Sumarles el
+    # volumen, una duración o la medida diluye la señal: un detector de una
+    # sola serie promedia sus features. Solo en un log operativo (con nivel de
+    # errores): en uno de negocio (reservas, ventas) la medida es lo que importa
+    # vigilar, y ahí sigue el de antes.
+    problemas = [{"feature_name": fc["feature_name"], "aggregation_query": fc["aggregation_query"]}
+                 for fc in forecasts if fc["feature_name"] in ("critical_events", "error_events")] if errores else []
 
     # ── success_code: role → regex → más frecuente ──
     success_code = ""
@@ -1108,6 +1200,9 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         "forecasts": forecasts,
         "pattern_field": campo_de_patrones(usable),
     }
+    if problemas:
+        spec["anomalias"] = problemas
+        spec["ventana_ad"] = VENTANA_DE_PROBLEMAS
 
     # Asegurar que campos con rol semántico estén en el prompt del PPLTool
     # aunque no sean dimensionales — el chatbot necesita conocerlos para

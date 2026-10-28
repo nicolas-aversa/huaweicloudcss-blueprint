@@ -150,9 +150,20 @@ def test_sum_y_lo_ya_declarado_no_se_tocan():
         "total": {"sum": {"field": "v"}}, "prom": {"avg": {"field": "v"}},
         "propio": {"min": {"field": "v", "missing": 5}}}}
     assert perfiles.medidas_sin_vacios(perfil) == {
-        "total": {"sum": {"field": "v"}}, "prom": {"avg": {"field": "v", "missing": 0}},
+        "total": {"sum": {"field": "v"}}, "prom": perfiles.promedio_de_los_que_lo_tienen("v"),
         "propio": {"min": {"field": "v", "missing": 5}}}
     assert perfil["medidas"]["prom"] == {"avg": {"field": "v"}}, "no modifica el spec del vertical"
+
+
+def test_el_promedio_es_de_los_que_tienen_el_dato():
+    """Con `missing: 0` los eventos sin el dato eran ceros: en un OMS la
+    latencia promedio daba 3,5 ms y era 5,6 (medido con el preview del Transform
+    en CSS 3.4, que da 5,57 igual que el avg de OpenSearch)."""
+    s = perfiles.promedio_de_los_que_lo_tienen("fix.latencia_ms")["scripted_metric"]
+    assert "doc.containsKey('fix.latencia_ms') && doc['fix.latencia_ms'].size() > 0" in s["map_script"]
+    assert "n > 0 ? s / n : 0.0" in s["reduce_script"], "sin eventos con el dato, 0 (vacío no se indexa)"
+    raro = perfiles.promedio_de_los_que_lo_tienen("a'b")["scripted_metric"]["map_script"]
+    assert "doc['a\\'b']" in raro, "el nombre del campo no corta el script"
 
 
 def test_el_transform_es_continuo():

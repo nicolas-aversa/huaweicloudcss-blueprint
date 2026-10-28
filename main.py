@@ -6482,8 +6482,12 @@ def _discover_enums(base: str, user: str, password: str, index_pattern: str,
             return f"{path}.keyword"
         return path
 
+    # El nivel del log (log.level) también, aunque no sea dimensión: con sus
+    # valores reales se cuentan los errores que hay y no una lista adivinada.
+    import capabilities as _caps
     dims = [(f, _agg_field(f)) for f in (fields or [])
-            if f.get("dimension") and (f.get("field_path") or "").strip()]
+            if (f.get("dimension") or _caps._NIVEL_DE_LOG.search((f.get("field_path") or "").strip()))
+            and (f.get("field_path") or "").strip()]
     if not dims:
         return {}
     # Un solo request: un `terms` por dimensión, pidiendo uno más que el tope para
@@ -6696,11 +6700,13 @@ def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index
     min_ms, max_ms, _docs = rango
     intervalo = _intervalo_de_anomalias(min_ms, max_ms)
     rd = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors", user, password, timeout=30,
-                 json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo))
+                 json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo,
+                                                    shingle_size=spec.get("ventana_ad", 8)))
     if not _resp_ok(rd) and _es_saturacion(_resp_motivo(rd)):
         _esperar_cluster_libre(base, user, password)
         rd = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors", user, password, timeout=30,
-                     json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo))
+                     json_body=caps.build_ad_detector(slug, index_pattern, features, intervalo,
+                                                    shingle_size=spec.get("ventana_ad", 8)))
     detector_id = _resp_id(rd) if _resp_ok(rd) else ""
     if not detector_id:
         return {"ok": False, "reason": f"no se pudo crear el detector: {_resp_motivo(rd)}"}

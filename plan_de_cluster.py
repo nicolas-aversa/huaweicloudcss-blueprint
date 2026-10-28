@@ -71,6 +71,13 @@ def _item(plugin: str, titulo: str, aplica: bool, motivo: str, config: Any = Non
 def _forecast_en_palabras(fc: dict, fields: list[dict]) -> str:
     agg = next(iter((fc.get("aggregation_query") or {}).values()), {})
     tipo, cuerpo = next(iter(agg.items()), ("", {}))
+    if tipo == "filter":
+        # Un conteo de los que cumplen algo: "registros con Nivel ERROR o WARN".
+        clase, cond = next(iter((cuerpo or {}).items()), ("", {}))
+        ruta, valores = next(iter((cond or {}).items()), ("", []))
+        valores = valores if isinstance(valores, list) else [valores]
+        nombre = _nombre_de(str(ruta).removesuffix(".keyword"), fields)
+        return f"registros con {nombre} " + " o ".join(str(v) for v in valores[:3]) if valores else f"registros con {nombre}"
     campo = _nombre_de((cuerpo or {}).get("field", ""), fields)
     return {"value_count": "cantidad de registros" if fc.get("feature_name") == "event_volume" else f"cantidad con {campo}",
             "sum": f"total de {campo}", "cardinality": f"{campo} distintos"}.get(tipo, campo)
