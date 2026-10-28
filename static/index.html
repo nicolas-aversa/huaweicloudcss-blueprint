@@ -7945,11 +7945,19 @@
       state.provisionandoPlugins = true;
       state.aplicandoPlugin = clave;
       document.querySelectorAll('#infra-funciones .cat__aplicar').forEach(b => { b.disabled = true; });
-      const refresco = setInterval(refrescarPluginsEnCurso, _REFRESCO_PLUGINS_MS);
+      // La respuesta puede no llegar nunca (ver activacionTerminada): si el
+      // servidor ya terminó, se deja de esperarla.
+      const controlador = new AbortController();
+      const seguimiento = { desde: Date.now(), vista: false };
+      const refresco = setInterval(async () => {
+        const data = await refrescarPluginsEnCurso();
+        if (data && activacionTerminada(seguimiento, data, Date.now())) controlador.abort();
+      }, _REFRESCO_PLUGINS_MS);
       let listo = false;
       try {
         const res = await fetch('/api/v1/onboarding/provision-capabilities', {
           method: 'POST',
+          signal: controlador.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             opensearch_password: password,
@@ -7985,6 +7993,13 @@
         await hydrateActiveEnv();
         listo = true;
       } catch (err) {
+        if (err && err.name === 'AbortError') {
+          // Terminó en el servidor y su respuesta no llegó: lo que quedó, del estado.
+          toast('La activación terminó. El resultado de cada plugin está en Actividad.', 'info');
+          await hydrateActiveEnv();
+          listo = true;
+          return;
+        }
         // El error, debajo de SU botón (como los otros dos pasos).
         const statusEl = !plugins && document.getElementById('infra-capabilities-btn-status');
         if (statusEl) showStatus(statusEl, `Error: ${err.message}`, 'error');
@@ -8011,7 +8026,7 @@
     async function refrescarPluginsEnCurso() {
       try {
         const res = await fetch('/api/v1/terraform/status');
-        if (!res.ok) return;
+        if (!res.ok) return null;
         const data = await res.json();
         const antes = state.lastStatus || {};
         if (firmaDePlugins(data.plugins) !== firmaDePlugins(antes.plugins)
@@ -8019,7 +8034,22 @@
             || !!data.activando !== !!antes.activando) {
           renderInfraView(data);
         }
-      } catch (_err) { /* el próximo intento */ }
+        return data;
+      } catch (_err) { return null; /* el próximo intento */ }
+    }
+    // ¿La activación que lanzó esta pestaña ya terminó en el servidor? Su
+    // respuesta puede no llegar nunca: es un pedido de minutos, y una red que
+    // corta las conexiones largas sin avisar dejaba el botón en "Activando…"
+    // para siempre (visto en la ECS: la activación había terminado hacía 51
+    // min). Terminó si el servidor la mostró en curso y ya no; si nunca la
+    // mostró (arranca después de bajar lo anterior), a los 10 minutos.
+    const _SIN_RESPUESTA_MS = 10 * 60 * 1000;
+    function activacionTerminada(seguimiento, data, ahora) {
+      if (data.activando) {
+        seguimiento.vista = true;
+        return false;
+      }
+      return seguimiento.vista || ahora - seguimiento.desde > _SIN_RESPUESTA_MS;
     }
     // Con una activación corriendo que no lanzó esta pestaña (se recargó la
     // página, u otra pestaña), la vista se actualiza sola hasta que termina.
