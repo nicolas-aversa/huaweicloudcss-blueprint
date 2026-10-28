@@ -121,23 +121,27 @@ def _sujeto(filas: str) -> tuple[str, str]:
     return "registros", "Cuántos"
 
 
-def _agrupa(f: dict) -> bool:
-    """Un id único por fila (el perfil no le encontró valores frecuentes) no
-    agrupa: "¿qué ID de trabajo tuvo más fallas?" no tiene respuesta."""
-    return bool(f.get("frecuentes")) or "frecuentes" not in f
+def _quien(fields: list[dict]) -> dict | None:
+    """El "quién" del dashboard (y del perfil): el que marcó el usuario en el
+    paso 2 o, sin marca, uno con rol de entidad que agrupe ("¿qué ID de trabajo
+    tuvo más fallas?" no tiene respuesta). Se elegía aparte, el primero con rol
+    de entidad: en unos pozos las preguntas hablaban del gateway y el
+    dashboard, del pozo."""
+    from dashboards import _clasificar, _field_path
+
+    ruta = (_clasificar(fields)["entidad"] or {}).get("path")
+    return next((f for f in fields if _field_path(f) == ruta), None) if ruta else None
 
 
-def _de_incidentes(fields: list[dict], critico: "dict | None", primaria: "dict | None", hay_fecha: bool,
-                   cosas: str, cuantas: str, _et) -> list[str]:
+def _de_incidentes(fields: list[dict], quien: "dict | None", critico: "dict | None", primaria: "dict | None",
+                   hay_fecha: bool, cosas: str, cuantas: str, _et) -> list[str]:
     from capabilities import _NIVELES_DE_PROBLEMA
-    from dashboards import _NIVEL_DE_LOG, _clasificar
+    from dashboards import _NIVEL_DE_LOG, _clasificar, _field_path
 
-    quien = next((f for f in fields if (f.get("entity") or f.get("role") == "entity_id")
-                  and f.get("type") not in _NUMERICOS and _agrupa(f)), None)
     nivel = next((f for f in fields if f.get("type") in ("string", "keyword", "text")
                   and _NIVEL_DE_LOG.search(f.get("field_path") or "")), None)
     malos = [str(v) for v in (nivel or {}).get("frecuentes") or [] if _NIVELES_DE_PROBLEMA.match(str(v))]
-    por_ruta = {(f.get("field_path") or "").strip(): f for f in fields}
+    por_ruta = {_field_path(f): f for f in fields}
     duracion = next((por_ruta.get(c["path"]) for c in _clasificar(fields)["duraciones"]), None)
     qs: list[str] = []
     if critico:
@@ -166,11 +170,15 @@ def plantillas(fields: list[dict], filas: str = "") -> list[str]:
     fields = [f for f in fields or [] if isinstance(f, dict) and _etiqueta(f)]
     exito = _con_rol(fields, "success_indicator")
     critico = _con_rol(fields, "critical_indicator")
-    entidad = _con_rol(fields, "entity_id")
+    # La entidad es la del dashboard ("Por Cliente"), no el primer campo con
+    # rol de entidad: ese era el id de cada envío o de cada evento, y "los 10
+    # valores de ID de evento que más se repiten" se repiten una vez.
+    quien = _quien(fields)
+    entidad = quien or _con_rol(fields, "entity_id")
     hay_fecha = any(f.get("type") == "date" or f.get("role") == "timestamp" for f in fields)
     # Igual que el dashboard: la entidad elegida tiene su propia pregunta (top
-    # 10); un segundo campo con rol de entidad que agrupa bien ("Cliente", con
-    # cinco valores) sigue siendo una dimensión.
+    # 10); otro campo con rol de entidad que agrupa bien (un tipo de cliente,
+    # con cinco valores) sigue siendo una dimensión.
     dims = [f for f in fields
             if f.get("dimension") is True and f.get("type") not in ("date", "geo_point")
             and f is not entidad and f.get("role") != "critical_indicator"]
@@ -211,7 +219,7 @@ def plantillas(fields: list[dict], filas: str = "") -> list[str]:
     # OMS: quién tuvo más problemas y de qué, qué día hubo un pico, cuántos
     # errores por día, cuánto tarda y cuándo tardó más. Salen de los mismos
     # roles que el dashboard (Problemas y Tiempos).
-    qs += _de_incidentes(fields, critico, primaria, hay_fecha, cosas, cuantas, _et)
+    qs += _de_incidentes(fields, quien, critico, primaria, hay_fecha, cosas, cuantas, _et)
     if exito:
         qs.append(f"¿{cuantas} {cosas} hay de cada {_et(exito)}?")
     if hay_fecha:

@@ -86,16 +86,18 @@ def test_las_plantillas_usan_los_roles_y_los_valores_reales():
     qs = preguntas.armar(_campos(TELEMETRIA), [], "los trabajos")
     assert "¿Cuántos trabajos hay de cada estado?" in qs
     assert "¿Cuántos trabajos hubo por día?" in qs
-    assert "¿Cuáles son los 10 valores de ID trabajo que más se repiten?" in qs
     assert "¿Cuántos trabajos tienen código error?" in qs
     # El valor real del estado de falla, como lo diría una persona (el valor
     # va como está: es lo que hay que escribir para filtrar).
     assert "¿Cuántos trabajos terminaron en FALLIDO?" in qs
-    assert "¿Qué cliente tuvo más trabajos en FALLIDO?" in qs
-    # "Cliente" también tiene rol de entidad, pero la entidad elegida es ID
-    # Trabajo: Cliente agrupa, y es la torta principal del dashboard. Y sin
-    # repetir "total": "el total de páginas", no "de páginas totales".
-    assert "¿Cuál es el total de páginas por cliente?" in qs
+    # La entidad es la del dashboard ("Por Cliente"): ID Trabajo también tiene
+    # rol de entidad, pero es uno por fila. Y la dimensión principal también es
+    # la del dashboard: la prensa. Sin repetir "total": "el total de páginas",
+    # no "de páginas totales".
+    assert "¿Cuáles son los 10 valores de cliente que más se repiten?" in qs
+    assert not any("ID trabajo" in q for q in qs), qs
+    assert "¿Qué prensa / máquina tuvo más trabajos en FALLIDO?" in qs
+    assert "¿Cuál es el total de páginas por prensa / máquina?" in qs
 
 
 def test_las_preguntas_suenan_a_persona_y_no_a_titulo_de_reporte():
@@ -231,6 +233,28 @@ def test_las_de_incidente_dependen_de_los_datos():
     qs = preguntas.plantillas(fraude, "las transacciones")
     assert "¿Qué cliente tuvo más transacciones marcadas como fraude?" in qs, "un 0/1 no tiene motivo"
     assert "¿Qué día hubo más transacciones marcadas como fraude, y de qué cliente?" in qs
+
+
+def test_las_preguntas_hablan_del_mismo_quien_que_el_dashboard():
+    """En unos pozos las preguntas tomaban el primer campo con rol de entidad
+    (el gateway) y el dashboard, el que marcó el usuario (el pozo, sin valores
+    frecuentes por tener muchos). Y el top 10 era del id de cada evento, que
+    no se repite."""
+    pozos = [{"field_path": "@timestamp", "type": "date", "role": "timestamp"},
+             {"field_path": "evento.id", "type": "keyword", "role": "entity_id", "business_label": "ID de evento",
+              "frecuentes": []},
+             {"field_path": "gateway", "type": "keyword", "role": "entity_id", "dimension": True,
+              "business_label": "Gateway", "frecuentes": ["GW-01", "GW-02"]},
+             {"field_path": "pozo.id", "type": "keyword", "role": "entity_id", "entity": True, "dimension": False,
+              "business_label": "Pozo", "frecuentes": []},
+             {"field_path": "alarma.codigo", "type": "keyword", "role": "critical_indicator", "dimension": True,
+              "business_label": "Código de alarma", "frecuentes": ["FUGA", "COM"]}]
+    assert dashboards._clasificar(pozos)["entidad"]["path"] == "pozo.id"
+    qs = preguntas.plantillas(pozos, "los registros")
+    assert qs[:2] == ["¿Qué pozo tuvo más registros con código de alarma, y cuál fue el más frecuente?",
+                      "¿Qué día hubo más registros con código de alarma, y de qué pozo?"], qs
+    assert "¿Cuáles son los 10 valores de pozo que más se repiten?" in qs
+    assert not any("gateway tuvo" in q or "ID de evento" in q for q in qs), qs
 
 
 # ── El dashboard y las preguntas dicen lo mismo ─────────────────────────────

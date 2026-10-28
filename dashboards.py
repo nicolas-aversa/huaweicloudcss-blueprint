@@ -821,20 +821,24 @@ def _clasificar(fields: list[dict[str, Any]]) -> dict[str, Any]:
         campos.append({"path": path, "es": es, "agg": agg, "label": (f.get("business_label") or path),
                        "dim": bool(dim), "role": role, "unit": unit, "raw": f.get("raw_name") or "",
                        "entity": bool(f.get("entity")),
-                       # Un id que no se repite (cada fila trae el suyo) no agrupa: el
-                       # perfil no le encontró valores frecuentes.
+                       # Sin valores frecuentes puede ser un id que no se repite (cada
+                       # fila trae el suyo): el perfilador los guarda solo de las
+                       # dimensiones, y un campo de muchos valores no los tiene.
                        "agrupa": not ("frecuentes" in f and not f.get("frecuentes"))})
 
     def con_rol(rol: str):
         return next((c for c in campos if c["role"] == rol), None)
 
     texto = ("keyword", "text")
-    # La entidad: la marcada en el paso 2 o la del rol, y entre varias, una que
-    # agrupe ("Cliente" y no el id de cada trabajo: una tabla de ids de una
-    # fila cada uno no dice nada).
+    # La entidad: la que marcó el usuario en el paso 2, que es la del perfil por
+    # entidad (un afiliado o una cuenta se repiten aunque, por tener miles de
+    # valores, no traigan frecuentes: se tomaba el sexo del paciente). Sin
+    # marca, una con rol de entidad que agrupe ("Cliente" y no el id de cada
+    # trabajo: una tabla de ids de una fila cada uno no dice nada).
     candidatas = [c for c in campos if c["es"] in texto + ("ip",) and (c["entity"] or c["role"] == "entity_id")]
     candidatas.sort(key=lambda c: not c["entity"])
-    entidad = next((c for c in candidatas if c["agrupa"]), None) or (candidatas[0] if candidatas else None)
+    entidad = next((c for c in candidatas if c["entity"] or c["agrupa"]), None) or (
+        candidatas[0] if candidatas else None)
     ips = [c for c in campos if c["es"] == "ip"]
     if entidad is None and ips:
         entidad = ips[0]          # sin entidad, la IP es "quién"
@@ -842,13 +846,19 @@ def _clasificar(fields: list[dict[str, Any]]) -> dict[str, Any]:
     exito = con_rol("success_indicator")
     nivel = next((c for c in campos if c["es"] in texto and _NIVEL_DE_LOG.search(c["path"])), None)
     usados = {id(x) for x in (entidad, critico, exito, nivel) if x}
+    # La dimensión principal del análisis va antes que el componente: un
+    # "tipo_servicio" termina como un servicio de log y la dejaba afuera.
+    principal = con_rol("primary_dimension")
+    if principal is not None and id(principal) in usados:
+        principal = None
+    if principal:
+        usados.add(id(principal))
     componente = next((c for c in campos if c["es"] in texto and id(c) not in usados
                        and _COMPONENTE.search(c["path"])), None)
     if componente:
         usados.add(id(componente))
     categorias = [c for c in campos if c["es"] in texto and c["dim"] and id(c) not in usados]
-    principal = con_rol("primary_dimension")
-    if principal is None or id(principal) in usados:
+    if principal is None:
         principal = categorias[0] if categorias else None
     otras = [c for c in categorias if c is not principal]
 

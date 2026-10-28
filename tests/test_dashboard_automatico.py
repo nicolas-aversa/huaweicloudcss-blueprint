@@ -126,6 +126,30 @@ def test_la_fecha_que_ya_se_llama_timestamp_alcanza_para_las_series():
     assert not _de(_tableros([_campo("estado", "keyword")])[0], "area")
 
 
+EMERGENCIAS = [_campo("@timestamp", "date", role="timestamp", dimension=False),
+               _campo("afiliado_id", "keyword", entity=True, role="entity_id", label="Afiliado", dimension=False,
+                      frecuentes=[]),
+               _campo("sexo_paciente", "keyword", role="entity_id", label="Sexo paciente", frecuentes=["F", "M", "X"]),
+               _campo("tipo_servicio", "keyword", role="primary_dimension", label="Tipo servicio",
+                      frecuentes=["Urgencia", "Emergencia"]),
+               _campo("canal", "keyword", label="Canal", frecuentes=["Teléfono", "App"]),
+               _campo("tiempo_respuesta_min", "long", role="measure", label="Tiempo respuesta", dimension=False)]
+
+
+def test_la_entidad_es_la_marcada_aunque_tenga_miles_de_valores():
+    """El perfilador guarda valores frecuentes solo de las dimensiones: un
+    afiliado, con miles, no los trae y no por eso es un id por fila. Es la
+    entidad del perfil; el dashboard tomaba el sexo del paciente (tres valores,
+    también con rol de entidad)."""
+    clases = dashboards._clasificar(EMERGENCIAS)
+    assert clases["entidad"]["path"] == "afiliado_id" == perfiles.entidad_propuesta(EMERGENCIAS)
+    # La dimensión principal del análisis sigue siéndolo aunque el nombre
+    # termine como el servicio de un log, y no se repite como componente.
+    assert clases["principal"]["path"] == "tipo_servicio" and clases["componente"] is None
+    tablas = [p["title"] for p in _de(_tableros(EMERGENCIAS)[0], "table")]
+    assert tablas == ["Por Tipo servicio", "Por Afiliado"], tablas
+
+
 # ── Problemas ───────────────────────────────────────────────────────────────
 def test_problemas_dice_que_fallo_cuando_donde_y_a_quien():
     problemas = _tableros(OMS, "oms")[1]
