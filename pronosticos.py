@@ -76,6 +76,38 @@ def motivo_sin_grafico(estado: str, pasos: "int | None", history: int) -> str:
             "(el cluster rechazó parte de sus búsquedas)")
 
 
+# El error de la tarjeta: el ponderado de los pronósticos de los últimos
+# `ANCLAS_DEL_ERROR` puntos de partida del backtest. Era el MAPE de uno solo (8
+# pasos), que con valores chicos se infla: una prepaga mostraba 134 % con un
+# pronóstico que, medido sobre 150 puntos de partida, erraba 33 % y le ganaba
+# casi 3 a 1 a "lo mismo que el último paso".
+ANCLAS_DEL_ERROR = 50
+
+
+def error_ponderado(reales: list[dict], pronosticos: list[dict], paso_ms: int,
+                    anclas: int = ANCLAS_DEL_ERROR) -> "float | None":
+    """Σ|pronóstico − real| / Σ|real| (WAPE, en %) de los pasos del horizonte
+    de las últimas `anclas` del backtest que tienen valor real. None si no hay
+    con qué comparar."""
+    real = {}
+    for r in reales:
+        v = valor_real(r)
+        if v is not None and r.get("data_end_time"):
+            real[int(r["data_end_time"])] = v
+    ultimas = set(sorted({int(p["data_end_time"]) for p in pronosticos
+                          if p.get("data_end_time") and p.get("horizon_index")}, reverse=True)[:anclas])
+    error = referencia = 0.0
+    for p in pronosticos:
+        if not p.get("horizon_index") or int(p.get("data_end_time") or 0) not in ultimas:
+            continue
+        observado = _cercano(real, int(p.get("forecast_data_end_time") or 0), paso_ms // 2)
+        if observado is None:
+            continue
+        error += abs(float(p.get("forecast_value") or 0) - observado)
+        referencia += abs(observado)
+    return round(error / referencia * 100, 1) if referencia else None
+
+
 def elegir_ancla(reales: list[dict], horizonte: int) -> "int | None":
     """El fin del último paso con valor cuyo horizonte siguiente tiene datos en
     al menos la mitad de sus pasos: así el pronóstico se puede comparar con lo

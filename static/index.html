@@ -7161,7 +7161,8 @@
       if (clave.startsWith('forecast:')) {
         if (n.error_pct === null || n.error_pct === undefined) return n.error && (estado || 'ok') === 'ok' ? `<span>${escapeHtml(n.error)}</span>` : '';
         const sev = n.error_pct <= 20 ? 'sev--ok' : n.error_pct <= 40 ? 'sev--high' : 'sev--critical';
-        return `<span class="sev ${sev}">error medio ${_fmtPron(n.error_pct)} %</span>`;
+        return `<span class="sev ${sev}" title="Cuánto se desvió de lo que pasó en los últimos pronósticos del backtest (error ponderado)">`
+          + `error ${_fmtPron(n.error_pct)} %</span>`;
       }
       if (clave === 'anomalias') {
         if (n.error) return `<span>No se pudieron leer: ${escapeHtml(n.error)}</span>`;

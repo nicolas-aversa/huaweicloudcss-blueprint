@@ -8566,7 +8566,13 @@ def _pronostico_de(base: str, user: str, password: str, forecaster_id: str) -> d
     reales = [r for r in recientes
               if ancla - paso * pr.PASOS_DE_CONTEXTO <= int(r.get("data_end_time") or 0) <= ancla + paso * n]
     horizonte = buscar([{"term": {"data_end_time": ancla}}, {"exists": {"field": "horizon_index"}}], "asc", 50)
-    return {**fuera, **pr.serie(reales, horizonte, ancla, paso)}
+    grafico = pr.serie(reales, horizonte, ancla, paso)
+    # El número de la tarjeta: el error de muchos pronósticos, no el del que se dibuja.
+    ultimos = buscar([{"exists": {"field": "horizon_index"}}], "desc", pr.ANCLAS_DEL_ERROR * max(1, n))
+    ponderado = pr.error_ponderado(recientes, ultimos, paso)
+    if ponderado is not None:
+        grafico["error_pct"] = ponderado
+    return {**fuera, **grafico}
 
 
 # ── La búsqueda híbrida (ver busqueda.py) ───────────────────────────────────

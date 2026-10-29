@@ -87,7 +87,10 @@ def _cluster(monkeypatch, reales, horizonte, task="T1", estado="TEST_COMPLETE", 
         if "opensearch-forecast-results" in url:
             filtros = json.dumps(json_body)
             if "horizon_index" in filtros and "must_not" not in filtros:
-                fuente = [h for h in horizonte if str(h["data_end_time"]) in filtros]
+                if '"term": {"data_end_time"' in filtros:     # los del ancla, para el gráfico
+                    fuente = [h for h in horizonte if str(h["data_end_time"]) in filtros]
+                else:                                          # los últimos, para el error
+                    fuente = sorted(horizonte, key=lambda h: -h["data_end_time"])[:json_body.get("size", 10)]
             else:
                 # Como OpenSearch: el rango de fechas y el orden pedido.
                 rango = next((f["range"]["data_end_time"] for f in json_body["query"]["bool"]["filter"]
@@ -118,6 +121,24 @@ def test_el_pronostico_contra_lo_que_paso(monkeypatch):
     consulta = next(b for u, b in pedidos if "opensearch-forecast-results" in u)
     assert {"bool": {"must_not": [{"exists": {"field": "horizon_index"}}]}} in consulta["query"]["bool"]["filter"]
     assert {"term": {"task_id": "T1"}} in consulta["query"]["bool"]["filter"]
+
+
+def test_el_error_es_el_ponderado_de_los_ultimos_pronosticos(monkeypatch):
+    """Era el MAPE del tramo que se dibuja (8 pasos): con valores chicos se
+    inflaba (una prepaga mostraba 134 % con un pronóstico que, medido sobre 150
+    puntos de partida, erraba 33 %). Ahora, el ponderado de los últimos."""
+    reales = [_real(i, v) for i, v in enumerate([100, 100, 100, 100, 100, 100, 1, 100, 100, 100, 100, 100])]
+    # Dos puntos de partida: el 5 (pasa por el paso que valió 1) y el 8, el que se dibuja.
+    horizonte = [_pron(1, 11.0, 5), _pron(2, 100.0, 5), _pron(3, 100.0, 5),
+                 _pron(1, 110.0, 8), _pron(2, 100.0, 8), _pron(3, 100.0, 8)]
+    _cluster(monkeypatch, reales, horizonte)
+    p = main._pronostico_de("http://x:9200", "admin", "pw", "F1")
+    assert p["ancla"] == pr._iso(T0 + 8 * PASO) and len(p["pronostico"]) == 3
+    # |11−1| + 0 + 0 + |110−100| + 0 + 0 = 20, sobre 1 + 5×100 = 501 (el MAPE de los dos: 335 %).
+    assert p["error_pct"] == round(20 / 501 * 100, 1)
+    # Solo los últimos `anclas` puntos de partida.
+    assert pr.error_ponderado(reales, horizonte, PASO, anclas=1) == round(10 / 300 * 100, 1)
+    assert pr.error_ponderado([], horizonte, PASO) is None
 
 
 def test_sin_grafico_dice_lo_que_de_verdad_paso(monkeypatch):

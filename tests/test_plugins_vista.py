@@ -525,7 +525,8 @@ const conError = pluginsDetalleHTML([T('dashboard', 'ok', { filas: [{ texto: 'Re
 check('un error largo se corta, entero en el title', conError.includes('…</span></span>') && conError.includes(`title="${escapeHtml(largo)}"`)
   && !conError.includes(`>${escapeHtml(largo)}<`), conError);
 // Los números.
-check('error bajo en verde', numeroDePlugin('forecast:F', { error_pct: 4.3 }, 's', 'ok').includes('sev--ok">error medio 4,3 %'));
+check('error bajo en verde', numeroDePlugin('forecast:F', { error_pct: 4.3 }, 's', 'ok').includes('sev--ok" title=')
+  && numeroDePlugin('forecast:F', { error_pct: 4.3 }, 's', 'ok').includes('>error 4,3 %'));
 check('alto en rojo', numeroDePlugin('forecast:F', { error_pct: 93.5 }, 's', 'ok').includes('sev--critical'));
 check('el motivo si la fila estaba bien', numeroDePlugin('forecast:F', { error_pct: null, error: 'no se pudo leer' }, 's', 'ok').includes('no se pudo leer'));
 check('no se repite si la fila ya dice que es parcial', numeroDePlugin('forecast:F', { error_pct: null, error: 'backtest parcial' }, 's', 'parcial') === '');
