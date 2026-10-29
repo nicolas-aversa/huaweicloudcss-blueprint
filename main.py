@@ -4003,15 +4003,15 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
         if request.clear_indices:
             yield _sse({"type": "progress", "percent": 3, "phase": "Limpiando índices",
                         "message": "Limpiando índices previos…"})
+            ya_ingerian = {s for s, v in previo.items() if (v or {}).get("start_ingestion")}
+            limpiados: list[str] = []
             try:
-                _clear_case_indices(request, _cluster_with_public_access(terraform_dir))
+                limpiados = _clear_case_indices(request, _cluster_with_public_access(terraform_dir), ya_ingerian) or []
             except Exception as exc:
                 print(f"[deploy-stream] clear-index falló (best-effort): {exc!r}")
             # Los datos cambian: las preguntas de búsqueda que se armaron con los
             # de antes ya no valen (no hay otro momento en que se rehagan).
-            _olvidar_preguntas_por_significado(
-                terraform_dir, [c.slug for c in request.cases] if request.cases
-                else [(request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)])
+            _olvidar_preguntas_por_significado(terraform_dir, limpiados)
         # Security Analytics: sus índices y sus detectores, ANTES de que Logstash
         # arranque (el detector solo sigue a un índice que ya existía).
         yield from _preparar_seguridad_para_ingesta(request, terraform_dir)
@@ -5957,21 +5957,34 @@ def _preparar_seguridad_para_ingesta(request: "TerraformDeployRequest", terrafor
             yield _sse({"type": "step", "name": nombre, "ok": False, "reason": repr(exc)[:300]})
 
 
-def _clear_case_indices(request: "TerraformDeployRequest", cluster: dict[str, str]) -> None:
+def _clear_case_indices(request: "TerraformDeployRequest", cluster: dict[str, str],
+                        ya_ingerian: "set[str] | frozenset[str]" = frozenset()) -> list[str]:
     """Borra los índices de los casos del request (ANTES de re-ingestar), para que
     cada corrida arranque con un índice limpio (sin docs acumulados de deploys
     anteriores). El index template ya se aplicó en el paso 2, así que el índice
-    nuevo se recrea bien tipado. Best-effort."""
+    nuevo se recrea bien tipado. Best-effort. Devuelve los slugs limpiados.
+
+    Salvo los de `ya_ingerian`: Logstash recuerda los archivos que leyó y no
+    los vuelve a leer, así que su índice quedaba vacío. Pasaba al agregar un
+    caso a un entorno andando: tras recargar la página, "Iniciar ingesta" se
+    rearma con TODAS las pipelines y borraba los índices de las que corrían."""
     endpoint = cluster.get("public_endpoint", "") or cluster.get("endpoint", "")
     if not endpoint or not request.opensearch_password:
-        return
+        return []
     user = request.opensearch_user or "admin"
     if request.cases:
-        patterns = [index_pattern_from_name(c.index_name) for c in request.cases]
+        objetivos = [(c.slug, c.index_name) for c in request.cases]
     else:
-        patterns = [index_pattern_from_name(request.opensearch_index)]
-    for pat in patterns:
-        _delete_indices(endpoint, pat, request.opensearch_password, request.https_enabled, user)
+        slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+        objetivos = [(slug, request.opensearch_index)]
+    limpiados = []
+    for slug, indice in objetivos:
+        if slug in ya_ingerian:
+            continue
+        _delete_indices(endpoint, index_pattern_from_name(indice), request.opensearch_password,
+                        request.https_enabled, user)
+        limpiados.append(slug)
+    return limpiados
 
 
 _DASHBOARDS_IMPORT_RETRIES = 3

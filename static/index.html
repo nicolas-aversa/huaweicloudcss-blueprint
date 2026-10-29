@@ -8914,6 +8914,19 @@
           ${/* El progreso y el resultado de cada paso, debajo de SU botón. */ ''}
           <div id="${btnId}-status" class="setup-step__status hidden"></div>
         </div>`;
+      // Casos nuevos en un entorno que ya ingería: la ingesta es solo para
+      // ellos, y el botón lo dice. Los demás siguen como están (el backend no
+      // borra el índice de una pipeline que ya ingería).
+      const sinIngesta = pipelines.filter(p => !p.active);
+      const soloNuevos = sinIngesta.length > 0 && sinIngesta.length < pipelines.length;
+      const ingestaBoton = !soloNuevos ? 'Iniciar ingesta con Logstash'
+        : sinIngesta.length === 1 ? `Iniciar ingesta de ${escapeHtml(nombreCaso(sinIngesta[0].slug))}`
+        : `Iniciar ingesta de los ${sinIngesta.length} casos nuevos`;
+      const ingestaTexto = soloNuevos
+        ? `Arranca ${sinIngesta.map(p => escapeHtml(nombreCaso(p.slug))).join(', ')}. `
+          + `${pipelines.length - sinIngesta.length === 1 ? 'La otra pipeline sigue' : `Las otras ${pipelines.length - sinIngesta.length} pipelines siguen`}`
+          + ' como están: no se borra ni se vuelve a leer nada.'
+        : 'Arranca Logstash: recién acá empiezan a entrar los datos.';
       const setupTotal = 2 + (hasCapabilitySlug ? 1 : 0);
       const setupDoneCount = (schemaDone ? 1 : 0) + (ingestDone ? 1 : 0) + (hasCapabilitySlug && capsDone ? 1 : 0);
       // Arriba de las pestañas: lo que falta hacer se ve primero, esté en la
@@ -8934,8 +8947,8 @@
               ${setupStep(2, ingestDone, schemaDone && !ingestDone, 'Iniciar ingesta',
                 !schemaDone ? 'Aplicá primero el index template.'
                   : rechazadas.length ? `CSS rechazó el configuration file de ${rechazadas.map(p => escapeHtml(p.slug)).join(', ')}: al reintentar se manda de nuevo.`
-                  : 'Arranca Logstash: recién acá empiezan a entrar los datos.',
-                'infra-ingest-btn', 'Iniciar ingesta con Logstash', 'Reiniciar ingesta')}
+                  : ingestaTexto,
+                'infra-ingest-btn', ingestaBoton, 'Reiniciar ingesta')}
               ${hasCapabilitySlug ? setupStep(3, capsDone, ingestDone && !capsDone && !activando, 'Plugins de OpenSearch',
                 activando ? `<strong>Activando${haceMin ? ` (empezó hace ${haceMin} min)` : ''}.</strong> Arma los casos de a uno: `
                              + 'tarda unos minutos. Las tarjetas de abajo se completan solas a medida que terminan.'

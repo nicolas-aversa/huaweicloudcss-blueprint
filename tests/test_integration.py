@@ -3202,6 +3202,23 @@ def test_clear_case_indices_targets_each_case_pattern(monkeypatch):
     assert "transacciones-billetera-*" in cleared
 
 
+def test_clear_case_indices_no_toca_las_que_ya_ingerian(monkeypatch):
+    """Logstash no vuelve a leer lo que ya leyó: borrar el índice de una
+    pipeline que ya ingería lo deja vacío. Igual con el pedido de una sola
+    pipeline (el de "Agregar pipeline") que con el rearmado con todas."""
+    import main as _main
+
+    cleared = []
+    monkeypatch.setattr(_main, "_delete_indices",
+                        lambda ep, pat, pw, https, user="admin": cleared.append(pat) or 1)
+    una = _main.TerraformDeployRequest(pipeline_conf="x", opensearch_password="pw", pipeline_slug="envios",
+                                       opensearch_index="envios-%{+YYYY.MM}")
+    assert _main._clear_case_indices(una, {"public_endpoint": "1.2.3.4:9200"}, {"envios"}) == []
+    assert cleared == []
+    assert _main._clear_case_indices(una, {"public_endpoint": "1.2.3.4:9200"}, {"fix"}) == ["envios"]
+    assert cleared == ["envios-*"]
+
+
 def test_apply_schema_endpoint(monkeypatch):
     """POST /apply-schema aplica index template + importa dashboards al cluster
     existente (sin terraform) y reporta el resultado."""

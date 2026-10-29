@@ -50,8 +50,9 @@ def test_cada_paso_hecho_se_puede_rehacer():
     hecho = paso[paso.index("${done"):paso.index(": `<button class=\"btn ${enabled")]
     assert "Hecho" in hecho and 'id="${btnId}">${redoLabel}</button>' in hecho
     assert "'infra-apply-schema-btn', paso1.boton, 'Volver a aplicar')" in vista
-    for boton, texto, rehacer in (("infra-ingest-btn", "Iniciar ingesta con Logstash", "Reiniciar ingesta"),
-                                  ("infra-capabilities-btn", "Activar los plugins", "Volver a activar los plugins")):
+    # El de la ingesta nombra los casos nuevos (ver el test de abajo).
+    assert "'infra-ingest-btn', ingestaBoton, 'Reiniciar ingesta'" in vista
+    for boton, texto, rehacer in (("infra-capabilities-btn", "Activar los plugins", "Volver a activar los plugins"),):
         assert f"'{boton}', '{texto}', '{rehacer}'" in vista or f"'{boton}', activando ? 'Activando…' : '{texto}', '{rehacer}'" in vista, boton
 
 
@@ -102,6 +103,75 @@ def test_clear_indices_decide_si_se_borra(monkeypatch, tmp_path, limpiar):
         list(main._deploy_stream_gen_raw(req, td, None, None, []))
     assert borrados == ([1] if limpiar else [])
     assert subidas == [], "la fase 2 nunca sube datos"
+
+
+def test_iniciar_la_ingesta_de_un_caso_nuevo_no_borra_los_que_ya_ingerian(monkeypatch, tmp_path):
+    """Un caso agregado a un entorno andando: tras recargar la página, "Iniciar
+    ingesta" se rearma con TODAS las pipelines. Borraba los índices de las que
+    ya ingerían, y Logstash no vuelve a leer lo que ya leyó: quedaban vacíos."""
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True)
+    monkeypatch.setattr(main, "get_huawei_settings", lambda: {
+        "vpc_id": "v", "subnet_id": "s", "security_group_id": "g",
+        "availability_zone": "la-south-2a", "region": "la-south-2"})
+    main._write_pipelines_registry(td, {
+        "viejo": {"pipeline_conf": "x", "start_ingestion": True, "index": "viejo-%{+YYYY.MM}"},
+        "nuevo": {"pipeline_conf": "x", "start_ingestion": False, "index": "nuevo-%{+YYYY.MM}"}})
+    borrados = []
+    monkeypatch.setattr(main, "_delete_indices", lambda ep, pat, pw, https, user="admin": borrados.append(pat))
+    monkeypatch.setattr(main, "_cluster_with_public_access", lambda d: {"public_endpoint": "1.2.3.4:9200"})
+    olvidadas = []
+    monkeypatch.setattr(main, "_olvidar_preguntas_por_significado", lambda d, slugs: olvidadas.extend(slugs))
+
+    def _cortar(d):
+        raise _Corte()
+    monkeypatch.setattr(main, "_backend_init_args", _cortar)
+    req = main.TerraformDeployRequest(
+        pipeline_conf="input {} filter {} output {}", opensearch_password="pw", start_ingestion=True,
+        clear_indices=True, cases=[
+            main.PipelineCase(slug="viejo", filter_code="filter {}", fields=[], index_name="viejo-%{+YYYY.MM}"),
+            main.PipelineCase(slug="nuevo", filter_code="filter {}", fields=[], index_name="nuevo-%{+YYYY.MM}")])
+    with pytest.raises(_Corte):
+        list(main._deploy_stream_gen_raw(req, td, None, None, []))
+    assert borrados == ["nuevo-*"], borrados
+    assert olvidadas == ["nuevo"], "las preguntas de las que siguen igual tampoco se descartan"
+
+
+def test_el_boton_de_ingesta_nombra_los_casos_nuevos(tmp_path):
+    """"Iniciar ingesta con Logstash" no decía si arrancaba todo o solo lo
+    nuevo. Con casos nuevos en un entorno que ya ingería, los nombra."""
+    import shutil
+    import subprocess
+    if shutil.which("node") is None:
+        pytest.skip("node no está instalado")
+    vista = _vista()
+    i = vista.index("      const sinIngesta = ")
+    logica = vista[i:vista.index("      const setupTotal = ", i)]
+    arnes = logica + r"""
+return { ingestaBoton, ingestaTexto };
+"""
+    js = tmp_path / "boton.mjs"
+    js.write_text(r"""
+const escapeHtml = s => String(s);
+const nombreCaso = s => ({ 'seguimiento-de-envios': 'Seguimiento de envíos', fix: 'FIX' })[s] || s;
+const calcular = (pipelines) => { """ + arnes + r""" };
+const p = (slug, active) => ({ slug, active });
+const salida = {
+  todos: calcular([p('fix', false), p('pozos', false)]),
+  uno: calcular([p('fix', true), p('pozos', true), p('seguimiento-de-envios', false)]),
+  dos: calcular([p('fix', true), p('a', false), p('b', false)]),
+};
+console.log(JSON.stringify(salida));
+""", encoding="utf-8")
+    res = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert res.returncode == 0, res.stderr
+    s = json.loads(res.stdout)
+    assert s["todos"]["ingestaBoton"] == "Iniciar ingesta con Logstash"
+    assert s["uno"]["ingestaBoton"] == "Iniciar ingesta de Seguimiento de envíos"
+    assert "Las otras 2 pipelines siguen como están" in s["uno"]["ingestaTexto"]
+    assert s["dos"]["ingestaBoton"] == "Iniciar ingesta de los 2 casos nuevos"
+    assert s["dos"]["ingestaTexto"].startswith("Arranca a, b.") and "La otra pipeline sigue" in s["dos"]["ingestaTexto"]
+    assert "'infra-ingest-btn', ingestaBoton, 'Reiniciar ingesta'" in vista and ": ingestaTexto," in vista
 
 
 # ── Plugins ─────────────────────────────────────────────────────────────────

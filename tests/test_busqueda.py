@@ -1031,5 +1031,5 @@ def test_reiniciar_la_ingesta_borrando_indices_descarta_las_preguntas(tmp_path):
     main._olvidar_preguntas_por_significado(tmp_path / "no-existe", ["x"])     # sin archivo: nada
     import inspect
     fuente = inspect.getsource(main)
-    assert fuente.index("_clear_case_indices(request, _cluster_with_public_access(terraform_dir))") < \
-        fuente.index("_olvidar_preguntas_por_significado(\n                terraform_dir")
+    assert fuente.index("_clear_case_indices(request, _cluster_with_public_access(terraform_dir), ya_ingerian)") < \
+        fuente.index("_olvidar_preguntas_por_significado(terraform_dir, limpiados)")
