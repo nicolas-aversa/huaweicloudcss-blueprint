@@ -4657,7 +4657,7 @@
             <label class="form-label">Índice</label>
             <input type="text" class="form-input" id="output-index" value="logs-%{+YYYY.MM}" placeholder="logs-%{+YYYY.MM}">
           </div>
-          <div class="form-row" style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div class="form-row" id="output-credenciales" style="display:flex;gap:16px;flex-wrap:wrap;">
             <div class="form-group" style="flex:1;min-width:200px;">
               <label class="form-label">Usuario</label>
               <input type="text" class="form-input" id="output-user" value="admin">
@@ -4668,6 +4668,7 @@
                      autocomplete="new-password" placeholder="8-32, con mayúscula, número y símbolo">
             </div>
           </div>
+          <p class="form-hint hidden" id="output-del-entorno" style="margin:0;">Escribe en el cluster del entorno activo, con su usuario y su contraseña: no hace falta cargarlos.</p>
           <input type="hidden" id="output-protocol" value="http">
           <input type="hidden" id="output-hosts" value="">`,
         'obs': `
@@ -4686,6 +4687,17 @@
       };
 
       container.innerHTML = configs[plugin] || '';
+      syncDestinoDelEntorno();
+    }
+
+    // Con un entorno andando, la pipeline nueva escribe en SU cluster: el host
+    // lo pone Terraform y el usuario y la contraseña, el backend (los del
+    // cluster). Pedirlos acá no servía y era peligroso: una contraseña distinta
+    // de la real viajaba a Terraform, que intentaba cambiarle la del cluster.
+    function syncDestinoDelEntorno() {
+      const entorno = !!state.envActive;
+      document.getElementById('output-credenciales')?.classList.toggle('hidden', entorno);
+      document.getElementById('output-del-entorno')?.classList.toggle('hidden', !entorno);
     }
 
     // ── Casos de uso PRE-HORNEADOS (declarativos, demo-proof) ────────────
@@ -5840,6 +5852,13 @@
         config.index = document.getElementById('output-index')?.value || 'logs-%{+YYYY.MM}';
         config.user = document.getElementById('output-user')?.value || '';
         config.password = document.getElementById('output-password')?.value || '';
+        // Al entorno activo, los del cluster (ver `syncDestinoDelEntorno`):
+        // vacía, el backend pone la que ya tiene. El campo puede guardar la
+        // del primer deploy, o una tipeada antes de que el entorno existiera.
+        if (state.envActive) {
+          config.user = 'admin';
+          config.password = '';
+        }
         
         // SSL configuration
         if (protocol === 'https') {
@@ -8731,6 +8750,7 @@
 
       const active = !!(data && data.active);
       state.envActive = active;  // el paso 5 usa esto para el modo reuse
+      syncDestinoDelEntorno();
       pintarPuntoEntorno();
       syncHomeHero(active, (data && Array.isArray(data.pipelines)) ? data.pipelines.length : 0);
 
@@ -10296,7 +10316,10 @@
           checks.push(
             { id: 'output-index', label: 'el índice',
               test: v => !!v && /^[a-z0-9+._\-]*$/.test(v.replace(/%\{[^}]*\}/g, '')),
-              msg: 'Índice inválido: usá minúsculas, números y guiones (el date-math %{+YYYY.MM} está OK).' },
+              msg: 'Índice inválido: usá minúsculas, números y guiones (el date-math %{+YYYY.MM} está OK).' });
+          // Al entorno activo van el usuario y la contraseña del cluster: no
+          // se piden (ver `syncDestinoDelEntorno`).
+          if (!state.envActive) checks.push(
             { id: 'output-user', label: 'el usuario de OpenSearch' },
             // La política de Huawei CSS, validada acá y no descubierta a los diez
             // minutos: el cluster se crea al final del `terraform apply`, así que

@@ -3222,9 +3222,37 @@ def _fill_obs_creds(request) -> None:
     if getattr(request, "pipeline_conf", ""):
         request.pipeline_conf = _unmask_against(
             request.pipeline_conf, request, refs)
+        request.pipeline_conf = _con_credenciales_del_cluster(
+            request.pipeline_conf, request.opensearch_user or "admin", request.opensearch_password)
     for case in (getattr(request, "cases", None) or []):
         if getattr(case, "filter_code", ""):
             case.filter_code = _unmask_against(case.filter_code, request, refs)
+
+
+# La salida al cluster de la plataforma: la de `hosts => []`, que completa
+# Terraform. Hasta la `}` con la misma sangría que `elasticsearch {`.
+_SALIDA_AL_CLUSTER = re.compile(r"(?ms)^([ \t]*)elasticsearch\s*\{[ \t]*\n[ \t]*hosts\s*=>\s*\[\s*\][^\n]*\n.*?^\1\}")
+
+
+def _con_credenciales_del_cluster(conf: str, usuario: str, password: str) -> str:
+    """La salida al cluster de la plataforma con el usuario y la password del
+    cluster si no los trae. Al agregar una pipeline a un entorno activo, el
+    paso 3 ya no los pide (una password tipeada distinta de la real iba a
+    Terraform, que intentaba cambiarle la del cluster), y Terraform completa
+    solo los hosts: sin esto, la pipeline no se autenticaba."""
+    if not conf or not password:
+        return conf or ""
+
+    def completar(m: "re.Match[str]") -> str:
+        bloque = m.group(0)
+        if re.search(r"(?m)^\s*password\s*=>", bloque):
+            return bloque
+        lineas = [] if re.search(r"(?m)^\s*user\s*=>", bloque) else [_kv("user", usuario)]
+        lineas.append(_kv("password", password))
+        fin = bloque.rfind("\n")
+        return bloque[:fin] + "\n" + "\n".join(lineas) + bloque[fin:]
+
+    return _SALIDA_AL_CLUSTER.sub(completar, conf)
 
 
 def _stored_confs() -> list[str]:

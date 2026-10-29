@@ -6572,6 +6572,57 @@ def test_la_fase_2_repone_la_password_del_cluster(monkeypatch, tmp_path):
     assert req.opensearch_password == "PW-BODY"
 
 
+def test_una_pipeline_agregada_al_entorno_lleva_la_password_del_cluster(monkeypatch, tmp_path):
+    """Al agregar una pipeline a un entorno activo, el paso 3 ya no pide la
+    password (una tipeada distinta de la real iba a Terraform, que intentaba
+    cambiarle la del cluster). El .conf llega sin ella y Terraform completa
+    solo los hosts: la salida a la plataforma lleva la del cluster."""
+    import json as _json
+    import main as _main
+
+    td = tmp_path / "terraform"; td.mkdir()
+    monkeypatch.setattr(_main, "_active_terraform_dir", lambda: td)
+    monkeypatch.setattr(_main, "_stored_confs", lambda: [])
+    import maas_integrator as _mi
+    monkeypatch.setattr(_mi, "resolve_obs_creds", lambda ak="", sk="": (ak, sk))
+
+    def salida(**cfg):
+        return _main.generate_output_block({"plugin_type": "opensearch", "opensearch": {
+            "hosts": [], "index": "mi-log-%{+YYYY.MM}", **cfg}})
+
+    kafka = 'input {\n  kafka {\n    sasl_password => ""\n  }\n}\n\n'
+    sin_password = kafka + salida(user="admin", password="")
+    # Sin cluster no hay password que poner: el .conf queda como estaba.
+    req = _main.TerraformDeployRequest(pipeline_conf=sin_password)
+    _main._fill_obs_creds(req)
+    assert req.pipeline_conf == sin_password
+
+    (td / "destroy.auto.tfvars.json").write_text(_json.dumps({"opensearch_password": "PW-CLUSTER"}))
+    req = _main.TerraformDeployRequest(pipeline_conf=sin_password, opensearch_user="admin")
+    _main._fill_obs_creds(req)
+    assert req.opensearch_password == "PW-CLUSTER", "la de Terraform es la del cluster, no una tipeada"
+    salida_final = req.pipeline_conf[req.pipeline_conf.index("elasticsearch {"):]
+    assert salida_final.count('password => "PW-CLUSTER"') == 1 and salida_final.count('user => "admin"') == 1
+    assert salida_final.rstrip().endswith("  }\n}"), "adentro de la salida, antes de su cierre"
+    assert 'sasl_password => ""' in req.pipeline_conf, "el Kafka del cliente no se toca"
+
+    # Sin usuario, también el usuario.
+    req = _main.TerraformDeployRequest(pipeline_conf=salida(user="", password=""), opensearch_user="admin")
+    _main._fill_obs_creds(req)
+    assert 'user => "admin"' in req.pipeline_conf and 'password => "PW-CLUSTER"' in req.pipeline_conf
+
+    # La que ya trae (un deploy desde cero) y la salida a otro cluster no se tocan.
+    con_password = salida(user="admin", password="PW-TIPEADA")
+    req = _main.TerraformDeployRequest(pipeline_conf=con_password)
+    _main._fill_obs_creds(req)
+    assert req.pipeline_conf == con_password
+    ajena = _main.generate_output_block({"plugin_type": "opensearch", "opensearch": {
+        "hosts": ["https://otro:9200"], "index": "x", "user": "admin", "password": ""}})
+    req = _main.TerraformDeployRequest(pipeline_conf=ajena)
+    _main._fill_obs_creds(req)
+    assert req.pipeline_conf == ajena
+
+
 def test_apply_schema_repone_la_password_del_cluster(monkeypatch, tmp_path):
     """Tras un F5 el body llega sin password y `/apply-schema` no pasa por
     `_fill_obs_creds`: el template y los dashboards fallaban con mensajes que
