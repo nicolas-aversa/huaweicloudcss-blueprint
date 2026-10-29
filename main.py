@@ -5880,6 +5880,58 @@ def _verificar_configuraciones(terraform_dir: Path):
     print(f"[deploy-stream] configuraciones: {estados or 'sin datos'}")
 
 
+# "Activar los plugins" con la ingesta todavía entrando (14 casos con un worker
+# cada uno tardan unos 20 minutos) armaba los detectores y los backtests sobre la
+# mitad de los datos, y los dashboards abrían sobre un rango corto. Se espera a
+# que deje de crecer, con un tope. Solo las pipelines que leen sus archivos una
+# vez: una fuente en vivo crece siempre.
+_INGESTA_SONDEO_S = 30.0
+_INGESTA_ESPERA_MAX_S = 1800.0
+
+
+def _se_lee_una_vez(entry: dict) -> bool:
+    return "watch_for_new_files => false" in (entry.get("pipeline_conf") or "")
+
+
+def _esperar_que_termine_la_ingesta(base: str, user: str, password: str, pipe_reg: dict,
+                                    slugs: list[str], run: dict) -> None:
+    """Espera a que los índices de los casos que se leen una vez dejen de
+    crecer (dos cuentas seguidas iguales), con un tope. Lo dice en Actividad."""
+    patrones = [index_pattern_from_name((pipe_reg.get(s) or {}).get("index") or f"{s}-%{{+YYYY.MM}}")
+                for s in slugs if _se_lee_una_vez(pipe_reg.get(s) or {})]
+
+    def contar() -> "int | None":
+        total = 0
+        for patron in patrones:
+            n = _index_doc_count(base, user, password, patron)
+            if n is None:
+                return None
+            total += n
+        return total
+
+    anterior = contar() if patrones else None
+    if anterior is None:
+        return
+    inicio, avisado = time.monotonic(), False
+    while True:
+        time.sleep(_INGESTA_SONDEO_S)
+        ahora = contar()
+        if ahora is None or ahora == anterior:
+            break
+        if time.monotonic() - inicio >= _INGESTA_ESPERA_MAX_S:
+            runs.step(run, "Ingesta", False, f"sigue entrando después de {int(_INGESTA_ESPERA_MAX_S // 60)} min: "
+                                             "pronósticos y anomalías se arman con lo que hay")
+            return
+        if not avisado:
+            por_minuto = (ahora - anterior) * 60 / max(_INGESTA_SONDEO_S, 1)
+            runs.step(run, "Ingesta", True, f"sigue entrando (unos {por_minuto:,.0f} documentos por minuto): "
+                                            "pronósticos y anomalías esperan a que termine".replace(",", "."))
+            avisado = True
+        anterior = ahora
+    if avisado:
+        runs.step(run, "Ingesta", True, f"terminó: {anterior:,} documentos".replace(",", "."))
+
+
 def _index_doc_count(base: str, user: str, password: str, index_pattern: str) -> int | None:
     """Documentos que hay en el índice, o None si no se pudo preguntar."""
     r = _os_req("GET", f"{base}/{index_pattern}/_count", user, password, timeout=15)
@@ -10599,14 +10651,6 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     _asegurar_ppl_v3(cluster, user, password, request.https_enabled, terraform_dir, run,
                      _registrar_capacidades(cluster, user, password, request.https_enabled,
                                             terraform_dir, run))
-    # Los datos ya están: los dashboards abren sobre su rango real (en la
-    # puesta en marcha todavía no había datos y quedaba una ventana fija).
-    try:
-        rango = _ajustar_tiempo_de_dashboards(_os_base(cluster, request.https_enabled), user, password, terraform_dir, slugs)
-        if rango:
-            runs.step(run, "Rango de los dashboards", True, f"del {rango}")
-    except Exception as exc:  # noqa: BLE001 — los dashboards igual andan, con la ventana de antes
-        runs.step(run, "Rango de los dashboards", False, repr(exc)[:300])
     try:
         if pide("alertas"):
             _provisionar_canal(cluster, user, password, request.https_enabled, terraform_dir, run)
@@ -10627,6 +10671,19 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                                                        terraform_dir, caps_result, run, agente_del_run)
         except Exception as exc:  # noqa: BLE001 — el bucle lo vuelve a intentar
             print(f"[provision-capabilities] el asistente antes que los casos falló: {exc!r}")
+    # Pronósticos y anomalías se arman sobre el rango de datos que hay, y los
+    # dashboards abren sobre él: primero, que termine la ingesta.
+    if pide("forecasting") or pide("anomalias"):
+        _esperar_que_termine_la_ingesta(_os_base(cluster, request.https_enabled), user, password,
+                                        pipe_reg, slugs, run)
+    # Los datos ya están: los dashboards abren sobre su rango real (en la
+    # puesta en marcha todavía no había datos y quedaba una ventana fija).
+    try:
+        rango = _ajustar_tiempo_de_dashboards(_os_base(cluster, request.https_enabled), user, password, terraform_dir, slugs)
+        if rango:
+            runs.step(run, "Rango de los dashboards", True, f"del {rango}")
+    except Exception as exc:  # noqa: BLE001 — los dashboards igual andan, con la ventana de antes
+        runs.step(run, "Rango de los dashboards", False, repr(exc)[:300])
     por_caso = {"agente", "forecasting", "anomalias", "alertas"}
     casos = [s for s in slugs if s in con_plugins and not por_caso <= apagados]
 

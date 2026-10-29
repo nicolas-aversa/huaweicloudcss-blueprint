@@ -118,3 +118,58 @@ def test_sin_el_asistente_armado_van_de_a_uno(monkeypatch):
     TestClient(main.app).post("/api/v1/onboarding/provision-capabilities", json={
         "opensearch_password": "pw", "slugs": ["a", "b", "c", "d"], "recomendados": True})
     assert maximo[0] == 2, "con el asistente armado, de a dos"
+
+
+# ── Pronósticos y anomalías esperan a que termine la ingesta ────────────────
+_UNA_VEZ = {"index": "a-%{+YYYY.MM}", "pipeline_conf": "input { s3 {\n    watch_for_new_files => false\n} }"}
+_EN_VIVO = {"index": "b-%{+YYYY.MM}", "pipeline_conf": "input { s3 {\n    watch_for_new_files => true\n} }"}
+
+
+def _espera(monkeypatch, cuentas, pipe):
+    pasos, pedidas = [], []
+    seguidas = iter(cuentas)
+    monkeypatch.setattr(main, "_INGESTA_SONDEO_S", 0)
+    monkeypatch.setattr(main, "_index_doc_count", lambda b, u, p, patron: pedidas.append(patron) or next(seguidas))
+    monkeypatch.setattr(main.runs, "step", lambda run, n, ok, r="": pasos.append((n, ok, r)))
+    main._esperar_que_termine_la_ingesta("http://x", "a", "p", pipe, list(pipe), {})
+    return pasos, pedidas
+
+
+def test_espera_a_que_la_ingesta_deje_de_crecer(monkeypatch):
+    """14 casos con un worker cada uno: 20 minutos de ingesta. Activar en el
+    medio armaba detectores y backtests sobre la mitad de los datos."""
+    pasos, pedidas = _espera(monkeypatch, [100, 3100, 6100, 6100], {"a": _UNA_VEZ, "b": _EN_VIVO})
+    assert set(pedidas) == {"a-*"}, "una fuente en vivo crece siempre: no se la espera"
+    # 3.000 documentos entre una cuenta y otra; con el sondeo en 0 se toma 1 s.
+    assert pasos == [("Ingesta", True, "sigue entrando (unos 180.000 documentos por minuto): "
+                                       "pronósticos y anomalías esperan a que termine"),
+                     ("Ingesta", True, "terminó: 6.100 documentos")]
+    # Ya quieta: no dice nada.
+    pasos, _ = _espera(monkeypatch, [500, 500], {"a": _UNA_VEZ})
+    assert pasos == []
+    # Solo en vivo: ni cuenta.
+    pasos, pedidas = _espera(monkeypatch, [], {"b": _EN_VIVO})
+    assert pasos == [] and pedidas == []
+
+
+def test_la_espera_tiene_tope(monkeypatch):
+    monkeypatch.setattr(main, "_INGESTA_ESPERA_MAX_S", 0)
+    pasos, _ = _espera(monkeypatch, [100, 200, 300], {"a": _UNA_VEZ})
+    assert pasos == [("Ingesta", False, "sigue entrando después de 0 min: pronósticos y anomalías se arman con lo que hay")]
+
+
+def test_primero_la_ingesta_despues_el_rango_y_los_casos(monkeypatch):
+    vistos, _ = _endpoint(monkeypatch, agente="AG")
+    orden = []
+    monkeypatch.setattr(main, "_esperar_que_termine_la_ingesta", lambda *a: orden.append("ingesta"))
+    monkeypatch.setattr(main, "_ajustar_tiempo_de_dashboards", lambda *a: orden.append("rango") or "")
+    original = main._provision_capabilities
+    monkeypatch.setattr(main, "_provision_capabilities", lambda c, slug, *a, **k: (
+        orden.append("caso") if not k.get("solo_conversacional") else None) or original(c, slug, *a, **k))
+    TestClient(main.app).post("/api/v1/onboarding/provision-capabilities", json={
+        "opensearch_password": "pw", "slugs": ["a", "b"], "plugins": ["forecasting"]})
+    assert orden[:3] == ["ingesta", "rango", "caso"], orden
+    orden.clear()
+    TestClient(main.app).post("/api/v1/onboarding/provision-capabilities", json={
+        "opensearch_password": "pw", "slugs": ["a", "b"], "plugins": ["perfil"]})
+    assert "ingesta" not in orden, "sin pronósticos ni anomalías, no se espera"
