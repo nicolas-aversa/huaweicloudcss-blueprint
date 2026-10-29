@@ -3558,6 +3558,10 @@ def _eventos_de_linea(progreso: "progreso_tf.ProgresoApply", line: str, desde: f
 # espera a que CSS termine de verificarla, así que con 4 en paralelo nunca hay
 # más de 4 verificándose (y queda margen si CSS tarda en liberar una).
 _PARALELISMO_APPLY = 4
+# Casos de "Activar los plugins" a la vez (pronósticos, anomalías y alertas
+# de cada uno). Dos y no más: cada caso lanza sus backtests de a uno a
+# propósito, porque un cluster de un nodo rechaza búsquedas de a cientos.
+_CASOS_EN_PARALELO = 2
 
 
 def _correr_apply(terraform_dir: Path, args: list[str], desde: float, hasta: float,
@@ -5390,24 +5394,53 @@ def _remove_pipelines_registry(terraform_dir: Path) -> None:
 _CAPABILITIES_REGISTRY_NAME = ".capabilities.json"
 
 
+# Los casos de "Activar los plugins" corren de a varios (ver
+# `_CASOS_EN_PARALELO`): leer el registro mientras otro lo escribe lo veía
+# truncado (vacío: el caso se creía sin nada y lo recreaba), y escribirlo entero
+# pisaba lo que otro guardó. Lecturas y escrituras, de a una; lo que lee,
+# cambia y escribe, entero adentro del lock.
+_REGISTRO_LOCK = _threading.RLock()
+
+
 def _read_capabilities(terraform_dir: Path) -> dict[str, dict]:
     f = terraform_dir / _CAPABILITIES_REGISTRY_NAME
-    if not f.exists():
-        return {}
-    try:
-        data = json.loads(f.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
+    with _REGISTRO_LOCK:
+        if not f.exists():
+            return {}
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
 
 
 def _write_capabilities(terraform_dir: Path, registry: dict[str, dict]) -> None:
-    try:
-        (terraform_dir / _CAPABILITIES_REGISTRY_NAME).write_text(
-            json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except OSError as exc:
-        print(f"[capabilities] no se pudo persistir el registro: {exc!r}")
+    with _REGISTRO_LOCK:
+        try:
+            (terraform_dir / _CAPABILITIES_REGISTRY_NAME).write_text(
+                json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"[capabilities] no se pudo persistir el registro: {exc!r}")
+
+
+def _guardar_ids_del_caso(terraform_dir: Path, slug: str, antes: dict, ids: dict) -> None:
+    """Guarda lo que este paso cambió de los ids del caso (contra `antes`, lo
+    último que guardó), sobre lo que hay AHORA en el registro. Escribir los ids
+    enteros pisaba lo que otro guardó mientras tanto: el agente, que se asigna
+    a todos los casos en el medio. Deja `antes` al día."""
+    with _REGISTRO_LOCK:
+        registro = _read_capabilities(terraform_dir)
+        actual = dict(registro.get(slug) or {})
+        for clave in set(antes) | set(ids):
+            if clave not in ids:
+                actual.pop(clave, None)
+            elif antes.get(clave) != ids[clave]:
+                actual[clave] = ids[clave]
+        registro[slug] = actual
+        _write_capabilities(terraform_dir, registro)
+    antes.clear()
+    antes.update(json.loads(json.dumps(ids)))
 
 
 # Qué plugins tiene el cluster (lo detecta `_registrar_capacidades`). Aparte de
@@ -7615,6 +7648,16 @@ def _rearmar_el_agente_si_cambio(cluster: dict, user: str, password: str, https_
 def _registrar_agente_del_run(cluster: dict, user: str, password: str, https_enabled: bool,
                               terraform_dir: Path, caps_result: dict, run: dict,
                               agente_ya: str = "") -> str:
+    """Ver `_registrar_agente_del_run_en_lock`. Lee el registro, arma el agente
+    y lo escribe entero: con los casos guardando en paralelo, todo en el lock."""
+    with _REGISTRO_LOCK:
+        return _registrar_agente_del_run_en_lock(cluster, user, password, https_enabled, terraform_dir,
+                                                 caps_result, run, agente_ya)
+
+
+def _registrar_agente_del_run_en_lock(cluster: dict, user: str, password: str, https_enabled: bool,
+                                      terraform_dir: Path, caps_result: dict, run: dict,
+                                      agente_ya: str = "") -> str:
     """El agente de "Provisionar plugins", una sola vez por run y apenas un
     caso deja los modelos listos: los datos ya están ingestados, así que entran
     todos los casos del entorno y el chat queda andando mientras se provisiona
@@ -7687,6 +7730,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
 
     registry = _read_capabilities(terraform_dir)
     ids: dict = dict(registry.get(slug, {}))
+    antes = json.loads(json.dumps(ids))   # lo último guardado (ver `_guardar_ids_del_caso`)
     result: dict = {}
     ip = spec["index_pattern"]
     # Lo que se apagó en el paso 2 ("Lo que va a tener tu cluster") no se crea;
@@ -7777,8 +7821,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
             # (fue lo que dejó el model_group colgado y rompía el re-register por nombre).
             ids["model_group_id"] = group_id
             ids["connector_ids"] = [c for c in (ppl_conn, llm_conn) if c]
-            registry[slug] = ids
-            _write_capabilities(terraform_dir, registry)
+            _guardar_ids_del_caso(terraform_dir, slug, antes, ids)
             if not (ppl_model and llm_model) and group_id and ppl_conn and llm_conn:
                 ppl_task = _ml_create(base, user, password, "/_plugins/_ml/models/_register",
                                      caps.build_remote_model("platform-ppl", ppl_conn, group_id, "NL to PPL"), "task_id")
@@ -7803,8 +7846,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                 ids.update({"model_group_id": group_id, "connector_ids": [ppl_conn, llm_conn],
                             "model_ids": [ppl_model, llm_model],
                             "ppl_model_id": ppl_model, "llm_model_id": llm_model})
-                registry[slug] = ids
-                _write_capabilities(terraform_dir, registry)
+                _guardar_ids_del_caso(terraform_dir, slug, antes, ids)
                 if not registrar_agente:
                     # El agente se arma una vez, al final del run, con todas las
                     # fuentes (`_registrar_agente`). Rearmarlo en cada caso
@@ -7813,8 +7855,13 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                                                 "agente_pendiente": True,
                                                 "note": "modelos listos; el agente se arma al final, con todas las fuentes"}
                 else:
-                    agent_id, t2v = _registrar_agente(base, user, password, api_key, terraform_dir, registry,
-                                                      ppl_model, llm_model, slug_actual=slug)
+                    # `_registrar_agente` escribe el registro entero: con el de
+                    # ahora, adentro del lock (otros casos guardan en paralelo).
+                    with _REGISTRO_LOCK:
+                        registry = _read_capabilities(terraform_dir)
+                        registry[slug] = {**(registry.get(slug) or {}), **ids}
+                        agent_id, t2v = _registrar_agente(base, user, password, api_key, terraform_dir, registry,
+                                                          ppl_model, llm_model, slug_actual=slug)
                     if agent_id:
                         ids["agent_id"] = agent_id
                         result["text2viz"] = t2v
@@ -7833,8 +7880,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
         # Con un force, lo que se bajó tampoco queda en el registro (la pasada
         # siguiente de este caso no lo vuelve a bajar: ya no está).
         if force:
-            registry[slug] = ids
-            _write_capabilities(terraform_dir, registry)
+            _guardar_ids_del_caso(terraform_dir, slug, antes, ids)
         return result
 
     # ── Forecasting ──────────────────────────────────────────────────────────
@@ -7906,8 +7952,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
                 ids["forecaster_id"] = forecaster_ids[0] if forecaster_ids else None
                 # El registro, ya: así el caso aparece en la vista sin esperar
                 # a que terminen anomalías y alertas.
-                registry[slug] = ids
-                _write_capabilities(terraform_dir, registry)
+                _guardar_ids_del_caso(terraform_dir, slug, antes, ids)
                 n_ok = sum(1 for x in lanzados if estados[x["fc_id"]][0])
                 en_curso = [s for s in states if f"={FORECAST_EN_CURSO}" in s]
                 fallidos = [s for s in states if not s.endswith("=TEST_COMPLETE") and s not in en_curso]
@@ -7974,8 +8019,7 @@ def _provision_capabilities(cluster: dict[str, str], slug: str, user: str,
             result["alertas"] = {"ok": False, "reason": f"no se pudo crear el monitor: {_resp_motivo(rm)}"}
 
     # Persistir IDs acumulados.
-    registry[slug] = ids
-    _write_capabilities(terraform_dir, registry)
+    _guardar_ids_del_caso(terraform_dir, slug, antes, ids)
     return result
 
 
@@ -10584,34 +10628,47 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
         except Exception as exc:  # noqa: BLE001 — el bucle lo vuelve a intentar
             print(f"[provision-capabilities] el asistente antes que los casos falló: {exc!r}")
     por_caso = {"agente", "forecasting", "anomalias", "alertas"}
-    for slug in slugs:
-        if slug not in con_plugins or por_caso <= apagados:
-            continue
+    casos = [s for s in slugs if s in con_plugins and not por_caso <= apagados]
+
+    def _un_caso(slug: str) -> dict:
         # Con el cluster saturado (Security Analytics procesando la ingesta) lo
         # que se lanza ahora se rechaza: primero, que haya lugar.
         _esperar_cluster_libre(_os_base(cluster, request.https_enabled), user, password)
-        try:
-            caps_result[slug] = _provision_capabilities(
-                cluster, slug, user, password, request.https_enabled,
-                registrar_agente=False,   # el force ya bajó todo, arriba
-                apagados=apagados,
-            )
-            if caps_result[slug]:
-                any_ok = True
-            _guardar_estados(terraform_dir, slug, plugins_vista.estados_desde_resultado(caps_result[slug] or {}))
-            for cap_name, cap in (caps_result[slug] or {}).items():
-                if isinstance(cap, dict) and "ok" in cap:
-                    runs.step(run, f"{cap_name} · {slug}", cap.get("ok"),
-                              str(cap.get("reason", ""))[:300])
-            # El asistente, apenas el primer caso deja los modelos (ver
-            # `_registrar_agente_del_run`); a los siguientes, el mismo.
-            if pide("agente"):
-                agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,
-                                                           terraform_dir, caps_result, run, agente_del_run)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
-            caps_result[slug] = {"error": repr(exc)}
-            runs.step(run, slug, False, repr(exc)[:300])
+        return _provision_capabilities(cluster, slug, user, password, request.https_enabled,
+                                       registrar_agente=False,   # el force ya bajó todo, arriba
+                                       apagados=apagados)
+
+    # De a varios casos (eran 30 s cada uno, de a uno). Sin el asistente armado
+    # arriba, de a uno: cada caso crearía sus modelos a la vez que el otro. Cada
+    # tarea con el contexto del pedido (el usuario, su API key): un hilo nuevo
+    # no lo hereda.
+    import concurrent.futures
+    import contextvars
+
+    de_a = _CASOS_EN_PARALELO if (agente_del_run or not pide("agente")) else 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=de_a) as pool:
+        futuros = {pool.submit(contextvars.copy_context().run, _un_caso, s): s for s in casos}
+        # Cada caso, apenas termina (la vista lo muestra mientras siguen los otros).
+        for futuro in concurrent.futures.as_completed(futuros):
+            slug = futuros[futuro]
+            try:
+                caps_result[slug] = futuro.result()
+                if caps_result[slug]:
+                    any_ok = True
+                _guardar_estados(terraform_dir, slug, plugins_vista.estados_desde_resultado(caps_result[slug] or {}))
+                for cap_name, cap in (caps_result[slug] or {}).items():
+                    if isinstance(cap, dict) and "ok" in cap:
+                        runs.step(run, f"{cap_name} · {slug}", cap.get("ok"),
+                                  str(cap.get("reason", ""))[:300])
+                # El asistente, apenas el primer caso deja los modelos (ver
+                # `_registrar_agente_del_run`); a los siguientes, el mismo.
+                if pide("agente"):
+                    agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,
+                                                               terraform_dir, caps_result, run, agente_del_run)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[provision-capabilities] '{slug}' falló (best-effort): {exc!r}")
+                caps_result[slug] = {"error": repr(exc)}
+                runs.step(run, slug, False, repr(exc)[:300])
     # Por si el primero no pudo (sin modelos todavía): un último intento.
     if pide("agente"):
         _registrar_agente_del_run(cluster, user, password, request.https_enabled, terraform_dir,

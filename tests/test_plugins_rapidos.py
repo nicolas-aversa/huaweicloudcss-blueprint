@@ -103,7 +103,8 @@ def test_los_truncados_se_relanzan_una_vez(monkeypatch):
     assert "and not estados[x[\"fc_id\"]][1].startswith(FORECAST_EN_CURSO)]" in bloque
     assert bloque.count("_juzgar_backtests(") == 2
     # El caso entra al registro (y a la vista) apenas tiene sus forecasters.
-    assert bloque.index("registry[slug] = ids") < src.index("# ── Anomaly Detection + Alerting", i) - i
+    fin = src.index("# ── Anomaly Detection + Alerting", i) - i
+    assert bloque.index("_guardar_ids_del_caso(terraform_dir, slug, antes, ids)") < fin
 
 
 # ── El agente, una vez por run ──────────────────────────────────────────────
@@ -184,8 +185,10 @@ def test_el_run_arma_el_agente_despues_de_cada_caso_no_al_final():
     src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
     i = src.index("def provision_capabilities(")
     cuerpo = src[i:src.index("\n    msg = ", i)]
-    bucle = cuerpo[cuerpo.index("    for slug in slugs:"):cuerpo.index("    # Por si el primero no pudo")]
-    assert "agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled," in bucle
+    bucle = cuerpo[cuerpo.index("    casos = [s for s in slugs"):cuerpo.index("    # Por si el primero no pudo")]
+    # Apenas termina cada caso (adentro del as_completed), no al final.
+    assert bucle.index("concurrent.futures.as_completed(futuros)") < bucle.index(
+        "agente_del_run = _registrar_agente_del_run(cluster, user, password, request.https_enabled,")
 
 
 def test_volver_a_provisionar_rejuzga_los_backtests_que_ya_estan(monkeypatch):

@@ -200,7 +200,7 @@ def test_la_provision_guarda_cada_estado():
     assert "_guardar_estados(terraform_dir, slug, plugins_vista.estados_desde_resultado(caps_result[slug] or {}))" in cuerpo
     assert '{"perfil": plugins_vista.estado_simple(res)}' in cuerpo
     assert '{"analista": plugins_vista.estado_simple(res)}' in cuerpo
-    j = src.index("def _registrar_agente_del_run(")
+    j = src.index("def _registrar_agente_del_run_en_lock(")
     assert '_guardar_estados(terraform_dir, "_cluster", {"text2viz": plugins_vista.estado_simple(t2v)})' in \
         src[j:src.index("\ndef ", j + 10)]
 

@@ -4012,9 +4012,12 @@ def test_provision_capabilities_full_sequence(monkeypatch):
     alerting quedaron fuera por diseño) y persiste los IDs (agent/forecasters).
     El agente se registra multi-fuente (acá solo fintech tiene índice con datos)."""
     monkeypatch.setenv("MAAS_API_KEY", "KEY")
+    import json as _json
 
     persisted = {}
-    monkeypatch.setattr(main, "_read_capabilities", lambda td: {})
+    # Como el archivo: se lee lo que se escribió (cada paso guarda lo suyo
+    # sobre lo que hay, ver `_guardar_ids_del_caso`).
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: _json.loads(_json.dumps(persisted)))
     monkeypatch.setattr(main, "_write_capabilities", lambda td, reg: persisted.update(reg))
 
     conn_ids = iter(["C1", "C2"])
