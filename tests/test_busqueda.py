@@ -650,6 +650,29 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
     assert estados["a"]["busqueda"]["motivo"] == "1234 textos" and estados["a"]["busqueda"]["evaluacion"]["ok"]
 
 
+def test_primero_los_indices_de_todos_y_despues_las_evaluaciones(monkeypatch, tmp_path):
+    """Cada evaluación espera que su índice tenga textos vectorizados (el
+    Transform los carga al minuto y NVIDIA los vectoriza de a poco): caso por
+    caso, esas esperas se sumaban. Con los índices de todos armados antes,
+    corren a la vez."""
+    monkeypatch.setattr(main, "_read_estados", lambda td: {})
+    monkeypatch.setattr(main, "_guardar_estados", lambda *a: None)
+    monkeypatch.setattr(main, "_salida_a_nvidia", lambda *a: None)
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ({"passage": "M1", "query": "Q1"}, ""))
+    monkeypatch.setattr(main, "_esperar_cluster_libre", lambda *a: None)
+    monkeypatch.setattr(main, "_configurar_search_relevance", lambda *a: "")
+    orden = []
+    monkeypatch.setattr(main, "_provisionar_busqueda", lambda b, u, p, slug, *a: orden.append(("índice", slug))
+                        or {"ok": True, "campo": "msg", "textos": 10, "reason": "ok"})
+    monkeypatch.setattr(main, "_evaluar_busqueda", lambda b, u, p, slug, *a, **k: orden.append(("evaluación", slug))
+                        or {"ok": True, "consultas": 10, "motivo": "ok"})
+    pipe = {s: {"fields": [F("msg")]} for s in ("a", "b", "c")}
+    main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path, ["a", "b", "c"], pipe, False,
+                            main.runs.start("capabilities"))
+    assert orden == [("índice", "a"), ("índice", "b"), ("índice", "c"),
+                     ("evaluación", "a"), ("evaluación", "b"), ("evaluación", "c")]
+
+
 def test_un_link_a_cada_experimento_del_caso(monkeypatch, tmp_path):
     """En Search Relevance, la lista de Experiments tiene los de todos los
     casos (y los ítems del menú son formularios): el panel lleva a cada uno."""

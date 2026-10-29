@@ -1,13 +1,14 @@
 """Los juicios del LLM sobre la búsqueda de cada caso, guardados para toda la
 instancia.
 
-La evaluación de la búsqueda en Search Relevance (búsquedas realistas, los
-juicios del LLM sobre lo que trae cada configuración y los experimentos) era
-casi todo "Activar los plugins": dos minutos por caso, de llamadas al LLM
-(visto: 19 de 26 minutos con 11 casos). Con el mismo dataset da lo mismo cada
-vez, así que el LLM juzga una sola vez: se guardan sus búsquedas y la nota de
-cada texto, y los deploys siguientes, de cualquier SA, las importan
-(`IMPORT_JUDGMENT`) sin volver a llamarlo.
+La evaluación de la búsqueda en Search Relevance le pide al LLM búsquedas
+realistas y que juzgue lo que trae cada configuración. Con el mismo dataset
+da lo mismo cada vez, así que el LLM juzga una sola vez: se guardan sus
+búsquedas y la nota de cada texto, y los deploys siguientes, de cualquier SA,
+las importan (`IMPORT_JUDGMENT`): la evaluación sale igual en cada deploy, sin
+armar el juez ni llamar al LLM (medido en un entorno: 20 s importando contra
+30 s juzgando, por caso; lo que más tardaba era otra cosa, ver
+`_provisionar_la_busqueda`).
 
 Por texto y no por id de documento: el índice de búsqueda se arma de nuevo en
 cada entorno. Vale mientras el caso use el mismo campo de texto y el mismo

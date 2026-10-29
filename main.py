@@ -8867,6 +8867,12 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         "clave": _huella(_mi.get_nvidia_api_key()) if model_id else conocido.get("clave", ""),
         "dimensiones": busqueda.DIMENSION if model_id else 0}})
     juez = None   # el juez de la evaluación: uno para todos los casos, recién cuando hace falta
+    # Primero el índice de búsqueda de todos los casos y después las
+    # evaluaciones. Cada evaluación espera a que su índice tenga textos
+    # vectorizados (el Transform los carga al minuto y NVIDIA los vectoriza de
+    # a poco): caso por caso, esas esperas se sumaban (unos 14 de 26 minutos
+    # con 11 casos); así corren a la vez.
+    armados: dict[str, dict] = {}
     for slug, fields in casos.items():
         indice = (pipe_reg.get(slug) or {}).get("index") or f"{slug}-%{{+YYYY.MM}}"
         if not model_id and ((guardados.get(slug) or {}).get("busqueda") or {}).get("ok"):
@@ -8882,6 +8888,9 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         else:
             res = {"ok": False, "reason": f"sin el modelo de embeddings: {motivo}"}
         runs.step(run, f"Búsqueda híbrida · {slug}", bool(res["ok"] or res.get("no_aplica")), res["reason"][:300])
+        armados[slug] = res
+    for slug, res in armados.items():
+        fields = casos[slug]
         # Para compararla en Dashboards (Search Relevance), sin pegar consultas,
         # y con números: la evaluación (query set, juicios del LLM, experimentos).
         # Con el mismo modelo y ya armada, no se rehace: cada vez son llamados al
