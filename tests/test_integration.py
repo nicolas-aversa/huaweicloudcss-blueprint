@@ -4127,6 +4127,26 @@ def test_forecaster_window_sizes_from_data():
     assert main._forecaster_window(0, 10 * DAY, 10 * DAY, 5000)[1] == 1
 
 
+@pytest.mark.parametrize("dias, docs, esperado", [
+    (194, 99657, 480),     # una prepaga: daba 467 minutos
+    (364, 75707, 1440),    # un seguimiento de envíos: daba 875
+    (211, 70332, 720),     # unos pozos: daba 508
+    (165, 153973, 480),    # una flota: daba 396
+    (3, 500, 60),          # 3 días: daba 86; de a 120 quedan 36 pasos (< 40) → hacia abajo, 60
+    (50, 100, 1440),       # pocos datos: daba 1800; de a 2880 quedan 25 pasos → un día
+    (1095, 1000, 15840),   # 3 años, pocos datos: daba 15768 → 11 días enteros
+])
+def test_el_intervalo_del_pronostico_divide_el_dia(dias, docs, esperado):
+    """Con un intervalo que no divide el día, el ciclo diario cae cada vez en
+    otra hora y el pronóstico no lo aprende (medido: el error bajó en los 8
+    pronósticos que se probaron)."""
+    DAY = 86400000
+    intervalo, _, historia = main._forecaster_window(0, dias * DAY, dias * DAY, docs)
+    assert intervalo == esperado
+    assert 1440 % intervalo == 0 or intervalo % 1440 == 0
+    assert (dias * 1440) // intervalo >= 40 and historia <= main._FORECAST_PASOS + 1
+
+
 def test_build_forecaster_omits_low_seasonality_and_takes_window():
     """build_forecaster: no manda suggested_seasonality si ≤16 (OpenSearch lo
     ignora), respeta el window_delay pasado y capea history a 10000."""
