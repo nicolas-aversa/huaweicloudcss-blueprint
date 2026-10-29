@@ -150,19 +150,22 @@ def _de_incidentes(fields: list[dict], quien: "dict | None", critico: "dict | No
             con = f"marcad{'as' if cuantas == 'Cuántas' else 'os'} como {_et(critico)}"
         else:
             con = f"con {_et(critico)}"
+        # Una agregación por pregunta. "…, y cuál fue el más frecuente?" eran
+        # dos: el agente se trababa en los empates (pedidos: 10 pasos sin
+        # contestar) o elegía qué era "el más frecuente" (el texto de una
+        # llamada, en vez del campo).
         if quien:
-            qs.append(f"¿Qué {_et(quien)} tuvo más {cosas} {con}"
-                      + (", y cuál fue el más frecuente?" if critico.get("type") not in _NUMERICOS else "?"))
+            qs.append(f"¿Qué {_et(quien)} tuvo más {cosas} {con}?")
         if hay_fecha:
-            qs.append(f"¿Qué día hubo más {cosas} {con}" + (f", y de qué {_et(quien)}?" if quien else "?"))
+            qs.append(f"¿Qué día hubo más {cosas} {con}?")
     if malos and hay_fecha:
         qs.append(f"¿{cuantas} {cosas} con {_et(nivel)} {' o '.join(malos[:2])} hubo por día?")
     if duracion and primaria:
         qs.append(f"¿Cuál fue el promedio y el máximo de {_et(duracion)} por {_et(primaria)}?")
     if critico and primaria and hay_fecha and primaria is not quien:
         qs.append(f"¿{cuantas} {cosas} {con} hubo por {_et(primaria)} cada día?")
-    if duracion and quien and hay_fecha:
-        qs.append(f"¿Cuándo hubo picos de {_et(duracion)} y qué {_et(quien)} tuvo los valores más altos?")
+    if duracion and quien:
+        qs.append(f"¿Qué {_et(quien)} tuvo los valores más altos de {_et(duracion)}?")
     return qs
 
 

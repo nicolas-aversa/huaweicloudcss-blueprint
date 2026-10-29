@@ -215,12 +215,15 @@ OMS = [{"field_path": "@timestamp", "type": "date", "role": "timestamp", "frecue
 def test_primero_las_de_un_incidente():
     qs = preguntas.armar(OMS, [], "los mensajes")
     assert qs[:6] == [
-        "¿Qué participante tuvo más mensajes con motivo del rechazo, y cuál fue el más frecuente?",
-        "¿Qué día hubo más mensajes con motivo del rechazo, y de qué participante?",
+        "¿Qué participante tuvo más mensajes con motivo del rechazo?",
+        "¿Qué día hubo más mensajes con motivo del rechazo?",
         "¿Cuántos mensajes con nivel ERROR o WARN hubo por día?",
         "¿Cuál fue el promedio y el máximo de latencia (ms) por tipo de mensaje?",
         "¿Cuántos mensajes con motivo del rechazo hubo por tipo de mensaje cada día?",
-        "¿Cuándo hubo picos de latencia (ms) y qué participante tuvo los valores más altos?"], qs
+        "¿Qué participante tuvo los valores más altos de latencia (ms)?"], qs
+    # Una agregación por pregunta: "…, y cuál fue el más frecuente?" trababa al
+    # agente (empates) o le hacía elegir qué era "el más frecuente".
+    assert not any(", y " in q for q in qs[:6]), qs
     assert not any("orden tuvo" in q for q in qs), "un id por fila no agrupa: la entidad es el participante"
 
 
@@ -232,7 +235,7 @@ def test_las_de_incidente_dependen_de_los_datos():
               {"field_path": "cliente", "type": "keyword", "entity": True, "frecuentes": ["Ana", "Beto"]}]
     qs = preguntas.plantillas(fraude, "las transacciones")
     assert "¿Qué cliente tuvo más transacciones marcadas como fraude?" in qs, "un 0/1 no tiene motivo"
-    assert "¿Qué día hubo más transacciones marcadas como fraude, y de qué cliente?" in qs
+    assert "¿Qué día hubo más transacciones marcadas como fraude?" in qs
 
 
 def test_las_preguntas_hablan_del_mismo_quien_que_el_dashboard():
@@ -251,8 +254,8 @@ def test_las_preguntas_hablan_del_mismo_quien_que_el_dashboard():
               "business_label": "Código de alarma", "frecuentes": ["FUGA", "COM"]}]
     assert dashboards._clasificar(pozos)["entidad"]["path"] == "pozo.id"
     qs = preguntas.plantillas(pozos, "los registros")
-    assert qs[:2] == ["¿Qué pozo tuvo más registros con código de alarma, y cuál fue el más frecuente?",
-                      "¿Qué día hubo más registros con código de alarma, y de qué pozo?"], qs
+    assert qs[:2] == ["¿Qué pozo tuvo más registros con código de alarma?",
+                      "¿Qué día hubo más registros con código de alarma?"], qs
     assert "¿Cuáles son los 10 valores de pozo que más se repiten?" in qs
     assert not any("gateway tuvo" in q or "ID de evento" in q for q in qs), qs
 
