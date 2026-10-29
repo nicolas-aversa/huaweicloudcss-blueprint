@@ -9041,6 +9041,9 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
         label = _label_del_caso(slug, pipe_reg.get(slug) or {})
         anterior = (guardados.get(slug) or {}).get("busqueda") or {}
         modelo_de_consultas = ids.get("query") or model_id
+        # Los juicios guardados van por el NOMBRE del modelo, no por su id: cada
+        # entorno lo registra con otro id, y con el id no se reusaban nunca (en
+        # un entorno nuevo, las 11 evaluaciones volvieron a llamar al LLM).
         evaluacion = None
         try:
             if res["ok"] and not force and (anterior.get("evaluacion") or {}).get("ok") \
@@ -9050,7 +9053,7 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
                 runs.step(run, f"Search Relevance · {slug}", True, "ya estaba (configuraciones y evaluación)")
                 # Hecha antes de que se guardaran: queda para los próximos deploys.
                 _recordar_evaluacion(base, user, password, slug, label,
-                                     res.get("campo") or busqueda.campo_de_texto_libre(fields), modelo_de_consultas)
+                                     res.get("campo") or busqueda.campo_de_texto_libre(fields), busqueda.PROVEEDOR["modelo"])
             elif res["ok"]:
                 fallo = _configurar_search_relevance(base, user, password, slug, label, modelo_de_consultas)
                 runs.step(run, f"Search Relevance · {slug}", not fallo,
@@ -9064,7 +9067,7 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
                         return juez
                     evaluacion = {**_evaluar_busqueda(base, user, password, slug, label,
                                                       res.get("campo") or busqueda.campo_de_texto_libre(fields),
-                                                      _juez, modelo=modelo_de_consultas),
+                                                      _juez, modelo=busqueda.PROVEEDOR["modelo"]),
                                   "modelo": modelo_de_consultas}
                     runs.step(run, f"Evaluación con LLM · {slug}", evaluacion["ok"], evaluacion["motivo"][:300])
             elif res.get("no_aplica"):

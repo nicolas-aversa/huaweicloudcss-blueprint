@@ -626,10 +626,13 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
     jueces, evaluadas = [], []
     monkeypatch.setattr(main, "_asegurar_juez", lambda *a: jueces.append(1) or ("JUEZ", ""))
     # El juez llega como función: se arma recién si un caso no tiene juicios guardados.
-    monkeypatch.setattr(main, "_evaluar_busqueda", lambda b, u, p, slug, label, campo, juez, modelo="": evaluadas.append(
-        (slug, campo, juez())) or {"ok": True, "consultas": 10, "motivo": "10 búsquedas juzgadas por el LLM"})
+    claves = []
+    monkeypatch.setattr(main, "_evaluar_busqueda", lambda b, u, p, slug, label, campo, juez, modelo="": claves.append(modelo)
+                        or evaluadas.append((slug, campo, juez()))
+                        or {"ok": True, "consultas": 10, "motivo": "10 búsquedas juzgadas por el LLM"})
     recordadas = []
-    monkeypatch.setattr(main, "_recordar_evaluacion", lambda b, u, p, slug, *a, **k: recordadas.append(slug) or True)
+    monkeypatch.setattr(main, "_recordar_evaluacion", lambda b, u, p, slug, label, campo, modelo, *a, **k:
+                        claves.append(modelo) or recordadas.append(slug) or True)
     pipe = {"a": {"fields": [F("msg")]}, "b": {"fields": [F("msg")]}}
     activar = lambda force=False: main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path,  # noqa: E731
                                                           ["a", "b"], pipe, force, main.runs.start("capabilities"))
@@ -641,6 +644,9 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
     activar()
     assert len(evaluadas) == 2, "ya armada y con el mismo modelo: no se rehace"
     assert recordadas == ["a", "b"], "la que ya estaba en el cluster queda guardada para los próximos deploys"
+    # Los juicios guardados, por el NOMBRE del modelo: su id (Q1) cambia en cada
+    # entorno y no se reusaban nunca. "Ya estaba", en cambio, compara el id.
+    assert set(claves) == {busqueda.PROVEEDOR["modelo"]}, claves
     activar(force=True)
     assert len(evaluadas) == 4
     # Un "ya estaba" de la búsqueda igual guarda la evaluación nueva.
