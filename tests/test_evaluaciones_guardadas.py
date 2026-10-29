@@ -36,7 +36,9 @@ class _Cluster:
         ruta = url.replace("http://x/", "")
         self.pedidos.append((m, ruta, json_body))
         de_id = {v: TEXTOS[k] for k, v in self.ids.items()}
-        if ruta.endswith("/_mget"):
+        if "/_mget" in ruta:
+            if set(json_body) != {"ids"}:   # como OpenSearch: `_source` en el body es un 400
+                return _R(400, {"error": "unknown key [_source] for a START_ARRAY, expected [docs] or [ids]"})
             return _R(200, {"docs": [{"_id": i, "found": i in de_id, "_source": {"texto": de_id.get(i)}}
                                      for i in json_body["ids"]]})
         if ruta.endswith("/_search") and ruta.startswith("busqueda-"):

@@ -9237,8 +9237,9 @@ def _recordar_evaluacion(base: str, user: str, password: str, slug: str, label: 
         ids = sorted({x.get("docId") for j in ratings for x in j.get("ratings") or [] if x.get("docId")})
         if not (consultas and ids):
             return False
-        r = _os_req("POST", f"{base}/{busqueda.indice(slug)}/_mget", user, password, timeout=30,
-                    json_body={"ids": ids, "_source": ["texto"]})
+        # `_source` va en la URL: en el body, `_mget` lo rechaza (400).
+        r = _os_req("POST", f"{base}/{busqueda.indice(slug)}/_mget?_source_includes=texto", user, password,
+                    timeout=30, json_body={"ids": ids})
         docs = (r.json() or {}).get("docs") or [] if _resp_ok(r) else []
         texto_de_id = {d["_id"]: (d.get("_source") or {}).get("texto") for d in docs
                        if d.get("found") and (d.get("_source") or {}).get("texto")}
