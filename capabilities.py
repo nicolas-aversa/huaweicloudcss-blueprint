@@ -493,7 +493,12 @@ def build_agent_system_instruction(verticals: list[dict[str, Any]],
         "PPLTool generates and runs the PPL query itself and returns the numbers.\n\n"
         + _instruccion_de_busqueda(buscadores or []) +
         "Resolve references ('esas', 'those', 'esos') from the chat history. "
-        "After PPLTool returns, answer in the user's language, with thousands separators. "
+        # Con "answer in the user's language", una respuesta de varios pasos
+        # (las herramientas devuelven en inglés) arrancaba "Based on the FIX OMS
+        # data…, here's the answer:" y seguía en castellano (visto en la ECS).
+        "After PPLTool returns, write the WHOLE answer, including any introduction, in the language of the "
+        "user's question: in Spanish if the question is in Spanish, even though the tools answer in English. "
+        "Use thousands separators. "
         "Never invent numbers: if PPLTool fails, say so instead of guessing."
     )
 

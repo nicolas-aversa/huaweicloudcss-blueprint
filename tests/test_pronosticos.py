@@ -132,6 +132,10 @@ def test_sin_grafico_dice_lo_que_de_verdad_paso(monkeypatch):
     assert error().startswith("el backtest no escribió resultados")
     _cluster(monkeypatch, [_real(i, 0) for i in range(12)], [], history=600)
     assert error().startswith("backtest parcial: 12 de 600 pasos")
+    # Completo y todo en cero (los errores de un OMS): no es el cluster.
+    _cluster(monkeypatch, [_real(i, 0) for i in range(12)], [], history=12)
+    assert error() == ("el backtest terminó (12 de 12 pasos), pero la serie casi siempre vale 0: no hay un tramo "
+                       "con datos para comparar el pronóstico")
 
 
 def test_un_backtest_parcial_se_dibuja_con_lo_que_escribio(monkeypatch):

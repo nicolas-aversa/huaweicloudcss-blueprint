@@ -3973,6 +3973,10 @@ def test_capability_builders_wellformed():
         assert t["parameters"]["prompt"].endswith("QUESTION: ${indexInfo.question}\\nPPL:")
         assert s_por_tool[t["name"]] in t["parameters"]["prompt"] and "\n" not in t["parameters"]["prompt"]
     assert "Producción de pozos" in instr and "Encuentros clínicos" in instr
+    # Una respuesta de varios pasos arrancaba en inglés ("Based on the FIX OMS
+    # data…, here's the answer:"): toda la respuesta, en el idioma de la pregunta.
+    assert "write the WHOLE answer, including any introduction, in the language of the user's question" in instr
+    assert "in Spanish if the question is in Spanish" in instr
 
 
 def test_model_descriptions_are_ascii_safe():

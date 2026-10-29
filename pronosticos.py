@@ -67,6 +67,11 @@ def motivo_sin_grafico(estado: str, pasos: "int | None", history: int) -> str:
         return ("el backtest no escribió resultados (el cluster rechazó sus búsquedas): "
                 "«Volver a provisionar plugins» lo relanza")
     total = f" de {history}" if history else ""
+    # Completo (o casi) y sin tramo para comparar: la serie casi siempre vale 0
+    # (los errores de un OMS). Se le echaba la culpa al cluster con 618 de 619.
+    if history and pasos >= history * 0.95:
+        return (f"el backtest terminó ({pasos}{total} pasos), pero la serie casi siempre vale 0: no hay un "
+                "tramo con datos para comparar el pronóstico")
     return (f"backtest parcial: {pasos}{total} pasos, sin un tramo con datos para comparar el pronóstico "
             "(el cluster rechazó parte de sus búsquedas)")
 
