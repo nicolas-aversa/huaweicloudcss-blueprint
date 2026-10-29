@@ -6936,10 +6936,16 @@
       const sinTarjeta = f.aplica.filter(s => s !== '_cluster' && !f.tarjetas.some(([x]) => x === s))
         .map(s => caso(s, null, f.hechos.includes(s), (f.links || {})[s]));
       const casos = [...conTarjeta, ...sinTarjeta].join('');
+      const rehacer = _REHACIBLES.has(f.id) && f.c && f.hechos.length && f.estado !== 'en_curso'
+        ? `<button type="button" class="btn btn-secondary btn-sm fn__rehacer" data-plugin="${escapeHtml(f.id)}"`
+          + `${state.provisionandoPlugins ? ' disabled' : ''}>${state.aplicandoPlugin === f.id ? 'Rehaciendo…'
+            : `Rehacer en ${f.hechos.length === 1 ? 'el caso' : `los ${f.hechos.length} casos`}`}</button>`
+        : '';
       return (que ? `<div class="fn__que"><p><strong>Qué hace.</strong> ${escapeHtml(que)}</p>`
                   + `<p><strong>Para el negocio.</strong> ${escapeHtml(negocio)}</p></div>` : '')
         + (f.id === 'busqueda' ? comparadorHTML(f) : '')
         + (casos ? `<ul class="fn__casos">${casos}</ul>` : '')
+        + rehacer
         + (f.cluster.length ? `<div class="fn__cluster">${pluginsDetalleHTML(f.cluster, { verificar: false })}</div>` : '')
         + (f.busqueda ? busquedaDelAgenteHTML(f.busqueda, caso) : '');
     }
@@ -7110,6 +7116,25 @@
     }
     // Aplica un plugin donde falta. La alerta vigila al detector de anomalías:
     // donde todavía no hay, se arman los dos.
+    // Lo que se puede rehacer desde su panel: se baja y se vuelve a crear con lo
+    // que la plataforma arma hoy (un intervalo nuevo, otra ventana). Activar y
+    // "Volver a activar" solo completan lo que falta.
+    const _REHACIBLES = new Set(['forecasting', 'anomalias', 'alertas', 'perfil', 'reporte']);
+    async function rehacerPlugin(btn, pipelines, catalogo) {
+      const c = (catalogo || []).find(x => x.plugin === btn.dataset.plugin);
+      if (!c || !c.aplicado.length) return;
+      const titulo = ((_FUNCIONES.find(([x]) => x === c.plugin) || [])[1] || c.plugin).toLowerCase();
+      const n = c.aplicado.length;
+      const ok = await confirmModal({
+        title: `Rehacer ${titulo}`,
+        message: `Se borra y se vuelve a crear en ${n === 1 ? 'el caso que lo tiene' : `los ${n} casos que lo tienen`}, `
+          + 'con lo que la plataforma arma hoy. Tarda unos minutos.'
+          + (c.plugin === 'anomalias' ? ' Sus alertas se rehacen con el detector.' : ''),
+        confirmLabel: 'Rehacer',
+      });
+      if (!ok) return;
+      return provisionCapabilitiesFromInfra(btn, pipelines, true, { plugins: [c.plugin], slugs: c.aplicado, clave: c.plugin });
+    }
     function aplicarPlugin(btn, pipelines, catalogo) {
       const c = (catalogo || []).find(x => x.plugin === btn.dataset.plugin);
       if (!c) return;
@@ -7977,7 +8002,7 @@
       // refrescarPluginsEnCurso): sin esto la vista era una foto a mitad de camino.
       state.provisionandoPlugins = true;
       state.aplicandoPlugin = clave;
-      document.querySelectorAll('#infra-funciones .cat__aplicar').forEach(b => { b.disabled = true; });
+      document.querySelectorAll('#infra-funciones .cat__aplicar, #infra-funciones .fn__rehacer').forEach(b => { b.disabled = true; });
       // La respuesta puede no llegar nunca (ver activacionTerminada): si el
       // servidor ya terminó, se deja de esperarla.
       const controlador = new AbortController();
@@ -9069,6 +9094,8 @@
       body.querySelectorAll('.fn-seccion').forEach(seccion => seccion.addEventListener('click', (e) => {
         const aplicar = e.target.closest('.cat__aplicar');
         if (aplicar) return aplicarPlugin(aplicar, pipelines, data.catalogo);
+        const rehacer = e.target.closest('.fn__rehacer');
+        if (rehacer) return rehacerPlugin(rehacer, pipelines, data.catalogo);
         if (e.target.closest('.fn__probar')) return abrirAsistente();
         const explicar = e.target.closest('.anomalia__explicar');
         if (explicar) return explicarAnomalia(explicar);

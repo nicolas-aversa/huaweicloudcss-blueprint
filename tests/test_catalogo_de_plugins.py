@@ -87,6 +87,38 @@ def test_rehacer_un_plugin_no_baja_el_caso(monkeypatch):
     assert llamadas["perfil"] == ["siem"]
 
 
+def test_rehacer_pronosticos_y_anomalias_los_baja_y_los_recrea(monkeypatch):
+    """El paso por caso saltea lo que ya tiene ids, así que "Rehacer" no rehacía
+    pronósticos, anomalías ni alertas: con una lista y `force`, se bajan antes.
+    El asistente y los modelos no se tocan."""
+    reg = {**REGISTRO, "siem": {**REGISTRO["siem"], "excluir": ["perfil", "alertas"]}}
+    llamadas, escrito = _endpoint(monkeypatch, reg)
+    pedidos = []
+    registro = {"siem": {"agent_id": "A", "forecaster_ids": ["F1", "F2"], "detector_id": "D", "monitor_id": "M"},
+                "ventas-ecommerce": {"agent_id": "A", "forecaster_id": "F3", "detector_id": "D2", "monitor_id": "M2"}}
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: json.loads(json.dumps(registro)))
+    monkeypatch.setattr(main, "_write_capabilities", lambda td, r: registro.clear() or registro.update(r))
+    monkeypatch.setattr(main, "_os_req", lambda m, url, *a, **k: pedidos.append((m, url.split(":9200/")[-1])))
+    monkeypatch.setattr(main, "_borrar_detector_ad", lambda b, u, p, did: pedidos.append(("BORRAR", did)))
+    pedir = lambda plugins: TestClient(main.app).post("/api/v1/onboarding/provision-capabilities", json={  # noqa: E731
+        "opensearch_password": "pw", "slugs": ["siem", "ventas-ecommerce"], "plugins": plugins, "force": True})
+    assert pedir(["forecasting"]).status_code == 200
+    for fid in ("F1", "F2", "F3"):
+        assert ("DELETE", f"_plugins/_forecast/forecasters/{fid}") in pedidos, fid
+    assert registro["siem"] == {"agent_id": "A", "detector_id": "D", "monitor_id": "M"}
+    assert registro["ventas-ecommerce"] == {"agent_id": "A", "detector_id": "D2", "monitor_id": "M2"}
+    assert llamadas["casos"] and all("forecasting" not in ap for _, _, ap in llamadas["casos"]), "y se recrean"
+    # Las anomalías se llevan su monitor, que las vigila (sin prender las
+    # alertas que se apagaron en el paso 2).
+    pedidos.clear()
+    llamadas["casos"].clear()
+    assert pedir(["anomalias"]).status_code == 200
+    assert ("BORRAR", "D") in pedidos and ("DELETE", "_plugins/_alerting/monitors/M") in pedidos
+    assert registro["siem"] == {"agent_id": "A"} and registro["ventas-ecommerce"] == {"agent_id": "A"}
+    assert all("anomalias" not in ap and "alertas" not in ap for _, _, ap in llamadas["casos"])
+    assert not escrito, "las alertas siguen apagadas donde se apagaron en el paso 2"
+
+
 def test_los_recomendados_respetan_el_paso_2(monkeypatch):
     llamadas, escrito = _endpoint(monkeypatch, REGISTRO)
     TestClient(main.app).post("/api/v1/onboarding/provision-capabilities", json={
@@ -195,6 +227,28 @@ const activando = funcionesHTML(data);
 check('activando: lo dice y no deja lanzar otro', activando.includes('data-plugin="forecasting" disabled>Activando…')
   && activando.includes('data-plugin="anomalias" disabled>Activar'), activando);
 state.provisionandoPlugins = false; state.aplicandoPlugin = '';
+// Rehacer: en el panel de lo que ya está en algún caso; no en el agente ni en lo que no se activó.
+const panelFc = detalleDeFuncionHTML(funcionDe('forecasting', data));
+check('rehacer, en el panel de lo que está', panelFc.includes('class="btn btn-secondary btn-sm fn__rehacer" data-plugin="forecasting">Rehacer en el caso</button>'), panelFc);
+check('rehacer: no en el agente ni en lo que no se activó',
+  !detalleDeFuncionHTML(funcionDe('agente', data)).includes('fn__rehacer') && !detalleDeFuncionHTML(funcionDe('anomalias', data)).includes('fn__rehacer'));
+const dosCasos = { ...data, catalogo: data.catalogo.map(c => c.plugin === 'forecasting' ? C('forecasting', ['siem', 'produccion-pozos'], ['siem', 'produccion-pozos']) : c) };
+check('rehacer: cuántos casos', detalleDeFuncionHTML(funcionDe('forecasting', dosCasos)).includes('>Rehacer en los 2 casos</button>'));
+check('rehacer: en cola, no', !detalleDeFuncionHTML(funcionDe('forecasting', { ...data, activando: { desde: 1 } })).includes('fn__rehacer'));
+// El handler: confirma y pide `force` con ese plugin, en los casos que lo tienen.
+let confirmado = true, pedido = null;
+const confirmaciones = [];
+globalThis.confirmModal = async (o) => { confirmaciones.push(o); return confirmado; };
+globalThis.provisionCapabilitiesFromInfra = async (...a) => { pedido = a; };
+await rehacerPlugin({ dataset: { plugin: 'forecasting' } }, ['P'], dosCasos.catalogo);
+check('rehacer: confirma y pide force', pedido && pedido[2] === true
+  && JSON.stringify(pedido[3]) === JSON.stringify({ plugins: ['forecasting'], slugs: ['siem', 'produccion-pozos'], clave: 'forecasting' }),
+  JSON.stringify(pedido));
+check('rehacer: dice qué y cuántos', confirmaciones[0].title === 'Rehacer pronóstico' && confirmaciones[0].message.includes('los 2 casos'),
+  JSON.stringify(confirmaciones[0]));
+pedido = null; confirmado = false;
+await rehacerPlugin({ dataset: { plugin: 'forecasting' } }, ['P'], dosCasos.catalogo);
+check('rehacer: sin confirmar, nada', pedido === null);
 // Con "Activar los plugins" corriendo: lo que falta está en cola, no "sin activar".
 const enCurso = funcionesHTML({ ...data, activando: { desde: 1 } });
 check('activando: en cola, sin botón', tile(enCurso, 'forecasting').includes('Activando… 1 de 2')

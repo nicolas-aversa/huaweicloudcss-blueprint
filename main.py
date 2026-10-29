@@ -7245,6 +7245,25 @@ def _teardown_slug_caps(base: str, user: str, password: str, ids: dict) -> None:
             _os_req("DELETE", f"{base}/_plugins/_ml/connectors/{cid}", user, password, timeout=20)
 
 
+def _bajar_lo_pedido(base: str, user: str, password: str, ids: dict, plugins: "set[str]") -> dict:
+    """Para rehacer pronósticos, anomalías o alertas de un caso: los borra del
+    cluster y devuelve sus ids sin ellos (el paso por caso los vuelve a crear).
+    El asistente y los modelos no se tocan."""
+    ids = dict(ids or {})
+    if "alertas" in plugins and ids.get("monitor_id"):
+        _os_req("DELETE", f"{base}/_plugins/_alerting/monitors/{ids.pop('monitor_id')}", user, password, timeout=20)
+    if "anomalias" in plugins and ids.get("detector_id"):
+        _borrar_detector_ad(base, user, password, ids.pop("detector_id"))
+    if "forecasting" in plugins:
+        viejos = ids.pop("forecaster_ids", None) or [ids.get("forecaster_id")]
+        ids.pop("forecaster_id", None)
+        for fid in viejos:
+            if fid:
+                _os_req("POST", f"{base}/_plugins/_forecast/forecasters/{fid}/_stop", user, password, timeout=20)
+                _os_req("DELETE", f"{base}/_plugins/_forecast/forecasters/{fid}", user, password, timeout=20)
+    return ids
+
+
 def _search_ids(base: str, user: str, password: str, search_path: str,
                 name: str, name_field: str = "name.keyword") -> "list[str]":
     """Devuelve los `_id` de los docs cuyo `name_field` == `name` (para limpiar
@@ -10482,13 +10501,18 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
     # Solo los plugins pedidos: el resto queda apagado para este pedido. Lo que
     # se pide explícitamente deja de estar apagado (si se apagó en el paso 2).
     solo = set(PLUGINS_RECOMENDADOS) if request.recomendados else set(request.plugins or [])
+    pedidos = set(solo)
+    # El monitor de alertas vigila al detector: rehacer las anomalías se lleva
+    # sus alertas (sin prenderlas donde se apagaron en el paso 2).
+    if request.force and "anomalias" in solo and not request.recomendados:
+        solo.add("alertas")
     apagados = (PLUGINS_APLICABLES - solo) if solo else set()
     if solo and not request.recomendados:
         cambio = False
         for s in slugs:
             e = pipe_reg.get(s)
-            if e and set(e.get("excluir") or []) & solo:
-                e["excluir"] = [x for x in e["excluir"] if x not in solo]
+            if e and set(e.get("excluir") or []) & pedidos:
+                e["excluir"] = [x for x in e["excluir"] if x not in pedidos]
                 cambio = True
         if cambio:
             _write_pipelines_registry(terraform_dir, pipe_reg)
@@ -10510,6 +10534,18 @@ def provision_capabilities(request: ProvisionCapabilitiesRequest) -> ProvisionCa
                     _teardown_slug_caps(_base, user, password, registro[s])
                     registro[s] = {}
             _write_capabilities(terraform_dir, registro)
+    # Con una lista, el perfil, el reporte y la búsqueda reciben el `force`;
+    # pronósticos, anomalías y alertas se bajan acá, porque el paso por caso
+    # los saltea si sus ids están ("Rehacer" no los rehacía).
+    if request.force and solo and not request.recomendados:
+        _base = _os_base(cluster, request.https_enabled)
+        if _base.rsplit("//", 1)[-1]:
+            registro = _read_capabilities(terraform_dir)
+            bajados = {s: _bajar_lo_pedido(_base, user, password, registro[s], solo)
+                       for s in con_plugins if registro.get(s)}
+            if any(bajados[s] != registro[s] for s in bajados):
+                registro.update(bajados)
+                _write_capabilities(terraform_dir, registro)
     # Run de Actividad: una fila por capability (chatbot, forecast, …) con su
     # motivo si no salió. El endpoint devuelve esto igual, pero se perdía en
     # cuanto el browser cerraba la pestaña.
