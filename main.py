@@ -8896,14 +8896,23 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
                     and anterior.get("campo") == res.get("campo"):
                 evaluacion = anterior["evaluacion"]
                 runs.step(run, f"Search Relevance · {slug}", True, "ya estaba (configuraciones y evaluación)")
+                # Hecha antes de que se guardaran: queda para los próximos deploys.
+                _recordar_evaluacion(base, user, password, slug, label,
+                                     res.get("campo") or busqueda.campo_de_texto_libre(fields), modelo_de_consultas)
             elif res["ok"]:
                 fallo = _configurar_search_relevance(base, user, password, slug, label, modelo_de_consultas)
                 runs.step(run, f"Search Relevance · {slug}", not fallo,
                           fallo or f"«{label} · por palabras» y «{label} · híbrida», para Single Query Comparison")
                 if not fallo:
-                    juez = juez if juez is not None else _asegurar_juez(base, user, password)
+                    def _juez():
+                        # Uno para todos los casos, y solo si alguno no tiene juicios guardados.
+                        nonlocal juez
+                        if juez is None:
+                            juez = _asegurar_juez(base, user, password)
+                        return juez
                     evaluacion = {**_evaluar_busqueda(base, user, password, slug, label,
-                                                      res.get("campo") or busqueda.campo_de_texto_libre(fields), juez),
+                                                      res.get("campo") or busqueda.campo_de_texto_libre(fields),
+                                                      _juez, modelo=modelo_de_consultas),
                                   "modelo": modelo_de_consultas}
                     runs.step(run, f"Evaluación con LLM · {slug}", evaluacion["ok"], evaluacion["motivo"][:300])
             elif res.get("no_aplica"):
@@ -9116,14 +9125,19 @@ def _esperar_textos_vectorizados(base: str, user: str, password: str, slug: str)
 
 
 def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str, campo: str,
-                      juez: "tuple[str, str]") -> dict:
+                      juez: Any, modelo: str = "") -> dict:
     """La evaluación del caso en Search Relevance: búsquedas realistas (las
     propone el LLM desde los textos), los juicios del juez sobre lo que traen
     las dos configuraciones y los experimentos ya corridos. Se rehace entera:
-    las configuraciones se acaban de rehacer, con otros ids. `{ok, motivo, consultas}`."""
+    las configuraciones se acaban de rehacer, con otros ids. `{ok, motivo, consultas}`.
+
+    Si el caso ya se juzgó (en cualquier entorno, con el mismo campo y modelo),
+    se importan esos juicios y no se llama al LLM: eran dos minutos por caso
+    (ver `evaluaciones_guardadas`). `juez` puede ser una función: el juez se
+    arma recién si hace falta."""
+    import evaluaciones_guardadas
+
     _sacar_la_evaluacion(base, user, password, label)
-    if not juez[0]:
-        return {"ok": False, "motivo": f"sin el juez: {juez[1]}"}
     nombres = busqueda.nombres_de_configuracion(label)
     por_nombre = {x.get("name"): x["_id"] for x in _listar_sr(base, user, password, "search_configurations")}
     configs = [por_nombre.get(nombres["palabras"]), por_nombre.get(nombres["hibrida"])]
@@ -9133,26 +9147,40 @@ def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str
     textos = _textos_del_caso(base, user, password, slug)
     if not textos:
         return {"ok": False, "motivo": "el índice todavía no tiene textos"}
-    try:
-        consultas = busqueda.consultas_a_evaluar(semantica._json_de(
-            semantica._llamar_al_llm(busqueda.prompt_de_consultas(textos, campo, label))))
-    except Exception as exc:  # noqa: BLE001 — la búsqueda igual anda
-        return {"ok": False, "motivo": f"el LLM no propuso búsquedas ({type(exc).__name__})"}
-    if len(consultas) < 3:
-        return {"ok": False, "motivo": "el LLM propuso muy pocas búsquedas"}
+    importar = None
+    guardada = evaluaciones_guardadas.leer(slug, campo, modelo)
+    if guardada:
+        cuerpo, cobertura = evaluaciones_guardadas.para_importar(
+            busqueda.nombres_de_evaluacion(label)["juicios"], guardada,
+            _ids_de_los_textos(base, user, password, slug, evaluaciones_guardadas.textos(guardada)))
+        if cobertura >= evaluaciones_guardadas.COBERTURA_MINIMA:
+            importar, consultas = cuerpo, busqueda.consultas_a_evaluar({"consultas": guardada["consultas"]})
+    if importar is None:
+        juez = juez() if callable(juez) else juez
+        if not juez[0]:
+            return {"ok": False, "motivo": f"sin el juez: {juez[1]}"}
+        try:
+            consultas = busqueda.consultas_a_evaluar(semantica._json_de(
+                semantica._llamar_al_llm(busqueda.prompt_de_consultas(textos, campo, label))))
+        except Exception as exc:  # noqa: BLE001 — la búsqueda igual anda
+            return {"ok": False, "motivo": f"el LLM no propuso búsquedas ({type(exc).__name__})"}
+        if len(consultas) < 3:
+            return {"ok": False, "motivo": "el LLM propuso muy pocas búsquedas"}
     r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/query_sets", user, password,
                 json_body=busqueda.query_set(label, consultas), timeout=30)
     qs = _id_de(r, "query_set_id")
     if not qs:
         return {"ok": False, "motivo": f"no se pudo crear el query set: {_resp_motivo(r)}"[:300]}
-    r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/judgments", user, password,
-                json_body=busqueda.juicios(label, qs, configs, juez[0]), timeout=30)
+    r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/judgments", user, password, timeout=30,
+                json_body=importar or busqueda.juicios(label, qs, configs, juez[0]))
     jid = _id_de(r, "judgment_id")
     if not jid:
         return {"ok": False, "motivo": f"no se pudieron pedir los juicios: {_resp_motivo(r)}"[:300]}
     estado = _esperar_sr(base, user, password, f"judgments/{jid}", _ESPERA_DE_LOS_JUICIOS_S)
     if estado != "COMPLETED":
         return {"ok": False, "motivo": f"los juicios del LLM no terminaron ({estado or 'tardaron demasiado'})"}
+    if importar is None:
+        _recordar_evaluacion(base, user, password, slug, label, campo, modelo, consultas, jid)
     corriendo = 0
     for cuerpo in busqueda.experimentos(qs, configs, jid):
         r = _os_req("PUT", f"{base}/{_RUTA_DE_SR}/experiments", user, password, json_body=cuerpo, timeout=30)
@@ -9162,8 +9190,66 @@ def _evaluar_busqueda(base: str, user: str, password: str, slug: str, label: str
             return {"ok": False, "motivo": f"el experimento {cuerpo['type']} falló: {_resp_motivo(r) if not eid else estado}"[:300]}
         corriendo += not estado
     return {"ok": True, "consultas": len(consultas),
-            "motivo": f"{len(consultas)} búsquedas juzgadas por el LLM"
+            "motivo": (f"{len(consultas)} búsquedas con los juicios del LLM guardados (sin volver a llamarlo)"
+                       if importar else f"{len(consultas)} búsquedas juzgadas por el LLM")
                       + (f"; {corriendo} experimento(s) siguen corriendo" if corriendo else "")}
+
+
+def _ids_de_los_textos(base: str, user: str, password: str, slug: str, textos: list[str]) -> dict[str, str]:
+    """`{texto: id}` de esos textos en `busqueda-<caso>`."""
+    fuera: dict[str, str] = {}
+    for i in range(0, len(textos), 500):
+        tanda = textos[i:i + 500]
+        r = _os_req("POST", f"{base}/{busqueda.indice(slug)}/_search", user, password, timeout=30, json_body={
+            "size": len(tanda), "_source": ["texto"], "query": {"terms": {"texto.keyword": tanda}}})
+        try:
+            hits = ((r.json() or {}).get("hits") or {}).get("hits") or [] if _resp_ok(r) else []
+        except ValueError:
+            hits = []
+        fuera.update({(h.get("_source") or {}).get("texto"): h["_id"] for h in hits
+                      if h.get("_id") and (h.get("_source") or {}).get("texto")})
+    return fuera
+
+
+def _recordar_evaluacion(base: str, user: str, password: str, slug: str, label: str, campo: str,
+                         modelo: str, consultas: "list[str] | None" = None, jid: str = "") -> bool:
+    """Guarda para los próximos deploys los juicios del LLM del caso (los
+    recién hechos, o los que ya estaban en el cluster). Best-effort: si no
+    sale, la próxima vez se vuelve a juzgar. True si quedaron guardados."""
+    import evaluaciones_guardadas
+
+    if not campo or evaluaciones_guardadas.leer(slug, campo, modelo):
+        return bool(campo)
+    try:
+        nombres = busqueda.nombres_de_evaluacion(label)
+        if jid:
+            r = _os_req("GET", f"{base}/{_RUTA_DE_SR}/judgments/{jid}", user, password, timeout=20)
+            hits = ((r.json() or {}).get("hits") or {}).get("hits") or [] if _resp_ok(r) else []
+            juicio = (hits[0].get("_source") or {}) if hits else {}
+        else:
+            juicio = next((x for x in _listar_sr(base, user, password, "judgments")
+                           if x.get("name") == nombres["juicios"] and x.get("status") == "COMPLETED"), {})
+        if consultas is None:
+            qset = next((x for x in _listar_sr(base, user, password, "query_sets")
+                         if x.get("name") == nombres["query_set"]), {})
+            consultas = [q.get("queryText") for q in qset.get("querySetQueries") or [] if q.get("queryText")]
+        ratings = juicio.get("judgmentRatings") or []
+        ids = sorted({x.get("docId") for j in ratings for x in j.get("ratings") or [] if x.get("docId")})
+        if not (consultas and ids):
+            return False
+        r = _os_req("POST", f"{base}/{busqueda.indice(slug)}/_mget", user, password, timeout=30,
+                    json_body={"ids": ids, "_source": ["texto"]})
+        docs = (r.json() or {}).get("docs") or [] if _resp_ok(r) else []
+        texto_de_id = {d["_id"]: (d.get("_source") or {}).get("texto") for d in docs
+                       if d.get("found") and (d.get("_source") or {}).get("texto")}
+        juicios = evaluaciones_guardadas.por_texto(ratings, texto_de_id)
+        if not any(juicios.values()):
+            return False
+        evaluaciones_guardadas.guardar(slug, campo, modelo, consultas, juicios)
+        return True
+    except Exception as exc:  # noqa: BLE001 — la evaluación ya está en el cluster
+        print(f"[evaluacion] no se pudo guardar la de {slug}: {exc!r}")
+        return False
 
 
 def _experimentos_del_caso(base: str, user: str, password: str, label: str) -> dict:

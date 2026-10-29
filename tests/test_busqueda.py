@@ -477,6 +477,10 @@ def test_las_busquedas_a_evaluar_y_los_pedidos():
                                                        "a" * 81]}) == ["dolor de cabeza", "control de embarazo"]
     assert busqueda.consultas_a_evaluar({"consultas": [f"q{i}" for i in range(30)]}) == [f"q{i}" for i in range(10)]
     assert busqueda.consultas_a_evaluar(None) == [] and busqueda.consultas_a_evaluar({"consultas": "no"}) == []
+    # Search Relevance rechazaba el query set entero (visto en un OMS).
+    assert busqueda.consultas_a_evaluar({"consultas": ['rechazo "precio fuera de rango"', "orden <b>OR-1</b>",
+                                                       "ruta C:\\fix", "«falla» de sesión"]}) == [
+        "rechazo precio fuera de rango", "orden OR-1", "ruta C: fix", "falla de sesión"]
     p = busqueda.prompt_de_consultas(["Prenatal visit"], "desc", "Encuentros clínicos")
     assert "Escribí 10 búsquedas realistas" in p and "La mitad con palabras que aparecen en los textos" in p
     assert "«desc» de «Encuentros clínicos»" in p and p.endswith("Prenatal visit\n")
@@ -621,8 +625,11 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
     monkeypatch.setattr(main, "_configurar_search_relevance", lambda *a: "")
     jueces, evaluadas = [], []
     monkeypatch.setattr(main, "_asegurar_juez", lambda *a: jueces.append(1) or ("JUEZ", ""))
-    monkeypatch.setattr(main, "_evaluar_busqueda", lambda b, u, p, slug, label, campo, juez: evaluadas.append((slug, campo, juez))
-                        or {"ok": True, "consultas": 10, "motivo": "10 búsquedas juzgadas por el LLM"})
+    # El juez llega como función: se arma recién si un caso no tiene juicios guardados.
+    monkeypatch.setattr(main, "_evaluar_busqueda", lambda b, u, p, slug, label, campo, juez, modelo="": evaluadas.append(
+        (slug, campo, juez())) or {"ok": True, "consultas": 10, "motivo": "10 búsquedas juzgadas por el LLM"})
+    recordadas = []
+    monkeypatch.setattr(main, "_recordar_evaluacion", lambda b, u, p, slug, *a, **k: recordadas.append(slug) or True)
     pipe = {"a": {"fields": [F("msg")]}, "b": {"fields": [F("msg")]}}
     activar = lambda force=False: main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path,  # noqa: E731
                                                           ["a", "b"], pipe, force, main.runs.start("capabilities"))
@@ -633,6 +640,7 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
                                                       "modelo": "Q1"}
     activar()
     assert len(evaluadas) == 2, "ya armada y con el mismo modelo: no se rehace"
+    assert recordadas == ["a", "b"], "la que ya estaba en el cluster queda guardada para los próximos deploys"
     activar(force=True)
     assert len(evaluadas) == 4
     # Un "ya estaba" de la búsqueda igual guarda la evaluación nueva.

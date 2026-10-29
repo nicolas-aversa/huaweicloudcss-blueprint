@@ -6883,6 +6883,19 @@
         + `<span class="fn-tile__estado">${escapeHtml(estado)}</span></button>`
         + (accion ? `<span class="fn-tile__accion">${accion}</span>` : '') + '</div>';
     }
+    // El texto de "Qué podés mostrar". Activando, qué falta y cuánto: la
+    // búsqueda por significado no tiene tarjeta (va en la del agente) y es lo
+    // último, así que se veía "9 de 9 listas" y "Activando" sin saber qué faltaba.
+    function textoDeFunciones(activando, funciones) {
+      if (!activando) return 'Tocá una para ver qué es, para qué le sirve al cliente y dónde mostrarla.';
+      // Solo lo que está en cola (no, por ejemplo, Security Analytics: se arma en el paso 1).
+      const faltan = funciones.filter(f => f && f.estado === 'en_curso')
+        .map(f => `${f.id === 'busqueda' ? 'la búsqueda por significado' : f.titulo.toLowerCase()} `
+          + `(${f.hechos.length} de ${f.aplica.length} caso${f.aplica.length === 1 ? '' : 's'})`);
+      return faltan.length
+        ? `Activando: falta ${faltan.join(', ')}. Lo que ya está listo se puede mostrar: tocá una para ver qué es y dónde.`
+        : 'Activando: terminando los últimos pasos. Tocá una para ver qué es y dónde mostrarla.';
+    }
     function funcionesHTML(data) {
       const visibles = _FUNCIONES.map(([id]) => funcionDe(id, data)).filter(f => f.estado !== 'na');
       if (!visibles.length) return '';
@@ -6891,8 +6904,8 @@
       return `<div class="section-card fn-seccion" id="infra-funciones">
           <div class="fn-cab"><span class="section-card__title">Qué podés mostrar</span>`
         + `<span class="fn-cab__n">${listas} de ${visibles.length} listas</span></div>
-          <p class="fn-cab__hint">${(data.activando && !data.activando.plugins) ? 'Activando: se completan solas a medida que termina cada caso. Tocá una para ver qué es y dónde mostrarla.'
-            : 'Tocá una para ver qué es, para qué le sirve al cliente y dónde mostrarla.'}</p>
+          <p class="fn-cab__hint">${escapeHtml(textoDeFunciones(!!(data.activando && !data.activando.plugins),
+            [...visibles, funcionDe('busqueda', data)]))}</p>
           <div class="fn-grid">${visibles.map(tarjetaDeFuncionHTML).join('')}</div>
           <div class="fn-panel"${abierta ? '' : ' hidden'}></div>
         </div>`;

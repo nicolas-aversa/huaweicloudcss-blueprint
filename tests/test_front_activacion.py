@@ -9,6 +9,7 @@ Se corre la función REAL del HTML (`provisionCapabilitiesFromInfra`) en node,
 con un `fetch` cuya respuesta a la activación no llega nunca y un estado del
 servidor que la muestra en curso y después terminada.
 """
+import json
 import pathlib
 import re
 import shutil
@@ -157,3 +158,34 @@ def test_el_boton_no_queda_activando_si_la_respuesta_no_llega(tmp_path):
     res = subprocess.run(["node", str(js)], capture_output=True, text=True, timeout=60)
 
     assert res.returncode == 0, "checks fallidos:\n" + (res.stdout or res.stderr)
+
+
+def test_activando_dice_que_falta(tmp_path):
+    """Las nueve tarjetas listas y "Activando" a la vez: faltaba la búsqueda
+    por significado, que no tiene tarjeta. Ahora lo dice, con su avance."""
+    html = _INDEX.read_text(encoding="utf-8")
+    js = tmp_path / "texto.mjs"
+    js.write_text(_funcion(html, "    function textoDeFunciones(") + r"""
+const f = (id, titulo, hechos, aplica, estado = hechos.length < aplica.length ? 'en_curso' : 'ok') =>
+  ({ id, titulo, hechos, aplica, estado });
+const listas = [f('agente', 'Agente conversacional', ['a', 'b'], ['a', 'b']), f('perfil', 'Transformaciones', ['a'], ['a'])];
+console.log(JSON.stringify({
+  quieto: textoDeFunciones(false, listas),
+  busqueda: textoDeFunciones(true, [...listas, f('busqueda', 'busqueda', ['a'], ['a', 'b']),
+                                    f('security_analytics', 'Analítica de seguridad', [], ['a'], 'off')]),
+  dos: textoDeFunciones(true, [f('forecasting', 'Pronóstico', [], ['a', 'b']), f('busqueda', 'busqueda', [], ['a'])]),
+  nada: textoDeFunciones(true, [...listas, f('busqueda', 'busqueda', [], [])]),
+}));
+""", encoding="utf-8")
+    res = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert res.returncode == 0, res.stderr
+    t = json.loads(res.stdout)
+    assert t["quieto"] == "Tocá una para ver qué es, para qué le sirve al cliente y dónde mostrarla."
+    assert t["busqueda"].startswith("Activando: falta la búsqueda por significado (1 de 2 casos).")
+    assert "agente" not in t["busqueda"] and "transformaciones" not in t["busqueda"], "lo listo no se nombra"
+    assert "seguridad" not in t["busqueda"], "lo que no se activa acá (paso 1), tampoco"
+    assert t["dos"].startswith("Activando: falta pronóstico (0 de 2 casos), la búsqueda por significado (0 de 1 caso).")
+    assert t["nada"].startswith("Activando: terminando los últimos pasos."), "sin búsqueda en ningún caso"
+    vista = html[html.index("    function funcionesHTML("):]
+    assert "textoDeFunciones(!!(data.activando && !data.activando.plugins)" in vista[:2000]
+    assert "funcionDe('busqueda', data)" in vista[:2000]

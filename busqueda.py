@@ -672,14 +672,21 @@ def prompt_de_consultas(textos: list[str], campo: str = "", label: str = "") -> 
                                        textos="\n".join(_en_una_linea(t) for t in textos))
 
 
+# Search Relevance rechaza el query set entero si una búsqueda trae comillas,
+# barras invertidas o etiquetas HTML ("Invalid queryText"; visto en un OMS, que
+# cita los valores: «orden "OR-1"»). Se sacan: no cambian qué se busca.
+_NO_VA_EN_UNA_BUSQUEDA = re.compile(r"[\"'\\<>`“”‘’«»]")
+_ETIQUETA = re.compile(r"<[^>]*>")
+
+
 def consultas_a_evaluar(datos: Any) -> list[str]:
     """Las búsquedas que propuso el LLM para evaluar: texto, de largo
-    razonable y sin repetir."""
+    razonable, sin lo que Search Relevance rechaza y sin repetir."""
     propuestas = _la_lista(datos, "consultas")
     fuera: list[str] = []
     vistas: set[str] = set()
     for x in propuestas if isinstance(propuestas, list) else []:
-        q = " ".join(x.split()) if isinstance(x, str) else ""
+        q = " ".join(_NO_VA_EN_UNA_BUSQUEDA.sub(" ", _ETIQUETA.sub(" ", x)).split()) if isinstance(x, str) else ""
         if not 2 <= len(q) <= _LARGO_DE_BUSQUEDA[1] or q.lower() in vistas:
             continue
         vistas.add(q.lower())

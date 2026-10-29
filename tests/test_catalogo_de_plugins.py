@@ -200,7 +200,8 @@ const enCurso = funcionesHTML({ ...data, activando: { desde: 1 } });
 check('activando: en cola, sin botón', tile(enCurso, 'forecasting').includes('Activando… 1 de 2')
   && tile(enCurso, 'anomalias').includes('<span class="fn-tile__estado">Activando…</span>')
   && !enCurso.includes('cat__aplicar" data-plugin="forecasting"') && !enCurso.includes('cat__aplicar" data-plugin="anomalias"'), enCurso);
-check('activando: lo dice arriba', enCurso.includes('Activando: se completan solas'), enCurso);
+check('activando: dice qué falta', enCurso.includes('Activando: falta pronóstico (1 de 2 casos), detección de anomalías (0 de 1 caso).')
+  && !enCurso.includes('analítica de seguridad ('), enCurso);
 const unaSola = funcionesHTML({ ...data, activando: { desde: 1, plugins: ['forecasting'] } });
 check('activando una sola: solo esa en cola', tile(unaSola, 'forecasting').includes('Activando… 1 de 2')
   && tile(unaSola, 'anomalias').includes('data-plugin="anomalias">Activar</button>') && !unaSola.includes('Activando: se completan solas'), unaSola);
