@@ -7123,9 +7123,11 @@ def _ajustar_tiempo_de_dashboards(base: str, user: str, password: str, terraform
     todavía no hay datos y queda una ventana por defecto (2025-07…2026-07): un
     dataset con fechas posteriores se veía cortado. "" si no había nada que
     ajustar; si no, qué se ajustó."""
+    import requests
+
     registro = _read_pipelines_registry(terraform_dir)
     gmin = gmax = None
-    ajustados = []
+    cambios: list[tuple[str, int, int]] = []
     for slug in slugs:
         entrada = registro.get(slug) or {}
         bounds = _index_time_bounds(base, user, password,
@@ -7135,16 +7137,29 @@ def _ajustar_tiempo_de_dashboards(base: str, user: str, password: str, terraform
         gmin = bounds[0] if gmin is None else min(gmin, bounds[0])
         gmax = bounds[1] if gmax is None else max(gmax, bounds[1])
         if entrada.get("dashboard_id"):
-            r = _os_req("POST", f"{base}/.kibana/_update/dashboard:{entrada['dashboard_id']}", user, password, timeout=15,
-                        json_body={"doc": {"dashboard": {"timeRestore": True, "timeFrom": _epoch_ms_to_iso(bounds[0]),
-                                                         "timeTo": _epoch_ms_to_iso(bounds[1])}}})
-            if _resp_ok(r):
-                ajustados.append(slug)
+            cambios.append((entrada["dashboard_id"], bounds[0], bounds[1]))
     if gmin is None:
         return ""
+    # Todos en un `_bulk`: de a uno, con el cluster ocupado (Security Analytics
+    # procesando la ingesta, la cola de escritura en 221), cada `_update`
+    # esperaba su turno y se cortaba a los 15 s, y eran 14 (visto: minutos).
+    ajustados = 0
+    if cambios:
+        lineas = []
+        for did, desde, hasta in cambios:
+            lineas.append(json.dumps({"update": {"_index": ".kibana", "_id": f"dashboard:{did}"}}))
+            lineas.append(json.dumps({"doc": {"dashboard": {"timeRestore": True, "timeFrom": _epoch_ms_to_iso(desde),
+                                                            "timeTo": _epoch_ms_to_iso(hasta)}}}))
+        try:
+            r = requests.post(f"{base}/_bulk", data=("\n".join(lineas) + "\n").encode("utf-8"), auth=(user, password),
+                              headers={"Content-Type": "application/x-ndjson"}, timeout=60, verify=False)
+            items = (r.json() or {}).get("items") or [] if _resp_ok(r) else []
+            ajustados = sum(1 for it in items if 200 <= int((it.get("update") or {}).get("status") or 0) < 300)
+        except Exception as exc:  # noqa: BLE001 — los dashboards igual andan, con el rango de antes
+            print(f"[dashboards] no se pudo ajustar el rango: {exc!r}")
     t_from, t_to = _epoch_ms_to_iso(gmin), _epoch_ms_to_iso(gmax)
     _timepicker_global(base, user, password, t_from, t_to)
-    return f"{t_from[:10]} a {t_to[:10]}" + (f" ({len(ajustados)} dashboard{'s' if len(ajustados) != 1 else ''})" if ajustados else "")
+    return f"{t_from[:10]} a {t_to[:10]}" + (f" ({ajustados} dashboard{'s' if ajustados != 1 else ''})" if ajustados else "")
 
 
 def _patch_dashboard_time_range(ndjson: str, from_iso: str, to_iso: str) -> str:
@@ -12005,17 +12020,20 @@ def _plugins_de_la_vista(terraform_dir: Path, registry: dict, dashboards_url: st
         seguridad_reg = _read_security(terraform_dir)
         seguridad_specs = _specs_de_seguridad(terraform_dir)
         analistas = _read_analistas(terraform_dir)
+        act = _activando()
+        armando = set(act.get("plugins") or PLUGINS_RECOMENDADOS) if act else set()
         fuera: dict = {}
         for slug, entry in registry.items():
             ids = caps_reg.get(slug) or {}
             spec = _resolve_capability_spec(slug, terraform_dir=terraform_dir) if (ids or estados.get(slug)) else {}
-            tarjetas = plugins_vista.tarjetas_del_caso(
+            tarjetas = plugins_vista.mientras_se_arma(plugins_vista.tarjetas_del_caso(
                 slug, entry=entry or {}, ids=ids, spec=spec, perfil=_perfil_de(slug, entry or {}),
                 canal=(estados.get("_cluster") or {}).get("canal") or {},
                 enmascarados=_enmascarados_de(slug, entry or {}), seguridad_reg=seguridad_reg.get(slug) or {},
                 seguridad_spec=seguridad_specs.get(slug) or {}, estados=estados.get(slug) or {},
                 analista_creado=slug in analistas, base=base,
-                fields=(entry or {}).get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or [])
+                fields=(entry or {}).get("fields") or (verticals.get_vertical(slug) or {}).get("fields") or []),
+                armando)
             if tarjetas:
                 fuera[slug] = tarjetas
         if fuera:

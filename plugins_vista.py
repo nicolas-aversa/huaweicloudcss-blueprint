@@ -302,6 +302,15 @@ def _busqueda(estado: dict, base: str = "") -> dict:
     return t
 
 
+def mientras_se_arma(tarjetas: list[dict], plugins: "set[str]") -> list[dict]:
+    """Con una activación corriendo, lo que arma y todavía no está no "falló":
+    se está armando. Un "Rehacer" baja lo que había y lo vuelve a crear, y en el
+    medio la tarjeta decía "Falló" con el motivo de la vez anterior ("backtest
+    OK")."""
+    return [{**t, "estado": EN_CURSO, "motivo": "se está armando"}
+            if t.get("plugin") in plugins and t.get("estado") == FALLA else t for t in tarjetas]
+
+
 def tarjetas_del_caso(slug: str, *, entry: dict, ids: dict, spec: dict, perfil: "dict | None",
                       enmascarados: list[str], seguridad_reg: dict, seguridad_spec: dict,
                       estados: dict, analista_creado: bool, base: str,

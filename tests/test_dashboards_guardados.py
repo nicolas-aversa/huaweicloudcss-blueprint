@@ -69,7 +69,7 @@ def test_si_la_plataforma_mejoro_su_dashboard_la_copia_vieja_no_es_un_cambio():
 
 
 def test_que_la_plataforma_le_ajuste_las_fechas_no_es_un_cambio():
-    """`_ajustar_tiempo_de_dashboards` reescribe timeFrom/timeTo con un _update."""
+    """`_ajustar_tiempo_de_dashboards` reescribe timeFrom/timeTo con un update (en un _bulk)."""
     ajustado = {"dashboard:d-billetera": {"updated_at": DESPUES, "attributes": {
         "title": "d-billetera", "panelsJSON": "[1]", "timeFrom": "2026-09-01", "timeTo": "2026-10-20",
         "timeRestore": True}}}

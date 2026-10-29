@@ -683,3 +683,29 @@ console.log(f.join('\\n')); process.exit(f.length ? 1 : 0);
 """, encoding="utf-8")
     r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_lo_que_se_esta_rehaciendo_no_fallo(monkeypatch, tmp_path):
+    """Un "Rehacer" baja los pronósticos y los vuelve a crear: en el medio no
+    hay ids y la tarjeta decía "Falló", con el motivo de la vez anterior
+    ("backtest OK"). Con la activación corriendo, está en curso."""
+    t = [{"plugin": "forecasting", "estado": pv.FALLA, "motivo": "backtest OK (3/3)"},
+         {"plugin": "anomalias", "estado": pv.FALLA, "motivo": "no se creó el detector"},
+         {"plugin": "perfil", "estado": pv.OK, "motivo": ""}]
+    armando = pv.mientras_se_arma(t, {"forecasting", "perfil"})
+    assert armando[0] == {"plugin": "forecasting", "estado": pv.EN_CURSO, "motivo": "se está armando"}
+    assert armando[1]["estado"] == pv.FALLA, "lo que no se está armando sí falló"
+    assert armando[2]["estado"] == pv.OK, "lo que está bien, sigue bien"
+    # En la vista: la activación en curso dice qué arma (o todo, si no dice).
+    import main
+    monkeypatch.setattr(main, "_read_capabilities", lambda td: {"c": {"detector_id": "D"}})
+    monkeypatch.setattr(main, "_read_estados", lambda td: {"c": {"forecasting": {"ok": True, "motivo": "backtest OK (3/3)"}}})
+    monkeypatch.setattr(main, "_resolve_capability_spec", lambda slug, **k: {"forecasts": [
+        {"name": "x", "feature_name": "n", "aggregation_query": {"n": {"value_count": {"field": "@timestamp"}}}}]})
+    vista = lambda: {x["plugin"]: x["estado"] for x in main._plugins_de_la_vista(tmp_path, {"c": {}}, "")["c"]}  # noqa: E731
+    monkeypatch.setattr(main, "_activando", lambda: {"desde": 1, "plugins": ["forecasting"]})
+    assert vista()["forecasting"] == pv.EN_CURSO
+    monkeypatch.setattr(main, "_activando", lambda: None)
+    assert vista()["forecasting"] == pv.FALLA
+    monkeypatch.setattr(main, "_activando", lambda: {"desde": 1, "plugins": None})
+    assert vista()["forecasting"] == pv.EN_CURSO, "activando todo: lo recomendado está en curso"

@@ -254,8 +254,10 @@ def test_al_activar_los_plugins_los_dashboards_abren_sobre_sus_datos(monkeypatch
     """En la puesta en marcha todavía no hay datos: quedaba la ventana fija
     (2025-07…2026-07) y un dataset hasta octubre de 2026 se veía cortado."""
     main._write_pipelines_registry(tmp_path, {"emerg": {"index": "emerg-%{+YYYY.MM}", "dashboard_id": "D1"},
-                                              "vacio": {"index": "vacio-%{+YYYY.MM}", "dashboard_id": "D2"}})
-    rangos = {"emerg-*": (1767225600000, 1791849600000, 66000)}       # 2026-01-01 … 2026-10-13
+                                              "vacio": {"index": "vacio-%{+YYYY.MM}", "dashboard_id": "D2"},
+                                              "otro": {"index": "otro-%{+YYYY.MM}", "dashboard_id": "D3"}})
+    rangos = {"emerg-*": (1767225600000, 1791849600000, 66000),       # 2026-01-01 … 2026-10-13
+              "otro-*": (1767225600000, 1767312000000, 10)}           # 2026-01-01 … 2026-01-02
     monkeypatch.setattr(main, "_index_time_bounds", lambda b, u, p, patron: rangos.get(patron))
     pedidos = []
 
@@ -266,10 +268,28 @@ def test_al_activar_los_plugins_los_dashboards_abren_sobre_sus_datos(monkeypatch
             return {"hits": {"hits": [{"_id": "config:3.4.0"}]}}
 
     monkeypatch.setattr(main, "_os_req", lambda m, url, *a, json_body=None, **k: pedidos.append((m, url.replace("http://x", ""), json_body)) or _R())
-    assert main._tiempo_original("http://x", "a", "p", tmp_path, ["emerg", "vacio"]) == "2026-01-01 a 2026-10-13 (1 dashboard)"
-    dash = next(b for m, u, b in pedidos if u == "/.kibana/_update/dashboard:D1")
-    assert dash == {"doc": {"dashboard": {"timeRestore": True, "timeFrom": "2026-01-01T00:00:00.000Z", "timeTo": "2026-10-13T00:00:00.000Z"}}}
-    assert not any(u.endswith("dashboard:D2") for _, u, _ in pedidos), "sin datos, no se toca"
+    bulks = []
+
+    class _Bulk:
+        status_code = 200
+
+        def json(self):
+            return {"items": [{"update": {"status": 200}}, {"update": {"status": 200}}]}
+
+    import requests
+    monkeypatch.setattr(requests, "post", lambda url, data=None, **k: bulks.append((url, data.decode("utf-8"))) or _Bulk())
+    assert main._tiempo_original("http://x", "a", "p", tmp_path, ["emerg", "vacio", "otro"]) ==         "2026-01-01 a 2026-10-13 (2 dashboards)"
+    # Todos en un pedido: de a uno, con el cluster ocupado, cada uno esperaba su
+    # turno de escritura y se cortaba a los 15 s.
+    (url, cuerpo), = bulks
+    assert url == "http://x/_bulk"
+    lineas = [json.loads(x) for x in cuerpo.strip().splitlines()]
+    assert lineas[:2] == [{"update": {"_index": ".kibana", "_id": "dashboard:D1"}},
+                          {"doc": {"dashboard": {"timeRestore": True, "timeFrom": "2026-01-01T00:00:00.000Z",
+                                                 "timeTo": "2026-10-13T00:00:00.000Z"}}}]
+    assert lineas[2] == {"update": {"_index": ".kibana", "_id": "dashboard:D3"}}
+    assert "dashboard:D2" not in cuerpo, "sin datos, no se toca"
+    assert not any("/_update/dashboard:" in u for _, u, _ in pedidos)
     cfg = next(b for m, u, b in pedidos if u == "/.kibana/_update/config:3.4.0")
     assert cfg["doc"]["config"]["timepicker:timeDefaults"] == '{"from":"2026-01-01T00:00:00.000Z","to":"2026-10-13T00:00:00.000Z","mode":"absolute"}'
     assert main._tiempo_original("http://x", "a", "p", tmp_path, ["vacio"]) == ""
