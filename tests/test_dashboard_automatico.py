@@ -227,6 +227,21 @@ def test_un_critico_numerico_cuenta_los_que_valen_uno():
     assert not [p for p in _de(problemas, "bar") if p["field"] == "is_fraud"], "un 0/1 no tiene motivos"
 
 
+def test_un_critico_booleano_cuenta_los_true():
+    """`failed` está en todos los eventos (true o false): con `:*` "Con Failed"
+    eran todas las transacciones."""
+    assert dashboards._consulta_critica({"path": "transaction.funnel.failed", "es": "boolean"}) ==         "transaction.funnel.failed:true"
+    assert dashboards._consulta_critica({"path": "motivo", "es": "keyword"}) == "motivo:*"
+    assert dashboards._consulta_critica({"path": "is_fraud", "es": "long"}) == "is_fraud > 0"
+
+
+def test_information_no_es_un_problema():
+    """FortiGate escribe "information" y syslog "informational": eran el 13 %
+    de los "problemas" de un firewall."""
+    q = dashboards._consulta_de_problemas_del_nivel({"path": "level"})
+    assert '"information"' in q and '"informational"' in q and '"notice"' in q
+
+
 def test_un_nivel_sin_valores_conocidos_cuenta_lo_que_no_es_informativo():
     """Sin los valores del índice: lo que no es INFO/DEBUG/TRACE/NOTICE (una
     severidad propia, como "Alta", también es un problema)."""

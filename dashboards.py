@@ -778,8 +778,10 @@ _COMPONENTE = re.compile(r"(^|[._])(logger|component|componente|service|servicio
                          r"aplicacion)$", re.I)
 # Lo informativo de un nivel: lo demás (WARN, ERROR o una severidad propia,
 # como "Alta") es un problema, aunque no se conozcan los valores del índice.
-_NIVELES_INFORMATIVOS = ("INFO", "Info", "info", "DEBUG", "Debug", "debug", "TRACE", "Trace", "trace",
-                         "NOTICE", "Notice", "notice")
+# "information" (FortiGate) e "informational" (syslog) también: contaban como problemas.
+_NIVELES_INFORMATIVOS = ("INFO", "Info", "info", "INFORMATION", "Information", "information",
+                         "INFORMATIONAL", "Informational", "informational", "DEBUG", "Debug", "debug",
+                         "TRACE", "Trace", "trace", "NOTICE", "Notice", "notice")
 _UNIDADES_DE_TIEMPO = frozenset({"ms", "milisegundos", "s", "sec", "seg", "segundos", "min", "minutos",
                                  "h", "hs", "horas", "dias", "días", "days"})
 
@@ -902,8 +904,11 @@ def _clasificar(fields: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _consulta_critica(c: dict[str, Any]) -> str:
-    """Los eventos críticos: un indicador 0/1 vale 1; un código o un motivo
-    solo aparece cuando algo salió mal."""
+    """Los eventos críticos: un indicador 0/1 vale 1; un booleano ("failed"),
+    true (está en todos los eventos: `:*` los contaba a todos); un código o un
+    motivo solo aparece cuando algo salió mal."""
+    if c["es"] == "boolean":
+        return f"{c['path']}:true"
     return f"{c['path']} > 0" if c["es"] in ("long", "double") else f"{c['path']}:*"
 
 
