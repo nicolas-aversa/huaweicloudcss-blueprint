@@ -6854,6 +6854,27 @@ def _es_saturacion(texto: str) -> bool:
                                 "status 429", "fail to create detector"))
 
 
+# Varios casos arrancando su análisis histórico seguidos (de a dos en paralelo):
+# el plugin contesta 403 "Too many historical analysis requests in short time.
+# Please retry later" y fortianalyzer quedaba con el detector sin resultados.
+_AD_DEMASIADOS = "too many historical analysis requests"
+_AD_REINTENTOS_S = (10.0, 20.0, 30.0, 45.0)
+
+
+def _arrancar_el_historico(base: str, user: str, password: str, detector_id: str, rango: dict) -> Any:
+    def arrancar():
+        return _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/{detector_id}/_start", user, password,
+                       json_body=rango, timeout=30)
+
+    rs = arrancar()
+    for espera in _AD_REINTENTOS_S:
+        if _resp_ok(rs) or _AD_DEMASIADOS not in _resp_motivo(rs).lower():
+            break
+        time.sleep(espera)
+        rs = arrancar()
+    return rs
+
+
 def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index_pattern: str,
                            spec: dict, ids: dict) -> dict:
     """El detector del caso, dimensionado con el rango real del índice, y el
@@ -6886,8 +6907,8 @@ def _provisionar_anomalias(base: str, user: str, password: str, slug: str, index
     if not detector_id:
         return {"ok": False, "reason": f"no se pudo crear el detector: {_resp_motivo(rd)}"}
     ids["detector_id"] = detector_id
-    rs = _os_req("POST", f"{base}/_plugins/_anomaly_detection/detectors/{detector_id}/_start", user, password,
-                 json_body={"start_time": int(min_ms), "end_time": int(max_ms) + intervalo * 60000}, timeout=30)
+    rs = _arrancar_el_historico(base, user, password, detector_id,
+                                {"start_time": int(min_ms), "end_time": int(max_ms) + intervalo * 60000})
     if not _resp_ok(rs):
         return {"ok": False, "detector_id": detector_id,
                 "reason": f"el detector quedó creado pero el análisis histórico no arrancó: {_resp_motivo(rs)}"}

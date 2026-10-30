@@ -165,13 +165,17 @@ def _preparar(monkeypatch, estados=("RUNNING", "FINISHED"), crear=201, arrancar=
               rango=(1_000_000.0, 61_000_000.0, 5000)):
     pedidos, esperas = [], []
     estados = list(estados)
+    arranques = list(arrancar) if isinstance(arrancar, (list, tuple)) else None
 
     def fake(method, url, user, password, json_body=None, timeout=30):
         pedidos.append((method, url, json_body))
         if url.endswith("/_plugins/_anomaly_detection/detectors"):
             return _Resp(crear, {"_id": "D1"} if crear < 300 else {}, None if crear < 300 else "bad feature")
         if url.endswith("/_start"):
-            return _Resp(arrancar, {}, None if arrancar < 300 else "no data")
+            st = (arranques.pop(0) if len(arranques) > 1 else arranques[0]) if arranques else arrancar
+            texto = None if st < 300 else ("Too many historical analysis requests in short time. Please retry later."
+                                           if st == 403 else "no data")
+            return _Resp(st, {}, texto)
         if "?task=true" in url:
             return _Resp(200, {"historical_analysis_task": {"state": estados.pop(0) if estados else "FINISHED"}})
         return _Resp(404)
@@ -224,6 +228,24 @@ def test_si_el_historico_no_arranca_queda_el_detector(monkeypatch):
     res = main._provisionar_anomalias("http://x", "admin", "pw", "s", "s-*", _SPEC, ids)
     assert ids == {"detector_id": "D1"}, "para poder borrarlo"
     assert res["ok"] is False and "el análisis histórico no arrancó: status 400: no data" in res["reason"]
+
+
+def test_si_el_plugin_pide_esperar_se_reintenta(monkeypatch):
+    """14 casos de a dos: el plugin frena los arranques seguidos con un 403."""
+    pedidos, esperas = _preparar(monkeypatch, arrancar=[403, 403, 200])
+    res = main._provisionar_anomalias("http://x", "admin", "pw", "s", "s-*", _SPEC, {})
+    assert res["ok"] is True
+    assert len([u for m, u, b in pedidos if u.endswith("/_start")]) == 3
+    assert esperas[:2] == list(main._AD_REINTENTOS_S[:2])
+    # Si no se libera, se dice por qué, después de todos los reintentos.
+    pedidos, esperas = _preparar(monkeypatch, arrancar=[403])
+    res = main._provisionar_anomalias("http://x", "admin", "pw", "s", "s-*", _SPEC, {})
+    assert res["ok"] is False and "Too many historical analysis requests" in res["reason"]
+    assert len([u for m, u, b in pedidos if u.endswith("/_start")]) == 1 + len(main._AD_REINTENTOS_S)
+    # Otro error no se reintenta.
+    pedidos, _ = _preparar(monkeypatch, arrancar=400)
+    main._provisionar_anomalias("http://x", "admin", "pw", "s", "s-*", _SPEC, {})
+    assert len([u for m, u, b in pedidos if u.endswith("/_start")]) == 1
 
 
 def test_si_el_historico_falla_no_es_ok(monkeypatch):
