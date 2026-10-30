@@ -175,9 +175,13 @@ def _vs_timeseries(
     title: str, kind: str, metric_agg: str, metric_field: str | None,
     split_field: str | None = None, size: int = 5,
 ) -> dict[str, Any]:
-    aggs = [_metric_agg(metric_agg, metric_field, None), _datehist_agg("2")]
+    # La partida va antes que la fecha: así los `size` valores son los de todo
+    # el rango. Anidada en la fecha, cada intervalo traía sus propios N y la
+    # leyenda juntaba cientos.
+    aggs = [_metric_agg(metric_agg, metric_field, None)]
     if split_field:
         aggs.append(_terms_agg("3", split_field, "group", size))
+    aggs.append(_datehist_agg("2"))
     label = _agg_label(metric_agg, metric_field)
     series_type = "area" if kind == "area" else "line"
     mode = "stacked" if kind == "area" else "normal"
@@ -368,7 +372,7 @@ def _vs_serie(panel: dict[str, Any]) -> dict[str, Any]:
     tipo_serie = "line" if kind == "line" else kind
     modo = "stacked" if kind in ("area", "histogram") and partida else "normal"
     return {
-        "title": panel["title"], "type": kind, "aggs": aggs + [fecha] + ([partida] if partida else []),
+        "title": panel["title"], "type": kind, "aggs": aggs + ([partida] if partida else []) + [fecha],  # la partida, antes (ver `_vs_timeseries`)
         "params": {
             "type": kind, "grid": {"categoryLines": False},
             "categoryAxes": _category_axis("bottom"), "valueAxes": _value_axis(etiqueta, "left"),
@@ -404,10 +408,13 @@ def _vs_tabla(panel: dict[str, Any]) -> dict[str, Any]:
 
 
 def _vs_mapa_de_calor(title: str, field: str, size: int = 12) -> dict[str, Any]:
-    """Filas = los valores de `field` (una entidad), columnas = el tiempo."""
+    """Filas = los valores de `field` (una entidad), columnas = el tiempo.
+    Las filas van antes que la fecha: anidadas en ella, cada intervalo traía
+    sus 12 y una entidad con miles de valores juntaba cientos de filas
+    ("There are too many series defined (526). The configured maximum is 50")."""
     return {"title": title, "type": "heatmap",
-            "aggs": [_metric_agg("count", None, "Eventos"), _datehist_agg("2"),
-                     _terms_agg("3", field, "group", size)],
+            "aggs": [_metric_agg("count", None, "Eventos"), _terms_agg("3", field, "group", size),
+                     _datehist_agg("2")],
             "params": {"type": "heatmap", "addTooltip": True, "addLegend": True, "enableHover": False,
                        "legendPosition": "right", "times": [], "colorsNumber": 5, "colorSchema": "Reds",
                        "setColorRange": False, "colorsRange": [], "invertColors": False, "percentageMode": False,

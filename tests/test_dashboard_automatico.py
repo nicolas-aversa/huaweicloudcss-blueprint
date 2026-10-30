@@ -165,6 +165,44 @@ def test_problemas_dice_que_fallo_cuando_donde_y_a_quien():
     assert 'not log.level:("INFO"' in errores[0]["query"]
 
 
+@pytest.mark.parametrize("fields", [OMS, VENTAS, FRAUDE, SERVICIO, EMERGENCIAS], ids=lambda f: f[1]["field_path"])
+def test_la_partida_va_antes_que_la_fecha(fields):
+    """Anidada en la fecha, cada intervalo traía sus propios N valores: el
+    mapa de calor de una entidad con miles juntaba cientos de filas ("There are
+    too many series defined (526). The configured maximum is 50") y las
+    leyendas de las series, lo mismo."""
+    vistos = 0
+    for tablero in _tableros(fields):
+        for panel in tablero["panels"]:
+            if panel["type"] in ("markdown", "search"):
+                continue
+            aggs = dashboards._panel_to_vis_state(panel)["aggs"]
+            tipos = [a["type"] for a in aggs]
+            if "date_histogram" in tipos and any(a["schema"] == "group" for a in aggs):
+                vistos += 1
+                partida = next(i for i, a in enumerate(aggs) if a["schema"] == "group")
+                assert partida < tipos.index("date_histogram"), (panel["title"], tipos)
+    assert vistos, "el dataset tiene al menos una serie partida"
+
+
+def test_los_ndjson_de_disco_tambien():
+    """Salen de `python -m dashboards`: si no se regeneran, quedan con el orden viejo."""
+    from pathlib import Path
+    vistos = 0
+    for f in sorted((Path(dashboards.__file__).parent / "docs" / "dashboards").glob("*.ndjson")):
+        for linea in f.read_text(encoding="utf-8").splitlines():
+            obj = json.loads(linea) if linea.strip() else {}
+            if obj.get("type") != "visualization":
+                continue
+            aggs = json.loads(obj["attributes"]["visState"]).get("aggs") or []
+            tipos = [a["type"] for a in aggs]
+            if "date_histogram" in tipos and any(a["schema"] == "group" for a in aggs):
+                vistos += 1
+                partida = next(i for i, a in enumerate(aggs) if a["schema"] == "group")
+                assert partida < tipos.index("date_histogram"), (f.name, obj["attributes"]["title"])
+    assert vistos >= 19
+
+
 def test_un_critico_numerico_cuenta_los_que_valen_uno():
     problemas = _tableros(FRAUDE)[1]
     assert {p["query"] for p in _de(problemas, "metric")} == {"is_fraud > 0"}
@@ -258,7 +296,7 @@ def test_las_tablas_tienen_sus_columnas_y_sus_filas():
         "fix.comp_id_propio", "fix.rechazo_motivo.keyword"]
     p95 = vis["[oms] Latencia (ms) p95 por Tipo de mensaje"]
     assert p95["type"] == "line" and p95["aggs"][0]["params"]["percents"] == [95]
-    assert [a["type"] for a in p95["aggs"]] == ["percentiles", "date_histogram", "terms"]
+    assert [a["type"] for a in p95["aggs"]] == ["percentiles", "terms", "date_histogram"]
 
 
 def test_el_perfil_va_al_resumen():
