@@ -53,6 +53,10 @@ def _settings_aislados(tmp_path, monkeypatch):
     # prueban usan el original (`_tiempo_original`).
     monkeypatch.setattr(_main, "_tiempo_original", _main._ajustar_tiempo_de_dashboards, raising=False)
     monkeypatch.setattr(_main, "_ajustar_tiempo_de_dashboards", lambda *a, **k: "")
+    # Y el paso 2 lo sigue en un hilo mientras entra la ingesta: los que lo
+    # prueban usan el original (`_seguimiento_original`).
+    monkeypatch.setattr(_main, "_seguimiento_original", _main._seguir_el_rango_de_la_ingesta, raising=False)
+    monkeypatch.setattr(_main, "_seguir_el_rango_de_la_ingesta", lambda *a, **k: None)
     # La búsqueda híbrida baja el modelo y va a OBS: los que la prueban usan
     # el original (`_busqueda_original`).
     monkeypatch.setattr(_main, "_busqueda_original", _main._provisionar_la_busqueda, raising=False)

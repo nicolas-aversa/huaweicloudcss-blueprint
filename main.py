@@ -4338,6 +4338,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     # se quedó poleando la nada.
     if request.start_ingestion:
         yield from _verificar_ingesta(request, cluster)
+        yield from _rango_de_los_dashboards(request, cluster, terraform_dir)
 
     yield _sse({"type": "complete", "result": {
         "opensearch_endpoint": tf_outputs.get("opensearch_endpoint", {}).get("value", ""),
@@ -5967,21 +5968,30 @@ def _se_lee_una_vez(entry: dict) -> bool:
     return "watch_for_new_files => false" in (entry.get("pipeline_conf") or "")
 
 
+def _patrones_que_se_leen_una_vez(pipe_reg: dict, slugs: list[str]) -> list[str]:
+    return [index_pattern_from_name((pipe_reg.get(s) or {}).get("index") or f"{s}-%{{+YYYY.MM}}")
+            for s in slugs if _se_lee_una_vez(pipe_reg.get(s) or {})]
+
+
+def _contar_documentos(base: str, user: str, password: str, patrones: list[str]) -> "int | None":
+    """Los documentos de todos los `patrones`, o None si alguno no contestó."""
+    total = 0
+    for patron in patrones:
+        n = _index_doc_count(base, user, password, patron)
+        if n is None:
+            return None
+        total += n
+    return total
+
+
 def _esperar_que_termine_la_ingesta(base: str, user: str, password: str, pipe_reg: dict,
                                     slugs: list[str], run: dict) -> None:
     """Espera a que los índices de los casos que se leen una vez dejen de
     crecer (dos cuentas seguidas iguales), con un tope. Lo dice en Actividad."""
-    patrones = [index_pattern_from_name((pipe_reg.get(s) or {}).get("index") or f"{s}-%{{+YYYY.MM}}")
-                for s in slugs if _se_lee_una_vez(pipe_reg.get(s) or {})]
+    patrones = _patrones_que_se_leen_una_vez(pipe_reg, slugs)
 
     def contar() -> "int | None":
-        total = 0
-        for patron in patrones:
-            n = _index_doc_count(base, user, password, patron)
-            if n is None:
-                return None
-            total += n
-        return total
+        return _contar_documentos(base, user, password, patrones)
 
     anterior = contar() if patrones else None
     if anterior is None:
@@ -6078,6 +6088,60 @@ def _verificar_ingesta(request: "TerraformDeployRequest", cluster: dict[str, str
                                f"orden: que el prefijo del bucket tenga objetos, que el filtro "
                                f"matchee las líneas, y el log de la pipeline en la consola de CSS.")})
     print(f"[deploy-stream] ingesta verificada: {vistos or 'sin documentos'}")
+
+
+def _rango_de_los_dashboards(request: "TerraformDeployRequest", cluster: dict[str, str], terraform_dir: Path):
+    """Con los primeros documentos adentro, los dashboards abren sobre el rango
+    de los datos. Antes quedaban hasta "Activar los plugins" con la ventana
+    fija de la puesta en marcha (2025-07…2026-07): un caso con datos de
+    octubre abría vacío. La ingesta sigue entrando, así que un hilo lo
+    reajusta hasta que deja de crecer (`_seguir_el_rango_de_la_ingesta`).
+
+    Generador de eventos SSE. Nunca hace fallar el deploy: informa."""
+    base = _os_base(cluster, request.https_enabled)
+    user, password = request.opensearch_user or "admin", request.opensearch_password
+    if not base.rsplit("//", 1)[-1] or not password:
+        return
+    slugs = ([c.slug for c in request.cases] if request.cases
+             else [(request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)])
+    try:
+        rango = _ajustar_tiempo_de_dashboards(base, user, password, terraform_dir, slugs)
+    except Exception as exc:  # noqa: BLE001 — los dashboards igual andan, con la ventana de antes
+        yield _sse({"type": "step", "name": "Rango de los dashboards", "ok": False, "reason": repr(exc)[:300]})
+        rango = ""
+    if rango:
+        yield _sse({"type": "step", "name": "Rango de los dashboards", "ok": True,
+                    "reason": f"del {rango}; se reajusta solo mientras termina de entrar la ingesta"})
+    _threading.Thread(target=_seguir_el_rango_de_la_ingesta, args=(base, user, password, terraform_dir, slugs),
+                      name="rango-de-los-dashboards", daemon=True).start()
+
+
+def _seguir_el_rango_de_la_ingesta(base: str, user: str, password: str, terraform_dir: Path,
+                                   slugs: list[str], dormir=time.sleep, reloj=time.monotonic) -> None:
+    """Mientras crecen los índices de los casos que se leen una vez, reajusta
+    el rango de los dashboards en cada vuelta; termina cuando dos cuentas
+    seguidas dan igual (el último ajuste ya vio todo) o al tope. Una fuente en
+    vivo crece siempre: con esas no se sigue nada. Si el cluster no contesta,
+    se vuelve a mirar en la vuelta siguiente."""
+    try:
+        patrones = _patrones_que_se_leen_una_vez(_read_pipelines_registry(terraform_dir), slugs)
+        if not patrones:
+            return
+        anterior, inicio = None, reloj()
+        while reloj() - inicio < _INGESTA_ESPERA_MAX_S:
+            dormir(_INGESTA_SONDEO_S)
+            ahora = _contar_documentos(base, user, password, patrones)
+            if ahora is None:
+                continue
+            if ahora == anterior:
+                return
+            rango = _ajustar_tiempo_de_dashboards(base, user, password, terraform_dir, slugs)
+            print(f"[dashboards] la ingesta va por {ahora} documentos: rango {rango or 'sin datos'}")
+            anterior = ahora
+        print(f"[dashboards] la ingesta sigue entrando después de {int(_INGESTA_ESPERA_MAX_S // 60)} min: "
+              "el rango lo termina de ajustar \"Activar los plugins\"")
+    except Exception as exc:  # noqa: BLE001 — "Activar los plugins" lo vuelve a ajustar
+        print(f"[dashboards] no se pudo seguir el rango de la ingesta: {exc!r}")
 
 
 def _preparar_seguridad_para_ingesta(request: "TerraformDeployRequest", terraform_dir: Path):
