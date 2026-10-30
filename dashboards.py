@@ -927,12 +927,13 @@ def _en_fila(paneles: list[dict[str, Any]], y: int, alto: int) -> int:
     return y + alto
 
 
-def _tableros_desde_campos(slug: str, index_name: str, fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _tableros_desde_campos(slug: str, index_name: str, fields: list[dict[str, Any]],
+                           nombre: str = "") -> list[dict[str, Any]]:
     """Los dashboards del dataset: el Resumen siempre y, si los campos lo
     justifican, Problemas (un crítico o el nivel del log) y Tiempos (alguna
     duración). El Resumen va primero (es el que abre la plataforma) y conserva
     el id del dashboard de antes: un dashboard guardado que lo reemplaza sigue
-    reemplazándolo."""
+    reemplazándolo. `nombre`: el del caso ("FIX OMS"); sin él, sale del slug."""
     from index_template import index_pattern_from_name
 
     k = _clasificar(fields)
@@ -945,14 +946,17 @@ def _tableros_desde_campos(slug: str, index_name: str, fields: list[dict[str, An
     q_nivel = _consulta_de_problemas_del_nivel(nivel) if nivel else ""
     critico_texto = bool(critico and critico["es"] in ("keyword", "text"))
 
-    titulo = slug.replace("-", " ").replace("_", " ").title()
+    # Los ids salen del slug, como siempre: el título con el nombre del caso
+    # ("FIX OMS", no "Fix Oms") no cambia qué dashboard reemplaza uno guardado.
+    del_slug = slug.replace("-", " ").replace("_", " ").title()
+    titulo = (nombre or "").strip() or del_slug
     claves = [("resumen", "Resumen")]
     if critico or nivel:
         claves.append(("problemas", "Problemas"))
     if k["duraciones"]:
         claves.append(("tiempos", "Tiempos"))
-    ids = {"resumen": _stable_id(slug, "dashboard", titulo)}
-    ids.update({c: _stable_id(slug, "dashboard", f"{titulo}:{c}") for c, _ in claves[1:]})
+    ids = {"resumen": _stable_id(slug, "dashboard", del_slug)}
+    ids.update({c: _stable_id(slug, "dashboard", f"{del_slug}:{c}") for c, _ in claves[1:]})
 
     def encabezado(clave: str, bajada: str) -> dict[str, Any]:
         nav = " · ".join(f"**{n}**" if c == clave else f"[{n}](#/view/{ids[c]})" for c, n in claves)
@@ -1381,7 +1385,7 @@ def id_del_dashboard(ndjson: str) -> str:
     return ""
 
 
-def build_ndjson_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]]) -> str:
+def build_ndjson_from_fields(slug: str, index_name: str, fields: list[dict[str, Any]], nombre: str = "") -> str:
     """Genera el NDJSON de los dashboards AUTO-derivados de los campos detectados
     (custom): el Resumen y, si aplican, Problemas y Tiempos.
 
@@ -1390,7 +1394,7 @@ def build_ndjson_from_fields(slug: str, index_name: str, fields: list[dict[str, 
     (`index_pattern_from_name`) y trae los `fields` poblados; las viz
     referencian el `field_path` real.
     """
-    return _build_tableros(slug, _tableros_desde_campos(slug, index_name, fields))
+    return _build_tableros(slug, _tableros_desde_campos(slug, index_name, fields, nombre))
 
 
 # ── Regeneración de los .ndjson de disco ─────────────────────────────────────

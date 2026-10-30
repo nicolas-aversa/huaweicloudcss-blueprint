@@ -1512,7 +1512,7 @@ def _ndjson_de_dashboards(slug: str, datos: dict) -> str:
     import capabilities as caps
     from index_template import index_pattern_from_name
 
-    ndjson = dashboards.build_ndjson_from_fields(slug, datos["index_name"], datos["fields"])
+    ndjson = dashboards.build_ndjson_from_fields(slug, datos["index_name"], datos["fields"], datos["label"])
     entrada = {"fields": datos["fields"], "excluir": datos["excluir"]}
     ndjson = dashboards.con_panel_de_perfil(ndjson, slug, _perfil_de(slug, entrada))
     spec = caps.build_spec_from_fields(slug, index_pattern_from_name(datos["index_name"]), datos["fields"], datos["label"])
@@ -6181,7 +6181,8 @@ def _ndjson_de_la_plataforma(slug: str, terraform_dir: Path | None, fields: list
             print(f"[dashboards] error generando NDJSON de spec: {exc!r}")
     if ndjson_content is None and fields:
         try:
-            ndjson_content = build_ndjson_from_fields(slug, index_name or f"{slug}-*", fields)
+            nombre = (_read_pipelines_registry(terraform_dir).get(slug) or {}).get("label", "") if terraform_dir else ""
+            ndjson_content = build_ndjson_from_fields(slug, index_name or f"{slug}-*", fields, nombre)
             print(f"[dashboards] NDJSON auto-generado de {len(fields)} campos para '{slug}'")
         except Exception as exc:  # noqa: BLE001
             print(f"[dashboards] error generando NDJSON de campos: {exc!r}")

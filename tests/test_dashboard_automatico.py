@@ -185,6 +185,24 @@ def test_la_partida_va_antes_que_la_fecha(fields):
     assert vistos, "el dataset tiene al menos una serie partida"
 
 
+def test_el_titulo_lleva_el_nombre_del_caso_y_los_ids_no_cambian():
+    """Del slug salía "Fix Oms" al lado de los "FIX OMS" que guardó un SA. Los
+    ids siguen saliendo del slug: si no, un dashboard guardado dejaba de
+    reemplazar al de la plataforma (y quedaban los dos)."""
+    def objetos(nombre):
+        nd = dashboards.build_ndjson_from_fields("fix-oms", "fix-oms-%{+YYYY.MM}", OMS, nombre)
+        return [json.loads(l) for l in nd.splitlines()]
+    sin, con = objetos(""), objetos("FIX OMS")
+    assert [o["id"] for o in sin] == [o["id"] for o in con]
+    tableros = [o["attributes"]["title"] for o in con if o["type"] == "dashboard"]
+    assert tableros == ["[fix-oms] FIX OMS · Resumen", "[fix-oms] FIX OMS · Problemas", "[fix-oms] FIX OMS · Tiempos"]
+    encabezados = [json.loads(o["attributes"]["visState"])["params"]["markdown"] for o in con
+                   if o["type"] == "visualization" and json.loads(o["attributes"]["visState"])["type"] == "markdown"]
+    assert encabezados and all(e.startswith("### FIX OMS · ") for e in encabezados)
+    assert "Fix Oms" not in json.dumps(con)
+    assert [o["attributes"]["title"] for o in sin if o["type"] == "dashboard"][0] == "[fix-oms] Fix Oms · Resumen"
+
+
 def test_los_ndjson_de_disco_tambien():
     """Salen de `python -m dashboards`: si no se regeneran, quedan con el orden viejo."""
     from pathlib import Path
