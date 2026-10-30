@@ -13,12 +13,13 @@ y, si fallaron al arrancar, las vuelve a arrancar (todas juntas, igual que la
 consola) hasta `REINTENTOS` veces. Terraform no se entera: sigue esperando y
 termina cuando quedan corriendo. Cada reintento queda anotado en Actividad.
 
-Solo rearranca las que Terraform ya arrancó (las que CSS lista y no están
-`stopped`). Al sumar pipelines a una activación que ya existía, el provider las
-arranca de a una (`lgsconf/hot-start`) y espera a que todas corran antes de la
-siguiente; rearrancar también las que faltaban le ganaba de mano, y al llegar su
-turno CSS rechazaba el apply entero ("CSS.5090 ... the conf[pipeline-x] is being
-executed"). Visto en un deploy de 11 casos.
+Las que se suman a una activación que ya existe no las arranca Terraform sino
+`arrancar_las_que_faltan`: el provider lee las activas de una sola página de
+CSS (10), así que con 11 "perdía" una, la volvía a arrancar y CSS rechazaba el
+apply entero ("CSS.5090 ... the conf[pipeline-x] is being executed"). Pasó en un
+deploy de 11 casos. Se arrancan de a una, como hacía el provider, y el vigía
+rearranca solo las ya arrancadas (las que CSS lista y no están `stopped`): las
+que faltan le tocan a su turno, y arrancarlas antes hacía chocar ese turno.
 """
 from __future__ import annotations
 
@@ -130,3 +131,54 @@ class VigiaEnSegundoPlano:
                 out.append(self.pasos.get_nowait())
             except queue.Empty:
                 return out
+
+
+# ── Las que se suman a una activación que ya existe ─────────────────────────
+ESPERA_S = 10.0
+TOPE_POR_PIPELINE_S = 600.0
+_PASO = "Logstash · arranque de las pipelines"
+
+
+def arrancar_las_que_faltan(listar: Callable[[], dict], arrancar_una: Callable[[str], None],
+                            nombres: list[str], vigia: Vigia | None = None,
+                            espera_s: float | None = None, tope_s: float | None = None,
+                            dormir: Callable[[float], None] = time.sleep,
+                            reloj: Callable[[], float] = time.monotonic):
+    """Generador: arranca (`arrancar_una(nombre)`, el hot-start de CSS) las de
+    `nombres` que CSS no lista o lista `stopped`, de a una y esperando que cada
+    una corra antes de la siguiente. Da los pasos a anotar en Actividad y
+    devuelve las que no quedaron corriendo. `vigia`: mientras se espera,
+    rearranca las que se cayeron."""
+    espera_s = ESPERA_S if espera_s is None else espera_s
+    tope_s = TOPE_POR_PIPELINE_S if tope_s is None else tope_s
+    try:
+        estados = listar() or {}
+    except Exception as exc:  # noqa: BLE001 — sin estado no se arranca nada a ciegas
+        yield {"name": _PASO, "ok": False, "reason": f"no se pudo leer el estado de las pipelines: {str(exc)[:200]}"}
+        return []
+    faltan = [n for n in nombres if estados.get(n) in (None, DETENIDA)]
+    for i, nombre in enumerate(faltan):
+        try:
+            arrancar_una(nombre)
+        except Exception as exc:  # noqa: BLE001 — se dice cuál y por qué; las que siguen, en el próximo intento
+            yield {"name": _PASO, "ok": False, "reason": f"no se pudo arrancar {nombre}: {str(exc)[:300]}"}
+            return faltan[i:]
+        limite = reloj() + tope_s
+        while True:
+            try:
+                estados = listar() or {}
+            except Exception:  # noqa: BLE001 — se vuelve a mirar
+                estados = {}
+            yield from (vigia.mirar() if vigia else [])
+            if estados.get(nombre) == CORRIENDO:
+                break
+            if reloj() >= limite:
+                yield {"name": _PASO, "ok": False, "reason": (
+                    f"{nombre} no quedó corriendo en {tope_s / 60:.0f} minutos "
+                    f"(estado: {estados.get(nombre) or 'no figura'})")}
+                return faltan[i:]
+            dormir(espera_s)
+    if faltan:
+        yield {"name": _PASO, "ok": True,
+               "reason": f"se sumaron {len(faltan)} a las que ya corrían: {', '.join(faltan)}"}
+    return []

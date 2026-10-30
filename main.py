@@ -3502,17 +3502,6 @@ def _items_de_rutas(request: "TerraformDeployRequest") -> list[dict]:
     return items
 
 
-# Al sumar pipelines a una activación que ya existe, el provider las arranca de
-# a una (`lgsconf/hot-start`). Si cuando le toca a una ya está arrancada, CSS
-# rechaza el apply entero ("CSS.5090 ... the conf[pipeline-x] is being
-# executed") y las que venían detrás quedan sin arrancar. Volver a aplicar
-# alcanza: Terraform lee las que ya corren y sigue con las que faltan.
-_YA_ARRANCADA = re.compile(r"hot start CSS logstash cluster pipeline.*?conf\[([^\]]+)\] is being executed",
-                           re.DOTALL)
-_REINTENTOS_ACTIVACION = 2
-_ESPERA_REACTIVAR_S = 20.0
-
-
 def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
                    extras: list[dict] | None = None, vigia=None):
     """Corre los applies de `_pasos_del_apply` en orden; devuelve el código del
@@ -3520,36 +3509,22 @@ def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
     se activa una pipeline cuya configuración no quedó bien. `extras`: filas
     que no son de Terraform y van en la lista desde el plan. `vigia`: arma el
     vigía del arranque de las pipelines (`_vigia_de_activacion`); corre solo
-    durante la activación. La activación que choca con una pipeline ya
-    arrancada (`_YA_ARRANCADA`) se vuelve a aplicar."""
+    durante la activación."""
     returncode = 0
     for paso in pasos:
         original = (_tfvars_sin_activar(terraform_dir, paso["sin_activar"])
                     if paso["sin_activar"] else None)
-        activacion = paso["args"] == [_TARGET_ACTIVACION]
-        desde = paso["desde"]
+        v = vigia() if (vigia and paso["args"] == [_TARGET_ACTIVACION]) else None
         try:
-            for intento in range(1 + (_REINTENTOS_ACTIVACION if activacion else 0)):
-                v = vigia() if (vigia and activacion) else None
-                ya_leidas = len(tf_lines)
-                if v:
-                    with v:
-                        returncode = yield from _correr_apply(terraform_dir, paso["args"],
-                                                              desde, paso["hasta"], tf_lines,
-                                                              extras=extras, vigia=v)
-                else:
+            if v:
+                with v:
                     returncode = yield from _correr_apply(terraform_dir, paso["args"],
-                                                          desde, paso["hasta"], tf_lines,
-                                                          extras=extras)
-                ya = _YA_ARRANCADA.search("".join(tf_lines[ya_leidas:])) if returncode else None
-                if not (activacion and ya) or intento == _REINTENTOS_ACTIVACION:
-                    break
-                yield _sse({"type": "step", "name": "Logstash · arranque de las pipelines", "ok": True,
-                            "reason": (f"{ya.group(1)} ya estaba arrancada cuando Terraform fue a "
-                                       "arrancarla: se vuelve a aplicar la activación para las que "
-                                       f"faltan (reintento {intento + 1} de {_REINTENTOS_ACTIVACION})")})
-                time.sleep(_ESPERA_REACTIVAR_S)
-                desde = paso["hasta"]   # el progreso no vuelve para atrás
+                                                          paso["desde"], paso["hasta"], tf_lines,
+                                                          extras=extras, vigia=v)
+            else:
+                returncode = yield from _correr_apply(terraform_dir, paso["args"],
+                                                      paso["desde"], paso["hasta"], tf_lines,
+                                                      extras=extras)
         finally:
             # Pase lo que pase, el tfvars vuelve a decir lo que pidió el deploy.
             if original is not None:
@@ -3807,7 +3782,7 @@ def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
     from huaweicloudsdkcore.auth.credentials import BasicCredentials
     from huaweicloudsdkcore.sdk_request import SdkRequest
     from huaweicloudsdkcore.signer.signer import Signer
-    from huaweicloudsdkcss.v1 import ListClustersDetailsRequest, ListConfsRequest
+    from huaweicloudsdkcss.v1 import ListClustersDetailsRequest
 
     pid, region = get_huawei_project_id(), get_region()
     cred = BasicCredentials(ak, sk, pid)
@@ -3833,7 +3808,7 @@ def _inventario_huawei(ak: str, sk: str, state: dict) -> dict:
         (c["id"] for c in clusters if c["name"].endswith("-logstash")), "")
     if ls_id:
         try:
-            confs = [c.name for c in (css.list_confs(ListConfsRequest(cluster_id=ls_id)).confs or [])]
+            confs = _confs_de_logstash(css, ls_id)
         except Exception as exc:  # noqa: BLE001 — sin la lista, no se importan configuraciones
             print(f"[recuperar] no se pudieron listar las configuraciones de Logstash: {exc!r}")
         try:
@@ -3853,18 +3828,45 @@ def _cliente_css(ak: str, sk: str):
         Region(region, f"https://css.{region}.myhuaweicloud.com")).build()
 
 
+# CSS lista las pipelines y las configuraciones de un Logstash de a 10 si no se
+# le pide otra cosa, y cada lista cuenta el `offset` distinto: las pipelines
+# desde 0, las configuraciones desde 1 (con 0 responde CSS.0001). Con 11 casos,
+# sin paginar, una de las 11 no aparecía.
+_PAGINA_CSS = 100
+
+
 def _estados_de_pipelines(css, ls_id: str) -> dict[str, str]:
-    """nombre → status de las pipelines del cluster Logstash (`working`, `failed`…)."""
+    """nombre → status de TODAS las pipelines del cluster Logstash (`working`, `failed`…)."""
     from huaweicloudsdkcss.v1 import ListPipelinesRequest
 
-    return {p.name: str(p.status or "") for p in
-            (css.list_pipelines(ListPipelinesRequest(cluster_id=ls_id)).pipelines or [])}
+    estados: dict[str, str] = {}
+    while True:
+        antes = len(estados)
+        pagina = css.list_pipelines(ListPipelinesRequest(
+            cluster_id=ls_id, offset=str(antes), limit=str(_PAGINA_CSS))).pipelines or []
+        estados.update({p.name: str(p.status or "") for p in pagina})
+        if len(pagina) < _PAGINA_CSS or len(estados) == antes:
+            return estados
 
 
-def _vigia_de_activacion(request, terraform_dir: Path):
-    """El vigía del arranque de las pipelines (ver `vigia_logstash`) para la
-    activación que está por correr, o None si no hay con qué mirar (sin
-    credenciales, sin cluster Logstash en el state o nada a activar)."""
+def _confs_de_logstash(css, ls_id: str) -> list[str]:
+    """Los nombres de TODAS las configuraciones del cluster Logstash."""
+    from huaweicloudsdkcss.v1 import ListConfsRequest
+
+    nombres: list[str] = []
+    while True:
+        r = css.list_confs(ListConfsRequest(cluster_id=ls_id, offset=str(len(nombres) + 1),
+                                            limit=str(_PAGINA_CSS)))
+        pagina = [c.name for c in (r.confs or [])]
+        nombres += pagina
+        if len(pagina) < _PAGINA_CSS or len(nombres) >= (r.total_size or 0):
+            return nombres
+
+
+def _logstash_del_entorno(request, terraform_dir: Path):
+    """`(cliente CSS, id del cluster Logstash, nombres de las pipelines activas)`
+    del entorno, o None si no hay con qué mirar (sin credenciales, sin cluster
+    Logstash en el state o nada activo)."""
     import recuperacion
     import vigia_logstash
 
@@ -3879,17 +3881,55 @@ def _vigia_de_activacion(request, terraform_dir: Path):
         nombres = vigia_logstash.nombres_activos(tfvars)
         if not (ls_id and nombres):
             return None
-        css = _cliente_css(ak, sk)
-    except Exception as exc:  # noqa: BLE001 — es una ayuda: sin vigía, el apply corre como siempre
-        print(f"[vigia] no se pudo preparar: {exc!r}")
+        return _cliente_css(ak, sk), ls_id, nombres
+    except Exception as exc:  # noqa: BLE001 — es una ayuda: sin esto, el deploy sigue como siempre
+        print(f"[logstash] no se pudo leer el entorno: {exc!r}")
         return None
+
+
+def _vigia(css, ls_id: str, nombres: list[str]):
+    import vigia_logstash
 
     def arrancar(nombres_):
         from huaweicloudsdkcss.v1 import StartPipelineReq, StartPipelineRequest
         css.start_pipeline(StartPipelineRequest(cluster_id=ls_id, body=StartPipelineReq(names=list(nombres_))))
 
-    return vigia_logstash.VigiaEnSegundoPlano(vigia_logstash.Vigia(
-        lambda: _estados_de_pipelines(css, ls_id), arrancar, nombres))
+    return vigia_logstash.Vigia(lambda: _estados_de_pipelines(css, ls_id), arrancar, nombres)
+
+
+def _vigia_de_activacion(request, terraform_dir: Path):
+    """El vigía del arranque de las pipelines (ver `vigia_logstash`) para la
+    activación que está por correr, o None si no hay con qué mirar."""
+    import vigia_logstash
+
+    entorno = _logstash_del_entorno(request, terraform_dir)
+    return vigia_logstash.VigiaEnSegundoPlano(_vigia(*entorno)) if entorno else None
+
+
+def _arrancar_las_que_faltan(request, terraform_dir: Path):
+    """Después de la activación: arranca las pipelines activas que CSS todavía
+    no corre (ver `vigia_logstash.arrancar_las_que_faltan`) y emite sus pasos.
+    Devuelve las que no quedaron corriendo (vacía si todo bien)."""
+    import vigia_logstash
+    from huaweicloudsdkcss.v1 import StartHotPipelineRequest, StartHotPipelineRequestBody
+
+    entorno = _logstash_del_entorno(request, terraform_dir)
+    if not entorno:
+        return []
+    css, ls_id, nombres = entorno
+
+    def arrancar_una(nombre):
+        css.start_hot_pipeline(StartHotPipelineRequest(
+            cluster_id=ls_id, body=StartHotPipelineRequestBody(name=nombre, keep_alive=False)))
+
+    pasos = vigia_logstash.arrancar_las_que_faltan(lambda: _estados_de_pipelines(css, ls_id), arrancar_una,
+                                                   nombres, vigia=_vigia(css, ls_id, nombres))
+    while True:
+        try:
+            paso = next(pasos)
+        except StopIteration as fin:
+            return fin.value
+        yield _sse({"type": "step", **paso})
 
 
 def _recuperar_deploy_cortado(request, terraform_dir: Path):
@@ -4157,6 +4197,15 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
             if rechazadas else
             "No se pudo iniciar la ingesta: terraform apply falló.\n" + "".join(tf_lines)[-1200:])})
         return
+    if request.start_ingestion:
+        # Terraform solo crea la activación: las que se suman a una que ya
+        # existía las arranca la plataforma (ver la activación en main.tf).
+        faltaron = yield from _arrancar_las_que_faltan(request, terraform_dir)
+        if faltaron:
+            yield _sse({"type": "error", "message": (
+                f"No arrancaron {len(faltaron)} pipelines: {', '.join(faltaron)}. Las demás quedaron "
+                "corriendo: volvé a tocar \"Iniciar ingesta\" y se reintentan solo esas.")})
+            return
 
     # ── terraform output ─────────────────────────────────────────────────
     # Se lee INCLUSO si el apply falló: un apply parcial igual guarda estado, así

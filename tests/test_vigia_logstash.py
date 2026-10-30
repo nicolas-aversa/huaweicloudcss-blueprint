@@ -9,6 +9,9 @@ desmarca, en vez de pararlas y volver a arrancarlas."""
 import io
 import json
 import pathlib
+from types import SimpleNamespace as _NS
+
+import pytest
 
 import main
 import recuperacion
@@ -74,11 +77,10 @@ def test_si_una_sola_fallo_tambien():
     assert arranques == [NOMBRES]
 
 
-def test_no_arranca_las_que_terraform_todavia_no_arranco():
-    """Al sumar pipelines a una activación que ya existía, Terraform las arranca
-    de a una: las que todavía no le tocaron no figuran (o están `stopped`). Si
-    el vigía las arrancaba, al llegar su turno CSS rechazaba el apply entero
-    ("the conf[pipeline-x] is being executed"). Visto con 11 casos."""
+def test_no_arranca_las_que_todavia_no_se_arrancaron():
+    """Las que se suman a una activación se arrancan de a una: las que todavía
+    no les tocó no figuran (o están `stopped`). Si el vigía las arrancaba, al
+    llegar su turno CSS lo rechazaba ("the conf[pipeline-x] is being executed")."""
     for falta in ({}, {"pipeline-cts": "stopped"}):
         v, arranques, _ = _vigia([{"pipeline-siem": "failed", **falta}])
         (paso,) = v.mirar()
@@ -281,3 +283,191 @@ def test_el_inventario_trae_el_estado_de_las_pipelines(monkeypatch):
     state = {"resources": [{"mode": "managed", "type": "huaweicloud_css_logstash_cluster", "name": "logstash_cluster",
                             "instances": [{"attributes": {"id": "ls-9"}}]}]}
     assert main._inventario_huawei("AK", "SK", state)["pipelines"] == {"pipeline-siem": "working"}
+
+
+# ── Con más de 10 pipelines ─────────────────────────────────────────────────
+# Caso real (11 casos): CSS lista las pipelines de a 10. El provider leía una
+# sola página, "perdía" una que corría, la volvía a arrancar y CSS rechazaba
+# cada "Iniciar ingesta" ("CSS.5090 ... the conf[pipeline-x] is being executed").
+ONCE = [f"pipeline-{i:02d}" for i in range(11)]
+
+
+class _CssPaginado:
+    """Como CSS: de a 10 si no se pide otra cosa; las pipelines cuentan el
+    `offset` desde 0 y las configuraciones desde 1 (con 0, CSS.0001)."""
+
+    def __init__(self, nombres, estados=None):
+        self.nombres = list(nombres)
+        self.estados = dict(estados if estados is not None else {n: "working" for n in nombres})
+        self.hot = []
+
+    def list_pipelines(self, req):
+        off, lim = int(req.offset or 0), int(req.limit or 10)
+        hay = [n for n in self.nombres if n in self.estados]
+        return _NS(pipelines=[_NS(name=n, status=self.estados[n]) for n in hay[off:off + lim]])
+
+    def list_confs(self, req):
+        off, lim = int(req.offset or 1), int(req.limit or 10)
+        if off < 1:
+            raise RuntimeError("CSS.0001 offset")
+        return _NS(confs=[_NS(name=n) for n in self.nombres[off - 1:off - 1 + lim]], total_size=len(self.nombres))
+
+    def start_hot_pipeline(self, req):
+        nombre = req.body.name
+        if self.estados.get(nombre) not in (None, "stopped"):
+            raise RuntimeError(f"CSS.5090 the conf[{nombre}] is being executed")
+        self.hot.append((req.cluster_id, nombre, req.body.keep_alive))
+        self.estados[nombre] = "working"
+
+
+@pytest.mark.parametrize("pagina", [4, 100])
+def test_las_listas_de_css_se_leen_enteras(monkeypatch, pagina):
+    monkeypatch.setattr(main, "_PAGINA_CSS", pagina)
+    css = _CssPaginado(ONCE)
+    assert sorted(main._estados_de_pipelines(css, "ls")) == ONCE
+    assert main._confs_de_logstash(css, "ls") == ONCE
+
+
+class _Cluster:
+    """Un Logstash en el tiempo: lo arrancado pasa por `starting` y a la mirada
+    siguiente queda `working` (o `failed`, una vez, si está en `caen`)."""
+
+    def __init__(self, estados, caen=(), siempre_arrancando=()):
+        self.estados, self.caen, self.lentas = dict(estados), set(caen), set(siempre_arrancando)
+        self.hot, self.start = [], []
+
+    def listar(self):
+        out = dict(self.estados)
+        for n, s in list(self.estados.items()):
+            if s == "starting" and n not in self.lentas:
+                self.estados[n] = "failed" if n in self.caen else "working"
+                self.caen.discard(n)
+        return out
+
+    def hot_start(self, nombre):
+        if self.estados.get(nombre) not in (None, "stopped"):
+            raise RuntimeError(f"CSS.5090 the conf[{nombre}] is being executed")
+        self.hot.append(nombre)
+        self.estados[nombre] = "starting"
+
+    def arrancar(self, nombres):
+        self.start.append(list(nombres))
+        for n in nombres:
+            self.estados[n] = "starting"
+
+
+def _devuelve(gen, pasos=None):
+    """Consume el generador (juntando lo que da en `pasos`) y devuelve su `return`."""
+    try:
+        while True:
+            paso = next(gen)
+            if pasos is not None:
+                pasos.append(paso)
+    except StopIteration as fin:
+        return fin.value
+
+
+def _faltan(cluster, nombres, vigia=None, reloj=None):
+    reloj = reloj or _Reloj()
+
+    def dormir(s):
+        reloj.t += s
+
+    pasos = []
+    faltaron = _devuelve(vigia_logstash.arrancar_las_que_faltan(
+        cluster.listar, cluster.hot_start, nombres, vigia=vigia, espera_s=10, tope_s=600,
+        dormir=dormir, reloj=reloj), pasos)
+    return faltaron, pasos
+
+
+def test_si_ya_corren_todas_no_arranca_nada():
+    c = _Cluster({n: "working" for n in NOMBRES})
+    assert _faltan(c, NOMBRES) == ([], []) and c.hot == []
+
+
+def test_arranca_de_a_una_las_que_faltan():
+    nombres = ["pipeline-a", "pipeline-b", "pipeline-c"]
+    c = _Cluster({"pipeline-a": "working", "pipeline-c": "stopped"})
+    faltaron, pasos = _faltan(c, nombres)
+    assert faltaron == [] and c.hot == ["pipeline-b", "pipeline-c"]
+    assert pasos == [{"name": "Logstash · arranque de las pipelines", "ok": True,
+                      "reason": "se sumaron 2 a las que ya corrían: pipeline-b, pipeline-c"}]
+
+
+def test_si_una_se_cae_el_vigia_no_arranca_las_que_esperan_su_turno():
+    nombres = ["pipeline-a", "pipeline-b", "pipeline-c"]
+    reloj = _Reloj()
+    c = _Cluster({"pipeline-a": "working"}, caen={"pipeline-b"})
+    v = vigia_logstash.Vigia(c.listar, c.arrancar, nombres, reloj=reloj)
+    faltaron, pasos = _faltan(c, nombres, vigia=v, reloj=reloj)
+    assert faltaron == [] and c.hot == ["pipeline-b", "pipeline-c"]
+    assert c.start == [["pipeline-a", "pipeline-b"]], "pipeline-c todavía no se había arrancado"
+    assert any("reintento 1 de 3" in p["reason"] for p in pasos) and pasos[-1]["ok"]
+
+
+def test_si_css_rechaza_el_arranque_avisa_y_deja_las_demas():
+    def rechaza(nombre):
+        raise RuntimeError("CSS.5090 more than 5 configs in the checking state")
+
+    pasos = []
+    faltaron = _devuelve(vigia_logstash.arrancar_las_que_faltan(
+        _Cluster({}).listar, rechaza, NOMBRES, dormir=lambda s: None), pasos)
+    assert faltaron == NOMBRES
+    (paso,) = pasos
+    assert not paso["ok"] and "no se pudo arrancar pipeline-siem" in paso["reason"] and "CSS.5090" in paso["reason"]
+
+
+def test_si_no_llega_a_correr_se_rinde_con_su_estado():
+    c = _Cluster({}, siempre_arrancando={"pipeline-siem"})
+    faltaron, pasos = _faltan(c, NOMBRES)
+    assert faltaron == NOMBRES and c.hot == ["pipeline-siem"]
+    assert pasos == [{"name": "Logstash · arranque de las pipelines", "ok": False,
+                      "reason": "pipeline-siem no quedó corriendo en 10 minutos (estado: starting)"}]
+
+
+def test_sin_estado_no_arranca_a_ciegas():
+    def listar():
+        raise RuntimeError("sin red")
+
+    hot, pasos = [], []
+    assert _devuelve(vigia_logstash.arrancar_las_que_faltan(listar, hot.append, NOMBRES,
+                                                            dormir=lambda s: None), pasos) == []
+    assert hot == [] and not pasos[0]["ok"] and "sin red" in pasos[0]["reason"]
+
+
+def test_la_plataforma_arranca_las_que_faltan_en_el_logstash_del_state(monkeypatch, tmp_path):
+    (tmp_path / "deploy.auto.tfvars.json").write_text(json.dumps({"pipelines": {
+        f"{i:02d}": {"start_ingestion": True} for i in range(11)}}), encoding="utf-8")
+    monkeypatch.setattr(main.tfstate, "read_state", lambda td: {"resources": [
+        {"mode": "managed", "type": "huaweicloud_css_logstash_cluster", "name": "logstash_cluster",
+         "instances": [{"attributes": {"id": "ls-9"}}]}]})
+    css = _CssPaginado(ONCE, {n: "working" for n in ONCE[:9]})
+    monkeypatch.setattr(main, "_cliente_css", lambda ak, sk: css)
+    # Sin esperas de verdad: si no la ve correr, se rinde enseguida.
+    monkeypatch.setattr(vigia_logstash, "ESPERA_S", 0)
+    monkeypatch.setattr(vigia_logstash, "TOPE_POR_PIPELINE_S", 0)
+
+    class _Req:
+        obs_access_key, obs_secret_key = "AK", "SK"
+
+    eventos = []
+    assert _devuelve(main._arrancar_las_que_faltan(_Req(), tmp_path), eventos) == []
+    assert css.hot == [("ls-9", "pipeline-09", False), ("ls-9", "pipeline-10", False)]
+    (paso,) = [json.loads(e[len("data: "):]) for e in eventos]
+    assert paso["type"] == "step" and paso["ok"] and "pipeline-09, pipeline-10" in paso["reason"]
+
+    css.hot.clear()
+    assert _devuelve(main._arrancar_las_que_faltan(_Req(), tmp_path)) == [] and css.hot == [], \
+        "con las 11 corriendo (la 11ª en la segunda página) no arranca nada"
+
+    class _SinCred:
+        obs_access_key, obs_secret_key = "", ""
+
+    assert _devuelve(main._arrancar_las_que_faltan(_SinCred(), tmp_path)) == []
+
+
+def test_el_paso_2_arranca_las_que_faltan_despues_de_la_activacion():
+    src = pathlib.Path(main.__file__).read_text(encoding="utf-8")
+    activacion = src.index("returncode = yield from _aplicar_pasos(terraform_dir, pasos, tf_lines,")
+    faltan = src.index("faltaron = yield from _arrancar_las_que_faltan(request, terraform_dir)")
+    assert activacion < faltan < src.index('yield _sse({"type": "progress", "percent": _PCT_OUTPUTS')

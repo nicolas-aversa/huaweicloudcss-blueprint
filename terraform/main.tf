@@ -497,8 +497,14 @@ resource "huaweicloud_css_logstash_configuration" "pipeline" {
 # Deploy en dos fases POR pipeline: una configuración con start_ingestion=false
 # queda creada pero NO se activa acá (para aplicar su index template antes de
 # que Logstash cree el índice con el primer documento). La fase 2 prende su flag
-# y entra a la lista `names`. Agregar/activar una pipeline reasienta esta lista
-# sin recrear las configuraciones existentes.
+# y entra a la lista `names`.
+#
+# Terraform solo CREA la activación (arranca todas juntas). Las que se suman
+# después las arranca la plataforma (`vigia_logstash.arrancar_las_que_faltan`):
+# el provider (1.87, y master sigue igual) lee las activas de UNA página de
+# `listpipelines`, que CSS devuelve de a 10. Con 11 "perdía" una, la volvía a
+# arrancar y CSS rechazaba el apply ("CSS.5090 ... the conf[pipeline-x] is being
+# executed"), también en cada apply del paso 1. Por eso `ignore_changes`.
 
 resource "huaweicloud_css_logstash_pipeline" "pipeline" {
   count      = length(local.active_pipeline_names) > 0 ? 1 : 0
@@ -510,6 +516,10 @@ resource "huaweicloud_css_logstash_pipeline" "pipeline" {
   timeouts {
     create = "30m"
     update = "30m"
+  }
+
+  lifecycle {
+    ignore_changes = [names]
   }
 }
 
@@ -567,12 +577,15 @@ output "pipeline_names" {
 
 output "active_pipeline_names" {
   description = "Configuraciones cuya ingesta está activa (fase 2)."
-  # Lee el recurso de la activación, NO el local. "Iniciar ingesta" aplica solo
-  # la activación (`-target`), y un output que no depende de ningún recurso
-  # dirigido no se actualiza en ese apply: las pipelines arrancaban y la vista
-  # seguía diciendo "En pausa" (probado con `terraform_data`). Leyendo el
-  # recurso, el output es lo que quedó aplicado de verdad.
-  value = length(huaweicloud_css_logstash_pipeline.pipeline) > 0 ? tolist(huaweicloud_css_logstash_pipeline.pipeline[0].names) : []
+  # Depende del recurso de la activación, no solo del local. "Iniciar ingesta"
+  # aplica solo la activación (`-target`), y un output que no depende de ningún
+  # recurso dirigido no se actualiza en ese apply: las pipelines arrancaban y la
+  # vista seguía diciendo "En pausa" (probado con `terraform_data`). Pero no lee
+  # sus `names`: el provider los trae de una sola página de CSS (10 de 11) y no
+  # se actualizan (`ignore_changes`). Con la activación creada, las del tfvars:
+  # las que faltan las arranca la plataforma, y si alguna no arranca el paso 2
+  # termina en error.
+  value = length(huaweicloud_css_logstash_pipeline.pipeline) > 0 ? local.active_pipeline_names : []
 }
 
 output "project_name" {
