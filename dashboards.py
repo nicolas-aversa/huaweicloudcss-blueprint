@@ -928,12 +928,14 @@ def _en_fila(paneles: list[dict[str, Any]], y: int, alto: int) -> int:
 
 
 def _tableros_desde_campos(slug: str, index_name: str, fields: list[dict[str, Any]],
-                           nombre: str = "") -> list[dict[str, Any]]:
+                           nombre: str = "", id_principal: str = "") -> list[dict[str, Any]]:
     """Los dashboards del dataset: el Resumen siempre y, si los campos lo
     justifican, Problemas (un crítico o el nivel del log) y Tiempos (alguna
     duración). El Resumen va primero (es el que abre la plataforma) y conserva
     el id del dashboard de antes: un dashboard guardado que lo reemplaza sigue
-    reemplazándolo. `nombre`: el del caso ("FIX OMS"); sin él, sale del slug."""
+    reemplazándolo. `nombre`: el del caso ("FIX OMS"); sin él, sale del slug.
+    `id_principal`: el dashboard al que llevan los de al lado como Resumen (uno
+    hecho a mano, ver `con_tableros_de_al_lado`)."""
     from index_template import index_pattern_from_name
 
     k = _clasificar(fields)
@@ -955,7 +957,7 @@ def _tableros_desde_campos(slug: str, index_name: str, fields: list[dict[str, An
         claves.append(("problemas", "Problemas"))
     if k["duraciones"]:
         claves.append(("tiempos", "Tiempos"))
-    ids = {"resumen": _stable_id(slug, "dashboard", del_slug)}
+    ids = {"resumen": id_principal or _stable_id(slug, "dashboard", del_slug)}
     ids.update({c: _stable_id(slug, "dashboard", f"{del_slug}:{c}") for c, _ in claves[1:]})
 
     def encabezado(clave: str, bajada: str) -> dict[str, Any]:
@@ -1370,6 +1372,75 @@ def con_panel_de_perfil(ndjson: str, slug: str, perfil: "dict | None") -> str:
         {"name": f"panel_{i}", "type": "visualization", "id": vis_id}]
     otros = [o for o in objetos if o is not tablero]
     return "\n".join(json.dumps(o) for o in otros + [patron, _viz_obj(slug, vis_id, titulo, tabla, ip_id, True), tablero])
+
+
+def _objetos_del_ndjson(ndjson: str) -> list[dict[str, Any]]:
+    objetos = []
+    for linea in (ndjson or "").splitlines():
+        try:
+            obj = json.loads(linea)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            objetos.append(obj)
+    return objetos
+
+
+def con_tableros_de_al_lado(ndjson: str, slug: str, fields: list[dict[str, Any]], nombre: str = "") -> str:
+    """Un dashboard hecho a mano (el de un caso curado) con Problemas y Tiempos
+    al lado, como los de un caso del Builder: salen de los mismos campos (con
+    su `role`) y se enlazan con él, que suma arriba de todo una fila para ir a
+    ellos. Sin crítico, nivel ni duración queda como estaba. No los duplica."""
+    objetos = _objetos_del_ndjson(ndjson)
+    principal = next((o for o in objetos if o.get("type") == "dashboard" and o.get("id")), None)
+    patron = next((o for o in objetos if o.get("type") == "index-pattern"), None)
+    if principal is None or patron is None:
+        return ndjson
+    tableros = _tableros_desde_campos(slug, patron["attributes"]["title"], fields, nombre, id_principal=principal["id"])
+    if len(tableros) < 2 or any(o.get("id") == tableros[1]["id"] for o in objetos):
+        return ndjson
+    generados = _objetos_del_ndjson(_build_tableros(slug, tableros))
+    al_lado = {t["id"] for t in tableros[1:]}
+    usados = {r["id"] for o in generados if o.get("id") in al_lado for r in o.get("references") or []}
+    nuevos = [o for o in generados if o.get("id") in usados | al_lado and o.get("type") != "index-pattern"]
+    # Los campos que usan y el index pattern a mano no trae (un `.keyword`).
+    de_antes = json.loads(patron["attributes"].get("fields") or "[]")
+    tiene = {f.get("name") for f in de_antes}
+    for o in generados:
+        if o.get("type") == "index-pattern" and o.get("id") == patron.get("id"):
+            de_antes += [f for f in json.loads(o["attributes"].get("fields") or "[]") if f.get("name") not in tiene]
+    patron["attributes"]["fields"] = json.dumps(de_antes)
+    # Arriba del dashboard a mano, a dónde ir.
+    nav = " · ".join(["**Resumen**"] + [f"[{t['titulo'].rsplit(' · ', 1)[-1]}](#/view/{t['id']})" for t in tableros[1:]])
+    vis_id = _stable_id(slug, "vis", "navegación entre dashboards")
+    alto = 4
+    paneles = json.loads(principal["attributes"].get("panelsJSON") or "[]")
+    for p in paneles:
+        if p.get("gridData"):
+            p["gridData"]["y"] += alto
+    i = len(paneles)
+    paneles.insert(0, {"version": "7.10.0", "gridData": {"x": 0, "y": 0, "w": 48, "h": alto, "i": str(i)},
+                       "panelIndex": str(i), "embeddableConfig": {"hidePanelTitles": True}, "panelRefName": f"panel_{i}"})
+    principal["attributes"]["panelsJSON"] = json.dumps(paneles)
+    principal["references"] = list(principal.get("references") or []) + [
+        {"name": f"panel_{i}", "type": "visualization", "id": vis_id}]
+    navegacion = _viz_obj(slug, vis_id, "Dashboards del caso", _vs_markdown("Dashboards del caso", nav), "", False)
+    antes = objetos[:objetos.index(principal)]
+    despues = objetos[objetos.index(principal) + 1:]
+    return "\n".join(json.dumps(o) for o in antes + [navegacion, principal] + despues + nuevos)
+
+
+def sin_tableros_de_al_lado(ndjson: str, id_principal: str) -> str:
+    """Solo el dashboard `id_principal`: sin los de al lado (Problemas, Tiempos)
+    ni lo que usan solo ellos. Cuando un SA guardó su propio principal, el
+    generado ya no está para llevar a ellos y quedaban repetidos con los suyos."""
+    objetos = _objetos_del_ndjson(ndjson)
+    sobran = {o["id"] for o in objetos if o.get("type") == "dashboard" and o.get("id") != id_principal}
+    if not sobran or len(sobran) == sum(o.get("type") == "dashboard" for o in objetos):
+        return ndjson
+    queda = {r["id"] for o in objetos if o.get("id") not in sobran for r in o.get("references") or []}
+    solo_de_ellos = {r["id"] for o in objetos if o.get("id") in sobran for r in o.get("references") or []} - queda
+    return "\n".join(json.dumps(o) for o in objetos if o.get("id") not in sobran | solo_de_ellos)
 
 
 def id_del_dashboard(ndjson: str) -> str:

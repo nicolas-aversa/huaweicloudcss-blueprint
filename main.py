@@ -6155,6 +6155,19 @@ def _import_dashboards_via_opensearch(
     return False
 
 
+def _campos_de_un_caso_curado(slug: str) -> list[dict[str, Any]]:
+    """Los campos de un caso curado como los de uno del Builder: con su `role`
+    (del nombre y el tipo, como el Builder cuando el modelo no lo da) y la
+    fecha del evento, que el vertical no declara porque va a `@timestamp`."""
+    from maas_integrator import infer_role
+
+    campos = [{**f, "role": f.get("role") or infer_role(f.get("field_path", ""), f.get("type", ""))}
+              for f in (verticals.get_vertical(slug) or {}).get("fields") or []]
+    if not any(f.get("field_path") == "@timestamp" for f in campos):
+        campos.insert(0, {"field_path": "@timestamp", "type": "date", "role": "timestamp", "business_label": "Fecha"})
+    return campos
+
+
 def _ndjson_de_la_plataforma(slug: str, terraform_dir: Path | None, fields: list[dict[str, Any]] | None,
                              index_name: str | None) -> "tuple[str | None, str]":
     """Los saved objects que la plataforma carga para un caso, como NDJSON, y el
@@ -6179,6 +6192,15 @@ def _ndjson_de_la_plataforma(slug: str, terraform_dir: Path | None, fields: list
             print(f"[dashboards] NDJSON generado (spec) para '{slug}'")
         except Exception as exc:  # noqa: BLE001
             print(f"[dashboards] error generando NDJSON de spec: {exc!r}")
+    curado = verticals.get_vertical(slug) if ndjson_content is not None else None
+    if curado and curado.get("fields"):
+        # Hecho a mano: Problemas y Tiempos al lado, como en un caso del Builder.
+        try:
+            from dashboards import con_tableros_de_al_lado
+            ndjson_content = con_tableros_de_al_lado(ndjson_content, slug, _campos_de_un_caso_curado(slug),
+                                                     curado.get("label", ""))
+        except Exception as exc:  # noqa: BLE001 — el dashboard a mano va igual
+            print(f"[dashboards] '{slug}': sin Problemas ni Tiempos al lado ({exc!r})")
     if ndjson_content is None and fields:
         try:
             nombre = (_read_pipelines_registry(terraform_dir).get(slug) or {}).get("label", "") if terraform_dir else ""
@@ -6249,6 +6271,10 @@ def _import_dashboards(
     ndjson_content, dashboard_id = _ndjson_de_la_plataforma(slug, terraform_dir, fields, index_name)
     if ndjson_content is None:
         return False
+    import dashboards_guardados as dg
+    if dashboard_id and dg.reemplaza_al_principal(slug, ndjson_content, dashboard_id):
+        from dashboards import sin_tableros_de_al_lado
+        ndjson_content = sin_tableros_de_al_lado(ndjson_content, dashboard_id)
     from dashboards import busquedas_del_ndjson
     busquedas = busquedas_del_ndjson(ndjson_content)
 

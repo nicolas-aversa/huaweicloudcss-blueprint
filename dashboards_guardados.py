@@ -68,6 +68,24 @@ def ndjson(slug: str) -> str:
     return "\n".join(lineas) + ("\n" if lineas else "")
 
 
+def reemplaza_al_principal(slug: str, plataforma: str, id_principal: str) -> bool:
+    """Si lo guardado del caso trae su propio dashboard principal (el mismo id
+    que el de la plataforma) y no lleva a los de al lado de la plataforma
+    (Problemas, Tiempos): entonces nadie llega a ellos y repiten lo que armó el
+    SA. Uno que editó el principal generado conserva el encabezado con los
+    links, y ahí los de al lado siguen."""
+    guardados = leer(slug)
+    principal = guardados.get(f"dashboard:{id_principal}")
+    if not principal:
+        return False
+    de_la_plataforma = objetos_del_ndjson(plataforma)
+    al_lado = [o["id"] for o in de_la_plataforma.values() if o["type"] == "dashboard" and o["id"] != id_principal]
+    usados = [guardados.get(f"{r.get('type')}:{r.get('id')}") or de_la_plataforma.get(f"{r.get('type')}:{r.get('id')}")
+              for r in principal.get("references") or []]
+    texto = json.dumps([principal] + usados)
+    return not any(i in texto for i in al_lado)
+
+
 def objetos_del_ndjson(contenido: str) -> dict[str, dict]:
     """`{"<tipo>:<id>": {type, id, attributes, references}}` de un NDJSON."""
     out: dict[str, dict] = {}

@@ -68,7 +68,10 @@ def test_al_importar_quedan_sus_ids(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_import_dashboards_via_opensearch", lambda *a, **k: True)
     assert main._import_dashboards("transacciones-billetera", {"public_endpoint": "1.2.3.4:9200"}, "pw", True, tmp_path)
     b = main._read_pipelines_registry(tmp_path)["transacciones-billetera"]["busquedas"]
-    assert len(b) == 2 and all(x["id"] for x in b)
+    assert all(x["id"] for x in b)
+    # Las dos de Discover; con Problemas al lado, también la suya ("Eventos con problemas").
+    titulos = [x["titulo"] for x in b]
+    assert any(t.endswith(": todos los eventos") for t in titulos) and any(t.endswith(": eventos críticos") for t in titulos)
 
 
 # ── Reporting ───────────────────────────────────────────────────────────────
