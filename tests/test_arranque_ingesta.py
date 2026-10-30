@@ -131,6 +131,91 @@ def test_si_el_primer_apply_falla_no_se_activa_nada(monkeypatch, tmp_path):
     assert ruta.read_text(encoding="utf-8") == original, "el tfvars vuelve a lo pedido igual"
 
 
+# Lo que imprimió Terraform en el deploy de 11 casos (sin los ids de la cuenta).
+_YA_ARRANCADA = [
+    "│ Error: error hot start CSS logstash cluster pipeline: Bad request with: [POST "
+    "https://css.la-south-2.myhuaweicloud.com/v1.0/p/clusters/c/lgsconf/hot-start], request_id: r, "
+    'error message: {"errCode":"CSS.5090","externalMessage":"CSS.5090 : In this status, the current '
+    "operation is not allowed. (start logstash failed, the conf[pipeline-transacciones-billetera] is "
+    'being executed.)"}\n',
+    "│   with huaweicloud_css_logstash_pipeline.pipeline[0],\n"]
+
+
+def _activacion_que_falla(monkeypatch, tmp_path, salidas):
+    """Corre una activación directa cuyo apply devuelve, en orden, `salidas`
+    ([(código, líneas)]); devuelve (código final, applies corridos, eventos)."""
+    _tfvars(tmp_path)
+    corridas, eventos = [], []
+    monkeypatch.setattr(main, "_ESPERA_REACTIVAR_S", 0)
+
+    def _fake(terraform_dir, args, desde, hasta, tf_lines, **_):
+        rc, lineas = salidas[len(corridas)]
+        corridas.append((args, desde))
+        tf_lines.extend(lineas)
+        return rc
+        yield  # noqa
+
+    monkeypatch.setattr(main, "_correr_apply", _fake)
+    pasos = main._pasos_del_apply(True, {"fintech": {"pipeline_conf": "x"}}, {"fintech": {"pipeline_conf": "x"}},
+                                  ["fintech"], {"fintech"})
+    gen = main._aplicar_pasos(tmp_path, pasos, [])
+    try:
+        while True:
+            eventos.append(json.loads(next(gen)[len("data: "):]))
+    except StopIteration as fin:
+        return fin.value, corridas, eventos
+
+
+def test_si_una_ya_estaba_arrancada_se_vuelve_a_activar(monkeypatch, tmp_path):
+    rc, corridas, eventos = _activacion_que_falla(monkeypatch, tmp_path, [(1, _YA_ARRANCADA), (0, [])])
+    assert rc == 0
+    assert [a for a, _ in corridas] == [[main._TARGET_ACTIVACION]] * 2
+    assert corridas[1][1] == main._PCT_APPLY_HASTA, "el progreso no vuelve para atrás"
+    (paso,) = eventos
+    assert paso["type"] == "step" and paso["ok"]
+    assert "pipeline-transacciones-billetera ya estaba arrancada" in paso["reason"]
+    assert "reintento 1 de 2" in paso["reason"]
+
+
+def test_si_sigue_chocando_se_rinde(monkeypatch, tmp_path):
+    rc, corridas, eventos = _activacion_que_falla(monkeypatch, tmp_path, [(1, _YA_ARRANCADA)] * 4)
+    assert rc == 1 and len(corridas) == 1 + main._REINTENTOS_ACTIVACION
+    assert ["reintento 1 de 2" in e["reason"] or "reintento 2 de 2" in e["reason"] for e in eventos] == [True, True], \
+        "no anuncia un reintento que no va a hacer"
+
+
+@pytest.mark.parametrize("lineas", [
+    ["│ Error: error starting CSS logstash cluster pipeline: timeout while waiting\n"],
+    ["│ Error: error hot start CSS logstash cluster pipeline: CSS.5090 more than 5 configs in the checking state\n"],
+])
+def test_otro_error_de_la_activacion_no_se_reintenta(monkeypatch, tmp_path, lineas):
+    rc, corridas, eventos = _activacion_que_falla(monkeypatch, tmp_path, [(1, lineas), (0, [])])
+    assert rc == 1 and len(corridas) == 1 and eventos == []
+
+
+def test_el_apply_de_las_configuraciones_no_se_reintenta(monkeypatch, tmp_path):
+    """El choque solo puede pasar al activar; el primer apply no activa nada."""
+    _tfvars(tmp_path)
+    corridas = []
+    monkeypatch.setattr(main, "_ESPERA_REACTIVAR_S", 0)
+
+    def _fake(terraform_dir, args, desde, hasta, tf_lines, **_):
+        corridas.append(args)
+        tf_lines.extend(_YA_ARRANCADA)
+        return 1
+        yield  # noqa
+
+    monkeypatch.setattr(main, "_correr_apply", _fake)
+    pasos = main._pasos_del_apply(True, {}, {"fintech": {}}, ["fintech"], set())
+    gen, eventos = main._aplicar_pasos(tmp_path, pasos, []), []
+    try:
+        while True:
+            eventos.append(next(gen))
+    except StopIteration as fin:
+        assert fin.value == 1
+    assert corridas == [[]] and eventos == [], "ni lo reintenta ni lo anuncia"
+
+
 def _correr(gen):
     """Consume un generador y devuelve su `return`."""
     try:

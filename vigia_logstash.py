@@ -12,6 +12,13 @@ Mientras corre la activación, el vigía mira el estado de las pipelines en CSS
 y, si fallaron al arrancar, las vuelve a arrancar (todas juntas, igual que la
 consola) hasta `REINTENTOS` veces. Terraform no se entera: sigue esperando y
 termina cuando quedan corriendo. Cada reintento queda anotado en Actividad.
+
+Solo rearranca las que Terraform ya arrancó (las que CSS lista y no están
+`stopped`). Al sumar pipelines a una activación que ya existía, el provider las
+arranca de a una (`lgsconf/hot-start`) y espera a que todas corran antes de la
+siguiente; rearrancar también las que faltaban le ganaba de mano, y al llegar su
+turno CSS rechazaba el apply entero ("CSS.5090 ... the conf[pipeline-x] is being
+executed"). Visto en un deploy de 11 casos.
 """
 from __future__ import annotations
 
@@ -22,6 +29,7 @@ from typing import Callable
 
 CORRIENDO = "working"
 FALLIDA = "failed"
+DETENIDA = "stopped"
 REINTENTOS = 3
 # Después de un reintento CSS tarda en reflejar el nuevo estado: hasta que pase
 # este tiempo, un `failed` es el de antes y no amerita otro reintento.
@@ -76,8 +84,10 @@ class Vigia:
                                 "se repite, revisá el log de Logstash en la consola de CSS.")}]
         self.intentos += 1
         self.ultimo = self.reloj()
+        # Las que Terraform todavía no arrancó las arranca él cuando le toque.
+        arrancadas = [n for n in self.nombres if estados.get(n) not in (None, DETENIDA)]
         try:
-            self.arrancar(self.nombres)
+            self.arrancar(arrancadas)
             ok, detalle = True, ""
         except Exception as exc:  # noqa: BLE001 — se anota y se reintenta en la próxima mirada
             ok, detalle = False, f" · no se pudo pedir el arranque: {str(exc)[:200]}"

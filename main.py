@@ -3502,6 +3502,17 @@ def _items_de_rutas(request: "TerraformDeployRequest") -> list[dict]:
     return items
 
 
+# Al sumar pipelines a una activación que ya existe, el provider las arranca de
+# a una (`lgsconf/hot-start`). Si cuando le toca a una ya está arrancada, CSS
+# rechaza el apply entero ("CSS.5090 ... the conf[pipeline-x] is being
+# executed") y las que venían detrás quedan sin arrancar. Volver a aplicar
+# alcanza: Terraform lee las que ya corren y sigue con las que faltan.
+_YA_ARRANCADA = re.compile(r"hot start CSS logstash cluster pipeline.*?conf\[([^\]]+)\] is being executed",
+                           re.DOTALL)
+_REINTENTOS_ACTIVACION = 2
+_ESPERA_REACTIVAR_S = 20.0
+
+
 def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
                    extras: list[dict] | None = None, vigia=None):
     """Corre los applies de `_pasos_del_apply` en orden; devuelve el código del
@@ -3509,22 +3520,36 @@ def _aplicar_pasos(terraform_dir: Path, pasos: list[dict], tf_lines: list[str],
     se activa una pipeline cuya configuración no quedó bien. `extras`: filas
     que no son de Terraform y van en la lista desde el plan. `vigia`: arma el
     vigía del arranque de las pipelines (`_vigia_de_activacion`); corre solo
-    durante la activación."""
+    durante la activación. La activación que choca con una pipeline ya
+    arrancada (`_YA_ARRANCADA`) se vuelve a aplicar."""
     returncode = 0
     for paso in pasos:
         original = (_tfvars_sin_activar(terraform_dir, paso["sin_activar"])
                     if paso["sin_activar"] else None)
-        v = vigia() if (vigia and paso["args"] == [_TARGET_ACTIVACION]) else None
+        activacion = paso["args"] == [_TARGET_ACTIVACION]
+        desde = paso["desde"]
         try:
-            if v:
-                with v:
+            for intento in range(1 + (_REINTENTOS_ACTIVACION if activacion else 0)):
+                v = vigia() if (vigia and activacion) else None
+                ya_leidas = len(tf_lines)
+                if v:
+                    with v:
+                        returncode = yield from _correr_apply(terraform_dir, paso["args"],
+                                                              desde, paso["hasta"], tf_lines,
+                                                              extras=extras, vigia=v)
+                else:
                     returncode = yield from _correr_apply(terraform_dir, paso["args"],
-                                                          paso["desde"], paso["hasta"], tf_lines,
-                                                          extras=extras, vigia=v)
-            else:
-                returncode = yield from _correr_apply(terraform_dir, paso["args"],
-                                                      paso["desde"], paso["hasta"], tf_lines,
-                                                      extras=extras)
+                                                          desde, paso["hasta"], tf_lines,
+                                                          extras=extras)
+                ya = _YA_ARRANCADA.search("".join(tf_lines[ya_leidas:])) if returncode else None
+                if not (activacion and ya) or intento == _REINTENTOS_ACTIVACION:
+                    break
+                yield _sse({"type": "step", "name": "Logstash · arranque de las pipelines", "ok": True,
+                            "reason": (f"{ya.group(1)} ya estaba arrancada cuando Terraform fue a "
+                                       "arrancarla: se vuelve a aplicar la activación para las que "
+                                       f"faltan (reintento {intento + 1} de {_REINTENTOS_ACTIVACION})")})
+                time.sleep(_ESPERA_REACTIVAR_S)
+                desde = paso["hasta"]   # el progreso no vuelve para atrás
         finally:
             # Pase lo que pase, el tfvars vuelve a decir lo que pidió el deploy.
             if original is not None:

@@ -74,6 +74,17 @@ def test_si_una_sola_fallo_tambien():
     assert arranques == [NOMBRES]
 
 
+def test_no_arranca_las_que_terraform_todavia_no_arranco():
+    """Al sumar pipelines a una activación que ya existía, Terraform las arranca
+    de a una: las que todavía no le tocaron no figuran (o están `stopped`). Si
+    el vigía las arrancaba, al llegar su turno CSS rechazaba el apply entero
+    ("the conf[pipeline-x] is being executed"). Visto con 11 casos."""
+    for falta in ({}, {"pipeline-cts": "stopped"}):
+        v, arranques, _ = _vigia([{"pipeline-siem": "failed", **falta}])
+        (paso,) = v.mirar()
+        assert arranques == [["pipeline-siem"]] and paso["ok"]
+
+
 def test_despues_de_los_reintentos_avisa_y_no_insiste():
     falladas = {n: "failed" for n in NOMBRES}
     v, arranques, reloj = _vigia([falladas] * 5, reintentos=2)
