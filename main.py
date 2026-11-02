@@ -3459,6 +3459,45 @@ def _asegurar_dnat(terraform_dir: Path, beats: bool, tf_lines: list[str]):
     return siguen
 
 
+# ── El Logstash que CSS rechaza mientras crea el OpenSearch ─────────────────
+# Los dos clusters se piden a la vez. En la cuenta de un SA nuevo, CSS retuvo
+# el alta del Logstash los 6 minutos que tardó el OpenSearch y recién ahí la
+# rechazó: "CSS.0001 : Incorrect parameters. (Transaction rolled back because it
+# has been marked as rollback-only)". Los parámetros eran los de siempre, y con
+# el OpenSearch ya creado no hay nada con qué chocar: se reintenta una vez.
+# Solo si eso fue lo único que falló (otro error no se arregla repitiendo) y si
+# el apply fue uno completo: repetir uno de "Iniciar ingesta" en dos pasos
+# activaría pipelines cuya configuración se está verificando.
+_LS_RECHAZADO = re.compile(r'^error creating CSS logstash cluster: .*"errCode":"CSS\.0001"')
+
+
+def _logstash_rechazado_al_crear(errores_tf: dict[str, str]) -> bool:
+    return list(errores_tf) == [_LS_EN_STATE] and bool(_LS_RECHAZADO.match(errores_tf[_LS_EN_STATE]))
+
+
+def _reintentar_el_logstash(terraform_dir: Path, pasos: list[dict], returncode: int | None,
+                            tf_lines: list[str]):
+    """Generador: si corresponde, corre el apply otra vez (crea solo lo que
+    falta) y devuelve su código; si no, devuelve `returncode`. `tf_lines` queda
+    con la salida del último apply: sus errores son los que cuentan."""
+    completo = len(pasos) == 1 and not pasos[0]["args"] and not pasos[0]["sin_activar"]
+    if not returncode or not completo or not _logstash_rechazado_al_crear(_errores_de_terraform(tf_lines)):
+        return returncode
+    yield _sse({"type": "progress", "percent": _PCT_APPLY_HASTA, "phase": "Logstash",
+                "message": "CSS rechazó el Logstash mientras creaba el OpenSearch: "
+                           "se reintenta (unos 7 minutos)…"})
+    lineas: list[str] = []
+    rc = yield from _correr_apply(terraform_dir, [], _PCT_APPLY_HASTA, _PCT_APPLY_HASTA, lineas, plan=False)
+    tf_lines[:] = lineas
+    if rc is not None:
+        errores = _errores_de_terraform(lineas)
+        yield _sse({"type": "step", "name": "Reintento del Logstash", "ok": rc == 0, "reason": (
+            "CSS rechazó el primer intento mientras creaba el OpenSearch (CSS.0001); "
+            "al segundo se creó." if rc == 0 else
+            ("; ".join(f"{d}: {m}" for d, m in errores.items()) or "".join(lineas)[-300:])[:400])})
+    return rc
+
+
 def _tfvars_sin_activar(terraform_dir: Path, slugs: list[str]) -> str:
     """Apaga `start_ingestion` de esos slugs en el tfvars del deploy y devuelve
     el texto original, para reponerlo después del apply."""
@@ -4165,6 +4204,7 @@ def _deploy_stream_gen_raw(request: TerraformDeployRequest, terraform_dir: Path,
     returncode = yield from _aplicar_pasos(terraform_dir, pasos, tf_lines,
                                            extras=_items_de_rutas(request),
                                            vigia=lambda: _vigia_de_activacion(request, terraform_dir))
+    returncode = yield from _reintentar_el_logstash(terraform_dir, pasos, returncode, tf_lines)
     if returncode is None:
         return                # la lectura se cortó: el error ya salió
 
