@@ -8011,6 +8011,15 @@
         const data = await refrescarPluginsEnCurso();
         if (data && activacionTerminada(seguimiento, data, Date.now())) controlador.abort();
       }, _REFRESCO_PLUGINS_MS);
+      // Antes de repintar con el estado nuevo, no después: con la marca puesta,
+      // la vista que dibuja hydrateActiveEnv decía "Activando" en el paso 3 (o
+      // en el botón del plugin) y nadie la volvía a dibujar. Visto en la ECS:
+      // la activación había terminado y la pantalla seguía "Activando".
+      const soltar = () => {
+        clearInterval(refresco);
+        state.provisionandoPlugins = false;
+        state.aplicandoPlugin = '';
+      };
       let listo = false;
       try {
         const res = await fetch('/api/v1/onboarding/provision-capabilities', {
@@ -8048,12 +8057,14 @@
                                           : `${nombre}: no se aplicó. El motivo está en Actividad.`,
                 data.status === 'success' ? 'success' : 'error');
         }
+        soltar();
         await hydrateActiveEnv();
         listo = true;
       } catch (err) {
         if (err && err.name === 'AbortError') {
           // Terminó en el servidor y su respuesta no llegó: lo que quedó, del estado.
           toast('La activación terminó. El resultado de cada plugin está en Actividad.', 'info');
+          soltar();
           await hydrateActiveEnv();
           listo = true;
           return;
@@ -8064,9 +8075,7 @@
         else if (plugins) toast(`No se pudo aplicar: ${err.message}`, 'error');
         else if (mount) mount.innerHTML = `<div class="status status-error">Error: ${escapeHtml(err.message)}</div>`;
       } finally {
-        clearInterval(refresco);
-        state.provisionandoPlugins = false;
-        state.aplicandoPlugin = '';
+        soltar();
         btn.disabled = false;
         btn.innerHTML = original;
         // Si la vista se repintó mientras tanto, quedó con los botones apagados.

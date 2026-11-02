@@ -39,9 +39,14 @@ let capChatAbierto = false;
 const _NOMBRE_DEL_PLUGIN = {};
 const escapeHtml = s => String(s);
 const document = { getElementById: () => null, querySelectorAll: () => [] };
-let avisos = [], hidratado = 0;
+let avisos = [], hidratado = 0, marcasAlRepintar = [];
 const toast = (m) => avisos.push(m);
-const hydrateActiveEnv = async () => { hidratado++; };
+// Lo que la vista ve al repintarse: con la marca puesta, el paso 3 (o el
+// botón del plugin) se dibujaba "Activando" y quedaba así.
+const hydrateActiveEnv = async () => {
+  hidratado++;
+  marcasAlRepintar.push([state.provisionandoPlugins, state.aplicandoPlugin]);
+};
 const renderInfraView = () => {};
 const renderCapabilitiesResult = () => {};
 const showStatus = () => {};
@@ -85,6 +90,7 @@ let terminado = false;
   check('1: el botón vuelve', !btn.disabled && btn.innerHTML === 'Volver a activar los plugins', btn.innerHTML);
   check('1: avisa', avisos.some(a => /terminó/.test(a) && /Actividad/.test(a)), avisos.join(' | '));
   check('1: repinta con el estado', hidratado === 1, hidratado);
+  check('1: repinta ya sin "Activando"', JSON.stringify(marcasAlRepintar) === '[[false,""]]', JSON.stringify(marcasAlRepintar));
   check('1: deja de mirar', intervalos.every(fn => fn === null));
 }
 
@@ -123,12 +129,24 @@ let terminado = false;
 
 // 4. La respuesta llega: el camino de siempre, sin el aviso de "terminó".
 {
-  intervalos = []; avisos = []; hidratado = 0;
+  intervalos = []; avisos = []; hidratado = 0; marcasAlRepintar = [];
   const btn = nuevoBoton();
   respuesta = { ok: true, json: async () => ({ status: 'success', capabilities: {} }) };
   await provisionCapabilitiesFromInfra(btn, casos, true);
   check('4: listo', state.provisionandoPlugins === false && !btn.disabled && hidratado === 1);
+  check('4: repinta ya sin "Activando"', JSON.stringify(marcasAlRepintar) === '[[false,""]]', JSON.stringify(marcasAlRepintar));
   check('4: sin el aviso de la respuesta perdida', !avisos.some(a => /terminó/.test(a)), avisos.join(' | '));
+  check('4: deja de mirar', intervalos.every(fn => fn === null));
+  respuesta = null;
+}
+
+// 5. Un plugin solo: su botón tampoco queda "Activando…" al repintar.
+{
+  intervalos = []; avisos = []; hidratado = 0; marcasAlRepintar = [];
+  const btn = nuevoBoton();
+  respuesta = { ok: true, json: async () => ({ status: 'success', capabilities: {} }) };
+  await provisionCapabilitiesFromInfra(btn, casos, false, { plugins: ['perfil'], clave: 'perfil' });
+  check('5: repinta sin el plugin en curso', JSON.stringify(marcasAlRepintar) === '[[false,""]]', JSON.stringify(marcasAlRepintar));
   respuesta = null;
 }
 
