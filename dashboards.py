@@ -83,6 +83,28 @@ def _terms_agg(_id: str, field: str, schema: str, size: int) -> dict[str, Any]:
     }
 
 
+# OpenSearch no ordena los grupos de un terms por una métrica de varios valores
+# sin que se nombre cuál: con `orderBy: "1"` y un percentiles en "1", el panel
+# entero sale "Error" ("Invalid aggregation order path [1]. When ordering on a
+# multi-value metrics aggregation a metric name must be specified"; visto en
+# "Latencia p95 por mercado"). Se nombra el percentil como lo hace el editor de
+# Dashboards al elegirlo ("1.95"): el más alto, que es el que el panel mira.
+_PERCENTS_POR_DEFECTO = [1, 5, 25, 50, 75, 95, 99]   # los de Dashboards, sin `percents`
+
+
+def orden_valido(vis_state: dict[str, Any]) -> dict[str, Any]:
+    """El visState con cada terms ordenado por algo que OpenSearch acepta."""
+    percentiles = {a.get("id"): (a.get("params") or {}).get("percents") or _PERCENTS_POR_DEFECTO
+                   for a in vis_state.get("aggs") or [] if a.get("type") == "percentiles"}
+    for a in vis_state.get("aggs") or []:
+        params = a.get("params") or {}
+        if a.get("type") == "terms" and params.get("orderBy") in percentiles:
+            p = max(percentiles[params["orderBy"]])
+            params["orderBy"] = f"{params['orderBy']}.{int(p)}" if float(p).is_integer() \
+                else f"{params['orderBy']}[{p}]"
+    return vis_state
+
+
 def _datehist_agg(_id: str = "2") -> dict[str, Any]:
     return {
         "id": _id, "enabled": True, "type": "date_histogram", "schema": "segment",
@@ -426,6 +448,10 @@ def _vs_mapa_de_calor(title: str, field: str, size: int = 12) -> dict[str, Any]:
 
 def _panel_to_vis_state(panel: dict[str, Any]) -> dict[str, Any]:
     """Despacha un panel (spec rich) a su visState."""
+    return orden_valido(_vis_state_del_panel(panel))
+
+
+def _vis_state_del_panel(panel: dict[str, Any]) -> dict[str, Any]:
     t = panel["type"]
     title = panel["title"]
     if t == "markdown":

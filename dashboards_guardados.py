@@ -62,10 +62,28 @@ def guardar(slug: str, objetos: list[dict], quien: str) -> None:
 
 def ndjson(slug: str) -> str:
     """Lo guardado del caso, como NDJSON de saved objects (para cargarlo)."""
-    lineas = [json.dumps({"type": o["type"], "id": o["id"], "attributes": o.get("attributes") or {},
+    lineas = [json.dumps({"type": o["type"], "id": o["id"], "attributes": _con_orden_valido(o),
                           "references": o.get("references") or []}, ensure_ascii=False)
               for o in leer(slug).values()]
     return "\n".join(lineas) + ("\n" if lineas else "")
+
+
+def _con_orden_valido(o: dict) -> dict:
+    """Los atributos, con el visState corregido si ordena por un percentil sin
+    nombrarlo (ver `dashboards.orden_valido`): una copia guardada de un panel
+    que la plataforma generaba así seguía cargándose rota en cada deploy."""
+    import dashboards
+
+    attrs = o.get("attributes") or {}
+    if o.get("type") != "visualization" or not isinstance(attrs.get("visState"), str):
+        return attrs
+    try:
+        vs = json.loads(attrs["visState"])
+    except ValueError:
+        return attrs
+    antes = json.dumps(vs, sort_keys=True)
+    vs = dashboards.orden_valido(vs)
+    return attrs if json.dumps(vs, sort_keys=True) == antes else {**attrs, "visState": json.dumps(vs)}
 
 
 def reemplaza_al_principal(slug: str, plataforma: str, id_principal: str) -> bool:

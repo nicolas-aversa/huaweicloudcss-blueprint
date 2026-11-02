@@ -297,7 +297,13 @@ def test_todo_campo_que_usa_un_panel_esta_en_el_index_pattern(nombre):
                 for f in prm.get("filters") or []:
                     assert all(c in campos for c in _CAMPO_KQL.findall(f["input"]["query"])), f
                 if agg["type"] == "terms":
-                    assert prm["orderBy"] in [x["id"] for x in vs["aggs"]], (a["title"], prm["orderBy"])
+                    # Una métrica de un solo valor, o el percentil nombrado: por
+                    # un percentiles a secas OpenSearch no ordena y el panel falla.
+                    tipos = {x["id"]: x for x in vs["aggs"]}
+                    base, _, pct = prm["orderBy"].partition(".")
+                    assert base in tipos, (a["title"], prm["orderBy"])
+                    if tipos[base]["type"] == "percentiles":
+                        assert pct and float(pct) in tipos[base]["params"]["percents"], (a["title"], prm["orderBy"])
             for c in (vs.get("params") or {}).get("controls") or []:
                 assert c["fieldName"] in campos, c
         if o["type"] == "search":
@@ -330,6 +336,7 @@ def test_las_tablas_tienen_sus_columnas_y_sus_filas():
     p95 = vis["[oms] Latencia (ms) p95 por Tipo de mensaje"]
     assert p95["type"] == "line" and p95["aggs"][0]["params"]["percents"] == [95]
     assert [a["type"] for a in p95["aggs"]] == ["percentiles", "terms", "date_histogram"]
+    assert p95["aggs"][1]["params"]["orderBy"] == "1.95", "los de p95 más alto, nombrando el percentil"
 
 
 def test_el_perfil_va_al_resumen():
