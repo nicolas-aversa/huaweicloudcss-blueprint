@@ -77,6 +77,8 @@ from index_template import (  # noqa: E402
     build_index_template,
     index_pattern_from_name,
     put_snippet,
+    sin_codec,
+    tiene_codec,
 )
 from ecs_validator import classify_field, spec_loaded, spec_size  # noqa: E402
 import verticals  # noqa: E402  (registro declarativo de los verticales de demo)
@@ -5696,9 +5698,12 @@ def _write_index_template_artifact(terraform_dir: Path, request: "TerraformDeplo
             if not cases:
                 return
             snippets, patterns, first_tpl = [], [], None
+            con_seguridad = _specs_de_seguridad(terraform_dir)
             for case in cases:
                 # Los tipos predefinidos parsean a top-level (namespace "").
                 tpl = build_index_template(case.fields, "", case.index_name)
+                if case.slug in con_seguridad:
+                    tpl = sin_codec(tpl)   # igual que en `_apply_index_templates`
                 snippets.append(put_snippet(f"{base_name}-{case.slug}", tpl))
                 patterns.append(index_pattern_from_name(case.index_name))
                 if first_tpl is None:
@@ -5880,7 +5885,8 @@ def _apply_index_templates(
         caso = next((c for c in casos if f"{base_name}-{c.slug}" == name), None)
         if caso is None or caso.slug not in con_seguridad:
             continue
-        tpl = json.loads(json.dumps(tpl))   # copia: el curado no se toca
+        tpl = sin_codec(tpl)   # copia: el curado no se toca. Y sin zstd, que
+        # Security Analytics no admite en sus índices.
         alias = seguridad.alias_del_caso(index_pattern_from_name(caso.index_name))
         tpl.setdefault("template", {}).setdefault("aliases", {})[alias] = {}
         templates[i] = (name, tpl)
@@ -5890,20 +5896,31 @@ def _apply_index_templates(
     if cluster.get("public_endpoint"):
         print(f"[index-template] usando endpoint público {endpoint}")
 
+    def _poner(url: str, cuerpo: dict[str, Any]):
+        return requests.put(
+            url,
+            json=cuerpo,
+            auth=(user, request.opensearch_password),
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+            verify=False,
+        )
+
     all_ok = True
     for name, tpl in templates:
         url = f"{proto}://{endpoint}/_index_template/{name}"
         applied = False
         for attempt in range(1, _INDEX_TEMPLATE_APPLY_RETRIES + 1):
             try:
-                resp = requests.put(
-                    url,
-                    json=tpl,
-                    auth=(user, request.opensearch_password),
-                    headers={"Content-Type": "application/json"},
-                    timeout=30,
-                    verify=False,
-                )
+                resp = _poner(url, tpl)
+                # Un cluster sin el códec rechaza el template ENTERO, y sin
+                # template los campos quedarían sin tipar. Se aplica igual, con
+                # el códec por defecto: un índice más pesado, pero bien tipado.
+                if (resp.status_code == 400 and tiene_codec(tpl)
+                        and "codec" in (resp.text or "").lower()):
+                    print(f"[index-template] el cluster no admite el códec de '{name}': va sin él")
+                    tpl = sin_codec(tpl)
+                    resp = _poner(url, tpl)
                 if resp.status_code in (200, 201):
                     print(f"[index-template] aplicado '{name}' (attempt {attempt})")
                     applied = True

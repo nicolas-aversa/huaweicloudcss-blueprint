@@ -3139,6 +3139,49 @@ def test_apply_index_templates_puts_to_public_endpoint(monkeypatch):
     assert props["source"]["properties"]["ip"] == {"type": "ip"}
 
 
+def test_el_template_generado_lleva_el_codec_liviano():
+    from index_template import build_index_template, sin_codec, tiene_codec
+
+    tpl = build_index_template([{"raw_name": "a", "type": "keyword"}], "", "logs-%{+YYYY.MM}")
+    assert tpl["template"]["settings"]["index.codec"] == "zstd_no_dict"
+    sin = sin_codec(tpl)
+    assert not tiene_codec(sin) and tiene_codec(tpl)   # copia: el original no se toca
+    assert sin["template"]["mappings"] == tpl["template"]["mappings"]
+
+
+def test_un_cluster_sin_el_codec_recibe_el_template_igual(monkeypatch):
+    """Un cluster que no conoce zstd rechaza el template entero: se reintenta
+    sin el códec, para que los campos no queden sin tipar."""
+    import main as _main
+
+    enviados = []
+
+    def _fake_put(url, **kwargs):
+        cuerpo = kwargs.get("json")
+        enviados.append(cuerpo)
+
+        class _Resp:
+            status_code = 400 if "index.codec" in cuerpo["template"]["settings"] else 200
+            text = ('{"error":{"reason":"unknown value for [index.codec] must be one of '
+                    '[default, best_compression] but was: zstd_no_dict"}}')
+
+        return _Resp()
+
+    monkeypatch.setattr("requests.put", _fake_put)
+    monkeypatch.setattr(_main.time, "sleep", lambda s: None)
+    req = _main.TerraformDeployRequest(
+        pipeline_conf="x", project_name="p", opensearch_password="pw",
+        cases=[_main.PipelineCase(slug="firewall", filter_code="f", index_name="firewall-%{+YYYY.MM}",
+                                  fields=[{"raw_name": "srcip", "field_path": "source.ip", "type": "ip"}])],
+    )
+
+    assert _main._apply_index_templates(req, {"public_endpoint": "x:9200"}) is True
+    assert len(enviados) == 2
+    assert "index.codec" in enviados[0]["template"]["settings"]
+    assert "index.codec" not in enviados[1]["template"]["settings"]
+    assert enviados[1]["template"]["mappings"] == enviados[0]["template"]["mappings"]
+
+
 def test_apply_index_templates_skips_without_endpoint():
     """Sin endpoint (ni público ni privado) no intenta aplicar nada."""
     import main as _main

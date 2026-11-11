@@ -136,6 +136,29 @@ def _mapping_de(f: dict[str, Any]) -> dict[str, Any] | None:
     return mapping
 
 
+# Cómo se comprimen los campos guardados. `zstd_no_dict` deja el índice más
+# liviano que el códec por defecto (LZ4) y no escribe más lento. No sirve para
+# índices k-NN ni de Security Analytics, y un cluster sin el códec rechaza el
+# template entero: por eso existe `sin_codec`.
+CODEC = "zstd_no_dict"
+
+
+def tiene_codec(template: dict[str, Any]) -> bool:
+    settings = (template.get("template") or {}).get("settings") or {}
+    return "index.codec" in settings or "codec" in (settings.get("index") or {})
+
+
+def sin_codec(template: dict[str, Any]) -> dict[str, Any]:
+    """Una copia del template sin `index.codec`: el índice nace con el códec
+    por defecto del cluster."""
+    copia = copy.deepcopy(template)
+    settings = (copia.get("template") or {}).get("settings") or {}
+    settings.pop("index.codec", None)
+    if isinstance(settings.get("index"), dict):
+        settings["index"].pop("codec", None)
+    return copia
+
+
 def _set_nested(props: dict[str, Any], dotted_path: str, mapping: dict[str, Any]) -> None:
     """Inserta ``mapping`` en ``props`` siguiendo ``dotted_path`` (ej.
     ``source.geo.country_name``), creando/mergeando objetos
@@ -208,6 +231,7 @@ def build_index_template(
             "settings": {
                 "number_of_shards": 1,
                 "number_of_replicas": 1,
+                "index.codec": CODEC,
                 # Tolerar valores que no coercen al tipo del campo (ej. el string
                 # "null" en un campo `double`, o basura en un date/ip): se saltea
                 # SOLO ese campo (queda en _source, no agregable) en vez de

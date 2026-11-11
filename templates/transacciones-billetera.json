@@ -5,6 +5,7 @@
     "settings": {
       "number_of_shards": 1,
       "number_of_replicas": 1,
+      "index.codec": "zstd_no_dict",
       "refresh_interval": "30s",
       "index.sort.field": "@timestamp",
       "index.sort.order": "desc"
