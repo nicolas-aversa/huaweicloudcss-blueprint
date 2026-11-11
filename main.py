@@ -5698,12 +5698,9 @@ def _write_index_template_artifact(terraform_dir: Path, request: "TerraformDeplo
             if not cases:
                 return
             snippets, patterns, first_tpl = [], [], None
-            con_seguridad = _specs_de_seguridad(terraform_dir)
             for case in cases:
                 # Los tipos predefinidos parsean a top-level (namespace "").
                 tpl = build_index_template(case.fields, "", case.index_name)
-                if case.slug in con_seguridad:
-                    tpl = sin_codec(tpl)   # igual que en `_apply_index_templates`
                 snippets.append(put_snippet(f"{base_name}-{case.slug}", tpl))
                 patterns.append(index_pattern_from_name(case.index_name))
                 if first_tpl is None:
@@ -5885,8 +5882,7 @@ def _apply_index_templates(
         caso = next((c for c in casos if f"{base_name}-{c.slug}" == name), None)
         if caso is None or caso.slug not in con_seguridad:
             continue
-        tpl = sin_codec(tpl)   # copia: el curado no se toca. Y sin zstd, que
-        # Security Analytics no admite en sus índices.
+        tpl = json.loads(json.dumps(tpl))   # copia: el curado no se toca
         alias = seguridad.alias_del_caso(index_pattern_from_name(caso.index_name))
         tpl.setdefault("template", {}).setdefault("aliases", {})[alias] = {}
         templates[i] = (name, tpl)

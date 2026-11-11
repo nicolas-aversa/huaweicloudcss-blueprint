@@ -134,8 +134,8 @@ def test_el_template_de_un_caso_de_seguridad_lleva_el_alias(monkeypatch):
     assert main._apply_index_templates(req, {"public_endpoint": "x:9200"})
     assert enviados["p-siem"]["template"]["aliases"] == {"siem-seguridad": {}}
     assert "aliases" not in enviados["p-transacciones-billetera"]["template"]
-    # zstd no va en los índices de Security Analytics; en el resto, sí.
-    assert "index.codec" not in enviados["p-siem"]["template"]["settings"]
+    # Los índices de logs que lee Security Analytics también van con zstd.
+    assert enviados["p-siem"]["template"]["settings"]["index.codec"] == "zstd_no_dict"
     assert enviados["p-transacciones-billetera"]["template"]["settings"]["index.codec"] == "zstd_no_dict"
 
 

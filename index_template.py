@@ -137,9 +137,13 @@ def _mapping_de(f: dict[str, Any]) -> dict[str, Any] | None:
 
 
 # Cómo se comprimen los campos guardados. `zstd_no_dict` deja el índice más
-# liviano que el códec por defecto (LZ4) y no escribe más lento. No sirve para
-# índices k-NN ni de Security Analytics, y un cluster sin el códec rechaza el
-# template entero: por eso existe `sin_codec`.
+# liviano que el códec por defecto (LZ4) y no escribe más lento: con el caso FIX
+# (OpenSearch 3.4) los campos guardados bajaron a la mitad y el índice un 24 %,
+# con la misma velocidad de copia. Vale también para los índices de logs que lee
+# Security Analytics: su monitor dio lo mismo sobre zstd que sobre LZ4. Lo que
+# OpenSearch no admite con zstd son los índices k-NN y los internos del plugin
+# (`.opensearch-sap-*`), que este template no toca. Un cluster sin el códec
+# rechaza el template entero: por eso existe `sin_codec`.
 CODEC = "zstd_no_dict"
 
 

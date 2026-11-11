@@ -22,7 +22,7 @@ import ciclo_de_vida as cdv
 import perfiles
 import plan_de_cluster
 import seguridad
-from index_template import build_index_template, index_pattern_from_name, sin_codec
+from index_template import build_index_template, index_pattern_from_name
 
 MAAS_API_KEY = "<MAAS_API_KEY>"
 NVIDIA_API_KEY = "<NVIDIA_API_KEY>"
@@ -131,7 +131,6 @@ def _armar(slug: str, fields: list[dict], *, label: str = "", index_name: str = 
     template = build_index_template(fields, "", index_name)
     con_sa = aplica.get("security_analytics")
     if con_sa:
-        template = sin_codec(template)   # Security Analytics no admite zstd en sus índices
         template.setdefault("template", {}).setdefault("aliases", {})[seguridad.alias_del_caso(ip)] = {}
     seccion("Index template", "Los tipos de cada campo, antes de la ingesta.", "template")
     bloques.append(_req("PUT", f"_index_template/{slug}", template))
