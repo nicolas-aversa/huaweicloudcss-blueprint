@@ -1357,6 +1357,27 @@ def get_verticals() -> dict:
 # Alta desde el Builder: el SA sube su .log, GLM-5.2 arma el filter y detecta los
 # campos, y acá el caso queda persistido como uno más del flujo de demo. Ver
 # custom_cases.py. Son compartidos por instancia; borra el creador o un admin.
+@app.post("/api/v1/cotizador", tags=["cotizador"], summary="Cotiza un cluster CSS OpenSearch")
+def cotizar_cluster(request: dict) -> dict:
+    """Body: el formulario del cotizador (ver `cotizador.DEFAULTS`; lo que falta
+    toma su valor por defecto). Devuelve el cluster, el costo por mes, el primer
+    año mes a mes, los avisos y los supuestos con su fuente."""
+    import cotizador
+
+    try:
+        return cotizador.cotizar(request or {})
+    except cotizador.DatoInvalido as exc:
+        raise HTTPException(status_code=400, detail={"stage": "cotizador", "message": str(exc)}) from exc
+
+
+@app.get("/api/v1/cotizador/valores", tags=["cotizador"], summary="Valores por defecto y precios del cotizador")
+def valores_del_cotizador() -> dict:
+    import cotizador
+
+    return {"defaults": cotizador.DEFAULTS, "region": cotizador.PRECIOS["region"],
+            "consultado": cotizador.PRECIOS["consultado"]}
+
+
 @app.get("/api/v1/cases", tags=["verticals"], summary="Casos de demo creados desde la plataforma")
 def list_custom_cases() -> dict:
     """Metadata de los casos guardados (sin el dataset)."""
