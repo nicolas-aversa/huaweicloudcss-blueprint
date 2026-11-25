@@ -656,6 +656,30 @@ def test_la_evaluacion_al_activar_y_no_se_rehace_si_ya_esta(monkeypatch, tmp_pat
     assert estados["a"]["busqueda"]["motivo"] == "1234 textos" and estados["a"]["busqueda"]["evaluacion"]["ok"]
 
 
+def test_con_otro_modelo_de_nvidia_se_rehace_la_busqueda(monkeypatch, tmp_path):
+    """Los vectores de otro modelo no se comparan con los del nuevo: una búsqueda
+    armada con el anterior (su estado no decía el modelo) se rehace, una vez."""
+    estados = {"a": {"busqueda": {"ok": True, "motivo": "10 textos", "campo": "msg"}},
+               "b": {"busqueda": {"ok": True, "motivo": "10 textos", "campo": "msg", "modelo": busqueda.PROVEEDOR["modelo"]}}}
+    monkeypatch.setattr(main, "_read_estados", lambda td: estados)
+    monkeypatch.setattr(main, "_guardar_estados", lambda td, slug, nuevo: estados.setdefault(slug, {}).update(nuevo))
+    monkeypatch.setattr(main, "_salida_a_nvidia", lambda *a: None)
+    monkeypatch.setattr(main, "_asegurar_modelo_de_embeddings", lambda *a: ({"passage": "M1", "query": "Q1"}, ""))
+    monkeypatch.setattr(main, "_esperar_cluster_libre", lambda *a: None)
+    forzadas = {}
+    monkeypatch.setattr(main, "_provisionar_busqueda", lambda b, u, p, slug, idx, fields, mid, force:
+                        forzadas.__setitem__(slug, force) or {"ok": True, "campo": "msg", "textos": 10, "reason": "ok"})
+    monkeypatch.setattr(main, "_configurar_search_relevance", lambda *a: "fuera de esta prueba")
+    pipe = {"a": {"fields": [F("msg")]}, "b": {"fields": [F("msg")]}}
+    activar = lambda: main._busqueda_original({"public_endpoint": "x:9200"}, "a", "p", False, tmp_path,  # noqa: E731
+                                              ["a", "b"], pipe, False, main.runs.start("capabilities"))
+    activar()
+    assert forzadas == {"a": True, "b": False}
+    assert estados["a"]["busqueda"]["modelo"] == busqueda.PROVEEDOR["modelo"]
+    activar()
+    assert forzadas == {"a": False, "b": False}, "ya con el modelo nuevo: no se rehace otra vez"
+
+
 def test_primero_los_indices_de_todos_y_despues_las_evaluaciones(monkeypatch, tmp_path):
     """Cada evaluación espera que su índice tenga textos vectorizados (el
     Transform los carga al minuto y NVIDIA los vectoriza de a poco): caso por

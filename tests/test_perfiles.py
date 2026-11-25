@@ -42,7 +42,7 @@ class _R:
         return self._d
 
 
-def _cluster(monkeypatch, existe=False, falla="", estado="finished", continuo=True):
+def _cluster(monkeypatch, existe=False, falla="", estado="finished", continuo=True, agrupa=None):
     pedidos = []
 
     def req(method, url, user, password, json_body=None, timeout=30):
@@ -51,7 +51,10 @@ def _cluster(monkeypatch, existe=False, falla="", estado="finished", continuo=Tr
         if falla and ruta.endswith(falla) and method != "GET":
             return _R(400, {"error": "malo"})
         if method == "GET" and ruta == "/_plugins/_transform/siem-perfil":
-            return _R(200, {"transform": {"continuous": continuo}}) if existe else _R(404)
+            t = {"continuous": continuo}
+            if agrupa:
+                t["groups"] = [{"terms": {"source_field": agrupa, "target_field": "entidad"}}]
+            return _R(200, {"transform": t}) if existe else _R(404)
         if method == "GET" and ruta == "/_plugins/_transform/siem-perfil/_explain":
             return _R(200, {"siem-perfil": {"transform_metadata": {
                 "status": estado, "failure_reason": "Failed to index the documents" if estado == "failed" else None}}})
@@ -177,3 +180,14 @@ def test_uno_de_una_sola_pasada_se_rehace(monkeypatch):
     r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
     assert r["ok"] and r["reason"].endswith("(se rehízo: el anterior era de una sola pasada y quedó con los datos de ese momento)")
     assert ("PUT", "/_plugins/_transform/siem-perfil") in pedidos and ("DELETE", "/perfil-siem") in pedidos
+
+
+def test_si_agrupa_por_otra_entidad_se_rehace(monkeypatch):
+    """Cambió cuál es la entidad (visto: regalos de experiencias, armado por
+    dispositivo): "Volver a activar" lo rehace en vez de dejar el de antes."""
+    pedidos = _cluster(monkeypatch, existe=True, agrupa="sesion.dispositivo")
+    r = main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)
+    assert r["ok"] and "agrupaba por sesion.dispositivo" in r["reason"]
+    assert ("PUT", "/_plugins/_transform/siem-perfil") in pedidos
+    pedidos = _cluster(monkeypatch, existe=True, agrupa=PERFIL["campo"])
+    assert main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)["reason"] == "ya estaba"

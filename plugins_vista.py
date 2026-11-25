@@ -392,7 +392,7 @@ def tarjetas_del_cluster(*, agente: bool, text2viz: dict, base: str, canal: "dic
     # deja desplegar modelos locales). Sin botón propio: activar la búsqueda lo
     # prepara.
     reintentar = "se reintenta con «Completar» en Búsqueda por significado"
-    que = ("El modelo multilingüe de NVIDIA (nemotron-3-embed-1b) que entiende el significado de los textos. "
+    que = ("El modelo multilingüe de NVIDIA (nemotron-3.5-embed-1b) que entiende el significado de los textos. "
            "El cluster le pide los vectores por un conector, como el asistente a MaaS: los textos viajan a NVIDIA.")
     desde = int((embeddings or {}).get("en_curso") or 0)
     if desde and _time.time() - desde < _PREPARACION_MAXIMA_S:

@@ -24,9 +24,11 @@ class _R:
         return self._d
 
 
-def _cluster(monkeypatch, existentes=None, deploy_ok=True, predict_ok=True, clave=CLAVE):
+def _cluster(monkeypatch, existentes=None, deploy_ok=True, predict_ok=True, clave=CLAVE, modelos=None):
     """Un ml-commons falso. `existentes`: {nombre: [(model_id, estado)]}; un
-    estado None es un modelo que no se puede leer (el cluster no contesta)."""
+    estado None es un modelo que no se puede leer (el cluster no contesta).
+    `modelos`: {model_id: modelo de NVIDIA de su conector}; sin dato, el
+    conector no dice cuál."""
     pedidos = []
     estados = {mid: est for lista in (existentes or {}).values() for mid, est in lista}
     por_nombre = {n: [mid for mid, _ in lista] for n, lista in (existentes or {}).items()}
@@ -54,6 +56,9 @@ def _cluster(monkeypatch, existentes=None, deploy_ok=True, predict_ok=True, clav
         if url.endswith("/_predict"):
             return (_R(200, {"inference_results": [{"output": [{"data": [0.1] * busqueda.DIMENSION}]}]}) if predict_ok
                     else _R(500, {"error": {"reason": "Connection timed out"}}))
+        if "/_plugins/_ml/connectors/CX-" in url and m == "GET":
+            mid = url.rsplit("/CX-", 1)[1]
+            return _R(200, {"parameters": {"model": modelos[mid], "input_type": "passage"}} if mid in (modelos or {}) else {})
         if "/_plugins/_ml/models/" in url and m == "DELETE":
             estados.pop(url.rsplit("/", 1)[-1], None)
             return _R(200, {})
@@ -84,7 +89,7 @@ def test_crea_el_conector_y_los_dos_modelos(monkeypatch):
     for c in conectores:
         accion = c["actions"][0]
         assert accion["url"] == "https://integrate.api.nvidia.com/v1/embeddings" and c["credential"] == {"api_key": CLAVE}
-        assert c["parameters"]["model"] == "nvidia/nemotron-3-embed-1b"
+        assert c["parameters"]["model"] == "nvidia/nemotron-3.5-embed-1b"
         assert accion["pre_process_function"] == "connector.pre_process.openai.embedding"
         assert "${credential.api_key}" in accion["headers"]["Authorization"]
     registros = _creados(pedidos, "/models/_register?deploy=true")
@@ -174,6 +179,29 @@ def test_con_otra_clave_los_rehace(monkeypatch):
     assert len(_creados(pedidos, "/connectors/_create")) == 2
 
 
+def test_si_piden_otro_modelo_de_nvidia_los_rehace(monkeypatch):
+    """NVIDIA dio de baja nemotron-3-embed-1b el 2026-11-23 (410 Gone): los
+    registrados antes le seguían pidiendo los vectores al que ya no está."""
+    viejo = "nvidia/nemotron-3-embed-1b"
+    pedidos = _cluster(monkeypatch, existentes={"plataforma-embeddings-textos": [("T1", "DEPLOYED")],
+                                                "plataforma-embeddings-consultas": [("Q1", "DEPLOYED")]},
+                       modelos={"T1": viejo, "Q1": viejo})
+    ids, motivo = main._preparar_los_modelos("http://x", "a", "p", main._huella(CLAVE))
+    assert motivo == "" and ids == {"passage": "M-plataforma-embeddings-textos", "query": "M-plataforma-embeddings-consultas"}
+    borrados = [u for m, u, _ in pedidos if m == "DELETE"]
+    assert "http://x/_plugins/_ml/models/T1" in borrados and "http://x/_plugins/_ml/connectors/CX-Q1" in borrados
+    assert [c["parameters"]["model"] for c in _creados(pedidos, "/connectors/_create")] == [busqueda.PROVEEDOR["modelo"]] * 2
+
+
+def test_con_el_mismo_modelo_los_reusa(monkeypatch):
+    actual = busqueda.PROVEEDOR["modelo"]
+    pedidos = _cluster(monkeypatch, existentes={"plataforma-embeddings-textos": [("T1", "DEPLOYED")],
+                                                "plataforma-embeddings-consultas": [("Q1", "DEPLOYED")]},
+                       modelos={"T1": actual, "Q1": actual})
+    assert main._preparar_los_modelos("http://x", "a", "p", main._huella(CLAVE)) == ({"passage": "T1", "query": "Q1"}, "")
+    assert not [u for m, u, _ in pedidos if m == "DELETE"] and not _creados(pedidos, "/connectors/_create")
+
+
 def test_si_nvidia_no_responde_lo_dice(monkeypatch):
     _cluster(monkeypatch, predict_ok=False)
     ids, motivo = main._preparar_los_modelos("http://x", "a", "p", "")
@@ -225,7 +253,7 @@ def test_probar_la_clave(monkeypatch):
     import requests
     monkeypatch.setattr(maas_integrator, "get_nvidia_api_key", lambda: CLAVE)
     monkeypatch.setattr(requests, "post", lambda url, **k: _R(200, {"data": [{"embedding": [0.0] * 2048}]}))
-    assert maas_integrator.probar_nvidia_api_key() == {"ok": True, "detail": "Funciona: nvidia/nemotron-3-embed-1b devolvió un vector de 2048 dimensiones."}
+    assert maas_integrator.probar_nvidia_api_key() == {"ok": True, "detail": "Funciona: nvidia/nemotron-3.5-embed-1b devolvió un vector de 2048 dimensiones."}
     monkeypatch.setattr(requests, "post", lambda url, **k: _R(401, {"error": "Unauthorized"}))
     assert "rechazó la API key" in maas_integrator.probar_nvidia_api_key()["detail"]
     monkeypatch.setattr(maas_integrator, "get_nvidia_api_key", lambda: "")

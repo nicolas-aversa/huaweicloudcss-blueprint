@@ -389,6 +389,22 @@ def test_una_principal_invalida_se_descarta(principales):
     assert not any(c.principal for c in p.columnas)
 
 
+def test_sin_entidad_principal_se_elige_la_que_mas_se_repite():
+    """El LLM no dio entidad (o la que dio no servía): de los identificadores,
+    la que más se repite en la muestra. Una categoría (el dispositivo, con tres
+    valores) no es una entidad a seguir, y un id por fila tampoco."""
+    filas = ["fecha,prestador,beneficiario,dispositivo,monto"]
+    for i in range(60):
+        filas.append(f"2026-05-{1 + i % 28:02d} 10:00:00,PRE-{100 + i % 15},BEN-{5000 + i},{('Android', 'iPhone', 'Mac')[i % 3]},{1000 + i}")
+    p = _perfil("\n".join(filas))
+    semantica.enriquecer(p, _responde({"columnas": {"prestador": {"rol": "entity_id"}, "beneficiario": {"rol": "entity_id"},
+                                                    "dispositivo": {"rol": "entity_id"}},
+                                       "principales": {"entidad": "beneficiario"}}))
+    assert _col(p, "prestador").principal == "entidad"
+    assert not _col(p, "beneficiario").principal and not _col(p, "dispositivo").principal
+    assert {f["raw_name"]: f for f in perfilador.campos(p)}["prestador"].get("entity") is True
+
+
 def test_en_un_csv_sin_header_la_principal_usa_el_nombre_nuevo():
     p = _perfil(SIN_HEADER)
     semantica.enriquecer(p, _responde({"columnas": {}, "nombres": {"columna_2": "pozo"},

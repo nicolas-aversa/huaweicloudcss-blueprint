@@ -9,7 +9,7 @@ otras palabras ("cobro rechazado" → "pago denegado").
 
 Cómo:
 
-* Los vectores los calcula NVIDIA NIM (nemotron-3-embed-1b, multilingüe): el
+* Los vectores los calcula NVIDIA NIM (nemotron-3.5-embed-1b, multilingüe): el
   cluster se los pide por un conector de ml-commons, como el asistente le pide
   respuestas a MaaS. El CSS no deja desplegar modelos locales: el motor (DJL)
   baja PyTorch de internet y el nodo no lo puede guardar ("Failed to save
@@ -34,15 +34,22 @@ import re
 import unicodedata
 from typing import Any
 
-# Quién calcula los vectores. Multilingüe (castellano entre 34 idiomas),
-# 2048 dimensiones, normalizados. La API es la de OpenAI.
+# Quién calcula los vectores. Multilingüe, 2048 dimensiones, normalizados. La
+# API es la de OpenAI. NVIDIA da de baja modelos: nemotron-3-embed-1b dejó de
+# andar el 2026-11-23 (410 Gone) y lo reemplaza nemotron-3.5-embed-1b, con las
+# mismas dimensiones. Al cambiar de modelo, la provisión rehace los modelos
+# remotos del cluster y los índices de búsqueda (vectores de otro modelo no se
+# comparan con los del nuevo).
 PROVEEDOR = {
     "nombre": "NVIDIA NIM",
     "url": "https://integrate.api.nvidia.com/v1/embeddings",
-    "modelo": "nvidia/nemotron-3-embed-1b",
+    "modelo": "nvidia/nemotron-3.5-embed-1b",
     # Global Accelerator de AWS: IPs fijas, las que piden las rutas del CSS.
     "ips": ("75.2.113.119", "99.83.136.103"),
 }
+# Con qué modelo se armaron las búsquedas cuyo estado no lo guardaba (todas las
+# anteriores a que se guardara): al ver otro, se rehacen.
+MODELO_SIN_REGISTRO = "nvidia/nemotron-3-embed-1b"
 DESTINO_PERMITIDO = r"^https://integrate\.api\.nvidia\.com/.*$"
 DIMENSION = 2048
 # Textos por pedido: la API acepta hasta 256; el tier gratis, ~40 pedidos por minuto.

@@ -8458,6 +8458,16 @@ def _provisionar_perfil(base: str, user: str, password: str, slug: str, index_pa
             continuo = True
         if fallo is None and not continuo:
             fallo = "el anterior era de una sola pasada y quedó con los datos de ese momento"
+        # Si agrupa por otra entidad (cambió cuál es), se rehace: si no, seguía
+        # el de antes (visto: regalos de experiencias, armado por dispositivo).
+        if fallo is None:
+            try:
+                grupos = (((ya.json() or {}).get("transform") or {}).get("groups") or [{}])
+                antes = ((grupos[0] or {}).get("terms") or {}).get("source_field")
+            except (ValueError, AttributeError, IndexError):
+                antes = None
+            if antes and antes != perfil.get("campo"):
+                fallo = f"agrupaba por {antes}"
         if not force and fallo is None:
             return {"ok": True, "reason": "ya estaba"}
         _borrar_transform(ruta, user, password)
@@ -9064,10 +9074,29 @@ def _borrar_modelo_remoto(base: str, user: str, password: str, model_id: str) ->
         _os_req("DELETE", f"{base}/_plugins/_ml/connectors/{conector}", user, password, timeout=30)
 
 
+def _modelo_de_nvidia(base: str, user: str, password: str, model_id: str) -> str:
+    """A qué modelo de NVIDIA le pide los vectores un modelo remoto del cluster
+    ('' si no se puede leer). NVIDIA da de baja modelos (nemotron-3-embed-1b, el
+    2026-11-23): uno registrado antes le seguiría pidiendo al que ya no está."""
+    r = _os_req("GET", f"{base}/_plugins/_ml/models/{model_id}", user, password, timeout=20)
+    try:
+        conector = str((r.json() or {}).get("connector_id") or "") if _resp_ok(r) else ""
+    except (ValueError, AttributeError):
+        conector = ""
+    if not conector:
+        return ""
+    rc = _os_req("GET", f"{base}/_plugins/_ml/connectors/{conector}", user, password, timeout=20)
+    try:
+        return str(((rc.json() or {}).get("parameters") or {}).get("model") or "") if _resp_ok(rc) else ""
+    except (ValueError, AttributeError):
+        return ""
+
+
 def _preparar_los_modelos(base: str, user: str, password: str, huella_previa: str) -> "tuple[dict, str]":
     """Reusa los que ya están (por nombre); si no, crea el conector y el modelo
-    remoto de cada uno. Con otra clave, los rehace (el conector lleva la clave).
-    Al final, un vector de prueba: dice si el cluster llega a NVIDIA."""
+    remoto de cada uno. Con otra clave o si piden otro modelo de NVIDIA, los
+    rehace (el conector lleva la clave y el modelo). Al final, un vector de
+    prueba: dice si el cluster llega a NVIDIA."""
     import maas_integrator as _mi
 
     clave = _mi.get_nvidia_api_key()
@@ -9077,7 +9106,10 @@ def _preparar_los_modelos(base: str, user: str, password: str, huella_previa: st
     ids: dict = {}
     for tipo, nombre in busqueda.NOMBRES_DE_MODELO.items():
         existentes = _modelos_por_nombre(base, user, password, nombre)
-        if otra_clave:
+        # Uno que no se puede leer no se toca: se reusa como siempre.
+        otro_modelo = any(_modelo_de_nvidia(base, user, password, mid) not in ("", busqueda.PROVEEDOR["modelo"])
+                          for mid in existentes)
+        if otra_clave or otro_modelo:
             for mid in existentes:
                 _borrar_modelo_remoto(base, user, password, mid)
             existentes = []
@@ -9277,9 +9309,13 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
             continue
         if model_id:
             _esperar_cluster_libre(base, user, password)
+            # Los vectores de otro modelo no se comparan con los del nuevo: se rehace.
+            antes = (guardados.get(slug) or {}).get("busqueda") or {}
+            otro_modelo = bool(antes) and not antes.get("no_aplica") \
+                and antes.get("modelo", busqueda.MODELO_SIN_REGISTRO) != busqueda.PROVEEDOR["modelo"]
             try:
                 res = _provisionar_busqueda(base, user, password, slug, index_pattern_from_name(indice),
-                                            fields, model_id, force)
+                                            fields, model_id, force or otro_modelo)
             except Exception as exc:  # noqa: BLE001 — pieza de demo
                 res = {"ok": False, "reason": repr(exc)}
         else:
@@ -9331,7 +9367,10 @@ def _provisionar_la_busqueda(cluster: dict, user: str, password: str, https_enab
             runs.step(run, f"Search Relevance · {slug}", False, repr(exc)[:300])
         e = plugins_vista.estado_simple(res)
         nuevo = e and {**e, "campo": res.get("campo") or busqueda.campo_de_texto_libre(fields),
-                       "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica"))}
+                       "textos": res.get("textos"), "no_aplica": bool(res.get("no_aplica")),
+                       # Con qué modelo están los vectores (solo si se armó): si
+                       # cambia, la próxima provisión lo rehace.
+                       **({"modelo": busqueda.PROVEEDOR["modelo"]} if res.get("ok") and not res.get("no_aplica") else {})}
         if nuevo and evaluacion is not None:
             # Un "ya estaba" no pisa lo guardado, pero la evaluación puede ser nueva.
             nuevo = ({**{k: v for k, v in anterior.items() if k != "ya"}, "evaluacion": evaluacion}

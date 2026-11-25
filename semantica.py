@@ -296,6 +296,7 @@ def aplicar(perfil, datos: dict) -> None:
     # Después de los nombres: en un CSV sin header nombra a `id_paciente`, no
     # a `columna_5`.
     _principales(perfil, datos.get("principales"))
+    _entidad_por_repeticion(perfil)
     _falla(perfil, datos.get("falla"))
 
 
@@ -323,6 +324,29 @@ def _principales(perfil, principales: Any) -> None:
                     otra.rol = None
         c.rol = rol
         c.principal = clave
+
+
+# Menos valores distintos en la muestra es una categoría (el dispositivo, el
+# navegador), no una entidad a seguir.
+_MIN_DISTINTOS_ENTIDAD = 10
+
+
+def _entidad_por_repeticion(perfil) -> None:
+    """Sin entidad principal (el LLM no dio una, o la que dio no servía), la que
+    más se repite en la muestra entre los identificadores: en regalos de
+    experiencias quedaba sin entidad y el perfil se armaba por dispositivo, con
+    cinco valores; el prestador, que se repite, es la que conviene seguir."""
+    if any(c.principal == "entidad" for c in perfil.columnas):
+        return
+    mejor, repeticion = None, 1.0
+    for c in perfil.columnas:
+        llenos = len(c.valores) - c.vacios
+        if c.rol != "entity_id" or not _MIN_DISTINTOS_ENTIDAD <= c.distintos < llenos:
+            continue
+        if llenos / c.distintos > repeticion:
+            mejor, repeticion = c, llenos / c.distintos
+    if mejor is not None:
+        mejor.principal = "entidad"
 
 
 def _falla(perfil, falla: Any) -> None:
