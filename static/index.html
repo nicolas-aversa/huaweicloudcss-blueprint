@@ -2875,7 +2875,10 @@
     /* El formulario a la izquierda (queda a la vista al bajar) y la cotización
        a la derecha; en pantallas chicas, uno abajo del otro. */
     .cot { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 24px; align-items: start; }
-    .cot__form { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 12px; }
+    .cot__form {
+      display: flex; flex-direction: column; gap: 14px; position: sticky; top: 12px;
+      max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px;
+    }
     .cot__grupo {
       border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-primary);
       box-shadow: var(--shadow-xs); padding: 10px 16px 4px; margin: 0; min-width: 0;
@@ -2917,9 +2920,31 @@
     .cot__det { display: block; color: var(--text-muted); font-size: var(--fs-xs); }
     .cot__suma td { font-weight: var(--fw-semi); border-bottom: 0; border-top: 2px solid var(--border-default); }
     .cot__acciones { display: flex; justify-content: flex-end; }
+    /* Las fuentes de logs: una tarjeta por fuente, con sus campos de a dos. */
+    .cot__fuentes { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 8px; }
+    .cot__fuente { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); padding: 10px 12px 0; }
+    .cot__fuente-cab { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .cot__fuente-cab .form-input { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+    .cot__quitar {
+      flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+      border: 1px solid var(--border-default); border-radius: var(--radius-md); background: transparent; color: var(--text-muted); cursor: pointer;
+    }
+    .cot__quitar:hover { color: var(--accent-red); border-color: var(--accent-red); }
+    .cot__quitar[hidden] { display: none; }
+    .cot__quitar .icon { width: 14px; height: 14px; }
+    .cot__par { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; align-items: end; }
+    .cot__par--arriba { align-items: start; }
+    .cot__ancho { grid-column: 1 / -1; }
+    .cot__ayuda { display: block; color: var(--text-muted); font-size: var(--fs-xs); line-height: var(--lh-base); margin: 0 0 10px; }
+    .cot__acciones-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .cot__acciones-form .btn-ghost:disabled { opacity: .5; cursor: not-allowed; }
+    .cot__tag {
+      display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--accent-tint);
+      color: var(--text-secondary); font-size: var(--fs-xs); vertical-align: middle;
+    }
     @media (max-width: 960px) {
       .cot { grid-template-columns: 1fr; }
-      .cot__form { position: static; }
+      .cot__form { position: static; max-height: none; overflow: visible; padding-right: 0; }
     }
   </style>
 </head>
@@ -3229,40 +3254,75 @@
         </div>
 
         <!-- ═══ Vista: Cotizador ═════════════════════════════════════════════ -->
-        <!-- Un formulario y la cotización de un cluster CSS OpenSearch, con el
-             modelo validado en un cluster real (cotizador.py). Se recalcula al
-             cambiar cualquier dato. -->
+        <!-- Un formulario y la cotización de un cluster CSS OpenSearch para
+             cualquier escenario de logs, con el modelo validado en un cluster
+             real (cotizador.py). Se recalcula al cambiar cualquier dato. Las
+             fuentes, los flavors y los precios los arma el script con
+             /api/v1/cotizador/valores. -->
         <div class="app-view" id="view-cotizador">
-          <p class="view-subtitle">Cuánto cluster CSS OpenSearch hace falta y cuánto cuesta, según cuántos logs llegan y cuánto tiempo se guardan.</p>
+          <p class="view-subtitle">Cuánto cluster CSS OpenSearch hace falta y cuánto cuesta, para cualquier escenario de logs: cargá las fuentes y cuánto se guarda y, si querés, el hardware y los precios.</p>
           <div class="cot">
             <form class="cot__form" id="cot-form" autocomplete="off" novalidate>
               <fieldset class="cot__grupo">
-                <legend>Cuántos logs llegan</legend>
-                <label class="cot__campo"><span>Log por día (GB)</span><input class="form-input" type="number" name="gb_por_dia" min="0.01" step="any"></label>
-                <label class="cot__campo"><span>Tamaño de un evento (bytes)</span><input class="form-input" type="number" name="bytes_por_evento" min="20" step="1"><small>El promedio de una línea del log.</small></label>
-                <label class="cot__campo"><span>Días con log por semana</span><select class="form-select" name="dias_por_semana"><option value="7">Todos los días</option><option value="5">Días hábiles</option></select></label>
-                <label class="cot__campo"><span>Horas en que llega casi todo</span><input class="form-input" type="number" name="horas_activas" min="1" max="24" step="1"><small>24 si llega parejo; 7 si es, por ejemplo, de 10 a 17 h.</small></label>
-                <label class="cot__campo"><span>Pico sobre el promedio</span><input class="form-input" type="number" name="pico" min="1" max="20" step="0.5"><small>Cuántas veces el promedio de esas horas.</small></label>
+                <legend>Qué logs llegan y cuánto se guardan</legend>
+                <div class="cot__fuentes" id="cot-fuentes"></div>
+                <small class="cot__ayuda">Horas en que llega: casi todo el log; 24 si llega parejo, 7 si es de 10 a 17 h. Pico: cuántas veces el promedio de esas horas. En hot: lo que se consulta al instante.</small>
+                <div class="cot__acciones-form"><button type="button" class="btn-ghost" id="cot-mas-fuente"><svg class="icon"><use href="#ic-plus"/></svg> Agregar otra fuente</button></div>
               </fieldset>
+              <template id="cot-fuente-tpl">
+                <div class="cot__fuente">
+                  <div class="cot__fuente-cab">
+                    <input class="form-input" type="text" data-f="nombre" maxlength="60" placeholder="Nombre (opcional)" aria-label="Nombre de la fuente">
+                    <button type="button" class="cot__quitar" title="Quitar esta fuente" aria-label="Quitar esta fuente" hidden><svg class="icon"><use href="#ic-x"/></svg></button>
+                  </div>
+                  <div class="cot__par">
+                    <label class="cot__campo"><span>Log por día (GB)</span><input class="form-input" type="number" data-f="gb_por_dia" min="0.01" step="any"></label>
+                    <label class="cot__campo"><span>Bytes por evento</span><input class="form-input" type="number" data-f="bytes_por_evento" min="20" step="1"></label>
+                    <label class="cot__campo"><span>Días con log por semana</span><select class="form-select" data-f="dias_por_semana"><option value="7">Todos</option><option value="6">6</option><option value="5">Hábiles</option></select></label>
+                    <label class="cot__campo"><span>Horas en que llega</span><input class="form-input" type="number" data-f="horas_activas" min="1" max="24" step="1"></label>
+                    <label class="cot__campo"><span>Pico sobre el promedio</span><input class="form-input" type="number" data-f="pico" min="1" max="20" step="0.5"></label>
+                    <label class="cot__campo"><span>Se guarda (días)</span><input class="form-input" type="number" data-f="retencion_dias" min="1" max="3650" step="1"></label>
+                    <label class="cot__campo"><span>En hot (días)</span><input class="form-input" type="number" data-f="dias_hot" min="1" max="3650" step="1"></label>
+                  </div>
+                </div>
+              </template>
               <fieldset class="cot__grupo">
-                <legend>Cuánto se guarda</legend>
-                <label class="cot__campo"><span>Se guarda (días)</span><input class="form-input" type="number" name="retencion_dias" min="1" max="3650" step="1"></label>
-                <label class="cot__campo"><span>En nodos de datos hot (días)</span><input class="form-input" type="number" name="dias_hot" min="1" max="3650" step="1"><small>Lo que se consulta al instante.</small></label>
-                <label class="cot__campo"><span>El resto va a</span><select class="form-select" name="resto"><option value="congelados">Índices congelados</option><option value="cold">Nodos de datos cold</option></select></label>
-                <label class="cot__campo"><span>Respaldo en OBS</span><select class="form-select" name="respaldo"><option value="1">Sí</option><option value="0">No</option></select></label>
+                <legend>Dónde se guarda</legend>
+                <label class="cot__campo"><span>Pasados los días en hot, va a</span><select class="form-select" name="resto"><option value="congelados">Índices congelados</option><option value="cold">Nodos de datos cold</option></select></label>
+                <label class="cot__campo"><span>Respaldo en OBS</span><select class="form-select" name="respaldo"><option value="1">Sí</option><option value="0">No</option></select><small>Un snapshot de todo lo guardado.</small></label>
               </fieldset>
               <fieldset class="cot__grupo">
                 <legend>Disponibilidad y enlace</legend>
                 <label class="cot__campo"><span>Réplicas</span><select class="form-select" name="replicas"><option value="1">1</option><option value="0">Sin réplica</option><option value="2">2</option></select></label>
-                <label class="cot__campo"><span>AZ</span><select class="form-select" name="azs"><option value="2">2</option><option value="1">1</option></select></label>
+                <label class="cot__campo"><span>AZ</span><select class="form-select" name="azs"><option value="2">2</option><option value="3">3</option><option value="1">1</option></select></label>
                 <label class="cot__campo"><span>Cómo llegan los logs</span><select class="form-select" name="enlace"><option value="interno">Desde la misma VPC</option><option value="publico">Por el acceso público del cluster</option><option value="vpn">Por una VPN</option></select></label>
                 <label class="cot__campo" data-si-enlace="vpn" hidden><span>Respuesta corta de Fluent Bit</span><select class="form-select" name="respuesta_corta"><option value="1">Sí</option><option value="0">No</option></select><small>Le pide al cluster solo el resultado de cada mensaje: menos tráfico de vuelta.</small></label>
               </fieldset>
+              <details class="cot__avanzado">
+                <summary>Hardware: automático o elegido</summary>
+                <small class="cot__ayuda">En automático sale el cluster más barato que cumple. Lo que elijas se respeta, y los avisos dicen si no alcanza.</small>
+                <div class="cot__par">
+                  <label class="cot__campo"><span>Flavor hot</span><select class="form-select" name="flavor_hot" data-flavors><option value="auto">Automático</option></select></label>
+                  <label class="cot__campo"><span>Nodos hot</span><input class="form-input" type="number" name="nodos_hot" min="1" max="200" step="1" placeholder="Automático"></label>
+                  <label class="cot__campo"><span>Disco por nodo hot (GB)</span><input class="form-input" type="number" name="disco_hot_gb" min="40" step="20" placeholder="Automático"></label>
+                  <label class="cot__campo"><span>Tipo de disco hot</span><select class="form-select" name="disco_hot"><option value="ultra">Ultra-high I/O</option><option value="high">High I/O</option></select></label>
+                  <label class="cot__campo" data-si-resto="cold"><span>Flavor cold</span><select class="form-select" name="flavor_cold" data-flavors><option value="auto">Automático</option></select></label>
+                  <label class="cot__campo" data-si-resto="cold"><span>Nodos cold</span><input class="form-input" type="number" name="nodos_cold" min="1" max="32" step="1" placeholder="Automático"></label>
+                  <label class="cot__campo cot__ancho"><span>Masters dedicados</span><select class="form-select" name="masters"><option value="regla">Según la regla de Huawei</option><option value="siempre">Siempre (al menos 3)</option></select></label>
+                </div>
+              </details>
               <details class="cot__avanzado">
                 <summary>Supuestos que se pueden ajustar</summary>
                 <label class="cot__campo"><span>Crecimiento del índice sobre el log</span><input class="form-input" type="number" name="crecimiento" min="0.3" max="5" step="0.01"><small>1,33 con zstd_no_dict, medido.</small></label>
                 <label class="cot__campo"><span>MB/s de escritura por vCPU</span><input class="form-input" type="number" name="mb_s_por_vcpu" min="0.1" max="10" step="0.1"><small>1 en la fórmula de Huawei.</small></label>
               </details>
+              <details class="cot__avanzado">
+                <summary>Precios: de lista o de otra región</summary>
+                <small class="cot__ayuda">Vienen los de lista. Para otra región, cambiá el nombre y los precios: la cotización aclara que se cargaron a mano.</small>
+                <div id="cot-precios"></div>
+                <div class="cot__acciones-form"><button type="button" class="btn-ghost" id="cot-precios-lista"><svg class="icon"><use href="#ic-refresh"/></svg> Volver a los de lista</button></div>
+              </details>
+              <div class="cot__acciones-form"><button type="button" class="btn-ghost" id="cot-reiniciar"><svg class="icon"><use href="#ic-refresh"/></svg> Empezar de nuevo</button></div>
             </form>
             <div class="cot__resultado" id="cot-resultado" aria-live="polite"></div>
           </div>
@@ -8659,11 +8719,17 @@
 
     // ── Cotizador ────────────────────────────────────────────────────────────
     // El formulario manda todo a /api/v1/cotizador y pinta la respuesta. El
-    // cálculo vive en el servidor (cotizador.py), con sus tests.
-    let _cotIniciado = false, _cotTimer = null, _cotUltimo = null, _cotPedido = 0;
+    // cálculo vive en el servidor (cotizador.py), con sus tests. El formulario
+    // se arma con /api/v1/cotizador/valores: los valores por defecto, los
+    // flavors y los precios de lista.
+    let _cotIniciado = false, _cotTimer = null, _cotUltimo = null, _cotPedido = 0, _cotValores = null;
     const _cotNum = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
     const _cotDec = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
     const _cotUsd = (v) => `US$ ${_cotNum.format(Math.round(v))}`;
+    const _cotGb = (x) => x >= 1000 ? `${_cotDec.format(x / 1000)} TB` : `${_cotNum.format(x)} GB`;
+    const _COT_SI_NO = new Set(['respaldo', 'respuesta_corta']);
+    const _COT_TEXTO = new Set(['resto', 'enlace', 'disco_hot', 'masters', 'flavor_hot', 'flavor_cold']);
+    const _COT_VACIO_ES_AUTO = new Set(['nodos_hot', 'disco_hot_gb', 'nodos_cold']);
 
     async function initCotizador() {
       if (_cotIniciado) return;
@@ -8672,16 +8738,76 @@
       if (!form) return;
       try {
         const res = await fetch('/api/v1/cotizador/valores');
-        const data = await res.json();
-        Object.entries(data.defaults || {}).forEach(([k, v]) => {
-          const el = form.elements[k];
-          if (el) el.value = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
-        });
+        if (res.ok) _cotValores = await res.json();
       } catch (_) { /* sin valores: el servidor usa los suyos */ }
+      armarCotizador(form);
       form.addEventListener('input', programarCotizacion);
       form.addEventListener('change', programarCotizacion);
       form.addEventListener('submit', (e) => e.preventDefault());
+      document.getElementById('cot-mas-fuente')?.addEventListener('click', () => { agregarFuente(); cotizarCluster(); });
+      document.getElementById('cot-precios-lista')?.addEventListener('click', () => { armarPrecios(); cotizarCluster(); });
+      document.getElementById('cot-reiniciar')?.addEventListener('click', () => { armarCotizador(form); cotizarCluster(); });
       cotizarCluster();
+    }
+
+    // Todo el formulario con los valores por defecto y una sola fuente.
+    function armarCotizador(form) {
+      const v = _cotValores || {};
+      const flavors = (v.flavors || []).filter(f => f.datos);
+      form.querySelectorAll('select[data-flavors]').forEach(sel => {
+        sel.innerHTML = '<option value="auto">Automático</option>' + flavors.map(f =>
+          `<option value="${escapeHtml(f.clave)}">${f.vcpu} vCPU y ${f.ram} GB</option>`).join('');
+      });
+      Object.entries(v.defaults || {}).forEach(([k, val]) => {
+        const el = form.elements[k];
+        if (!el) return;
+        el.value = typeof val === 'boolean' ? (val ? '1' : '0') : (_COT_VACIO_ES_AUTO.has(k) && !val ? '' : String(val));
+      });
+      const lista = document.getElementById('cot-fuentes');
+      if (lista) lista.innerHTML = '';
+      agregarFuente();
+      armarPrecios();
+    }
+
+    function agregarFuente() {
+      const lista = document.getElementById('cot-fuentes');
+      const tpl = document.getElementById('cot-fuente-tpl');
+      if (!lista || !tpl || lista.children.length >= (_cotValores?.max_fuentes || 20)) return;
+      const card = tpl.content.firstElementChild.cloneNode(true);
+      Object.entries(_cotValores?.fuente || {}).forEach(([k, val]) => {
+        const el = card.querySelector(`[data-f="${k}"]`);
+        if (el && k !== 'nombre') el.value = String(val);
+      });
+      card.querySelector('.cot__quitar').addEventListener('click', () => { card.remove(); marcarFuentes(); cotizarCluster(); });
+      lista.appendChild(card);
+      marcarFuentes();
+    }
+
+    // Con una sola fuente no hay nada que quitar; con varias, cada una con su número.
+    function marcarFuentes() {
+      const cards = [...(document.getElementById('cot-fuentes')?.children || [])];
+      cards.forEach((c, i) => {
+        c.querySelector('.cot__quitar').hidden = cards.length < 2;
+        c.querySelector('[data-f="nombre"]').placeholder = cards.length < 2 ? 'Nombre (opcional)' : `Fuente ${i + 1}`;
+      });
+      const mas = document.getElementById('cot-mas-fuente');
+      if (mas) mas.disabled = cards.length >= (_cotValores?.max_fuentes || 20);
+    }
+
+    // Los precios de lista, cada uno editable: así se cotiza otra región.
+    function armarPrecios() {
+      const caja = document.getElementById('cot-precios');
+      if (!caja) return;
+      const v = _cotValores;
+      if (!v) { caja.innerHTML = '<small class="cot__ayuda">No se pudieron leer los precios de lista.</small>'; return; }
+      const campo = (attr, clave, etiqueta, unidad, valor) => `<label class="cot__campo"><span>${escapeHtml(etiqueta)}</span>`
+        + `<input class="form-input" type="number" min="0" step="any" ${attr}="${escapeHtml(clave)}" value="${escapeHtml(String(valor))}">`
+        + `<small>${escapeHtml(unidad)}</small></label>`;
+      caja.innerHTML = `<label class="cot__campo"><span>Región</span><input class="form-input" type="text" maxlength="60" data-p="region" `
+        + `value="${escapeHtml(v.region)}"></label><div class="cot__par cot__par--arriba">`
+        + (v.flavors || []).map(f => campo('data-pf', f.clave, `Nodo de ${f.vcpu} vCPU y ${f.ram} GB`, `US$ por mes, ${f.uso}`, f.usd_mes)).join('')
+        + (v.precios_campos || []).map(c => campo('data-p', c.clave, c.etiqueta, c.unidad, v.precios[c.clave])).join('')
+        + '</div>';
     }
 
     function programarCotizacion() {
@@ -8690,14 +8816,29 @@
     }
 
     function datosDelCotizador(form) {
-      const d = {};
+      const d = { fuentes: [] };
+      form.querySelectorAll('.cot__fuente').forEach(card => {
+        const f = {};
+        card.querySelectorAll('[data-f]').forEach(el => {
+          if (el.dataset.f === 'nombre') f.nombre = el.value.trim();
+          else if (el.value !== '') f[el.dataset.f] = Number(el.value);
+        });
+        d.fuentes.push(f);
+      });
       for (const el of form.elements) {
         if (!el.name) continue;
-        if (el.name === 'respaldo' || el.name === 'respuesta_corta') d[el.name] = el.value === '1';
-        else if (el.name === 'resto' || el.name === 'enlace') d[el.name] = el.value;
+        if (_COT_SI_NO.has(el.name)) d[el.name] = el.value === '1';
+        else if (_COT_TEXTO.has(el.name)) d[el.name] = el.value;
         else if (el.value !== '') d[el.name] = Number(el.value);
       }
+      const precios = { flavors: {} };
+      form.querySelectorAll('[data-p]').forEach(el => {
+        if (el.value !== '') precios[el.dataset.p] = el.dataset.p === 'region' ? el.value.trim() : Number(el.value);
+      });
+      form.querySelectorAll('[data-pf]').forEach(el => { if (el.value !== '') precios.flavors[el.dataset.pf] = Number(el.value); });
+      d.precios = precios;
       form.querySelectorAll('[data-si-enlace]').forEach(c => { c.hidden = d.enlace !== c.dataset.siEnlace; });
+      form.querySelectorAll('[data-si-resto]').forEach(c => { c.hidden = d.resto !== c.dataset.siResto; });
       return d;
     }
 
@@ -8722,20 +8863,39 @@
       }
     }
 
+    function _cotPrecios(p) {
+      return p.editados ? `Precios cargados a mano para ${p.region}` : `Precios de lista de ${p.region}, ${p.consultado}`;
+    }
+
     function cotizacionHTML(r) {
-      const v = r.volumen, c = r.cluster, a = r.anual, e = r.entrada;
+      const v = r.volumen, c = r.cluster, a = r.anual, e = r.entrada, fs = r.fuentes || [];
+      const varias = fs.length > 1;
       const cifras = [
         ['Eventos por segundo en el pico', _cotNum.format(v.eventos_s_pico)],
         ['Log en el pico', `${_cotDec.format(v.mb_s_pico)} MB/s`],
         ['Uso estimado en el pico', `${Math.round(c.uso_pico * 100)} %`],
-        ['Shards por índice diario', `${c.shards} de ${_cotNum.format(c.gb_por_shard)} GB`],
+        varias ? ['Shards por día', `${c.shards}, en ${fs.length} índices`]
+          : ['Shards por índice diario', `${c.shards} de ${_cotNum.format(c.gb_por_shard)} GB`],
       ];
       if (r.enlace.tipo !== 'interno') cifras.push(['Red en el pico', `${_cotNum.format(r.enlace.mbit_pico)} Mbit/s`]);
+      const fuentes = !varias ? '' : `
+        <section class="cot__bloque">
+          <h3>Las fuentes</h3>
+          <div class="cot__scroll"><table class="cot__tabla"><thead><tr><th>Fuente</th><th class="n">Por día</th>`
+            + '<th class="n">Pico</th><th class="n">En hot</th><th class="n">Se guarda</th><th class="n">Shards</th></tr></thead><tbody>'
+            + fs.map(f => `<tr><td>${escapeHtml(f.nombre)}</td><td class="n">${_cotGb(f.gb_dia)}</td>`
+              + `<td class="n">${_cotDec.format(f.mb_s_pico)} MB/s</td><td class="n">${f.dias_hot} días</td>`
+              + `<td class="n">${f.retencion_dias} días</td><td class="n">${f.shards} por día</td></tr>`).join('')
+            + `</tbody></table></div>
+        </section>`;
       const costos = r.costos.map(x => `<tr><td>${escapeHtml(x.concepto)}<span class="cot__det">${escapeHtml(x.detalle)}</span></td>`
         + `<td class="n">${_cotUsd(x.usd)}</td></tr>`).join('');
+      const conViejo = r.progresion.some(m => m.gb_viejo > 0);
       const viejo = e.resto === 'cold' ? 'En nodos cold' : 'Congelados';
-      const meses = r.progresion.map(m => `<tr><td>Mes ${m.mes}</td><td class="n">${m.dias_hot}</td><td class="n">${m.dias_viejo}</td>`
-        + (e.respaldo ? `<td class="n">${m.dias_respaldo}</td>` : '') + `<td class="n">${_cotUsd(m.usd)}</td></tr>`).join('');
+      const meses = r.progresion.map(m => `<tr><td>Mes ${m.mes}</td><td class="n">${_cotGb(m.gb_hot)}</td>`
+        + (conViejo ? `<td class="n">${_cotGb(m.gb_viejo)}</td>` : '')
+        + (e.respaldo ? `<td class="n">${_cotGb(m.gb_respaldo)}</td>` : '') + `<td class="n">${_cotUsd(m.usd)}</td></tr>`).join('');
+      const aMano = (c.a_mano || []).length ? ' <span class="cot__tag">Hardware elegido a mano</span>' : '';
       return `
         <div class="cot__total">
           <span class="cot__eyebrow">Por mes, con todo lo guardado</span>
@@ -8746,16 +8906,17 @@
             <div><dt>Cada año siguiente</dt><dd>${_cotUsd(a.anio_siguiente)}</dd></div>
             <div><dt>Cada año siguiente, con pago anual</dt><dd>${_cotUsd(a.anio_siguiente_pago_anual)}</dd></div>
           </dl>
-          <p class="cot__nota">Por hora, con pago por uso: ${_cotUsd(a.por_hora_mes)} por mes. Precios de lista de ${escapeHtml(r.precios.region)}, `
-            + `${escapeHtml(r.precios.consultado)}, sin impuestos ni descuentos.</p>
+          <p class="cot__nota">Por hora, con pago por uso: ${_cotUsd(a.por_hora_mes)} por mes. ${escapeHtml(_cotPrecios(r.precios))}, `
+            + `sin impuestos ni descuentos.</p>
         </div>
         <section class="cot__bloque">
           <h3>El cluster</h3>
-          <p>${escapeHtml(r.resumen)}.</p>
+          <p>${escapeHtml(r.resumen)}.${aMano}</p>
           <dl class="cot__cifras">${cifras.map(([k, val]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(val)}</dd></div>`).join('')}</dl>
         </section>
         ${r.avisos.length ? `<section class="cot__bloque cot__avisos"><h3>Para tener en cuenta</h3>`
           + `<ul>${r.avisos.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul></section>` : ''}
+        ${fuentes}
         <section class="cot__bloque">
           <h3>Costo por mes, con todo lo guardado</h3>
           <div class="cot__scroll"><table class="cot__tabla"><tbody>${costos}`
@@ -8763,8 +8924,9 @@
         </section>
         <details class="cot__bloque">
           <summary>El primer año, mes a mes</summary>
-          <p class="cot__nota">Días con log guardados en cada lugar. El cluster hot se contrata entero desde el primer mes; lo demás crece hasta llenarse.</p>
-          <div class="cot__scroll"><table class="cot__tabla"><thead><tr><th>Mes</th><th class="n">En hot</th><th class="n">${viejo}</th>`
+          <p class="cot__nota">Índice guardado en cada lugar (una copia). El cluster hot se contrata entero desde el primer mes; lo demás crece hasta llenarse.</p>
+          <div class="cot__scroll"><table class="cot__tabla"><thead><tr><th>Mes</th><th class="n">En hot</th>`
+            + (conViejo ? `<th class="n">${viejo}</th>` : '')
             + (e.respaldo ? '<th class="n">En el respaldo</th>' : '') + `<th class="n">Costo</th></tr></thead><tbody>${meses}</tbody></table></div>
         </details>
         <details class="cot__bloque">
@@ -8775,14 +8937,18 @@
     }
 
     function textoDeLaCotizacion(r) {
-      const e = r.entrada, a = r.anual;
-      const resto = e.retencion_dias > e.dias_hot ? ` y el resto en ${e.resto === 'cold' ? 'nodos de datos cold' : 'índices congelados'}` : '';
+      const e = r.entrada, a = r.anual, fs = e.fuentes || [];
+      const fuente = (f) => `${_cotDec.format(f.gb_por_dia)} GB de log por día, ${f.dias_por_semana} días por semana, con un pico de `
+        + `${_cotDec.format(f.pico)} veces el promedio en ${_cotDec.format(f.horas_activas)} h; se guardan ${f.retencion_dias} días, `
+        + `${f.dias_hot} en nodos de datos hot`;
+      const hayResto = fs.some(f => f.retencion_dias > f.dias_hot);
       const lineas = [
-        `Cotización de CSS OpenSearch (${r.precios.region}, precios de lista de ${r.precios.consultado}, sin impuestos ni descuentos)`,
+        `Cotización de CSS OpenSearch (${r.precios.region}, ${r.precios.editados ? 'precios cargados a mano'
+          : `precios de lista de ${r.precios.consultado}`}, sin impuestos ni descuentos)`,
         '',
-        `Datos: ${_cotDec.format(e.gb_por_dia)} GB de log por día, ${e.dias_por_semana} días por semana, con un pico de `
-          + `${_cotDec.format(e.pico)} veces el promedio en ${e.horas_activas} h. Se guardan ${e.retencion_dias} días: ${e.dias_hot} en `
-          + `nodos de datos hot${resto}${e.respaldo ? ', con respaldo en OBS' : ''}. Réplicas: ${e.replicas}. AZ: ${e.azs}.`,
+        ...(fs.length > 1 ? ['Fuentes:', ...fs.map(f => `- ${f.nombre}: ${fuente(f)}.`)] : [`Datos: ${fuente(fs[0])}.`]),
+        (hayResto ? `Lo demás va a ${e.resto === 'cold' ? 'nodos de datos cold' : 'índices congelados'}. ` : '')
+          + `${e.respaldo ? 'Con respaldo en OBS. ' : ''}Réplicas: ${e.replicas}. AZ: ${e.azs}.`,
         `Cluster: ${r.resumen}.`,
         '',
         'Costo por mes, con todo lo guardado:',

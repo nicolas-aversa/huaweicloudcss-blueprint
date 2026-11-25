@@ -1353,15 +1353,16 @@ def get_verticals() -> dict:
     return _front_payload()
 
 
-# ── Casos de demo creados desde la plataforma ───────────────────────────────
-# Alta desde el Builder: el SA sube su .log, GLM-5.2 arma el filter y detecta los
-# campos, y acá el caso queda persistido como uno más del flujo de demo. Ver
-# custom_cases.py. Son compartidos por instancia; borra el creador o un admin.
+# ── Cotizador ───────────────────────────────────────────────────────────────
+# La cotización de un cluster CSS OpenSearch para cualquier escenario de logs
+# (una o varias fuentes, hardware automático o elegido, precios de lista o de
+# otra región). El cálculo está en cotizador.py.
 @app.post("/api/v1/cotizador", tags=["cotizador"], summary="Cotiza un cluster CSS OpenSearch")
 def cotizar_cluster(request: dict) -> dict:
-    """Body: el formulario del cotizador (ver `cotizador.DEFAULTS`; lo que falta
-    toma su valor por defecto). Devuelve el cluster, el costo por mes, el primer
-    año mes a mes, los avisos y los supuestos con su fuente."""
+    """Body: `fuentes` (lista de `cotizador.FUENTE`), el resto de
+    `cotizador.DEFAULTS` y, si se quiere, `precios`. Lo que falta toma su valor
+    por defecto. Devuelve el cluster, el costo por mes, el primer año mes a mes,
+    los avisos y los supuestos con su fuente."""
     import cotizador
 
     try:
@@ -1370,14 +1371,17 @@ def cotizar_cluster(request: dict) -> dict:
         raise HTTPException(status_code=400, detail={"stage": "cotizador", "message": str(exc)}) from exc
 
 
-@app.get("/api/v1/cotizador/valores", tags=["cotizador"], summary="Valores por defecto y precios del cotizador")
+@app.get("/api/v1/cotizador/valores", tags=["cotizador"], summary="Valores por defecto, flavors y precios del cotizador")
 def valores_del_cotizador() -> dict:
     import cotizador
 
-    return {"defaults": cotizador.DEFAULTS, "region": cotizador.PRECIOS["region"],
-            "consultado": cotizador.PRECIOS["consultado"]}
+    return cotizador.valores()
 
 
+# ── Casos de demo creados desde la plataforma ───────────────────────────────
+# Alta desde el Builder: el SA sube su .log, GLM-5.2 arma el filter y detecta los
+# campos, y acá el caso queda persistido como uno más del flujo de demo. Ver
+# custom_cases.py. Son compartidos por instancia; borra el creador o un admin.
 @app.get("/api/v1/cases", tags=["verticals"], summary="Casos de demo creados desde la plataforma")
 def list_custom_cases() -> dict:
     """Metadata de los casos guardados (sin el dataset)."""
