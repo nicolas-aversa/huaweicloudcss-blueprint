@@ -52,7 +52,8 @@ PRECIOS: dict[str, Any] = {
     "obs_tb_anio": 174.18,          # paquete anual de OBS, por TB (1.024 GB)
     "congelado_gb_hora": 0.00003209,
     "ancho_banda_mbit": 8.016,      # acceso público del cluster
-    "vpn_gateway_hora": 0.33,       # VPN Enterprise Professional 1, pago por uso
+    "vpn_gateway_mes": 209.0,       # VPN Enterprise Professional 1, pago mensual (calculadora)
+    "vpn_gateway_hora": 0.33,       # la misma, pago por uso
     "eip_hora": 0.005,              # reserva de una EIP
     "trafico_salida_gb": 0.081,     # EIP por tráfico, hasta 10 TB por mes
     "meses_pago_anual": 10,
@@ -66,7 +67,8 @@ PRECIOS_CAMPOS: list[tuple[str, str, str, float, float]] = [
     ("obs_tb_anio", "Paquete anual de OBS", "US$ por TB y año", 0, 100000),
     ("congelado_gb_hora", "Índices congelados", "US$ por GB y hora", 0, 1),
     ("ancho_banda_mbit", "Acceso público", "US$ por Mbit/s y mes", 0, 10000),
-    ("vpn_gateway_hora", "Gateway VPN", "US$ por hora", 0, 1000),
+    ("vpn_gateway_mes", "Gateway VPN, pago mensual", "US$ por mes", 0, 100000),
+    ("vpn_gateway_hora", "Gateway VPN, pago por hora", "US$ por hora", 0, 1000),
     ("eip_hora", "Reserva de una EIP", "US$ por hora", 0, 1000),
     ("trafico_salida_gb", "Tráfico que sale", "US$ por GB", 0, 100),
     ("meses_pago_anual", "Pago anual", "meses que cuesta un año", 1, 12),
@@ -83,7 +85,7 @@ FLAVORS: dict[str, tuple[int, int, float, int]] = {
     "16u128g": (16, 128, 664.65, 10240),
 }
 DE_DATOS = tuple(k for k, v in FLAVORS.items() if v[3])
-HOT = ("8u32g", "16u64g")                       # los que prueba el modo automático
+HOT = DE_DATOS                                   # el automático prueba todos los de datos
 COLD = ("4u32g", "8u64g", "16u128g", "16u64g")
 FLAVOR_CLIENTE, FLAVOR_MASTER = "8u32g", "4u16g"
 DISCO_CLIENTE_MASTER_GB = 40
@@ -113,7 +115,7 @@ DEFAULTS: dict[str, Any] = {
     "resto": "congelados", "respaldo": True, "replicas": 1, "azs": 2, "enlace": "interno", "respuesta_corta": True,
     "crecimiento": 1.33, "mb_s_por_vcpu": 1.0,
     "flavor_hot": "auto", "nodos_hot": 0, "disco_hot_gb": 0, "disco_hot": "ultra",
-    "flavor_cold": "auto", "nodos_cold": 0, "masters": "regla",
+    "flavor_cold": "auto", "nodos_cold": 0, "masters": "regla", "pago": "mensual",
 }
 
 # (etiqueta, mínimo, máximo, entero): la etiqueta es la del formulario, para
@@ -143,6 +145,53 @@ _OPCIONES: dict[str, tuple[str, tuple[str, ...]]] = {
     "masters": ("Masters dedicados", ("regla", "siempre")),
     "flavor_hot": ("Flavor hot", ("auto",) + DE_DATOS),
     "flavor_cold": ("Flavor cold", ("auto",) + DE_DATOS),
+    "pago": ("Cómo se va a pagar", ("mensual", "anual", "por_hora")),
+}
+
+# ── El formulario simple ────────────────────────────────────────────────────
+# Preguntas de negocio, sin términos de CSS, que se traducen a los datos del
+# modelo. Si junto con ellas llega un dato técnico (desde «Ajustes técnicos»),
+# gana el técnico.
+GB_POR_SESION_FIX = 8      # medido en un OMS FIX: unos 8 GB de log por sesión por día
+BYTES_FIX = 333            # tamaño medio de un mensaje FIX (medido)
+BYTES_EVENTO = 500         # una línea de log típica (supuesto)
+UNIDADES: dict[str, str] = {
+    "gb_dia": "GB por día",
+    "eventos_s": "eventos por segundo",
+    "millones_dia": "millones de eventos por día",
+    "sesiones_fix": "sesiones FIX",
+}
+# (texto, días con log por semana, horas en que llega casi todo, pico sobre el promedio)
+HORARIOS: dict[str, tuple[str, int, int, float]] = {
+    "parejo": ("Parejo, las 24 horas, todos los días", 7, 24, 2.0),
+    "dia": ("Sobre todo de día (8 a 20 h), todos los días", 7, 12, 2.0),
+    "habil": ("En horario hábil (9 a 18 h), de lunes a viernes", 5, 9, 2.0),
+    "mercado": ("En horario de mercado (10 a 17 h), de lunes a viernes", 5, 7, 3.0),
+}
+# (texto, AZ, réplicas, respaldo)
+CRITICIDAD: dict[str, tuple[str, int, int, bool]] = {
+    "alta": ("Producción crítica: sigue andando aunque se caiga una zona", 2, 1, True),
+    "media": ("Producción: sigue andando aunque se caiga un servidor", 1, 1, True),
+    "prueba": ("Prueba de concepto o desarrollo", 1, 0, False),
+}
+LO_VIEJO: dict[str, tuple[str, str]] = {
+    "lento": ("Rara vez: puede tardar unos minutos", "congelados"),
+    "rapido": ("Seguido: tiene que responder rápido", "cold"),
+}
+ORIGEN: dict[str, tuple[str, str]] = {
+    "misma_region": ("En Huawei Cloud, en la misma región que el cluster", "interno"),
+    "otro_lugar": ("En otra región de Huawei Cloud, en otra nube o en su datacenter", "vpn"),
+    "internet": ("Por internet, sin VPN", "publico"),
+}
+PAGO: dict[str, str] = {
+    "mensual": "Por mes",
+    "anual": "Por año (cuesta 10 meses)",
+    "por_hora": "Por hora, sin compromiso",
+}
+SIMPLE: dict[str, Any] = {"criticidad": "alta", "viejo": "lento", "origen": "misma_region", "pago": "mensual"}
+FUENTE_SIMPLE: dict[str, Any] = {
+    "nombre": "", "cantidad": 50, "unidad": "gb_dia", "horario": "parejo", "retencion_dias": 30, "consulta_dias": 7,
+    "bytes_por_evento": "",
 }
 
 
@@ -186,6 +235,85 @@ def _si(v: Any) -> bool:
     if isinstance(v, str):
         return v.strip().lower() in ("1", "true", "si", "sí", "yes")
     return bool(v)
+
+
+def _opcion(datos: dict, clave: str, opciones: dict, etiqueta: str, defecto: str) -> str:
+    v = str(datos.get(clave) or defecto)
+    if v not in opciones:
+        raise DatoInvalido(f"{etiqueta}: «{v}» no es una de las opciones ({', '.join(opciones)})")
+    return v
+
+
+def _plazo(dias: int) -> str:
+    """7 → «7 días», 182 → «6 meses», 365 → «1 año», 1825 → «5 años»."""
+    if dias >= 365 and dias % 365 == 0:
+        return f"{dias // 365} año{'s' if dias > 365 else ''}"
+    if dias in (180, 182, 183):
+        return "6 meses"
+    return f"{dias} día{'s' if dias != 1 else ''}"
+
+
+def _fuente_simple(d: dict, prefijo: str) -> tuple[dict, "dict | None"]:
+    """Una fuente del formulario simple en los datos del modelo, y cómo se contó en
+    palabras. Una fuente técnica (con `gb_por_dia`, o sin `cantidad`) pasa tal cual."""
+    if d.get("cantidad") in (None, "") or d.get("gb_por_dia") not in (None, ""):
+        return dict(d), None
+    unidad = _opcion(d, "unidad", UNIDADES, prefijo + "Unidad", "gb_dia")
+    horario = _opcion(d, "horario", HORARIOS, prefijo + "Cuándo llega", "parejo")
+    texto_horario, dias, horas, pico = HORARIOS[horario]
+    cantidad = _valor(d["cantidad"], prefijo + "Cuánto llega", 0.0001, 1e9)
+    b = d.get("bytes_por_evento")
+    if b in (None, ""):
+        b = BYTES_FIX if unidad == "sesiones_fix" else BYTES_EVENTO
+    bytes_ev = _valor(b, prefijo + "Bytes por evento", 20, 1000000, True)
+    gb = {"gb_dia": cantidad, "eventos_s": cantidad * bytes_ev * horas * 3600 / 1e9,
+          "millones_dia": cantidad * 1e6 * bytes_ev / 1e9, "sesiones_fix": cantidad * GB_POR_SESION_FIX}[unidad]
+    minimo, maximo = _CAMPOS_FUENTE["gb_por_dia"][1:3]
+    if not minimo <= gb <= maximo:
+        raise DatoInvalido(f"{prefijo}Cuánto llega: son unos {_dec(gb, 2)} GB de log por día y el cotizador va de "
+                           f"{_dec(minimo, 2)} a {_miles(maximo)}")
+    t = {k: v for k, v in d.items() if k not in ("cantidad", "unidad", "horario", "consulta_dias")}
+    t.update(gb_por_dia=gb, bytes_por_evento=bytes_ev)
+    for k, v in (("dias_por_semana", dias), ("horas_activas", horas), ("pico", pico)):
+        if t.get(k) in (None, ""):
+            t[k] = v
+    consulta = d.get("consulta_dias")
+    if consulta not in (None, "") and t.get("dias_hot") in (None, ""):
+        retencion = t.get("retencion_dias")
+        t["dias_hot"] = (FUENTE["retencion_dias"] if retencion in (None, "") else retencion) if str(consulta) == "todo" else consulta
+    cuanto = f"{_dec(cantidad, 2)} {UNIDADES[unidad]}" + ("" if unidad == "gb_dia" else f" (unos {_dec(gb)} GB de log por día)")
+    return t, {"cuanto": cuanto, "cuando": texto_horario}
+
+
+def _simple(datos: dict) -> tuple[dict, dict]:
+    """Traduce el formulario simple a los datos del modelo. Devuelve esos datos y
+    las respuestas en palabras. Lo técnico que llegue explícito gana."""
+    t = dict(datos)
+    criticidad = _opcion(datos, "criticidad", CRITICIDAD, "Qué tan crítico es", SIMPLE["criticidad"])
+    viejo = _opcion(datos, "viejo", LO_VIEJO, "Cómo se busca lo que ya no se consulta seguido", SIMPLE["viejo"])
+    origen = _opcion(datos, "origen", ORIGEN, "Dónde están los sistemas que generan los logs", SIMPLE["origen"])
+    _, azs, replicas, respaldo = CRITICIDAD[criticidad]
+    derivados = {"azs": azs, "replicas": replicas, "respaldo": respaldo, "resto": LO_VIEJO[viejo][1],
+                 "enlace": ORIGEN[origen][1]}
+    tecnicos = [k for k in derivados if datos.get(k) not in (None, "")]
+    for k, v in derivados.items():
+        if k not in tecnicos:
+            t[k] = v
+    comos: list = []
+    lista = datos.get("fuentes")
+    if isinstance(lista, list):
+        nuevas = []
+        for i, d in enumerate(lista):
+            if not isinstance(d, dict):
+                nuevas.append(d)
+                comos.append(None)
+                continue
+            nombre = str(d.get("nombre") or "").strip()[:60] or (f"Fuente {i + 1}" if len(lista) > 1 else "Logs")
+            f, como = _fuente_simple(d, f"{nombre} · " if len(lista) > 1 else "")
+            nuevas.append(f)
+            comos.append(como)
+        t["fuentes"] = nuevas
+    return t, {"criticidad": criticidad, "viejo": viejo, "origen": origen, "comos": comos, "tecnicos": tecnicos}
 
 
 def _fuentes(datos: dict) -> list[dict[str, Any]]:
@@ -420,20 +548,190 @@ def _enlace(e: dict, mb_s_pico: float, eventos_mes: float, log_gb_mes: float) ->
         r.update(contratado_mbit=contratado, usd=contratado * p["ancho_banda_mbit"],
                  detalle=f"{contratado} Mbit/s de acceso público")
     elif e["enlace"] == "vpn":
+        # El gateway con pago mensual (el de la calculadora); por hora sale más caro.
         vuelta_gb = eventos_mes * (RESPUESTA_CORTA_B if e["respuesta_corta"] else RESPUESTA_COMPLETA_B) * IPSEC / 1024 ** 3
-        fijo = (p["vpn_gateway_hora"] + 2 * p["eip_hora"]) * HORAS_MES
+        eips = 2 * p["eip_hora"] * HORAS_MES
+        trafico = vuelta_gb * p["trafico_salida_gb"]
         r.update(ida_gb_mes=log_gb_mes * RED_SOBRE_LOG * IPSEC, vuelta_gb_mes=vuelta_gb,
-                 usd=fijo + vuelta_gb * p["trafico_salida_gb"],
-                 detalle=f"gateway Professional 1 y sus 2 EIP (US$ {_miles(fijo)}) y {_miles(vuelta_gb)} GB de respuestas que salen del cluster")
+                 gateway_mes=p["vpn_gateway_mes"], gateway_por_hora=p["vpn_gateway_hora"] * HORAS_MES,
+                 eips_usd=eips, trafico_usd=trafico, usd=p["vpn_gateway_mes"] + eips + trafico,
+                 detalle=f"gateway VPN Professional 1 (US$ {_miles(p['vpn_gateway_mes'])} por mes), sus 2 EIP y "
+                         f"{_miles(vuelta_gb)} GB de respuestas que salen del cluster")
     return r
+
+
+# Cómo nombra la calculadora de Huawei Cloud cada cosa (export de una cotización
+# real): el modo de pago, la familia de cada flavor y los discos.
+MODOS_CALCULADORA = {"mensual": ("Monthly", "1 month"), "anual": ("Yearly", "1 year"), "por_hora": ("Pay-per-use", "730 hours")}
+FAMILIAS = {"4u8g": "Compute-intensive", "8u16g": "Compute-intensive", "4u16g": "General computing",
+            "8u32g": "General computing", "16u64g": "General computing", "4u32g": "Memory-optimized",
+            "8u64g": "Memory-optimized", "16u128g": "Memory-optimized"}
+CALCULADORA_URL = "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html"
+
+
+def _tipo_en_calculadora(clave: str, n: int) -> str:
+    vcpu, ram, _, _ = FLAVORS[clave]
+    return f"x86 | {FAMILIAS.get(clave, '')} | ess.spec-{clave} | {vcpu}vCPUs | {ram}GB × {n}"
+
+
+def _calculadora(e: dict, cluster: dict, lleno: dict, enlace: dict, tipo_disco: str) -> dict[str, Any]:
+    """Qué cargar en la calculadora de Huawei Cloud, ítem por ítem, con los campos
+    que ella muestra y el precio que tendría que dar cada uno en el modo de pago
+    elegido. Suma lo mismo que la cotización."""
+    p, pago = e["precios"], e["pago"]
+    modo, cantidad = MODOS_CALCULADORA[pago]
+    anual, por_hora = pago == "anual", pago == "por_hora"
+    por_uso = "8760 hours" if anual else "730 hours"     # lo que se paga por uso, en el período
+    meses = 12 if anual else 1
+    items: list[dict] = []
+
+    def nodos(descripcion: str, clave: str, n: int, disco: str, disco_gb: int, precio_gb: float) -> None:
+        usd_nodos, usd_disco = n * p["flavors"][clave], n * disco_gb * precio_gb
+        if anual:
+            usd_nodos, usd_disco = usd_nodos * p["meses_pago_anual"], usd_disco * p["meses_pago_anual"]
+        elif por_hora:
+            usd_nodos *= 1 + p["recargo_por_hora"]
+        items.append({"servicio": "Cloud Search Service", "descripcion": descripcion, "modo": modo, "cantidad": cantidad,
+                      "campos": [["Type", _tipo_en_calculadora(clave, n), usd_nodos],
+                                 ["Node Storage Type", f"{disco} | {disco_gb}GB × {n}", usd_disco]],
+                      "usd": usd_nodos + usd_disco})
+
+    hot, cold = cluster["hot"], cluster["cold"]
+    if cluster["masters"]:
+        nodos("Nodos Master", FLAVOR_MASTER, cluster["masters"], "High I/O", DISCO_CLIENTE_MASTER_GB, p["disco_high_gb"])
+    nodos("Nodos Hot", hot["flavor"], hot["nodos"], tipo_disco, hot["disco_gb"],
+          p["disco_ultra_gb"] if tipo_disco == "Ultra-high I/O" else p["disco_high_gb"])
+    if cluster["clientes"]:
+        nodos("Nodos Client", FLAVOR_CLIENTE, cluster["clientes"], "Ultra-high I/O", DISCO_CLIENTE_MASTER_GB, p["disco_ultra_gb"])
+    if cold:
+        nodos("Nodos Cold", cold["flavor"], cold["nodos"], "High I/O", cold["disco_gb"], p["disco_high_gb"])
+    if lleno["congelado_gb"]:
+        usd = lleno["congelados"] * meses
+        items.append({"servicio": "Cloud Search Service", "descripcion": "Índices congelados", "modo": "Pay-per-use",
+                      "cantidad": por_uso, "campos": [["Frozen index storage", f"{round(lleno['congelado_gb'])}GB", usd]],
+                      "usd": usd, "nota": f"Si la calculadora no los tiene, sumalos aparte: se pagan US$ "
+                                          f"{_dec(p['congelado_gb_hora'], 8)} por GB y por hora."})
+    if lleno["obs_gb"]:
+        if anual:
+            tb = math.ceil(lleno["obs_gb"] / 1024 - 1e-9)
+            items.append({"servicio": "Object Storage Service", "descripcion": "Respaldo", "modo": "Yearly", "cantidad": "1 year",
+                          "campos": [["Storage Space", f"{tb}TB", tb * p["obs_tb_anio"]]], "usd": tb * p["obs_tb_anio"]})
+        else:
+            items.append({"servicio": "Object Storage Service", "descripcion": "Respaldo", "modo": "Pay-per-use",
+                          "cantidad": por_uso, "campos": [["Storage Space", f"Standard | {round(lleno['obs_gb'])}GB", lleno["obs"]]],
+                          "usd": lleno["obs"]})
+    if enlace["tipo"] == "vpn":
+        gateway = enlace["gateway_por_hora"] if por_hora else enlace["gateway_mes"] * meses
+        items.append({"servicio": "Virtual Private Network", "descripcion": "VPN", "modo": "Pay-per-use" if por_hora else "Monthly",
+                      "cantidad": "730 hours" if por_hora else "12 months" if anual else "1 month",
+                      "campos": [["Specification", "Professional 1", gateway]], "usd": gateway})
+        trafico, eips = enlace["trafico_usd"] * meses, enlace["eips_usd"] * meses
+        items.append({"servicio": "Elastic IP", "descripcion": "Elastic IP VPN", "modo": "Pay-per-use", "cantidad": por_uso,
+                      "campos": [["Bandwidth Price", f"Dedicated | Dynamic BGP | Traffic | {round(enlace['vuelta_gb_mes'] * meses)}GB", trafico],
+                                 ["EIP Price", "2", eips]],
+                      "usd": trafico + eips})
+    elif enlace["tipo"] == "publico":
+        usd = enlace["usd"] * meses
+        items.append({"servicio": "Elastic IP", "descripcion": "Elastic IP acceso público", "modo": "Monthly",
+                      "cantidad": "12 months" if anual else "1 month",
+                      "campos": [["Bandwidth Price", f"Dedicated | Dynamic BGP | Bandwidth | {enlace['contratado_mbit']}Mbit/s", usd],
+                                 ["EIP Price", "1", 0.0]],
+                      "usd": usd})
+    # Numerados como en el export: «Cloud Search Service 1», «Elastic IP 2»...
+    vistos: dict[str, int] = {}
+    for it in items:
+        vistos[it["servicio"]] = vistos.get(it["servicio"], 0) + 1
+        it["servicio_n"] = f"{it['servicio']} {vistos[it['servicio']]}"
+        it["region"], it["az"] = p["region"], "General AZ"
+    return {"url": CALCULADORA_URL, "region": p["region"], "periodo": "por año" if anual else "por mes",
+            "items": items, "total": sum(it["usd"] for it in items)}
 
 
 def _gb(x: float) -> str:
     return f"{_dec(x / 1000)} TB" if x >= 1000 else f"{_miles(x)} GB"
 
 
+def _respuestas(e: dict, vols: list[dict], simple: dict, hay_resto: bool, a_mano: list[str]) -> list[dict[str, str]]:
+    """Lo que se pidió, en palabras: una línea por fuente y una por cada pregunta general."""
+    comos = simple["comos"] + [None] * (len(vols) - len(simple["comos"]))
+    filas = []
+    for f, v, como in zip(e["fuentes"], vols, comos):
+        cuanto = como["cuanto"] if como else f"{_dec(f['gb_por_dia'], 2)} GB de log por día"
+        cuando = (como["cuando"] if como else
+                  f"{f['dias_por_semana']} días por semana, casi todo en {_dec(f['horas_activas'])} h").lower()
+        consulta = ("todo lo guardado" if f["dias_hot"] >= f["retencion_dias"] else
+                    f"lo de los últimos {_plazo(f['dias_hot'])}")
+        filas.append({"que": f["nombre"], "respuesta": f"{cuanto}, {cuando}. Se guarda {_plazo(f['retencion_dias'])} y se "
+                                                        f"consulta seguido {consulta}."})
+    filas.append({"que": "Qué tan crítico es", "respuesta": CRITICIDAD[simple["criticidad"]][0]})
+    if hay_resto:
+        filas.append({"que": "Lo que ya no se consulta seguido", "respuesta": LO_VIEJO[simple["viejo"]][0]})
+    filas.append({"que": "Dónde están los sistemas que generan los logs", "respuesta": ORIGEN[simple["origen"]][0]})
+    filas.append({"que": "Cómo se va a pagar", "respuesta": PAGO[e["pago"]]})
+    if simple["tecnicos"] or a_mano:
+        filas.append({"que": "Ajustes técnicos", "respuesta": "Se cambiaron a mano: "
+                      + ", ".join(sorted(set(simple["tecnicos"]) | set(a_mano))) + "."})
+    return filas
+
+
+def _explicacion(e: dict, vols: list[dict], cluster: dict, enlace: dict, hay_resto: bool, a_pagar: tuple) -> list[str]:
+    """El dimensionamiento en palabras simples, para quien no conoce CSS."""
+    hot, cold = cluster["hot"], cluster["cold"]
+    copias = 1 + e["replicas"]
+    gb_dia = sum(v["gb_dia"] for v in vols)
+    lineas = [f"Llegan unos {_gb(gb_dia)} de logs por día; en el momento de más carga, unos "
+              f"{_miles(sum(v['eventos_s_pico'] for v in vols))} eventos por segundo."]
+    hot_dias = sorted({min(v["dias_hot"], v["retencion_dias"]) for v in vols})
+    if not hay_resto:
+        plazo = "Todo lo que se guarda"
+    elif len(hot_dias) == 1:
+        plazo = f"Lo de los últimos {_plazo(hot_dias[0])}"
+    else:
+        plazo = f"Lo más reciente (de {_plazo(hot_dias[0])} a {_plazo(hot_dias[-1])}, según la fuente)"
+    lineas.append(f"{plazo} queda listo para consultar al instante, en {hot['nodos']} servidores de {hot['vcpu']} vCPU y "
+                  f"{hot['ram']} GB de memoria con discos rápidos.")
+    if hay_resto:
+        retencion = _plazo(max(v["retencion_dias"] for v in vols))
+        if e["resto"] == "congelados":
+            lineas.append(f"Lo más viejo, hasta {retencion}, pasa a un almacenamiento de bajo costo (índices congelados): se "
+                          "sigue consultando, pero cada búsqueda tarda de segundos a minutos.")
+        else:
+            lineas.append(f"Lo más viejo, hasta {retencion}, pasa a {cold['nodos']} servidores más baratos (nodos cold), "
+                          "con discos de menor costo, y se sigue consultando rápido.")
+    if e["replicas"] == 0:
+        lineas.append("Cada dato se guarda una sola vez: si se cae un servidor, sus datos no se consultan hasta que vuelve. "
+                      "Sirve para una prueba, no para producción.")
+    elif e["azs"] > 1:
+        lineas.append(f"Los servidores se reparten en {e['azs']} zonas del datacenter de Huawei y cada dato tiene {copias} "
+                      "copias en zonas distintas: si se cae una zona, sigue andando.")
+    else:
+        lineas.append(f"Cada dato tiene {copias} copias en servidores distintos: si se cae un servidor, sigue andando.")
+    extra = [f"{cluster['clientes']} que reparten las consultas" if cluster["clientes"] else "",
+             f"{cluster['masters']} que coordinan el cluster" if cluster["masters"] else ""]
+    if any(extra):
+        lineas.append(f"Por el tamaño, Huawei pide sumar servidores de apoyo: {' y '.join(x for x in extra if x)}.")
+    if e["respaldo"]:
+        lineas.append("Además, todo lo guardado se respalda en OBS, para poder recuperarlo.")
+    if enlace["tipo"] == "interno":
+        lineas.append("Los logs llegan por la red interna de Huawei Cloud, sin costo de tráfico.")
+    elif enlace["tipo"] == "vpn":
+        lineas.append(f"Los logs llegan por una VPN; en el pico, unos {_miles(enlace['mbit_pico'])} Mbit/s.")
+    else:
+        lineas.append(f"Los logs llegan por internet al acceso público del cluster, con {enlace['contratado_mbit']} Mbit/s "
+                      "contratados.")
+    usd, periodo = a_pagar
+    lineas.append({"mensual": f"Pagando por mes: US$ {_miles(usd)} por mes, cuando ya está todo guardado.",
+                   "anual": f"Pagando por año: US$ {_miles(usd)} por año, cuando ya está todo guardado (el año cuesta "
+                            f"{_dec(e['precios']['meses_pago_anual'])} meses de servidores y disco).",
+                   "por_hora": f"Pagando por hora, sin compromiso: unos US$ {_miles(usd)} por mes, cuando ya está todo "
+                               "guardado."}[e["pago"]])
+    return lineas
+
+
 def cotizar(datos: dict) -> dict[str, Any]:
-    e = normalizar(datos)
+    datos = datos if isinstance(datos, dict) else {}
+    tecnico, simple = _simple(datos)
+    e = normalizar(tecnico)
     p = e["precios"]
     azs, copias = e["azs"], 1 + e["replicas"]
     vols = [_volumen(f, e["crecimiento"]) for f in e["fuentes"]]
@@ -624,8 +922,20 @@ def cotizar(datos: dict) -> dict[str, Any]:
 
     gb_dia = sum(v["gb_dia"] for v in vols)
     eventos_dia = sum(v["eventos_dia"] for v in vols)
+    # Por hora, los nodos llevan el recargo y el gateway VPN se paga por hora (sale más que el mensual).
+    por_hora_mes = total_mes + nodos_mes * p["recargo_por_hora"] + (
+        enlace["gateway_por_hora"] - enlace["gateway_mes"] if enlace["tipo"] == "vpn" else 0)
+    a_pagar = {"mensual": (total_mes, "por mes"), "anual": (anio_siguiente_anual, "por año"),
+               "por_hora": (por_hora_mes, "por mes")}[e["pago"]]
+    calculadora = _calculadora(e, cluster, lleno, enlace, tipo_disco)
+    respuestas = _respuestas(e, vols, simple, hay_resto, a_mano)
+    explicacion = _explicacion(e, vols, cluster, enlace, hay_resto, a_pagar)
     return {
         "entrada": {k: v for k, v in e.items() if k != "precios"},
+        "respuestas": respuestas,
+        "explicacion": explicacion,
+        "a_pagar": {"modo": e["pago"], "texto": PAGO[e["pago"]], "usd": a_pagar[0], "periodo": a_pagar[1]},
+        "calculadora": calculadora,
         "resumen": resumen,
         "fuentes": fuentes,
         "volumen": {"gb_dia": gb_dia, "eventos_dia": eventos_dia,
@@ -639,7 +949,7 @@ def cotizar(datos: dict) -> dict[str, Any]:
                     "datos_por_nodo_gb": datos_por_nodo, "a_mano": a_mano},
         "costos": costos,
         "total_mes": total_mes,
-        "anual": {"por_hora_mes": total_mes + nodos_mes * p["recargo_por_hora"],
+        "anual": {"por_hora_mes": por_hora_mes,
                   "primer_anio": primer_anio, "primer_anio_pago_anual": primer_anio_anual,
                   "anio_siguiente": anio_siguiente, "anio_siguiente_pago_anual": anio_siguiente_anual},
         "progresion": progresion,
@@ -654,6 +964,17 @@ def cotizar(datos: dict) -> dict[str, Any]:
 def valores() -> dict[str, Any]:
     """Lo que el formulario necesita para armarse: valores por defecto, flavors y precios de lista."""
     return {
+        "simple": SIMPLE,
+        "fuente_simple": FUENTE_SIMPLE,
+        "opciones": {
+            "unidad": UNIDADES,
+            "horario": {k: v[0] for k, v in HORARIOS.items()},
+            "criticidad": {k: v[0] for k, v in CRITICIDAD.items()},
+            "viejo": {k: v[0] for k, v in LO_VIEJO.items()},
+            "origen": {k: v[0] for k, v in ORIGEN.items()},
+            "pago": PAGO,
+        },
+        "calculadora_url": CALCULADORA_URL,
         "defaults": DEFAULTS,
         "fuente": FUENTE,
         "max_fuentes": MAX_FUENTES,

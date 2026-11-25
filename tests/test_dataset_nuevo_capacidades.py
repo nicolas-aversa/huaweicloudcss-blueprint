@@ -192,7 +192,12 @@ def test_la_tabla_del_paso_2_no_pide_marcas():
         assert fuera not in html, fuera
     assert "selectorDeRol" not in html and "marcarRol" not in html and "marcarEntidad" not in html
     assert '<td colspan="5">' in fn
-    assert "dimensionamiento" not in html.lower(), "sin «Para producción» en el paso 2"
+    # El cotizador sí habla de dimensionamiento: se mira el resto de la página.
+    v0, v1 = html.index("<!-- ═══ Vista: Cotizador"), html.index("<!-- ═══ Vista: Panel de control")
+    s0 = html.index("    // ── Cotizador ──")
+    s1 = html.index("    async function copiarCotizacion() {", s0)
+    sin_cotizador = html[:v0] + html[v1:s0] + html[s1:]
+    assert "dimensionamiento" not in sin_cotizador.lower(), "sin «Para producción» en el paso 2"
     # La entidad propuesta queda marcada en el campo: viaja con el deploy.
     assert "if (!fields.some(f => f.entity)) {" in fn
 

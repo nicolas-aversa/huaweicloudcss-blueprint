@@ -207,6 +207,104 @@ def test_precios_de_otra_region():
     assert not igual["precios"]["editados"] and igual["total_mes"] == pytest.approx(base["total_mes"])
 
 
+# ── El formulario simple ────────────────────────────────────────────────────
+FIX_SIMPLE = {"nombre": "OMS", "cantidad": 30, "unidad": "sesiones_fix", "horario": "mercado",
+              "retencion_dias": 7, "consulta_dias": 7}
+
+
+def test_el_formulario_simple_da_lo_del_documento():
+    """30 sesiones FIX en horario de mercado, una semana, producción crítica: lo mismo que con los datos técnicos."""
+    r = cotizador.cotizar({"fuentes": [FIX_SIMPLE], "criticidad": "alta", "origen": "misma_region", "pago": "mensual"})
+    assert round(r["total_mes"]) == 2953 and r["a_pagar"]["usd"] == r["total_mes"]
+    f = r["entrada"]["fuentes"][0]
+    assert (f["gb_por_dia"], f["bytes_por_evento"], f["dias_por_semana"], f["horas_activas"], f["pico"]) == (240, 333, 5, 7, 3)
+    assert r["respuestas"][0]["respuesta"].startswith("30 sesiones FIX (unos 240 GB de log por día)")
+
+
+@pytest.mark.parametrize("unidad, cantidad, bytes_ev, gb", [
+    ("gb_dia", 50, None, 50), ("eventos_s", 1000, None, 1000 * 500 * 86400 / 1e9),
+    ("eventos_s", 1000, 200, 1000 * 200 * 86400 / 1e9), ("millones_dia", 10, None, 5), ("sesiones_fix", 2, None, 16),
+])
+def test_cuanto_llega_en_cualquier_unidad(unidad, cantidad, bytes_ev, gb):
+    f = {"cantidad": cantidad, "unidad": unidad, "horario": "parejo"}
+    if bytes_ev:
+        f["bytes_por_evento"] = bytes_ev
+    r = cotizador.cotizar({"fuentes": [f]})
+    assert r["entrada"]["fuentes"][0]["gb_por_dia"] == pytest.approx(gb)
+
+
+def test_consulta_todo_lo_guardado():
+    r = cotizador.cotizar({"fuentes": [{"cantidad": 10, "retencion_dias": 90, "consulta_dias": "todo"}]})
+    assert r["entrada"]["fuentes"][0]["dias_hot"] == 90 and r["volumen"]["gb_viejo"] == 0
+
+
+@pytest.mark.parametrize("criticidad, azs, replicas, respaldo", [("alta", 2, 1, True), ("media", 1, 1, True), ("prueba", 1, 0, False)])
+def test_la_criticidad_decide_zonas_copias_y_respaldo(criticidad, azs, replicas, respaldo):
+    e = cotizador.cotizar({"fuentes": [{"cantidad": 10}], "criticidad": criticidad})["entrada"]
+    assert (e["azs"], e["replicas"], e["respaldo"]) == (azs, replicas, respaldo)
+
+
+def test_lo_tecnico_gana_y_queda_dicho():
+    r = cotizador.cotizar({"fuentes": [{"cantidad": 10}], "criticidad": "prueba", "replicas": 1})
+    assert r["entrada"]["replicas"] == 1 and r["entrada"]["azs"] == 1
+    assert r["respuestas"][-1]["que"] == "Ajustes técnicos" and "replicas" in r["respuestas"][-1]["respuesta"]
+
+
+def test_lo_viejo_y_el_origen():
+    r = cotizador.cotizar({"fuentes": [{"cantidad": 100, "retencion_dias": 365, "consulta_dias": 30}],
+                           "viejo": "rapido", "origen": "otro_lugar"})
+    assert r["entrada"]["resto"] == "cold" and r["cluster"]["cold"] and r["entrada"]["enlace"] == "vpn"
+    assert any("nodos cold" in x for x in r["explicacion"]) and any("VPN" in x for x in r["explicacion"])
+
+
+def test_el_tamano_de_los_nodos_depende_del_caso():
+    """No todos los casos llevan los mismos nodos: poco volumen, mucha escritura o mucho guardado en hot."""
+    poco = cotizador.cotizar({"fuentes": [{"cantidad": 5}]})["cluster"]["hot"]
+    escritura = cotizador.cotizar({"fuentes": [{"cantidad": 2000, "consulta_dias": 3, "retencion_dias": 7}]})["cluster"]["hot"]
+    guardado = cotizador.cotizar({"fuentes": [{"cantidad": 100, "retencion_dias": 180, "consulta_dias": "todo"}]})["cluster"]["hot"]
+    assert poco["vcpu"] < escritura["vcpu"] and escritura["nodos"] > poco["nodos"]
+    assert guardado["ram"] > escritura["ram"], "con mucho guardado conviene el flavor que admite más disco"
+
+
+@pytest.mark.parametrize("datos, que", [
+    ({"fuentes": [{"cantidad": 10, "unidad": "litros"}]}, "Unidad"),
+    ({"fuentes": [{"cantidad": 10, "horario": "noche"}]}, "Cuándo llega"),
+    ({"fuentes": [{"cantidad": 1e9, "unidad": "eventos_s"}]}, "Cuánto llega"),
+    ({"fuentes": [{"cantidad": 10}], "criticidad": "mucha"}, "Qué tan crítico"),
+    ({"fuentes": [{"cantidad": 10}], "origen": "marte"}, "Dónde están"),
+    ({"fuentes": [{"cantidad": 10}], "pago": "trueque"}, "Cómo se va a pagar"),
+])
+def test_respuestas_invalidas(datos, que):
+    with pytest.raises(cotizador.DatoInvalido, match=re.escape(que)):
+        cotizador.cotizar(datos)
+
+
+# ── Qué cargar en la calculadora ────────────────────────────────────────────
+@pytest.mark.parametrize("pago, total", [("mensual", "total_mes"), ("anual", "anio_siguiente_pago_anual"),
+                                         ("por_hora", "por_hora_mes")])
+@pytest.mark.parametrize("extra", [{}, {"origen": "otro_lugar"}, {"origen": "internet"}, {"viejo": "rapido"}])
+def test_la_calculadora_suma_lo_mismo_que_la_cotizacion(pago, total, extra):
+    r = cotizador.cotizar({"fuentes": [{**FIX_SIMPLE, "retencion_dias": 365, "consulta_dias": 30}], "pago": pago, **extra})
+    esperado = r["total_mes"] if total == "total_mes" else r["anual"][total]
+    assert r["calculadora"]["total"] == pytest.approx(esperado)
+    assert r["a_pagar"]["usd"] == pytest.approx(esperado)
+
+
+def test_la_calculadora_como_la_muestra_huawei():
+    r = cotizador.cotizar({"fuentes": [{**FIX_SIMPLE, "retencion_dias": 365, "consulta_dias": 30}], "origen": "otro_lugar"})
+    items = {it["descripcion"]: it for it in r["calculadora"]["items"]}
+    hot = items["Nodos Hot"]
+    assert (hot["servicio_n"], hot["region"], hot["az"], hot["modo"], hot["cantidad"]) == (
+        "Cloud Search Service 1", "LA-Santiago", "General AZ", "Monthly", "1 month")
+    assert hot["campos"][0][1] == "x86 | General computing | ess.spec-16u64g | 16vCPUs | 64GB × 4"
+    assert hot["campos"][1][1] == "Ultra-high I/O | 4980GB × 4"
+    assert items["VPN"]["campos"][0][1:] == ["Professional 1", 209.0], "el gateway con pago mensual, como en la calculadora"
+    assert items["Elastic IP VPN"]["campos"][1][1] == "2"
+    por_hora = cotizador.cotizar({"fuentes": [FIX_SIMPLE], "origen": "otro_lugar", "pago": "por_hora"})
+    vpn = next(it for it in por_hora["calculadora"]["items"] if it["descripcion"] == "VPN")
+    assert (vpn["modo"], vpn["usd"]) == ("Pay-per-use", pytest.approx(0.33 * 730))
+
+
 # ── La API ──────────────────────────────────────────────────────────────────
 def test_la_api():
     c = TestClient(main.app)
@@ -232,10 +330,12 @@ def test_la_vista_y_el_nav():
     assert 'data-view="cotizador"' in html and 'id="view-cotizador"' in html
     assert "if (name === 'cotizador') initCotizador();" in html
     vista = _vista(html)
-    for n in cotizador.DEFAULTS:
-        assert f'name="{n}"' in vista, f"el formulario tiene {n}"
-    for n in cotizador.FUENTE:
-        assert f'data-f="{n}"' in vista, f"cada fuente tiene {n}"
+    for n in cotizador.SIMPLE:
+        assert f'name="{n}"' in vista, f"el formulario simple pregunta {n}"
+    for n in cotizador.FUENTE_SIMPLE:
+        assert f'data-f="{n}"' in vista, f"cada fuente pregunta {n}"
+    for n in set(cotizador.DEFAULTS) - {"enlace"}:     # el enlace sale de «dónde están los sistemas»
+        assert f'name="{n}"' in vista, f"los ajustes técnicos tienen {n}"
     for sel in ("flavor_hot", "flavor_cold"):
         assert re.search(rf'name="{sel}" data-flavors', vista), "los flavors los arma el script"
 
@@ -253,7 +353,11 @@ const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
 const r = {UNA};
 let html = cotizacionHTML(r), texto = textoDeLaCotizacion(r);
-check('el total', html.includes('US$ 2.953'), html.slice(0, 400));
+check('el total', html.includes('US$ 2.953') && html.includes('Pagando por mes'), html.slice(0, 400));
+check('el dimensionamiento', html.includes('El dimensionamiento') && html.includes('sigue andando'));
+check('la calculadora', html.includes('Qué cargar en la calculadora') && html.includes('ess.spec-16u64g | 16vCPUs | 64GB × 4')
+  && html.includes('Ultra-high I/O | 1300GB × 4') && html.includes('Total Price'), html);
+check('lo que se pidió', html.includes('Lo que se pidió'));
 check('el cluster', html.includes('4 nodos hot de 16 vCPU'), html);
 check('uso en el pico', html.includes('74 %'));
 check('los doce meses', (html.match(/<td>Mes \d+<\/td>/g) || []).length === 12);
@@ -262,14 +366,15 @@ check('sin lo viejo, sin su columna', !html.includes('<th class="n">Congelados</
 check('los avisos', html.includes('Para tener en cuenta'));
 check('una fuente, sin tabla de fuentes', !html.includes('Las fuentes'));
 check('precios de lista', html.includes('Precios de lista de LA-Santiago'));
-check('el texto', texto.includes('Total: US$ 2.953 por mes.') && texto.includes('Cluster: 4 nodos hot') && texto.includes('Datos: '), texto);
+check('el texto', texto.includes('Total: US$ 2.953 por mes.') && texto.includes('Cluster: 4 nodos hot') && texto.includes('Lo que se pidió:')
+  && texto.includes('Cloud Search Service 1 · Nodos Hot · Monthly · 1 month'), texto);
 const v = {VARIAS};
 html = cotizacionHTML(v); texto = textoDeLaCotizacion(v);
 check('varias: la tabla', html.includes('Las fuentes') && html.includes('Firewall') && html.includes('Aplicaciones &amp; web'), html);
 check('varias: lo viejo', html.includes('<th class="n">Congelados</th>'));
 check('varias: precios a mano', html.includes('Precios cargados a mano para Otra región'));
 check('varias: hardware a mano', html.includes('Hardware elegido a mano'));
-check('varias: el texto', texto.includes('Fuentes:\n- Firewall: ') && texto.includes('precios cargados a mano'), texto);
+check('varias: el texto', texto.includes('- Firewall: ') && texto.includes('precios cargados a mano'), texto);
 console.log(fallos.join('\n'));
 process.exit(fallos.length ? 1 : 0);
 """
@@ -279,6 +384,7 @@ process.exit(fallos.length ? 1 : 0);
 def test_la_vista_pinta_la_cotizacion(tmp_path):
     html = _INDEX.read_text(encoding="utf-8")
     una = cotizador.cotizar({**FIX, "gb_por_dia": 240, "retencion_dias": 7, "dias_hot": 7, "respaldo": True})
+    assert round(una["total_mes"], 2) == round(una["calculadora"]["total"], 2)
     una["avisos"] = una["avisos"] or ["algo"]
     varias = cotizador.cotizar({"fuentes": [{"nombre": "Firewall", "gb_por_dia": 100, "retencion_dias": 90},
                                             {"nombre": "Aplicaciones & web", "gb_por_dia": 30}],
