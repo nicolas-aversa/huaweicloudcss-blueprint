@@ -191,3 +191,15 @@ def test_si_agrupa_por_otra_entidad_se_rehace(monkeypatch):
     assert ("PUT", "/_plugins/_transform/siem-perfil") in pedidos
     pedidos = _cluster(monkeypatch, existe=True, agrupa=PERFIL["campo"])
     assert main._provisionar_perfil("http://x:9200", "a", "p", "siem", "siem-*", PERFIL, force=False)["reason"] == "ya estaba"
+
+
+def test_la_medida_principal_entra_primero():
+    """Con muchas medidas, la principal del análisis no puede quedar afuera
+    (regalos de experiencias: entraba la comisión, siempre 35 %, y no el monto)."""
+    campos = [{"field_path": "prestador.id", "type": "string", "role": "entity_id", "entity": True},
+              {"field_path": "box.precio_ars", "type": "integer", "role": "measure"},
+              {"field_path": "reserva.personas", "type": "integer", "role": "measure"},
+              {"field_path": "pedido.cantidad", "type": "integer", "role": "measure"},
+              {"field_path": "monto_ars", "type": "integer", "role": "measure", "principal": True}]
+    medidas = [(f["field_path"], agg) for f, agg in perfiles.medidas_de_la_entidad(campos, "prestador.id")]
+    assert medidas[0] == ("monto_ars", "sum") and ("pedido.cantidad", "sum") not in medidas

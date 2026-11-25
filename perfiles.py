@@ -159,6 +159,9 @@ def medidas_de_la_entidad(fields: list[dict], entidad: str = "") -> list[tuple[d
     numericos = [f for f in fields or [] if f.get("type") in _NUMERICOS and _ruta(f) != entidad]
     elegidas = [f for f in numericos if f.get("role") == "measure"] or \
                [f for f in numericos if not (_NO_ES_MEDIDA.search(_ruta(f)) or _NO_ES_MEDIDA.search(f.get("raw_name") or ""))]
+    # La principal del análisis primero: en regalos de experiencias, con siete
+    # medidas, el monto quedaba afuera y entraba la comisión (siempre 35 %).
+    elegidas.sort(key=lambda f: not f.get("principal"))
     duracion = lambda f: any(r.search(_ruta(f)) or r.search(f.get("raw_name") or "")  # noqa: E731
                              for r in (_ES_DURACION, _ES_PRECIO_O_TASA))
     sumas = [(f, "sum") for f in elegidas if not duracion(f)]
