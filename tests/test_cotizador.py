@@ -353,17 +353,18 @@ const fallos = [];
 const check = (n, c, x) => { if (!c) fallos.push(n + (x === undefined ? '' : ' -> ' + x)); };
 const r = {UNA};
 let html = cotizacionHTML(r), texto = textoDeLaCotizacion(r);
-check('el total', html.includes('US$ 2.953') && html.includes('Pagando por mes'), html.slice(0, 400));
-check('el dimensionamiento', html.includes('El dimensionamiento') && html.includes('sigue andando'));
-check('la calculadora', html.includes('Qué cargar en la calculadora') && html.includes('ess.spec-16u64g | 16vCPUs | 64GB × 4')
-  && html.includes('Ultra-high I/O | 1300GB × 4') && html.includes('Total Price'), html);
-check('lo que se pidió', html.includes('Lo que se pidió'));
+check('el total', html.includes('US$ 2.953') && html.includes('Total mensual'), html.slice(0, 400));
+check('el dimensionamiento', html.includes('Dimensionamiento') && html.includes('2 copias en 2 zonas')
+  && html.includes('4 × 16 vCPU · 64 GB · 1.300 GB de disco'), html);
+check('la calculadora', html.includes('Calculadora de Huawei Cloud') && html.includes('ess.spec-16u64g | 16vCPUs | 64GB × 4')
+  && html.includes('Ultra-high I/O | 1300GB × 4') && html.includes('Total · LA-Santiago'), html);
+check('sin párrafos de más', !html.includes('Lo que se pidió') && !html.includes('cot__explica'));
 check('el cluster', html.includes('4 nodos hot de 16 vCPU'), html);
 check('uso en el pico', html.includes('74 %'));
 check('los doce meses', (html.match(/<td>Mes \d+<\/td>/g) || []).length === 12);
 check('con respaldo, su columna', html.includes('En el respaldo'));
 check('sin lo viejo, sin su columna', !html.includes('<th class="n">Congelados</th>'));
-check('los avisos', html.includes('Para tener en cuenta'));
+check('los avisos', html.includes('cot__avisos'));
 check('una fuente, sin tabla de fuentes', !html.includes('Las fuentes'));
 check('precios de lista', html.includes('Precios de lista de LA-Santiago'));
 check('el texto', texto.includes('Total: US$ 2.953 por mes.') && texto.includes('Cluster: 4 nodos hot') && texto.includes('Lo que se pidió:')

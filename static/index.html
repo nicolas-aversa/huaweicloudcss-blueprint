@@ -2872,91 +2872,133 @@
     }
 
     /* ── Cotizador ───────────────────────────────────────────────────────── */
-    /* El formulario a la izquierda (queda a la vista al bajar) y la cotización
-       a la derecha; en pantallas chicas, uno abajo del otro. */
-    .cot { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 24px; align-items: start; }
+    /* El formulario a la izquierda (scrollea por dentro y queda a la vista) y
+       el resultado a la derecha; en pantallas chicas, uno abajo del otro. Las
+       tarjetas usan el encabezado de Configuración (.settings-card). */
+    .cot { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
     .cot__form {
-      display: flex; flex-direction: column; gap: 14px; position: sticky; top: 12px;
+      display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px;
       max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px;
     }
-    .cot__grupo {
-      border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-primary);
-      box-shadow: var(--shadow-xs); padding: 10px 16px 4px; margin: 0; min-width: 0;
-    }
-    .cot__grupo legend { font-weight: var(--fw-semi); font-size: var(--fs-base); color: var(--text-primary); padding: 0 6px; }
-    .cot__campo { display: block; margin-bottom: 10px; }
+    .cot__resultado { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .cot .settings-card { min-width: 0; }
+    .cot .settings-card__head { align-items: center; }
+    .cot__spacer { flex: 1; }
+    .cot__campo { display: block; margin-bottom: 10px; min-width: 0; }
     .cot__campo[hidden] { display: none; }
-    .cot__campo > span { display: block; font-size: var(--fs-sm); color: var(--text-secondary); margin-bottom: 4px; }
-    .cot__campo .form-input, .cot__campo .form-select { padding: 8px 12px; font-size: var(--fs-base); }
-    .cot__campo small { display: block; color: var(--text-muted); font-size: var(--fs-xs); margin-top: 3px; line-height: var(--lh-base); }
-    .cot__avanzado { border: 1px dashed var(--border-default); border-radius: var(--radius-lg); padding: 10px 16px; }
-    .cot__avanzado summary { cursor: pointer; font-size: var(--fs-sm); color: var(--text-secondary); margin-bottom: 8px; }
-    .cot__resultado { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-    .cot__total {
-      background: var(--grad-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
-      padding: 18px 20px; box-shadow: var(--shadow-sm);
-    }
-    .cot__eyebrow { display: block; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
-    .cot__total strong { font-size: var(--fs-2xl); line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--text-primary); }
-    .cot__anios, .cot__cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; margin: 12px 0 0; }
-    .cot__anios dt, .cot__cifras dt { font-size: var(--fs-xs); color: var(--text-muted); }
-    .cot__anios dd, .cot__cifras dd { margin: 2px 0 0; font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; color: var(--text-primary); }
-    .cot__nota { font-size: var(--fs-sm); color: var(--text-muted); margin: 10px 0 0; line-height: var(--lh-base); }
-    .cot__bloque {
-      background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
-      padding: 14px 18px; box-shadow: var(--shadow-xs); min-width: 0;
-    }
-    .cot__bloque h3 { font-size: var(--fs-md); font-weight: var(--fw-semi); margin: 0 0 8px; color: var(--text-primary); }
-    .cot__bloque p { margin: 0; line-height: var(--lh-base); }
-    .cot__bloque > summary { cursor: pointer; font-weight: var(--fw-semi); color: var(--text-primary); }
-    .cot__avisos { border-color: var(--accent-yellow); background: var(--accent-yellow-tint); }
-    .cot__avisos ul, .cot__supuestos { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: var(--fs-sm); line-height: var(--lh-base); }
-    .cot__supuestos { margin-top: 10px; }
-    .cot__scroll { overflow-x: auto; }
-    .cot__tabla { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin-top: 6px; }
-    .cot__tabla th, .cot__tabla td { padding: 7px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
-    .cot__tabla th { color: var(--text-muted); font-weight: var(--fw-medium); }
-    .cot__tabla .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .cot__det { display: block; color: var(--text-muted); font-size: var(--fs-xs); }
-    .cot__suma td { font-weight: var(--fw-semi); border-bottom: 0; border-top: 2px solid var(--border-default); }
-    .cot__acciones { display: flex; justify-content: flex-end; }
-    /* Las fuentes de logs: una tarjeta por fuente, con sus campos de a dos. */
-    .cot__fuentes { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 8px; }
-    .cot__fuente { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-subtle); padding: 10px 12px 0; }
+    .cot__campo > span { display: block; font-size: var(--fs-xs); color: var(--text-muted); margin-bottom: 4px; }
+    .cot__campo .form-input, .cot__campo .form-select { width: 100%; padding: 7px 10px; font-size: var(--fs-sm); }
+    .cot__campo small { display: block; color: var(--text-muted); font-size: var(--fs-xs); margin-top: 3px; }
+    .cot__par { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; align-items: end; }
+    .cot__par--arriba { align-items: start; }
+    .cot__vol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; }
+
+    /* Las fuentes: con una sola no hay marco ni nombre; con varias, una tarjeta por fuente. */
+    .cot__fuentes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+    .cot__fuente { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 12px 0; }
     .cot__fuente-cab { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-    .cot__fuente-cab .form-input { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+    .cot__fuente-cab .form-input { flex: 1; min-width: 0; padding: 6px 10px; font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+    .cot__fuentes--una .cot__fuente { border: 0; padding: 0; }
+    .cot__fuentes--una .cot__fuente-cab { display: none; }
     .cot__quitar {
-      flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+      flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
       border: 1px solid var(--border-default); border-radius: var(--radius-md); background: transparent; color: var(--text-muted); cursor: pointer;
     }
     .cot__quitar:hover { color: var(--accent-red); border-color: var(--accent-red); }
-    .cot__quitar[hidden] { display: none; }
     .cot__quitar .icon { width: 14px; height: 14px; }
-    .cot__par { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; align-items: end; }
-    .cot__par--arriba { align-items: start; }
-    .cot__ancho { grid-column: 1 / -1; }
-    .cot__ayuda { display: block; color: var(--text-muted); font-size: var(--fs-xs); line-height: var(--lh-base); margin: 0 0 10px; }
-    .cot__acciones-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-    .cot__acciones-form .btn-ghost:disabled { opacity: .5; cursor: not-allowed; }
+    #cot-mas-fuente:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Lo avanzado: dos desplegables con el mismo aspecto, y restablecer abajo. */
+    .cot__avanzado { border-bottom: 1px solid var(--border-subtle); }
+    .cot__avanzado > summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px;
+      padding: 2px 0 12px; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary);
+    }
+    .cot__avanzado + .cot__avanzado > summary { padding-top: 12px; }
+    .cot__avanzado > summary::-webkit-details-marker { display: none; }
+    .cot__avanzado > summary::after { content: '+'; margin-left: auto; color: var(--text-muted); font-weight: var(--fw-medium); }
+    .cot__avanzado[open] > summary::after { content: '−'; }
+    .cot__avanzado[open] { padding-bottom: 12px; }
+    .cot__restablecer { margin-top: 12px; }
+
+    /* El total. */
+    .cot__total {
+      background: var(--grad-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+      padding: 16px 20px; box-shadow: var(--shadow-sm);
+    }
+    .cot__total-cab { display: flex; align-items: center; gap: 10px; }
+    .cot__total-et { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-secondary); }
+    .cot__total-num {
+      font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15;
+      font-variant-numeric: tabular-nums; color: var(--text-primary); margin: 2px 0 10px;
+    }
+    .cot__total-num small { font-size: var(--fs-sm); font-weight: var(--fw-medium); letter-spacing: 0; color: var(--text-muted); margin-left: 6px; }
+    .cot__otros { display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: var(--fs-sm); color: var(--text-muted); }
+    .cot__otros b { margin-left: 6px; font-weight: var(--fw-semi); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .cot__pie { margin-top: 10px; font-size: var(--fs-xs); color: var(--text-muted); }
+
+    /* La ficha: pocas líneas, rótulo a la izquierda. */
+    .cot__ficha { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: var(--fs-sm); }
+    .cot__ficha dt { color: var(--text-muted); }
+    .cot__ficha dd { margin: 0; color: var(--text-primary); line-height: var(--lh-base); }
+    .cot__ficha dd div + div { margin-top: 2px; }
+
+    /* Los avisos. */
+    .cot__avisos {
+      display: flex; gap: 10px; padding: 10px 14px; border: 1px solid var(--accent-yellow); border-radius: var(--radius-lg);
+      background: var(--accent-yellow-tint); font-size: var(--fs-sm); line-height: var(--lh-base); color: var(--text-primary);
+    }
+    .cot__avisos > .icon { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--text-secondary); }
+    .cot__avisos ul { margin: 0; padding-left: 16px; display: grid; gap: 4px; }
+
+    /* Las tablas: la de la calculadora y las del detalle. */
+    .cot__scroll { overflow-x: auto; }
+    .cot__tabla { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+    .cot__tabla th, .cot__tabla td { padding: 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
+    .cot__tabla th { font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--text-muted); }
+    .cot__tabla .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .cot__det { display: block; font-size: var(--fs-xs); color: var(--text-muted); }
+    .cot__suma td { font-weight: var(--fw-semi); border-bottom: 0; border-top: 1px solid var(--border-default); }
+    .cot a.btn { text-decoration: none; }
+    .cot__item { padding: 10px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
+    .cot__item:first-child { padding-top: 0; }
+    .cot__item-cab { display: flex; align-items: baseline; gap: 8px; }
+    .cot__item-desc { color: var(--text-muted); }
+    .cot__item-usd { font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .cot__item-modo { margin: 2px 0 6px; font-size: var(--fs-xs); color: var(--text-muted); }
+    .cot__item-cfg { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 8px; line-height: var(--lh-base); color: var(--text-primary); overflow-wrap: anywhere; }
+    .cot__item-cfg span { color: var(--text-muted); }
+    @media (max-width: 520px) { .cot__item-cfg { grid-template-columns: 1fr; gap: 0; } .cot__item-cfg + .cot__item-cfg { margin-top: 4px; } }
+    .cot__items-total { display: flex; align-items: baseline; gap: 8px; padding-top: 10px; font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+    .cot__nota { margin: 8px 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+
+    /* Más detalle: tres desplegables en una tarjeta. */
+    .cot__mas > details + details { border-top: 1px solid var(--border-subtle); }
+    .cot__mas summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; padding: 10px 0;
+      font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text-primary);
+    }
+    .cot__mas summary::-webkit-details-marker { display: none; }
+    .cot__mas summary::after { content: '+'; margin-left: auto; color: var(--text-muted); font-weight: var(--fw-medium); }
+    .cot__mas details[open] > summary::after { content: '−'; }
+    .cot__mas details[open] { padding-bottom: 10px; }
+    .cot__mas h4 { font-size: var(--fs-sm); font-weight: var(--fw-semi); margin: 14px 0 4px; color: var(--text-primary); }
+    .cot__mas p { margin: 0 0 10px; font-size: var(--fs-sm); line-height: var(--lh-base); color: var(--text-secondary); }
+    .cot__cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 16px; margin: 0; }
+    .cot__cifras dt { font-size: var(--fs-xs); color: var(--text-muted); }
+    .cot__cifras dd { margin: 2px 0 0; font-size: var(--fs-sm); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; }
+    .cot__supuestos { margin: 0; padding-left: 16px; display: grid; gap: 6px; font-size: var(--fs-sm); line-height: var(--lh-base); }
     .cot__tag {
       display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--accent-tint);
       color: var(--text-secondary); font-size: var(--fs-xs); vertical-align: middle;
     }
-    /* El formulario simple y la lista para la calculadora de Huawei Cloud. */
-    .cot__etiqueta { display: block; font-size: var(--fs-sm); color: var(--text-secondary); margin-bottom: 4px; }
-    .cot__explica { margin: 0; padding-left: 18px; display: grid; gap: 6px; line-height: var(--lh-base); }
-    .cot__bloque h4 { font-size: var(--fs-base); font-weight: var(--fw-semi); margin: 16px 0 6px; color: var(--text-primary); }
-    .cot__nota a { color: var(--accent); }
-    .cot__calc .cot__calc-item td { font-weight: var(--fw-semi); background: var(--bg-subtle); }
-    .cot__calc .cot__calc-sub td { border-bottom-style: dashed; }
-    .cot__calc .cot__calc-sub td:first-child { padding-left: 20px; color: var(--text-secondary); white-space: nowrap; }
-    .cot__calc .cot__calc-nota { color: var(--text-muted); font-size: var(--fs-xs); }
-    .cot__pedido { margin: 10px 0 0; display: grid; gap: 10px; }
-    .cot__pedido dt { font-size: var(--fs-xs); color: var(--text-muted); }
-    .cot__pedido dd { margin: 2px 0 0; line-height: var(--lh-base); }
     @media (max-width: 960px) {
       .cot { grid-template-columns: 1fr; }
       .cot__form { position: static; max-height: none; overflow: visible; padding-right: 0; }
+    }
+    @media (max-width: 520px) {
+      .cot__ficha { grid-template-columns: 1fr; gap: 2px 0; }
+      .cot__ficha dd { margin-bottom: 8px; }
     }
   </style>
 </head>
@@ -3266,80 +3308,81 @@
         </div>
 
         <!-- ═══ Vista: Cotizador ═════════════════════════════════════════════ -->
-        <!-- Preguntas simples, sin términos de CSS, y el dimensionamiento con los
-             criterios del cluster validado del OMS FIX (cotizador.py): en
-             palabras, y qué cargar en la calculadora de Huawei Cloud ítem por
-             ítem. Lo técnico queda en «Ajustes técnicos». Las opciones, los
-             flavors y los precios los arma el script con
-             /api/v1/cotizador/valores. -->
+        <!-- Unas preguntas simples y el dimensionamiento de CSS OpenSearch con los
+             criterios del cluster validado del OMS FIX (cotizador.py), más qué
+             cargar en la calculadora de Huawei Cloud. Las opciones, los flavors y
+             los precios los arma el script con /api/v1/cotizador/valores. -->
         <div class="app-view" id="view-cotizador">
-          <p class="view-subtitle">Respondé unas preguntas sobre los logs y te armamos el dimensionamiento de CSS OpenSearch y lo que hay que cargar en la calculadora de Huawei Cloud.</p>
+          <p class="view-subtitle">Dimensionamiento y cotización de CSS OpenSearch.</p>
           <div class="cot">
             <form class="cot__form" id="cot-form" autocomplete="off" novalidate>
-              <fieldset class="cot__grupo">
-                <legend>Qué logs hay que guardar</legend>
+              <section class="settings-card">
+                <div class="settings-card__head">
+                  <span class="settings-card__tile"><svg class="icon"><use href="#ic-database"/></svg></span>
+                  <div class="settings-card__title">Logs</div>
+                </div>
                 <div class="cot__fuentes" id="cot-fuentes"></div>
-                <div class="cot__acciones-form"><button type="button" class="btn-ghost" id="cot-mas-fuente"><svg class="icon"><use href="#ic-plus"/></svg> Agregar otra fuente de logs</button></div>
-              </fieldset>
+                <button type="button" class="btn-ghost" id="cot-mas-fuente"><svg class="icon"><use href="#ic-plus"/></svg> Otra fuente</button>
+              </section>
               <template id="cot-fuente-tpl">
                 <div class="cot__fuente">
                   <div class="cot__fuente-cab">
-                    <input class="form-input" type="text" data-f="nombre" maxlength="60" placeholder="Nombre (opcional)" aria-label="Nombre de la fuente">
-                    <button type="button" class="cot__quitar" title="Quitar esta fuente" aria-label="Quitar esta fuente" hidden><svg class="icon"><use href="#ic-x"/></svg></button>
+                    <input class="form-input" type="text" data-f="nombre" maxlength="60" placeholder="Nombre" aria-label="Nombre de la fuente">
+                    <button type="button" class="cot__quitar" title="Quitar" aria-label="Quitar esta fuente"><svg class="icon"><use href="#ic-x"/></svg></button>
                   </div>
-                  <span class="cot__etiqueta">¿Cuánto llega?</span>
-                  <div class="cot__par">
-                    <label class="cot__campo"><input class="form-input" type="number" data-f="cantidad" min="0" step="any" aria-label="Cuánto llega"></label>
-                    <label class="cot__campo"><select class="form-select" data-f="unidad" data-opciones="unidad" aria-label="En qué unidad"></select></label>
+                  <div class="cot__campo"><span>Volumen</span>
+                    <div class="cot__vol"><input class="form-input" type="number" data-f="cantidad" min="0" step="any" aria-label="Volumen"><select class="form-select" data-f="unidad" data-opciones="unidad" aria-label="Unidad"></select></div>
                   </div>
-                  <label class="cot__campo" data-si-unidad hidden><span>¿Cuánto pesa cada evento? (bytes)</span><input class="form-input" type="number" data-f="bytes_por_evento" min="20" step="1" placeholder="500, si no se sabe"></label>
-                  <label class="cot__campo"><span>¿Cuándo llega?</span><select class="form-select" data-f="horario" data-opciones="horario"></select></label>
+                  <label class="cot__campo" data-si-unidad hidden><span>Bytes por evento</span><input class="form-input" type="number" data-f="bytes_por_evento" min="20" step="1" placeholder="500"></label>
+                  <label class="cot__campo"><span>Horario</span><select class="form-select" data-f="horario" data-opciones="horario"></select></label>
                   <div class="cot__par">
-                    <label class="cot__campo"><span>¿Cuánto tiempo se guarda?</span><select class="form-select" data-f="retencion_dias">
+                    <label class="cot__campo"><span>Retención</span><select class="form-select" data-f="retencion_dias">
                       <option value="7">7 días</option><option value="15">15 días</option><option value="30">30 días</option><option value="60">60 días</option>
                       <option value="90">3 meses</option><option value="180">6 meses</option><option value="365">1 año</option><option value="730">2 años</option>
                       <option value="1825">5 años</option><option value="3650">10 años</option></select></label>
-                    <label class="cot__campo"><span>¿Hasta cuándo se consulta seguido?</span><select class="form-select" data-f="consulta_dias">
-                      <option value="1">El último día</option><option value="3">Los últimos 3 días</option><option value="7">La última semana</option>
-                      <option value="14">Las últimas 2 semanas</option><option value="30">El último mes</option><option value="90">Los últimos 3 meses</option>
-                      <option value="todo">Todo lo guardado</option></select></label>
+                    <label class="cot__campo"><span>Acceso inmediato</span><select class="form-select" data-f="consulta_dias">
+                      <option value="1">Último día</option><option value="3">3 días</option><option value="7">7 días</option><option value="14">14 días</option>
+                      <option value="30">30 días</option><option value="90">3 meses</option><option value="todo">Todo</option></select></label>
                   </div>
                 </div>
               </template>
-              <fieldset class="cot__grupo">
-                <legend>Cómo tiene que funcionar</legend>
-                <label class="cot__campo"><span>¿Qué tan crítico es?</span><select class="form-select" name="criticidad" data-opciones="criticidad"></select></label>
-                <label class="cot__campo" data-si-viejo><span>Lo que ya no se consulta seguido, ¿cómo se busca?</span><select class="form-select" name="viejo" data-opciones="viejo"></select></label>
-                <label class="cot__campo"><span>¿Dónde están los sistemas que generan los logs?</span><select class="form-select" name="origen" data-opciones="origen"></select></label>
-                <label class="cot__campo"><span>¿Cómo se va a pagar?</span><select class="form-select" name="pago" data-opciones="pago"></select></label>
-              </fieldset>
-              <details class="cot__avanzado">
-                <summary>Ajustes técnicos (para quien conoce CSS)</summary>
-                <small class="cot__ayuda">Sin tocar, lo decide el cotizador con los criterios del dimensionamiento del OMS FIX. Lo que cambies se respeta, y los avisos dicen si no alcanza.</small>
-                <div class="cot__par">
-                  <label class="cot__campo"><span>Réplicas</span><select class="form-select" name="replicas"><option value="">Según lo crítico</option><option value="0">Sin réplica</option><option value="1">1</option><option value="2">2</option></select></label>
-                  <label class="cot__campo"><span>AZ</span><select class="form-select" name="azs"><option value="">Según lo crítico</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
-                  <label class="cot__campo"><span>Respaldo en OBS</span><select class="form-select" name="respaldo"><option value="">Según lo crítico</option><option value="1">Sí</option><option value="0">No</option></select></label>
-                  <label class="cot__campo"><span>Lo viejo va a</span><select class="form-select" name="resto"><option value="">Según cómo se busca</option><option value="congelados">Índices congelados</option><option value="cold">Nodos de datos cold</option></select></label>
-                  <label class="cot__campo"><span>Flavor hot</span><select class="form-select" name="flavor_hot" data-flavors><option value="auto">Automático</option></select></label>
-                  <label class="cot__campo"><span>Nodos hot</span><input class="form-input" type="number" name="nodos_hot" min="1" max="200" step="1" placeholder="Automático"></label>
-                  <label class="cot__campo"><span>Disco por nodo hot (GB)</span><input class="form-input" type="number" name="disco_hot_gb" min="40" step="20" placeholder="Automático"></label>
-                  <label class="cot__campo"><span>Tipo de disco hot</span><select class="form-select" name="disco_hot"><option value="ultra">Ultra-high I/O</option><option value="high">High I/O</option></select></label>
-                  <label class="cot__campo" data-si-cold><span>Flavor cold</span><select class="form-select" name="flavor_cold" data-flavors><option value="auto">Automático</option></select></label>
-                  <label class="cot__campo" data-si-cold><span>Nodos cold</span><input class="form-input" type="number" name="nodos_cold" min="1" max="32" step="1" placeholder="Automático"></label>
-                  <label class="cot__campo"><span>Masters dedicados</span><select class="form-select" name="masters"><option value="regla">Según la regla de Huawei</option><option value="siempre">Siempre (al menos 3)</option></select></label>
-                  <label class="cot__campo" data-si-vpn><span>Respuesta corta de Fluent Bit</span><select class="form-select" name="respuesta_corta"><option value="1">Sí</option><option value="0">No</option></select></label>
-                  <label class="cot__campo"><span>Crecimiento del índice</span><input class="form-input" type="number" name="crecimiento" min="0.3" max="5" step="0.01"></label>
-                  <label class="cot__campo"><span>MB/s por vCPU</span><input class="form-input" type="number" name="mb_s_por_vcpu" min="0.1" max="10" step="0.1"></label>
+              <section class="settings-card">
+                <div class="settings-card__head">
+                  <span class="settings-card__tile"><svg class="icon"><use href="#ic-shield"/></svg></span>
+                  <div class="settings-card__title">Servicio</div>
                 </div>
-              </details>
-              <details class="cot__avanzado">
-                <summary>Precios: de lista o de otra región</summary>
-                <small class="cot__ayuda">Vienen los de lista. Para otra región, cambiá el nombre y los precios: la cotización aclara que se cargaron a mano.</small>
-                <div id="cot-precios"></div>
-                <div class="cot__acciones-form"><button type="button" class="btn-ghost" id="cot-precios-lista"><svg class="icon"><use href="#ic-refresh"/></svg> Volver a los de lista</button></div>
-              </details>
-              <div class="cot__acciones-form"><button type="button" class="btn-ghost" id="cot-reiniciar"><svg class="icon"><use href="#ic-refresh"/></svg> Empezar de nuevo</button></div>
+                <label class="cot__campo"><span>Criticidad</span><select class="form-select" name="criticidad" data-opciones="criticidad"></select></label>
+                <label class="cot__campo"><span>Origen de los logs</span><select class="form-select" name="origen" data-opciones="origen"></select></label>
+                <label class="cot__campo" data-si-viejo><span>Histórico</span><select class="form-select" name="viejo" data-opciones="viejo"></select></label>
+                <label class="cot__campo"><span>Pago</span><select class="form-select" name="pago" data-opciones="pago"></select></label>
+              </section>
+              <section class="settings-card">
+                <details class="cot__avanzado">
+                  <summary>Ajustes técnicos</summary>
+                  <div class="cot__par">
+                    <label class="cot__campo"><span>Réplicas</span><select class="form-select" name="replicas"><option value="">Auto</option><option value="0">0</option><option value="1">1</option><option value="2">2</option></select></label>
+                    <label class="cot__campo"><span>Zonas (AZ)</span><select class="form-select" name="azs"><option value="">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+                    <label class="cot__campo"><span>Respaldo en OBS</span><select class="form-select" name="respaldo"><option value="">Auto</option><option value="1">Sí</option><option value="0">No</option></select></label>
+                    <label class="cot__campo"><span>Histórico en</span><select class="form-select" name="resto"><option value="">Auto</option><option value="congelados">Congelados</option><option value="cold">Nodos cold</option></select></label>
+                    <label class="cot__campo"><span>Flavor hot</span><select class="form-select" name="flavor_hot" data-flavors><option value="auto">Auto</option></select></label>
+                    <label class="cot__campo"><span>Nodos hot</span><input class="form-input" type="number" name="nodos_hot" min="1" max="200" step="1" placeholder="Auto"></label>
+                    <label class="cot__campo"><span>Disco hot (GB)</span><input class="form-input" type="number" name="disco_hot_gb" min="40" step="20" placeholder="Auto"></label>
+                    <label class="cot__campo"><span>Tipo de disco</span><select class="form-select" name="disco_hot"><option value="ultra">Ultra-high I/O</option><option value="high">High I/O</option></select></label>
+                    <label class="cot__campo" data-si-cold><span>Flavor cold</span><select class="form-select" name="flavor_cold" data-flavors><option value="auto">Auto</option></select></label>
+                    <label class="cot__campo" data-si-cold><span>Nodos cold</span><input class="form-input" type="number" name="nodos_cold" min="1" max="32" step="1" placeholder="Auto"></label>
+                    <label class="cot__campo"><span>Masters</span><select class="form-select" name="masters"><option value="regla">Auto</option><option value="siempre">Siempre</option></select></label>
+                    <label class="cot__campo" data-si-vpn><span>Respuesta corta</span><select class="form-select" name="respuesta_corta"><option value="1">Sí</option><option value="0">No</option></select></label>
+                    <label class="cot__campo"><span>Crecimiento índice</span><input class="form-input" type="number" name="crecimiento" min="0.3" max="5" step="0.01"></label>
+                    <label class="cot__campo"><span>MB/s por vCPU</span><input class="form-input" type="number" name="mb_s_por_vcpu" min="0.1" max="10" step="0.1"></label>
+                  </div>
+                </details>
+                <details class="cot__avanzado">
+                  <summary>Precios</summary>
+                  <div id="cot-precios"></div>
+                  <button type="button" class="btn-ghost" id="cot-precios-lista"><svg class="icon"><use href="#ic-refresh"/></svg> Precios de lista</button>
+                </details>
+                <button type="button" class="btn-ghost cot__restablecer" id="cot-reiniciar"><svg class="icon"><use href="#ic-refresh"/></svg> Restablecer</button>
+              </section>
             </form>
             <div class="cot__resultado" id="cot-resultado" aria-live="polite"></div>
           </div>
@@ -8816,11 +8859,10 @@
 
     // Con una sola fuente no hay nada que quitar; con varias, cada una con su número.
     function marcarFuentes() {
-      const cards = [...(document.getElementById('cot-fuentes')?.children || [])];
-      cards.forEach((c, i) => {
-        c.querySelector('.cot__quitar').hidden = cards.length < 2;
-        c.querySelector('[data-f="nombre"]').placeholder = cards.length < 2 ? 'Nombre (opcional)' : `Fuente ${i + 1}`;
-      });
+      const lista = document.getElementById('cot-fuentes');
+      const cards = [...(lista?.children || [])];
+      lista?.classList.toggle('cot__fuentes--una', cards.length < 2);
+      cards.forEach((c, i) => { c.querySelector('[data-f="nombre"]').placeholder = `Fuente ${i + 1}`; });
       const mas = document.getElementById('cot-mas-fuente');
       if (mas) mas.disabled = cards.length >= (_cotValores?.max_fuentes || 20);
     }
@@ -8908,44 +8950,54 @@
       return p.editados ? `Precios cargados a mano para ${p.region}` : `Precios de lista de ${p.region}, ${p.consultado}`;
     }
 
-    const _COT_TITULO = {
-      mensual: 'Pagando por mes, con todo lo guardado',
-      anual: 'Pagando por año, con todo lo guardado',
-      por_hora: 'Pagando por hora: por mes, con todo lo guardado',
-    };
-
+    // Lo que hay que cargar en la calculadora de Huawei Cloud: un ítem por fila,
+    // con sus campos tal como ella los muestra y el precio que tendría que dar.
     function _cotCalculadoraHTML(cal) {
-      const filas = cal.items.map(it => `<tr class="cot__calc-item"><td>${escapeHtml(it.servicio_n)}</td><td>${escapeHtml(it.descripcion)}</td>`
-        + `<td>${escapeHtml(it.modo)}</td><td>${escapeHtml(it.cantidad)}</td><td class="n">${_cotUsdC(it.usd)}</td></tr>`
-        + it.campos.map(([k, val, usd]) => `<tr class="cot__calc-sub"><td>${escapeHtml(k)}</td><td colspan="3">${escapeHtml(val)}</td>`
-          + `<td class="n">${_cotUsdC(usd)}</td></tr>`).join('')
-        + (it.nota ? `<tr class="cot__calc-sub"><td></td><td colspan="4" class="cot__calc-nota">${escapeHtml(it.nota)}</td></tr>` : '')).join('');
+      const notas = [];
+      const filas = cal.items.map(it => {
+        if (it.nota) notas.push(it.nota);
+        const marca = it.nota ? '*'.repeat(notas.length) : '';
+        return `<div class="cot__item"><div class="cot__item-cab"><strong>${escapeHtml(it.servicio_n)}${marca}</strong>`
+          + `<span class="cot__item-desc">${escapeHtml(it.descripcion)}</span><span class="cot__spacer"></span>`
+          + `<span class="cot__item-usd">${_cotUsdC(it.usd)}</span></div>`
+          + `<div class="cot__item-modo">${escapeHtml(it.modo)} · ${escapeHtml(it.cantidad)}</div>`
+          + it.campos.map(([k, val]) => `<div class="cot__item-cfg"><span>${escapeHtml(k)}</span>${escapeHtml(val)}</div>`).join('')
+          + '</div>';
+      }).join('');
       return `
-        <section class="cot__bloque">
-          <h3>Qué cargar en la calculadora de Huawei Cloud</h3>
-          <p class="cot__nota">En la <a href="${escapeHtml(cal.url)}" target="_blank" rel="noopener">calculadora de precios</a>, región `
-            + `${escapeHtml(cal.region)}, agregá estos ítems con estos datos. Cada uno tendría que dar el precio de la derecha (${escapeHtml(cal.periodo)}).</p>
-          <div class="cot__scroll"><table class="cot__tabla cot__calc"><thead><tr><th>Service</th><th>Description</th><th>Billing Mode</th>`
-            + `<th>Purchase Amount</th><th class="n">Price (USD)</th></tr></thead><tbody>${filas}`
-            + `<tr class="cot__suma"><td colspan="4">Total Price</td><td class="n">${_cotUsdC(cal.total)}</td></tr></tbody></table></div>
+        <section class="settings-card">
+          <div class="settings-card__head">
+            <span class="settings-card__tile">${icon('file')}</span>
+            <div class="settings-card__title">Calculadora de Huawei Cloud</div>
+            <span class="cot__spacer"></span>
+            <a class="btn btn-secondary btn-sm" href="${escapeHtml(cal.url)}" target="_blank" rel="noopener">Abrir</a>
+          </div>
+          <div class="cot__items">${filas}</div>
+          <div class="cot__items-total"><span>Total · ${escapeHtml(cal.region)}, ${escapeHtml(cal.periodo)}</span>`
+            + `<span class="cot__spacer"></span><span>${_cotUsdC(cal.total)}</span></div>
+          ${notas.map((n, i) => `<p class="cot__nota">${'*'.repeat(i + 1)} ${escapeHtml(n)}</p>`).join('')}
         </section>`;
     }
+
+    const _COT_MODOS = { mensual: ['Mensual', '/ mes'], anual: ['Anual', '/ año'], por_hora: ['Por hora', '/ mes'] };
 
     function cotizacionHTML(r) {
       const v = r.volumen, c = r.cluster, a = r.anual, e = r.entrada, fs = r.fuentes || [], ap = r.a_pagar;
       const varias = fs.length > 1;
-      const otros = [
-        ['Por mes', _cotUsd(r.total_mes)],
-        ['Por año, con pago anual', _cotUsd(a.anio_siguiente_pago_anual)],
-        ['Por hora, en un mes', _cotUsd(a.por_hora_mes)],
-        ['Primer año, pagando por mes', _cotUsd(a.primer_anio)],
-      ];
+      const montos = { mensual: r.total_mes, anual: a.anio_siguiente_pago_anual, por_hora: a.por_hora_mes };
+      const [titulo, sufijo] = _COT_MODOS[ap.modo] || _COT_MODOS.mensual;
+      const otros = Object.keys(_COT_MODOS).filter(k => k !== ap.modo)
+        .map(k => `<span>${_COT_MODOS[k][0]}<b>${_cotUsd(montos[k])}</b> ${_COT_MODOS[k][1]}</span>`).join('')
+        + `<span>Primer año<b>${_cotUsd(a.primer_anio)}</b></span>`;
+      const ficha = r.ficha.map(f => `<dt>${escapeHtml(f.que)}</dt><dd>${f.lineas.map(l => `<div>${escapeHtml(l)}</div>`).join('')}</dd>`).join('');
+      const avisos = r.avisos.length ? `<div class="cot__avisos" role="note">${icon('alert-triangle')}`
+        + `<ul>${r.avisos.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul></div>` : '';
       const cifras = [
-        ['Eventos por segundo en el pico', _cotNum.format(v.eventos_s_pico)],
+        ['Eventos/s en el pico', _cotNum.format(v.eventos_s_pico)],
         ['Log en el pico', `${_cotDec.format(v.mb_s_pico)} MB/s`],
-        ['Uso estimado en el pico', `${Math.round(c.uso_pico * 100)} %`],
+        ['Uso en el pico', `${Math.round(c.uso_pico * 100)} %`],
         varias ? ['Shards por día', `${c.shards}, en ${fs.length} índices`]
-          : ['Shards por índice diario', `${c.shards} de ${_cotNum.format(c.gb_por_shard)} GB`],
+          : ['Shards por índice', `${c.shards} de ${_cotNum.format(c.gb_por_shard)} GB`],
       ];
       if (r.enlace.tipo !== 'interno') cifras.push(['Red en el pico', `${_cotNum.format(r.enlace.mbit_pico)} Mbit/s`]);
       const fuentes = !varias ? '' : '<h4>Las fuentes</h4><div class="cot__scroll"><table class="cot__tabla"><thead><tr><th>Fuente</th>'
@@ -8964,71 +9016,73 @@
       const aMano = (c.a_mano || []).length ? ' <span class="cot__tag">Hardware elegido a mano</span>' : '';
       return `
         <div class="cot__total">
-          <span class="cot__eyebrow">${escapeHtml(_COT_TITULO[ap.modo] || '')}</span>
-          <strong>${_cotUsd(ap.usd)}</strong>
-          <dl class="cot__anios">${otros.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
-          <p class="cot__nota">${escapeHtml(_cotPrecios(r.precios))}, sin impuestos ni descuentos.</p>
+          <div class="cot__total-cab">
+            <span class="cot__total-et">Total ${titulo.toLowerCase()}</span>
+            <span class="cot__spacer"></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="cot-copiar">${icon('copy')} Copiar</button>
+          </div>
+          <div class="cot__total-num">${_cotUsd(ap.usd)}<small>${sufijo}</small></div>
+          <div class="cot__otros">${otros}</div>
+          <div class="cot__pie">${escapeHtml(_cotPrecios(r.precios))}, sin impuestos.</div>
         </div>
-        <section class="cot__bloque">
-          <h3>El dimensionamiento</h3>
-          <ul class="cot__explica">${r.explicacion.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+        <section class="settings-card">
+          <div class="settings-card__head">
+            <span class="settings-card__tile">${icon('layers')}</span>
+            <div class="settings-card__title">Dimensionamiento</div>
+          </div>
+          <dl class="cot__ficha">${ficha}</dl>
         </section>
-        ${r.avisos.length ? `<section class="cot__bloque cot__avisos"><h3>Para tener en cuenta</h3>`
-          + `<ul>${r.avisos.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul></section>` : ''}
+        ${avisos}
         ${_cotCalculadoraHTML(r.calculadora)}
-        <details class="cot__bloque">
-          <summary>Lo que se pidió</summary>
-          <dl class="cot__pedido">${r.respuestas.map(x => `<div><dt>${escapeHtml(x.que)}</dt><dd>${escapeHtml(x.respuesta)}</dd></div>`).join('')}</dl>
-        </details>
-        <details class="cot__bloque">
-          <summary>Detalle técnico</summary>
-          <p class="cot__nota">${escapeHtml(r.resumen)}.${aMano}</p>
-          <dl class="cot__cifras">${cifras.map(([k, val]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(val)}</dd></div>`).join('')}</dl>
-          ${fuentes}
-          <h4>Costo por mes, con todo lo guardado</h4>
-          <div class="cot__scroll"><table class="cot__tabla"><tbody>${costos}`
-            + `<tr class="cot__suma"><td>Total</td><td class="n">${_cotUsd(r.total_mes)}</td></tr></tbody></table></div>
-        </details>
-        <details class="cot__bloque">
-          <summary>El primer año, mes a mes</summary>
-          <p class="cot__nota">Índice guardado en cada lugar (una copia). El cluster hot se contrata entero desde el primer mes; lo demás crece hasta llenarse. Pagando por mes.</p>
-          <div class="cot__scroll"><table class="cot__tabla"><thead><tr><th>Mes</th><th class="n">En hot</th>`
-            + (conViejo ? `<th class="n">${viejo}</th>` : '')
-            + (e.respaldo ? '<th class="n">En el respaldo</th>' : '') + `<th class="n">Costo</th></tr></thead><tbody>${meses}</tbody></table></div>
-        </details>
-        <details class="cot__bloque">
-          <summary>Supuestos y de dónde sale cada uno</summary>
-          <ul class="cot__supuestos">${r.supuestos.map(s => `<li><strong>${escapeHtml(s.que)}.</strong> ${escapeHtml(s.fuente)}</li>`).join('')}</ul>
-        </details>
-        <div class="cot__acciones"><button type="button" class="btn btn-secondary btn-sm" id="cot-copiar">${icon('copy')} Copiar el resumen</button></div>`;
+        <section class="settings-card cot__mas">
+          <details>
+            <summary>Detalle técnico</summary>
+            <p>${escapeHtml(r.resumen)}.${aMano}</p>
+            <dl class="cot__cifras">${cifras.map(([k, val]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(val)}</dd></div>`).join('')}</dl>
+            ${fuentes}
+            <h4>Costo por mes</h4>
+            <div class="cot__scroll"><table class="cot__tabla"><tbody>${costos}`
+              + `<tr class="cot__suma"><td>Total</td><td class="n">${_cotUsd(r.total_mes)}</td></tr></tbody></table></div>
+          </details>
+          <details>
+            <summary>Primer año, mes a mes</summary>
+            <div class="cot__scroll"><table class="cot__tabla"><thead><tr><th>Mes</th><th class="n">En hot</th>`
+              + (conViejo ? `<th class="n">${viejo}</th>` : '')
+              + (e.respaldo ? '<th class="n">En el respaldo</th>' : '') + `<th class="n">Costo</th></tr></thead><tbody>${meses}</tbody></table></div>
+          </details>
+          <details>
+            <summary>Supuestos</summary>
+            <ul class="cot__supuestos">${r.supuestos.map(s => `<li><strong>${escapeHtml(s.que)}.</strong> ${escapeHtml(s.fuente)}</li>`).join('')}</ul>
+          </details>
+        </section>`;
     }
 
     function textoDeLaCotizacion(r) {
       const a = r.anual, ap = r.a_pagar, cal = r.calculadora;
       const lineas = [
         `Dimensionamiento de CSS OpenSearch (${r.precios.region}, ${r.precios.editados ? 'precios cargados a mano'
-          : `precios de lista de ${r.precios.consultado}`}, sin impuestos ni descuentos)`,
+          : `precios de lista de ${r.precios.consultado}`}, sin impuestos)`,
         '',
         'Lo que se pidió:',
         ...r.respuestas.map(x => `- ${x.que}: ${x.respuesta}`),
         '',
-        'El dimensionamiento:',
-        ...r.explicacion.map(x => `- ${x}`),
+        'Dimensionamiento:',
+        ...r.ficha.map(f => `- ${f.que}: ${f.lineas.join('; ')}`),
         '',
-        `Qué cargar en la calculadora de Huawei Cloud (${cal.url}), región ${cal.region}, precios ${cal.periodo}:`,
+        `Calculadora de Huawei Cloud (${cal.url}), ${cal.region}, ${cal.periodo}:`,
         ...cal.items.flatMap(it => [
           `- ${it.servicio_n} · ${it.descripcion} · ${it.modo} · ${it.cantidad}: ${_cotUsdC(it.usd)}`,
-          ...it.campos.map(([k, val, usd]) => `    ${k}: ${val} (${_cotUsdC(usd)})`),
+          ...it.campos.map(([k, val]) => `    ${k}: ${val}`),
           ...(it.nota ? [`    ${it.nota}`] : []),
         ]),
-        `Total Price: ${_cotUsdC(cal.total)}`,
+        `Total: ${_cotUsdC(cal.total)}`,
         '',
         `Total: ${_cotUsd(ap.usd)} ${ap.periodo}.`,
-        `Por mes: ${_cotUsd(r.total_mes)}. Por año, con pago anual: ${_cotUsd(a.anio_siguiente_pago_anual)}. `
-          + `Por hora, en un mes: ${_cotUsd(a.por_hora_mes)}. Primer año, pagando por mes: ${_cotUsd(a.primer_anio)}.`,
+        `Mensual: ${_cotUsd(r.total_mes)}. Anual: ${_cotUsd(a.anio_siguiente_pago_anual)}. `
+          + `Por hora: ${_cotUsd(a.por_hora_mes)} por mes. Primer año: ${_cotUsd(a.primer_anio)}.`,
         `Cluster: ${r.resumen}.`,
       ];
-      if (r.avisos.length) lineas.push('', 'Para tener en cuenta:', ...r.avisos.map(x => `- ${x}`));
+      if (r.avisos.length) lineas.push('', 'Avisos:', ...r.avisos.map(x => `- ${x}`));
       return lineas.join('\n');
     }
 

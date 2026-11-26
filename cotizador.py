@@ -156,37 +156,37 @@ GB_POR_SESION_FIX = 8      # medido en un OMS FIX: unos 8 GB de log por sesión 
 BYTES_FIX = 333            # tamaño medio de un mensaje FIX (medido)
 BYTES_EVENTO = 500         # una línea de log típica (supuesto)
 UNIDADES: dict[str, str] = {
-    "gb_dia": "GB por día",
-    "eventos_s": "eventos por segundo",
-    "millones_dia": "millones de eventos por día",
+    "gb_dia": "GB/día",
+    "eventos_s": "eventos/s",
+    "millones_dia": "millones de eventos/día",
     "sesiones_fix": "sesiones FIX",
 }
 # (texto, días con log por semana, horas en que llega casi todo, pico sobre el promedio)
 HORARIOS: dict[str, tuple[str, int, int, float]] = {
-    "parejo": ("Parejo, las 24 horas, todos los días", 7, 24, 2.0),
-    "dia": ("Sobre todo de día (8 a 20 h), todos los días", 7, 12, 2.0),
-    "habil": ("En horario hábil (9 a 18 h), de lunes a viernes", 5, 9, 2.0),
-    "mercado": ("En horario de mercado (10 a 17 h), de lunes a viernes", 5, 7, 3.0),
+    "parejo": ("24 h, todos los días", 7, 24, 2.0),
+    "dia": ("De día (8 a 20 h), todos los días", 7, 12, 2.0),
+    "habil": ("Hábil (9 a 18 h), lunes a viernes", 5, 9, 2.0),
+    "mercado": ("Mercado (10 a 17 h), lunes a viernes", 5, 7, 3.0),
 }
 # (texto, AZ, réplicas, respaldo)
 CRITICIDAD: dict[str, tuple[str, int, int, bool]] = {
-    "alta": ("Producción crítica: sigue andando aunque se caiga una zona", 2, 1, True),
-    "media": ("Producción: sigue andando aunque se caiga un servidor", 1, 1, True),
-    "prueba": ("Prueba de concepto o desarrollo", 1, 0, False),
+    "alta": ("Crítica: tolera la caída de una zona", 2, 1, True),
+    "media": ("Producción: tolera la caída de un servidor", 1, 1, True),
+    "prueba": ("Prueba de concepto", 1, 0, False),
 }
 LO_VIEJO: dict[str, tuple[str, str]] = {
-    "lento": ("Rara vez: puede tardar unos minutos", "congelados"),
-    "rapido": ("Seguido: tiene que responder rápido", "cold"),
+    "lento": ("Consulta lenta, más barato", "congelados"),
+    "rapido": ("Consulta rápida", "cold"),
 }
 ORIGEN: dict[str, tuple[str, str]] = {
-    "misma_region": ("En Huawei Cloud, en la misma región que el cluster", "interno"),
-    "otro_lugar": ("En otra región de Huawei Cloud, en otra nube o en su datacenter", "vpn"),
-    "internet": ("Por internet, sin VPN", "publico"),
+    "misma_region": ("Misma región de Huawei Cloud", "interno"),
+    "otro_lugar": ("Otra región, nube o datacenter (VPN)", "vpn"),
+    "internet": ("Internet, sin VPN", "publico"),
 }
 PAGO: dict[str, str] = {
-    "mensual": "Por mes",
-    "anual": "Por año (cuesta 10 meses)",
-    "por_hora": "Por hora, sin compromiso",
+    "mensual": "Mensual",
+    "anual": "Anual",
+    "por_hora": "Por hora",
 }
 SIMPLE: dict[str, Any] = {"criticidad": "alta", "viejo": "lento", "origen": "misma_region", "pago": "mensual"}
 FUENTE_SIMPLE: dict[str, Any] = {
@@ -609,8 +609,8 @@ def _calculadora(e: dict, cluster: dict, lleno: dict, enlace: dict, tipo_disco: 
         usd = lleno["congelados"] * meses
         items.append({"servicio": "Cloud Search Service", "descripcion": "Índices congelados", "modo": "Pay-per-use",
                       "cantidad": por_uso, "campos": [["Frozen index storage", f"{round(lleno['congelado_gb'])}GB", usd]],
-                      "usd": usd, "nota": f"Si la calculadora no los tiene, sumalos aparte: se pagan US$ "
-                                          f"{_dec(p['congelado_gb_hora'], 8)} por GB y por hora."})
+                      "usd": usd, "nota": f"Si la calculadora no los ofrece, sumalos aparte (US$ "
+                                          f"{_dec(p['congelado_gb_hora'], 8)} por GB y hora)."})
     if lleno["obs_gb"]:
         if anual:
             tb = math.ceil(lleno["obs_gb"] / 1024 - 1e-9)
@@ -672,6 +672,37 @@ def _respuestas(e: dict, vols: list[dict], simple: dict, hay_resto: bool, a_mano
         filas.append({"que": "Ajustes técnicos", "respuesta": "Se cambiaron a mano: "
                       + ", ".join(sorted(set(simple["tecnicos"]) | set(a_mano))) + "."})
     return filas
+
+
+def _ficha(e: dict, vols: list[dict], cluster: dict, enlace: dict, hay_resto: bool) -> list[dict[str, Any]]:
+    """El dimensionamiento en pocas líneas: servidores, datos, disponibilidad, enlace y volumen."""
+    hot, cold = cluster["hot"], cluster["cold"]
+    servidores = [f"{hot['nodos']} × {hot['vcpu']} vCPU · {hot['ram']} GB · {_miles(hot['disco_gb'])} GB de disco"]
+    if cold:
+        servidores.append(f"{cold['nodos']} × {cold['vcpu']} vCPU · {cold['ram']} GB · {_miles(cold['disco_gb'])} GB de disco (histórico)")
+    if cluster["clientes"]:
+        servidores.append(f"{cluster['clientes']} × {_flavor(FLAVOR_CLIENTE).replace(' y ', ' · ')} (reparten consultas)")
+    if cluster["masters"]:
+        servidores.append(f"{cluster['masters']} × {_flavor(FLAVOR_MASTER).replace(' y ', ' · ')} (coordinan)")
+    hot_dias = sorted({min(v["dias_hot"], v["retencion_dias"]) for v in vols})
+    al_instante = _plazo(hot_dias[0]) if len(hot_dias) == 1 else f"{_plazo(hot_dias[0])} a {_plazo(hot_dias[-1])}"
+    datos = [f"{al_instante} al instante"]
+    if hay_resto:
+        donde = "almacenamiento económico" if e["resto"] == "congelados" else "servidores de histórico"
+        datos.append(f"hasta {_plazo(max(v['retencion_dias'] for v in vols))} en {donde}")
+    if e["respaldo"]:
+        datos.append("respaldo en OBS")
+    copias = 1 + e["replicas"]
+    disponibilidad = ("1 copia, sin tolerancia a fallas" if e["replicas"] == 0 else
+                      f"{copias} copias en {e['azs']} zona{'s' if e['azs'] > 1 else ''}")
+    red = {"interno": "Red interna de Huawei Cloud",
+           "vpn": f"VPN · {_miles(enlace['mbit_pico'])} Mbit/s en el pico",
+           "publico": f"Internet · {enlace.get('contratado_mbit', 0)} Mbit/s"}[enlace["tipo"]]
+    volumen = (f"{_gb(sum(v['gb_dia'] for v in vols))}/día · {_miles(sum(v['eventos_s_pico'] for v in vols))} "
+               "eventos/s en el pico")
+    return [{"que": "Servidores", "lineas": servidores}, {"que": "Datos", "lineas": [" · ".join(datos)]},
+            {"que": "Disponibilidad", "lineas": [disponibilidad]}, {"que": "Enlace", "lineas": [red]},
+            {"que": "Volumen", "lineas": [volumen]}]
 
 
 def _explicacion(e: dict, vols: list[dict], cluster: dict, enlace: dict, hay_resto: bool, a_pagar: tuple) -> list[str]:
@@ -827,50 +858,40 @@ def cotizar(datos: dict) -> dict[str, Any]:
 
     avisos = []
     if uso_pico > 0.8:
-        avisos.append(f"En el pico el cluster usaría cerca del {_pct(uso_pico)} de lo que medimos que escribe: sumá nodos hot "
-                      "o validalo con una prueba de carga.")
+        avisos.append(f"El pico usaría cerca del {_pct(uso_pico)} de la escritura medida: sumá nodos o hacé una prueba de carga.")
     elif hot["nodos"] < hot["escritura"]:
-        avisos.append(f"Para escribir el pico, la fórmula de Huawei pide {hot['escritura']} nodos hot de {hot['vcpu']} vCPU "
-                      f"y hay {hot['nodos']}.")
+        avisos.append(f"La fórmula de Huawei pide {hot['escritura']} nodos hot para el pico; hay {hot['nodos']}.")
     if hot["disco_necesario_gb"] > hot["disco_gb"] + 0.5:
-        avisos.append(f"Lo que se guarda en hot pide unos {_miles(hot['disco_necesario_gb'])} GB de disco por nodo y hay "
-                      f"{_miles(hot['disco_gb'])}: no entra. Sumá nodos o disco, o guardá menos días en hot.")
+        avisos.append(f"El disco no entra: hacen falta unos {_miles(hot['disco_necesario_gb'])} GB por nodo hot y hay "
+                      f"{_miles(hot['disco_gb'])}.")
     if datos_por_nodo > GB_POR_NODO_GUIA:
-        avisos.append(f"Cada nodo hot guardaría unos {_miles(datos_por_nodo)} GB de datos: la guía de Huawei habla de 100 a 1.000 GB "
-                      "por nodo. Entra en lo que admite la consola, pero conviene confirmarlo con Huawei.")
+        avisos.append(f"Cada nodo hot guardaría {_miles(datos_por_nodo)} GB y Huawei sugiere hasta {_miles(GB_POR_NODO_GUIA)}: "
+                      "confirmalo con Huawei.")
     if e["nodos_hot"] and e["nodos_hot"] < minimo_hot(e):
-        avisos.append(f"Con {e['replicas']} réplica{'s' if e['replicas'] != 1 else ''} y {azs} AZ se recomiendan al menos "
-                      f"{minimo_hot(e)} nodos hot: Huawei aconseja 3 nodos de datos para la disponibilidad.")
+        avisos.append(f"Se recomiendan al menos {minimo_hot(e)} nodos hot.")
     for k, tipo in (("nodos_hot", "hot"), ("nodos_cold", "cold")):
         if e[k] and e[k] % azs:
-            avisos.append(f"Con {azs} AZ, Huawei aconseja que los nodos {tipo} sean múltiplo de {azs}: con {e[k]}, una AZ "
-                          "queda con más nodos que otra.")
+            avisos.append(f"Con {azs} AZ, conviene que los nodos {tipo} sean múltiplo de {azs}.")
     if cold and cold["disco_necesario_gb"] > cold["disco_gb"] + 0.5:
-        avisos.append(f"Lo viejo pide unos {_miles(cold['disco_necesario_gb'])} GB por nodo cold y el flavor admite "
-                      f"{_miles(cold['disco_gb'])}: no entra. Sumá nodos cold o usá índices congelados.")
+        avisos.append(f"El histórico no entra: hacen falta unos {_miles(cold['disco_necesario_gb'])} GB por nodo cold y el "
+                      f"flavor admite {_miles(cold['disco_gb'])}.")
     if e["disco_hot"] == "high":
-        avisos.append("Lo medido fue con disco Ultra-high I/O: con High I/O la escritura puede ser menor; validalo con una "
-                      "prueba de carga.")
+        avisos.append("Lo medido fue con disco Ultra-high I/O: con High I/O, validá la escritura.")
     if e["replicas"] == 0:
-        avisos.append("Sin réplica, si cae un nodo sus datos no se consultan hasta que vuelve, y Huawei pide una réplica para "
-                      "que varias AZ protejan los datos.")
+        avisos.append("Sin réplica: si cae un servidor, sus datos no se consultan hasta que vuelve.")
     if azs == 3:
-        avisos.append("Con 3 AZ, cada tipo de nodo va de a 3 (uno por AZ). No todas las regiones tienen 3 AZ: confirmalo en "
-                      "la consola.")
+        avisos.append("Con 3 AZ, cada tipo de nodo va de a 3: confirmá que la región tiene 3 AZ.")
     if hay_resto and not e["respaldo"]:
-        avisos.append("Los índices congelados y los nodos cold guardan una sola copia: sin respaldo en OBS no hay de dónde "
-                      "recuperarlos.")
+        avisos.append("El histórico guarda una sola copia: sin respaldo no hay de dónde recuperarlo.")
     if hay_resto and e["resto"] == "congelados" and e["respaldo"]:
-        avisos.append("Respaldá cada índice antes de congelarlo: respaldar uno ya congelado fue 10 veces más lento.")
+        avisos.append("Respaldá cada índice antes de congelarlo: después es 10 veces más lento.")
     if e["enlace"] == "publico" and enlace["mbit_pico"] > MAX_PUBLICO_MBIT:
-        avisos.append(f"El pico pide unos {_miles(enlace['mbit_pico'])} Mbit/s y el acceso público llega a {MAX_PUBLICO_MBIT}: "
+        avisos.append(f"El pico pide {_miles(enlace['mbit_pico'])} Mbit/s y el acceso público llega a {MAX_PUBLICO_MBIT}: "
                       "usá una VPN.")
     if e["enlace"] == "vpn" and enlace["mbit_pico"] > MAX_VPN_MBIT * 0.85:
-        avisos.append(f"El pico pide unos {_miles(enlace['mbit_pico'])} Mbit/s: una VPN Professional 1 dio unos {MAX_VPN_MBIT} "
-                      "por sentido, con poco margen para ponerse al día después de un corte.")
+        avisos.append(f"El pico pide {_miles(enlace['mbit_pico'])} Mbit/s y la VPN da unos {MAX_VPN_MBIT}: poco margen.")
     if e["enlace"] == "vpn":
-        avisos.append(f"El costo de la VPN es el lado de {p['region']}. El del origen (su gateway y el tráfico que sale de su "
-                      "región) depende de dónde están sus servidores.")
+        avisos.append(f"Incluye la VPN del lado de {p['region']}; la del origen va aparte.")
     if datos_nodos > 32 and not cluster["masters"]:
         avisos.append("Más de 32 nodos de datos exige masters dedicados.")
 
@@ -930,10 +951,12 @@ def cotizar(datos: dict) -> dict[str, Any]:
     calculadora = _calculadora(e, cluster, lleno, enlace, tipo_disco)
     respuestas = _respuestas(e, vols, simple, hay_resto, a_mano)
     explicacion = _explicacion(e, vols, cluster, enlace, hay_resto, a_pagar)
+    ficha = _ficha(e, vols, cluster, enlace, hay_resto)
     return {
         "entrada": {k: v for k, v in e.items() if k != "precios"},
         "respuestas": respuestas,
         "explicacion": explicacion,
+        "ficha": ficha,
         "a_pagar": {"modo": e["pago"], "texto": PAGO[e["pago"]], "usd": a_pagar[0], "periodo": a_pagar[1]},
         "calculadora": calculadora,
         "resumen": resumen,
