@@ -10568,6 +10568,45 @@
     // no se podía descubrir). Con registros de varias líneas (una comilla que
     // abre y no cierra) van las primeras: saltear líneas cortaría un registro.
     // Igual que `muestra_repartida` en los tests de paridad.
+    //
+    // Después se suman (hasta _MUESTRA_EXTRA) las filas que traen campos que la
+    // muestra no tiene: un evento raro (una liquidación por semana entre miles
+    // de pasadas) no caía en ninguna de las 200 y sus campos quedaban fuera del
+    // análisis, del chat y de los dashboards. Solo en filas con nombre de campo
+    // propio (JSON, clave=valor); en CSV las columnas ya están en el header.
+    const _MUESTRA_EXTRA = 50;
+    function camposDeLinea(linea) {
+      const t = linea.trim();
+      if (t.startsWith('{')) {
+        let o;
+        try { o = JSON.parse(t); } catch (e) { return null; }
+        if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+        const campos = [];
+        const recorrer = (x, p) => Object.entries(x).forEach(([k, v]) => {
+          const ruta = p ? p + '.' + k : k;
+          if (v && typeof v === 'object' && !Array.isArray(v)) recorrer(v, ruta);
+          else campos.push(ruta);
+        });
+        recorrer(o, '');
+        return campos;
+      }
+      const kv = [...t.matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_.-]*)=/g)].map(m => m[1]);
+      return kv.length >= 3 ? kv : null;
+    }
+    function conCamposQueFaltan(muestra, lineas, extra = _MUESTRA_EXTRA) {
+      const vistos = new Set();
+      muestra.forEach(l => (camposDeLinea(l) || []).forEach(c => vistos.add(c)));
+      if (!vistos.size) return muestra;
+      const suma = [];
+      for (const l of lineas) {
+        if (suma.length >= extra) break;
+        const campos = camposDeLinea(l);
+        if (!campos || campos.every(c => vistos.has(c))) continue;
+        campos.forEach(c => vistos.add(c));
+        suma.push(l);
+      }
+      return muestra.concat(suma);
+    }
     function muestraRepartida(lineas, n = _MUESTRA_FILAS) {
       if (lineas.length <= n + 1) return lineas.slice();
       const partida = lineas.slice(0, n + 1).some(l => ((l.match(/"/g) || []).length % 2) === 1);
@@ -10577,7 +10616,7 @@
       const salto = resto / mitad;
       const repartidas = [];
       for (let i = 0; i < mitad; i++) repartidas.push(lineas[mitad + 1 + Math.floor(i * salto)]);
-      return lineas.slice(0, mitad + 1).concat(repartidas);
+      return conCamposQueFaltan(lineas.slice(0, mitad + 1).concat(repartidas), lineas);
     }
     // ── Varias fuentes en un mismo dataset ─────────────────────────────────
     // Lo que es de cada fuente. La activa está en `state`; al cambiar de

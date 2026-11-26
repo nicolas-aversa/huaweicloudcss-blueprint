@@ -15,6 +15,7 @@ Los datasets no están en el repo (`datasets/*.log`): sin el archivo, se saltea.
 import functools
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -64,6 +65,48 @@ HUECOS = {
 }
 
 
+def _campos_de_linea(linea: str) -> list[str] | None:
+    """`camposDeLinea` del front: rutas de un JSON o claves de clave=valor."""
+    t = linea.strip()
+    if t.startswith("{"):
+        try:
+            o = json.loads(t)
+        except ValueError:
+            return None
+        if not isinstance(o, dict):
+            return None
+        campos: list[str] = []
+
+        def recorrer(x: dict, p: str) -> None:
+            for k, v in x.items():
+                ruta = f"{p}.{k}" if p else k
+                if isinstance(v, dict):
+                    recorrer(v, ruta)
+                else:
+                    campos.append(ruta)
+        recorrer(o, "")
+        return campos
+    kv = re.findall(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_.-]*)=", t)
+    return kv if len(kv) >= 3 else None
+
+
+def _con_campos_que_faltan(muestra: list[str], lineas: list[str], extra: int = 50) -> list[str]:
+    """`conCamposQueFaltan` del front: suma las filas con campos que la muestra no tiene."""
+    vistos = {c for l in muestra for c in (_campos_de_linea(l) or [])}
+    if not vistos:
+        return muestra
+    suma: list[str] = []
+    for l in lineas:
+        if len(suma) >= extra:
+            break
+        campos = _campos_de_linea(l)
+        if not campos or all(c in vistos for c in campos):
+            continue
+        vistos.update(campos)
+        suma.append(l)
+    return muestra + suma
+
+
 def muestra_repartida(lineas: list[str], n: int = 200) -> list[str]:
     """La muestra que manda el front (`muestraRepartida` en index.html)."""
     if len(lineas) <= n + 1:
@@ -72,7 +115,8 @@ def muestra_repartida(lineas: list[str], n: int = 200) -> list[str]:
         return lineas[:n + 1]
     mitad = n // 2
     salto = (len(lineas) - (mitad + 1)) / mitad
-    return lineas[:mitad + 1] + [lineas[mitad + 1 + int(i * salto)] for i in range(mitad)]
+    return _con_campos_que_faltan(
+        lineas[:mitad + 1] + [lineas[mitad + 1 + int(i * salto)] for i in range(mitad)], lineas)
 
 
 @functools.lru_cache(maxsize=None)

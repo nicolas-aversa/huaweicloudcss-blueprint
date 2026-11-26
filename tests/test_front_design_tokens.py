@@ -449,8 +449,18 @@ def test_la_muestra_repartida_del_front_es_la_de_los_tests(tmp_path):
     html = _INDEX.read_text(encoding="utf-8")
     i = html.index("    const _MUESTRA_FILAS = 200;")
     fin = html.index("\n    }\n", html.index("function muestraRepartida", i)) + len("\n    }\n")
+    raro = '{"tipo": "liquidacion", "liq": {"monto": 5, "semana": "2026-01-05"}}'
+    json_raro = [json.dumps({"tipo": "pasada", "plaza": {"nombre": f"p{n % 7}"}, "n": n})
+                 for n in range(5000)]
+    for pos in (777, 2223, 4444):
+        json_raro[pos] = raro.replace("5,", f"{pos},")
+    kv = [f"date=2026-01-01 time=10:00:{n % 60:02d} devname=fw{n % 3} action=accept"
+          for n in range(3000)]
+    kv[1500] = "date=2026-01-01 time=10:00:00 devname=fw1 action=deny attack=sqli srcip=1.2.3.4"
     casos = {"largo": [f"l{n}" for n in range(5000)], "corto": [f"l{n}" for n in range(150)],
-             "multilinea": ['a,"b'] + [f"l{n}" for n in range(999)]}
+             "multilinea": ['a,"b'] + [f"l{n}" for n in range(999)],
+             "json_raro": json_raro, "kv": kv,
+             "claves_que_cambian": [json.dumps({f"k{n}": 1}) for n in range(1000)]}
     js = tmp_path / "m.mjs"
     js.write_text(html[i:fin] + "\nconst casos = " + json.dumps(casos) + ";\n"
                   "console.log(JSON.stringify(Object.fromEntries("
@@ -461,4 +471,8 @@ def test_la_muestra_repartida_del_front_es_la_de_los_tests(tmp_path):
     for k, v in casos.items():
         assert salida[k] == muestra_repartida(v), k
     assert len(salida["largo"]) == 201 and salida["largo"][-1] != "l200", "llega al final del archivo"
+    # El evento raro entra una vez (la segunda liquidación no trae nada nuevo).
+    assert len(salida["json_raro"]) == 202 and salida["json_raro"][-1] == json_raro[777]
+    assert salida["kv"][-1] == kv[1500] and len(salida["kv"]) == 202
+    assert len(salida["claves_que_cambian"]) == 251, "las filas que se suman tienen tope"
     assert salida["multilinea"] == casos["multilinea"][:201], "con registros partidos, las primeras"
