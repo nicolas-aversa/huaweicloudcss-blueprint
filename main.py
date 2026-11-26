@@ -6886,6 +6886,23 @@ def _discover_enums(base: str, user: str, password: str, index_pattern: str,
     return {path: values for _n, path, values in found}
 
 
+# Hasta cuántos valores distintos una dimensión le pasa los suyos al chat.
+_MAX_VALORES_CHAT = 30
+
+
+def _valores_para_el_chat(base: str, user: str, password: str, index_pattern: str,
+                          fields: "list[dict]", enums: "dict[str, list[str]]") -> "dict[str, list[str]]":
+    """Los valores de las dimensiones que tienen más que un enum (más de 15) y
+    hasta `_MAX_VALORES_CHAT`: los tipos de evento, las plazas, las rutas. Van
+    solo al prompt del PPL; la dimensión principal, el código de éxito y los
+    pronósticos siguen saliendo de los enums. Con 19 tipos de evento el modelo
+    no sabía que "las alarmas de vía" son `evento.tipo = 'Alarma de vía'` y se
+    perdía buscando (visto en la ECS con un dataset de peajes)."""
+    todos = _discover_enums(base, user, password, index_pattern, fields,
+                            max_terms=_MAX_VALORES_CHAT, max_cardinality=_MAX_VALORES_CHAT)
+    return {p: v for p, v in todos.items() if p not in enums}
+
+
 _RANGO_INTENTOS = 3
 _RANGO_ESPERA_S = 3.0
 
@@ -7714,7 +7731,8 @@ def _resolve_capability_spec(slug: str, base: str = "", user: str = "",
     # Enums del índice ya ingestado (sin LLM, terms agg nativa). Solo si hay
     # cluster: el chat siempre lo tiene, un provisioning sin endpoint no.
     enums = _discover_enums(base, user, password, ip, fields) if base else {}
-    spec = caps.build_spec_from_fields(slug, ip, fields, label, enums)
+    valores = _valores_para_el_chat(base, user, password, ip, fields, enums) if base else {}
+    spec = caps.build_spec_from_fields(slug, ip, fields, label, enums, valores)
     print(f"[capabilities] spec derivado de fields para '{slug}': "
           f"{len(spec.get('fields', {}))} fields, {len(spec.get('forecasts', []))} forecasts, "
           f"index={ip}, enums={list(enums.keys())}")
@@ -7785,7 +7803,8 @@ def _fuentes_del_agente(base: str, user: str, password: str, terraform_dir: Path
             if not ok2:
                 continue
         prod_enums2 = _discover_enums(base, user, password, ip2, prod_fields2)
-        spec2 = caps.build_spec_from_fields(slug2, ip2, prod_fields2, entry2.get("label") or "Tus logs", prod_enums2)
+        spec2 = caps.build_spec_from_fields(slug2, ip2, prod_fields2, entry2.get("label") or "Tus logs", prod_enums2,
+                                            _valores_para_el_chat(base, user, password, ip2, prod_fields2, prod_enums2))
         if not spec2.get("fields"):
             continue
         agent_verticals.append({

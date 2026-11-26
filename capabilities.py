@@ -510,8 +510,8 @@ def _instruccion_de_busqueda(buscadores: list[dict[str, Any]]) -> str:
     después contar esas frases exactas con PPL (sobre los eventos)."""
     if not buscadores:
         return ""
-    lineas = "\n".join(f"- {nombre_del_buscador(b['slug'])}: field {b['campo']} of {b['label']} "
-                        f"(then PPLTool-{b['slug']})" for b in buscadores)
+    lineas = "\n".join(f"- {nombre_del_buscador(b['slug'])}: ONLY the texts of field {b['campo']} of "
+                        f"{b['label']} (then PPLTool-{b['slug']})" for b in buscadores)
     return (
         "Some sources also have a semantic search over a free-text field:\n"
         f"{lineas}\n"
@@ -523,8 +523,9 @@ def _instruccion_de_busqueda(buscadores: list[dict[str, Any]]) -> str:
         "status changes) by place, day, type or account: call the PPLTool directly, it filters the categorical "
         "fields (type, category, status) and counts ALL the events. The search only brings 25 phrases, so "
         "filtering by them leaves events out. Use the search ONLY when the question is about what was written "
-        "in THAT field and the topic is written in many different ways (a symptom, a complaint, what an operator "
-        "wrote); if the topic belongs to another field, call the PPLTool directly. "
+        "in THAT field and the topic is written in many different ways (the symptoms written in a diagnosis field, "
+        "what an operator wrote in a note); if the topic belongs to another field, call the PPLTool directly "
+        "(complaints are not in a field of alarm details, and the other way around). "
         "In that case, FIRST call that search tool with just the topic. Keep only the "
         "returned phrases that really mean that topic (if they are few or all alike, call it again with another "
         "way of saying it). THEN call the PPLTool of that source asking it to filter "
@@ -956,6 +957,11 @@ def es_tasa(f: dict[str, Any]) -> bool:
     return bool(_TASA.search(f.get("unit") or "") or _NOMBRE_DE_TASA.search((f.get("field_path") or "").strip()))
 
 
+# Cuántos valores de un campo entran en su descripción. Con 12, de los 19 tipos
+# de evento de un dataset de peajes podía quedar afuera "Alarma de vía".
+MAX_VALORES_EN_EL_PROMPT = 30
+
+
 def _field_desc(f: dict[str, Any], values: "list[str] | None" = None, entidad: str = "") -> str:
     """Descripción de un campo para el prompt del PPLTool: la etiqueta de negocio
     + unidad + los valores reales del índice (si se descubrieron). Un caudal
@@ -973,8 +979,8 @@ def _field_desc(f: dict[str, Any], values: "list[str] | None" = None, entidad: s
     elif (f.get("type") or "") in _MEASURE_TYPES:
         desc += " — numeric measure: sum/avg it"
     if values:
-        shown = ", ".join(values[:12])
-        desc += f" — values: {shown}" + ("…" if len(values) > 12 else "")
+        shown = ", ".join(values[:MAX_VALORES_EN_EL_PROMPT])
+        desc += f" — values: {shown}" + ("…" if len(values) > MAX_VALORES_EN_EL_PROMPT else "")
     return desc or "(sin descripción)"
 
 
@@ -1011,7 +1017,8 @@ def campo_de_patrones(fields: list[dict[str, Any]]) -> str:
 
 
 def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str, Any]],
-                           label: str = "", enums: "dict[str, list[str]] | None" = None
+                           label: str = "", enums: "dict[str, list[str]] | None" = None,
+                           valores: "dict[str, list[str]] | None" = None
                            ) -> dict[str, Any]:
     """Spec de capabilities para un slug SIN spec curado (log productivo).
 
@@ -1022,11 +1029,20 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
     enums
         `{field_path: [valores]}` descubiertos del índice (ver `_discover_enums`
         en main.py). Ordenado de menor a mayor cardinalidad por el caller.
+    valores
+        Los de las dimensiones con más valores que un enum (los tipos de evento,
+        las plazas): solo van a la descripción del prompt del PPLTool, no deciden
+        la dimensión principal, el código de éxito ni los pronósticos.
 
     Devuelve el mismo shape que `_CAPABILITY_SPECS[...]`, así el resto del
     provisioning (PPLTool, agente, forecasters) no distingue demo de productivo.
     """
     enums = enums or {}
+    valores = valores or {}
+
+    def _vals(path: str) -> "list[str] | None":
+        return enums.get(path) or valores.get(path)
+
     usable = [f for f in (fields or []) if (f.get("field_path") or "").strip()]
 
     def _is_dim(f: dict[str, Any]) -> bool:
@@ -1042,7 +1058,7 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         path = f["field_path"].strip()
         ftype = (f.get("type") or "").strip()
         if _is_dim(f) or ftype in _MEASURE_TYPES + ("date", "ip"):
-            prompt_fields[path] = _field_desc(f, enums.get(path))
+            prompt_fields[path] = _field_desc(f, _vals(path))
         elif _es_texto_libre(f):
             como = (f"read sample rows with `fields {path} | head 30`"
                     # `multi_match` con el campo entre comillas: el PPL de CSS 3.4 no
@@ -1154,7 +1170,7 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
         # Los caudales se totalizan por entidad: su descripción la nombra.
         for f in usable:
             if es_tasa(f) and f["field_path"].strip() in prompt_fields:
-                prompt_fields[f["field_path"].strip()] = _field_desc(f, enums.get(f["field_path"].strip()),
+                prompt_fields[f["field_path"].strip()] = _field_desc(f, _vals(f["field_path"].strip()),
                                                                      entidad=entity["field_path"].strip())
         forecasts.append({
             "name": f"{slug}-entities-forecast",
@@ -1229,8 +1245,8 @@ def build_spec_from_fields(slug: str, index_pattern: str, fields: list[dict[str,
             continue
         role = (f.get("role") or "").strip()
         if role in ("critical_indicator", "success_indicator", "entity_id", "measure"):
-            prompt_fields[path] = _field_desc(f, enums.get(path))
+            prompt_fields[path] = _field_desc(f, _vals(path))
         elif _CRITICAL_FIELD_RE.search(path) or _RESPONSE_CODE_RE.search(path):
-            prompt_fields[path] = _field_desc(f, enums.get(path))
+            prompt_fields[path] = _field_desc(f, _vals(path))
 
     return spec
