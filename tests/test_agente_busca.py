@@ -38,6 +38,20 @@ def test_el_agente_sabe_cuando_usarla():
     assert "BuscarTextos" not in caps.build_agent_system_instruction(VERT)
 
 
+def test_para_contar_todos_los_eventos_de_un_tipo_no_busca():
+    """La búsqueda trae 25 frases: filtrar por ellas para contar las alarmas por
+    plaza dejaba afuera dos tercios. Y si el tema es de otro campo (los reclamos,
+    con la búsqueda en el detalle de las alarmas), va directo al PPLTool."""
+    con = caps.build_agent_system_instruction(VERT, BUSCA)
+    no = con.index("Do NOT use the search to count")
+    assert no < con.index("FIRST call that search tool"), "la restricción va antes del cómo"
+    assert "counts ALL the events" in con and "25 phrases" in con
+    assert "if the topic belongs to another field, call the PPLTool directly" in con
+    tool = next(t for t in caps.build_conversational_agent("LLM", "PPL", "i", VERT, buscadores=BUSCA)["tools"]
+                if t["type"] == "VectorDBTool")
+    assert "todos los eventos de un tipo" in tool["description"] and "PPLTool-envios directo" in tool["description"]
+
+
 def test_de_las_trazas_sale_lo_que_busco():
     trazas = [
         {"trace_number": 1, "origin": "BuscarTextos-envios", "input": "paquetes rotos",

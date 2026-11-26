@@ -454,8 +454,10 @@ def build_buscador_tool(b: dict[str, Any]) -> dict[str, Any]:
         "name": nombre_del_buscador(b["slug"]),
         "description": _sanitize_desc(
             f"Busca por significado en los textos de {b['campo']} de {b['label']}: devuelve las frases distintas "
-            "que se escribieron sobre un tema (texto) y cuántas veces aparece cada una (cuenta). Usala cuando la "
-            "pregunta habla de un tema que la gente escribe con distintas palabras. El input es SOLO el tema, en "
+            "que se escribieron sobre un tema (texto) y cuántas veces aparece cada una (cuenta). Usala solo cuando la "
+            f"pregunta es sobre lo que se escribió en {b['campo']} y la gente lo escribe con distintas palabras; "
+            "para contar o rankear todos los eventos de un tipo (por plaza, día, tipo o cuenta) no: eso lo hace "
+            f"PPLTool-{b['slug']} directo. El input es SOLO el tema, en "
             "pocas palabras; si hace falta, llamala otra vez con otra forma de decirlo. Después pasale a "
             f"PPLTool-{b['slug']} las frases que correspondan, copiadas textuales."),
         "parameters": {
@@ -513,8 +515,17 @@ def _instruccion_de_busqueda(buscadores: list[dict[str, Any]]) -> str:
     return (
         "Some sources also have a semantic search over a free-text field:\n"
         f"{lineas}\n"
-        "When the question is about a topic that people write in many different ways (a symptom, a complaint, "
-        "a failure, what an operator wrote), FIRST call that search tool with just the topic. Keep only the "
+        # Contar con las frases de la búsqueda deja eventos afuera (trae 25):
+        # "¿qué plaza tuvo más alarmas de vía?" contaba 78 de 274, y "¿de qué
+        # se quejan en los reclamos?" buscaba en el detalle de las alarmas, el
+        # único campo con búsqueda (visto en la ECS con un dataset de peajes).
+        "Do NOT use the search to count, rank or list events of a kind (alarms, complaints, rejections, logins, "
+        "status changes) by place, day, type or account: call the PPLTool directly, it filters the categorical "
+        "fields (type, category, status) and counts ALL the events. The search only brings 25 phrases, so "
+        "filtering by them leaves events out. Use the search ONLY when the question is about what was written "
+        "in THAT field and the topic is written in many different ways (a symptom, a complaint, what an operator "
+        "wrote); if the topic belongs to another field, call the PPLTool directly. "
+        "In that case, FIRST call that search tool with just the topic. Keep only the "
         "returned phrases that really mean that topic (if they are few or all alike, call it again with another "
         "way of saying it). THEN call the PPLTool of that source asking it to filter "
         "the field by exactly those phrases (copy them verbatim) and to count or group as the user asked. "
