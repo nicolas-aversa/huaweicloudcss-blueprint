@@ -167,6 +167,43 @@ def test_un_body_rearmado_toma_lo_del_caso_guardado(tmp_path, monkeypatch):
     assert req.cases[0].index_name == "fw-%{+YYYY_MM}"
 
 
+def _deploy_solo(tmp_path, monkeypatch, slug, guardados, **kw):
+    """El body del asistente con UN caso elegido: sin `cases`, con el slug."""
+    import custom_cases
+
+    monkeypatch.setattr(custom_cases, "get_case", lambda s: guardados.get(s))
+    monkeypatch.setattr(custom_cases, "dataset_path", lambda s: None)
+    td = tmp_path / "terraform"
+    (td / ".terraform" / "providers").mkdir(parents=True, exist_ok=True)
+    req = main.TerraformDeployRequest(pipeline_conf="filter { }", pipeline_slug=slug,
+                                      opensearch_index=f"{slug}-%{{+YYYY.MM}}", obs_prefix=f"{slug}-logs/",
+                                      log_file_content="\n".join(LINEAS), **kw)
+    main._casos_de_seguridad_al_indice_mensual(req)
+    main._prepare_deploy_tfvars(req, td)
+    return req, json.loads((td / main._PIPELINES_REGISTRY_NAME).read_text(encoding="utf-8"))
+
+
+def test_un_caso_con_reglas_desplegado_solo_tambien_tiene_security_analytics(tmp_path, monkeypatch):
+    """Agregado de a uno (el asistente no manda `cases`), el caso quedaba sin
+    su plan de seguridad y con el índice de antes: sin Security Analytics."""
+    guardado = {"seguridad": _validar(_regla()), "filter_code": "filter { }", "fields": CAMPOS, "familia": ""}
+    req, reg = _deploy_solo(tmp_path, monkeypatch, "fw", {"fw": guardado})
+    assert [c.slug for c in req.cases] == ["fw"] and req.cases[0].index_name == "fw-%{+YYYY_MM}"
+    assert reg["fw"]["seguridad"]["log_types"][0]["reglas"] and reg["fw"]["index"] == "fw-%{+YYYY_MM}"
+    assert reg["fw"]["obs_prefix"] == "fw-logs/" and reg["fw"]["fields"] == CAMPOS
+
+
+def test_solo_y_sin_reglas_o_apagado_sigue_por_el_camino_de_una_pipeline(tmp_path, monkeypatch):
+    req, reg = _deploy_solo(tmp_path, monkeypatch, "ventas", {"ventas": {"fields": CAMPOS}})
+    assert not req.cases and reg["ventas"]["index"] == "ventas-%{+YYYY.MM}"
+    apagado = {"fw": {"seguridad": _validar(_regla()), "excluir": ["security_analytics"]}}
+    req, reg = _deploy_solo(tmp_path / "b", monkeypatch, "fw", apagado)
+    assert not req.cases and reg["fw"]["index"] == "fw-%{+YYYY.MM}"
+    req, reg = _deploy_solo(tmp_path / "c", monkeypatch, "fw", {"fw": {"seguridad": _validar(_regla())}},
+                            excluir=["security_analytics"])
+    assert not req.cases, "lo apagado en el paso 2 viaja en el body"
+
+
 def test_las_fuentes_de_una_familia_se_correlacionan(tmp_path, monkeypatch):
     reglas = _validar(_regla())
     guardados = {s: {"seguridad": reglas, "familia": "siem"} for s in ("siem-fw", "siem-waf")}

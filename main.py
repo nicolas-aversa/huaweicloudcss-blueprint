@@ -3821,6 +3821,27 @@ def _specs_de_seguridad(terraform_dir: "Path | None" = None) -> dict:
     return specs
 
 
+def _caso_solo_como_lista(request: "TerraformDeployRequest") -> None:
+    """Un dataset nuevo con reglas de Security Analytics desplegado SOLO (el
+    asistente con un caso elegido no manda `cases`) pasa al camino de la lista
+    de casos: es el que lleva su plan de seguridad al registro y su índice al
+    formato mensual. Por el de una pipeline el caso quedaba sin Security
+    Analytics y nadie se enteraba (visto en la ECS con dos datasets nuevos
+    agregados de a uno). Los curados y los que no tienen reglas siguen igual."""
+    if request.cases:
+        return
+    slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+    guardado = (custom_cases.get_case(slug) or {}) if slug else {}
+    if not guardado.get("seguridad") or "security_analytics" in (request.excluir or guardado.get("excluir") or []):
+        return
+    request.cases = [PipelineCase(
+        slug=slug, raw_log=request.raw_log, filter_code=guardado.get("filter_code") or "",
+        fields=request.fields or guardado.get("fields") or [], index_name=request.opensearch_index,
+        obs_prefix=request.obs_prefix, read_existing_bucket=request.read_existing_bucket,
+        log_file_content=request.log_file_content,
+        excluir=list(request.excluir or []), retencion_dias=request.retencion_dias or 0)]
+
+
 def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> None:
     """Los casos con Security Analytics escriben `<caso>-%{+YYYY_MM}` (ver
     `seguridad.FORMATO_DEL_MES`). Se fuerza acá, y no solo en el front, porque
@@ -3828,6 +3849,7 @@ def _casos_de_seguridad_al_indice_mensual(request: "TerraformDeployRequest") -> 
     puede traer el `%{+YYYY.MM}` de antes."""
     import seguridad
 
+    _caso_solo_como_lista(request)
     specs = verticals.security_specs()
     for caso in request.cases or []:
         v = verticals.get_vertical(caso.slug) if caso.slug in specs else None
@@ -4436,6 +4458,7 @@ def terraform_deploy_stream(request: TerraformDeployRequest):
     El frontend lee el stream con ``fetch`` + ``response.body.getReader()``.
     """
     _fill_obs_creds(request)
+    _caso_solo_como_lista(request)   # antes del tamaño: un caso con Security Analytics pesa
     terraform_dir = _active_terraform_dir()
     if not terraform_dir.exists():
         raise HTTPException(
@@ -4586,6 +4609,7 @@ def terraform_deploy_job(request: TerraformDeployRequest) -> dict:
     """Igual que deploy-stream pero el apply corre en background: devuelve un
     `job_id` para engancharse al stream (sobrevive refresh/cierre del browser)."""
     _fill_obs_creds(request)
+    _caso_solo_como_lista(request)   # antes del tamaño: un caso con Security Analytics pesa
     import maas_integrator as _mi
 
     terraform_dir = _active_terraform_dir()
