@@ -5869,6 +5869,38 @@ _INDEX_TEMPLATE_APPLY_RETRIES = 3
 _INDEX_TEMPLATE_APPLY_RETRY_DELAY = 5.0
 
 
+def _quitar_template_viejo_del_caso(base_url: str, user: str, password: str, base_name: str,
+                                    nombre: str, tpl: dict, error: str) -> bool:
+    """Si el template no entra porque otro de la PLATAFORMA (su nombre es el del
+    proyecto o empieza con él) cubre exactamente los mismos índices, ese es el
+    de antes del mismo caso (el que se llamaba solo como el proyecto): se borra
+    para que entre el nuevo. Uno ajeno o con otros patrones no se toca. True si
+    borró alguno (hay que reintentar)."""
+    import re as _re
+    import requests
+
+    m = _re.search(r"matching patterns from existing templates \[([^\]]*)\]", error)
+    if not m:
+        return False
+    propios = set(tpl.get("index_patterns") or [])
+    borrado = False
+    for otro in (n.strip() for n in m.group(1).split(",")):
+        if not otro or otro == nombre or not (otro == base_name or otro.startswith(f"{base_name}-")):
+            continue
+        try:
+            r = requests.get(f"{base_url}/_index_template/{otro}", auth=(user, password), timeout=30, verify=False)
+            sus = set((((r.json() or {}).get("index_templates") or [{}])[0].get("index_template") or {})
+                      .get("index_patterns") or []) if r.status_code == 200 else set()
+        except Exception:  # noqa: BLE001 — best-effort
+            continue
+        if sus != propios:
+            continue
+        d = requests.delete(f"{base_url}/_index_template/{otro}", auth=(user, password), timeout=30, verify=False)
+        print(f"[index-template] '{otro}' cubría los mismos índices que '{nombre}': borrado ({d.status_code})")
+        borrado = borrado or d.status_code in (200, 404)
+    return borrado
+
+
 def _apply_index_templates(
     request: "TerraformDeployRequest",
     cluster: dict[str, str],
@@ -5909,12 +5941,17 @@ def _apply_index_templates(
                 build_index_template(case.fields, "", case.index_name),
             ))
     else:
+        # Con el nombre del caso, como en la lista: con el del proyecto solo, el
+        # segundo caso agregado de a uno pisaba el template del primero (sus
+        # índices de los meses siguientes quedaban sin tipar).
+        slug = (request.pipeline_slug or "").strip() or _slug_from_index(request.opensearch_index)
+        nombre = f"{base_name}-{slug}" if slug else base_name
         bundled = _bundled_index_template(request.pipeline_slug)
         if bundled is not None:
-            templates.append((base_name, bundled))
+            templates.append((nombre, bundled))
         elif request.fields:
             templates.append((
-                base_name,
+                nombre,
                 build_index_template(request.fields, request.namespace, request.opensearch_index),
             ))
 
@@ -5965,6 +6002,10 @@ def _apply_index_templates(
                         and "codec" in (resp.text or "").lower()):
                     print(f"[index-template] el cluster no admite el códec de '{name}': va sin él")
                     tpl = sin_codec(tpl)
+                    resp = _poner(url, tpl)
+                if resp.status_code == 400 and _quitar_template_viejo_del_caso(
+                        f"{proto}://{endpoint}", user, request.opensearch_password, base_name, name, tpl,
+                        resp.text or ""):
                     resp = _poner(url, tpl)
                 if resp.status_code in (200, 201):
                     print(f"[index-template] aplicado '{name}' (attempt {attempt})")
